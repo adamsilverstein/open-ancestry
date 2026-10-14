@@ -5,6 +5,7 @@ import {
   closeReimport,
   importGedcom,
   prepareReimport,
+  type ReimportSession,
 } from '../../packages/import/src/index';
 import type { BenchCase } from '../types';
 
@@ -56,6 +57,7 @@ export function laterExport(text: string): string {
 let base = '';
 let later = '';
 let tree: TreeStore | undefined;
+let session: ReimportSession | undefined;
 
 async function freshTree() {
   tree?.close();
@@ -86,21 +88,24 @@ export default [
     warmupIterations: 1,
   },
   {
+    // Only the apply is timed: each run gets a fresh tree and review, untimed.
     name: 'reimport: apply every default change (10k tree)',
-    setup: async () => {
+    setup: () => {
       base ||= generateGedcom({ people: 10_000, seed: 1 });
       later ||= laterExport(base);
     },
-    fn: async () => {
+    beforeEach: async () => {
       const store = await freshTree();
-      const session = await prepareReimport(store, { bytes: later });
+      session = await prepareReimport(store, { bytes: later });
+    },
+    fn: () => {
       const accepted = new Set(
-        session.diff.people.flatMap((p) =>
+        session!.diff.people.flatMap((p) =>
           p.changes.filter((c) => c.defaultAccept).map((c) => c.id),
         ),
       );
-      applyReimport(store, session, accepted, 'Re-import');
-      closeReimport(session);
+      applyReimport(tree!, session!, accepted, 'Re-import');
+      closeReimport(session!);
     },
     budgetMs: 10_000,
     metric: 'mean',

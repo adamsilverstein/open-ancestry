@@ -162,7 +162,9 @@ function assign(
 ): Map<string, Candidate> {
   const byIncoming = new Map<string, Candidate>();
   const taken = new Map<string, number>();
-  for (const c of [...candidates].sort((x, y) => y.score - x.score || x.i.localeCompare(y.i))) {
+  for (const c of [...candidates].sort(
+    (x, y) => y.score - x.score || (x.i < y.i ? -1 : x.i > y.i ? 1 : 0),
+  )) {
     const used = taken.get(c.e) ?? 0;
     if (c.score < MATCH_THRESHOLD || byIncoming.has(c.i) || used >= capacity(c.e)) continue;
     byIncoming.set(c.i, c);
@@ -251,16 +253,23 @@ export function matchPeople(existing: Snapshot, incoming: Snapshot): Map<string,
   }
   const final = assign(candidates, capacityOf);
   // Close runners-up: another tree person for this record, or another record for this person.
-  const best = (key: 'e' | 'i', id: string, except: Candidate) =>
-    Math.max(
-      -Infinity,
-      ...candidates
-        .filter(
-          (x) =>
-            x[key] === id && x !== except && (key === 'i' ? x.e !== except.e : x.i !== except.i),
-        )
-        .map((x) => x.score),
-    );
+  const byKey = { e: new Map<string, Candidate[]>(), i: new Map<string, Candidate[]>() };
+  for (const c of candidates) {
+    for (const key of ['e', 'i'] as const) {
+      const list = byKey[key].get(c[key]);
+      if (list) list.push(c);
+      else byKey[key].set(c[key], [c]);
+    }
+  }
+  const best = (key: 'e' | 'i', id: string, except: Candidate) => {
+    let top = -Infinity;
+    for (const x of byKey[key].get(id) ?? []) {
+      if (x !== except && (key === 'i' ? x.e !== except.e : x.i !== except.i)) {
+        top = Math.max(top, x.score);
+      }
+    }
+    return top;
+  };
   const perExisting = new Map<string, number>();
   for (const c of final.values()) perExisting.set(c.e, (perExisting.get(c.e) ?? 0) + 1);
   const result = new Map<string, PersonMatch>();

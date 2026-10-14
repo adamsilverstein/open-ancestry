@@ -100,8 +100,8 @@ One row per import run (GEDCOM, GEDZIP or JSON).
 | `source_software` | TEXT | yes | `HEAD.SOUR` of the file, e.g. `Ancestry.com Family Trees`. |
 | `source_version` | TEXT | yes | `HEAD.SOUR.VERS`. |
 | `status` | TEXT | no | `running`, `completed` or `failed`. Default `running`. |
-| `counts_json` | TEXT | no | JSON object of record counts per type, for the import report. |
-| `warnings_json` | TEXT | no | JSON array of warnings (`{ line, message }`). |
+| `counts_json` | TEXT | no | JSON summary for the import report: `records` (top-level records per GEDCOM tag), `rows` (rows written per table), `lines` (`total`, `mapped`, `preserved`), `media`, `living`, and the most frequent `unmapped` tag paths. |
+| `warnings_json` | TEXT | no | JSON array of warnings (`{ code, line, message }`, `line` 0 for whole-file warnings), capped at 1000. |
 | `started_at` | TEXT | no | When the import began. |
 | `finished_at` | TEXT | yes | When it completed or failed. |
 
@@ -407,7 +407,7 @@ Lines the mapper did not understand. With `raw_record` this guarantees every inp
 | `import_batch_id` | TEXT | no | FK `import_batch.id`. |
 | `owner_type` | TEXT | yes | Table of the row the line was under, if any. |
 | `owner_id` | TEXT | yes | Id of that row. |
-| `path` | TEXT | no | Tag path, e.g. `INDI.BIRT._XYZ`. |
+| `path` | TEXT | no | Tag path, e.g. `INDI.BIRT._XYZ`. Blank and unparseable lines end in `.(blank)` / `.(unparsed)`; text before `HEAD` has the path `(preamble)`. |
 | `line_no` | INTEGER | no | 1-based line number in the file. |
 | `line` | TEXT | no | The line as read. |
 
@@ -510,6 +510,17 @@ packages/db does not parse dates; callers pass these fields in.
 | Every top-level record verbatim | `raw_record` |
 | Anything not mapped | `unmapped_line` |
 | `HEAD.SOUR`, file metadata | `import_batch` |
+
+The importer is `packages/import` (`importGedcom`); see its README for the API and the import report. Rules it applies on top of the table:
+
+- **Line accounting.** Each physical line is either *mapped* (its content is in a domain column) or *preserved* (only in `raw_record`, plus an `unmapped_line` row unless it belongs to `HEAD`, `SUBM` or `TRLR`). `mapped + preserved` equals the file's line count, which tests assert for every fixture. Concatenating `raw_record.raw_text` in `seq` order (each plus a newline), after the `(preamble)` lines, reproduces the decoded file with LF line endings and no BOM.
+- **Alternate facts.** For `BIRT`, `CHR`, `BAPM`, `DEAT`, `BURI` and `CREM`, the first occurrence is preferred (`event_role.is_preferred = 1`) and later ones are alternates, matching Ancestry's export order. Other repeated facts (`RESI`, `OCCU`, ...) are all preferred.
+- **Names.** A later `NAME` without `TYPE` is `married` when its surname is a spouse's surname, else `aka` (Ancestry writes no `TYPE`). `NAME._MARNM` adds a married name with the same given names. `surname_key` holds the Soundex and Double Metaphone keys, space separated.
+- **Marriages.** `INDI.MARR` that matches a marriage of one of the person's families (same date, and same place when given) is dropped as a duplicate, its citations and notes moving to the family event. Otherwise it becomes the marriage of the person's only family without one, or stays a personal event.
+- **Links.** Missing back-links (`FAMS` without `HUSB`/`WIFE`, `FAMC` without `CHIL`) are repaired with a `one-sided-link` warning. A person cannot be their own partner or a child of their own family (`self-relationship`); someone who is their own ancestor is kept, with a `relationship-cycle` warning. Identical citations (same source, page, `_APID`, quality and data, with no notes or media of their own) share one `citation` row.
+- **Custom events.** Known Ancestry/FTM fact tags (`_MILT`, `_DNA`, `_FUN`, ...) and any other underscore tag with a `DATE`, `PLAC`, `TYPE` or `AGE` child become events with that tag as `type`.
+- **Media.** `FILE` URLs go to `remote_url` (never fetched). Local paths are normalized to forward slashes; paths with `..` are refused (`media-unsafe-path`). With a GEDZIP or a media folder the file is found by relative path, case-insensitively, or by a unique file name (for absolute paths from the exporting computer), copied into the tree's `media/` folder and hashed; files that are not found are listed in the report.
+- **Home person.** A `_HOME`, `_ROOT`, `_HOMEPERSON` or `_HME` pointer under `HEAD` (or `HEAD.SOUR._TREE`) when present, else the first individual. Stored in `meta.home_person_id`.
 
 ## Change log, undo and redo
 

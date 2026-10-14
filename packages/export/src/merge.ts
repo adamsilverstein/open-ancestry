@@ -173,7 +173,7 @@ class Merger {
 
   private lost(node: GedcomNode, path: string, why: string) {
     if (!this.ctx.quoteLines) {
-      this.ctx.warn(`${this.label}: a ${node.tag} line (${path}) was not carried over`);
+      this.ctx.warn(`${this.label}: an imported ${node.tag} line (${path}) was not carried over`);
       return;
     }
     const line = `${node.tag}${node.pointer ? ` ${node.pointer}` : node.value ? ` ${node.value.split('\n')[0]}` : ''}`;
@@ -329,7 +329,7 @@ function fallback(ctx: MergeContext, record: GedcomNode, lines: UnmappedLineRow[
       ctx.warn(
         ctx.quoteLines
           ? `${label}: "${line.line.trim()}" (${line.path}) was not carried over: no imported text to place it by`
-          : `${label}: a line (${line.path}) was not carried over`,
+          : `${label}: an imported line (${line.path}) was not carried over`,
       );
     }
   }

@@ -17,12 +17,12 @@ function treeDetail(deps: Deps, id: string) {
   const store = deps.library.open(id);
   const { n } = store.stmt('SELECT count(*) AS n FROM person').get() as { n: number };
   // Who a privatized export hides: living people (isLiving: living, inferred or unknown),
-  // and anyone else marked private, confidential or locked.
+  // and anyone else marked private or confidential (locked only guards edits).
   const hidden = store
     .stmt(
       `SELECT
          sum(living IN ('living', 'inferred_living', 'unknown')) AS living,
-         sum(living NOT IN ('living', 'inferred_living', 'unknown') AND privacy <> 'public') AS private
+         sum(living NOT IN ('living', 'inferred_living', 'unknown') AND privacy IN ('private', 'confidential')) AS private
        FROM person`,
     )
     .get() as { living: number | null; private: number | null };

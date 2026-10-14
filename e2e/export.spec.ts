@@ -224,3 +224,46 @@ test('a privatized export hides a deceased person marked confidential', async ({
   const zip = Buffer.from(await (await request.get(`${base}/export.gdz?privatize=true`)).body());
   expect(await reimport(zip)).toEqual(['Private']);
 });
+
+test('privatize stays on until the tree is checked, and if the check fails', async ({
+  page,
+  request,
+  baseURL,
+}, info) => {
+  const tree = treeName(info.title, info.project.name);
+  await seedTree(request, baseURL!, tree);
+  // Hold the tree detail (with its living count) to catch a quick click.
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let fail = false;
+  await page.route(`**/api/trees/${encodeURIComponent(tree)}`, async (route) => {
+    await held;
+    if (fail)
+      await route.fulfill({
+        status: 500,
+        json: { error: { code: 'internal_error', message: 'x' } },
+      });
+    else await route.continue();
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'File' }).click();
+  await page.getByRole('menuitem', { name: /Export/ }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export tree' });
+  await dialog.getByRole('combobox', { name: 'Tree' }).click();
+  await page.getByRole('option', { name: tree, exact: true }).click();
+  await expect(dialog.getByRole('checkbox', { name: /^Privatize/ })).toBeChecked();
+  await expect(dialog.getByRole('button', { name: 'Export' })).toBeDisabled();
+
+  // A failed check keeps privatize on, says why, and lets the export go ahead privatized.
+  fail = true;
+  release();
+  await expect(dialog.getByRole('status')).toContainText('Could not check this tree');
+  await expect(dialog.getByRole('checkbox', { name: /^Privatize/ })).toBeChecked();
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    dialog.getByRole('button', { name: 'Export' }).click(),
+  ]);
+  const text = await readFile((await download.path())!, 'utf8');
+  expect(text).not.toContain('Adelind');
+  expect(text).toContain('Bramwell');
+});

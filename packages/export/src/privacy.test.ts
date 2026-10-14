@@ -54,13 +54,22 @@ const lines = [
   '1 ASSO @ZELDAQUIXBY@',
   '2 RELA Canarygodchild',
   '1 OBJE @O2@',
-  // A locked family.
+  // A confidential family.
   '0 @Mill_Family@ FAM',
   '1 HUSB @I3@',
-  '1 RESN locked',
+  '1 RESN confidential',
   '1 MARR',
   '2 DATE 1875',
-  '2 PLAC Canarylockedwedding',
+  '2 PLAC Canaryconfidentialwedding',
+  // Locked means "do not edit", not private: this ancestor is exported in full.
+  '0 @I4@ INDI',
+  '1 NAME Lockedancestor /Oldline/',
+  '1 RESN locked',
+  '1 BIRT',
+  '2 DATE 1801',
+  '2 PLAC Lockedtown',
+  '1 DEAT',
+  '2 DATE 1870',
   '0 @F1@ FAM',
   '1 HUSB @I2@',
   '1 WIFE @ZELDAQUIXBY@',
@@ -105,9 +114,14 @@ describe('privatized exports withhold every marked record', () => {
       const out = buildGedcomExport(store, { version, privatizeLiving: true, now: TODAY });
       expect(canaries(out.text), version).toEqual([]);
       expect(canaries(out.warnings.join('\n')), version).toEqual([]);
+      expect(out.warnings, version).toContain(
+        '@I3@: an imported ASSO line (INDI.ASSO) was not carried over',
+      );
       if (version === '7') expect(gedcom7Problems(out.text)).toEqual([]);
-      // The deceased public person keeps their own details.
+      // The deceased public person keeps their own details, and so does a locked one.
       expect(out.text, version).toContain('Petra /Publicwell/');
+      expect(out.text, version).toContain('Lockedancestor /Oldline/');
+      expect(out.text, version).toContain('Lockedtown');
     }
     const zip = buildGedzipExport(store, { privatizeLiving: true, now: TODAY });
     const files = unzipSync(zip.bytes);
@@ -117,7 +131,7 @@ describe('privatized exports withhold every marked record', () => {
     store.close();
   });
 
-  it('writes private, confidential and locked people and families like living ones', async () => {
+  it('writes private and confidential people and families like living ones', async () => {
     const store = await tree();
     const out = buildGedcomExport(store, { version: '7', privatizeLiving: true, now: TODAY }).text;
     const records = out.split(/\n(?=0 )/);
@@ -128,7 +142,7 @@ describe('privatized exports withhold every marked record', () => {
         .map((l) => l.split(' ').slice(0, 2).join(' '));
     // Conrad (confidential) is "Private" with family links only.
     expect(out).not.toContain('Conrad');
-    // Both families (one locked, one with a living and a confidential partner) keep links only.
+    // Both families (one confidential, one with a living and a confidential partner) keep links only.
     for (const f of records.filter((r) => / FAM$/.test(r.split('\n')[0]!))) {
       expect(
         tags(f).every((t) => /^1 (HUSB|WIFE|CHIL)$/.test(t)),
@@ -160,7 +174,7 @@ describe('privatized exports withhold every marked record', () => {
         xrefs.join(' '),
       ).toBe(true);
       const again = await importInto(out);
-      expect(again.db.prepare('SELECT count(*) FROM person').pluck().get()).toBe(3);
+      expect(again.db.prepare('SELECT count(*) FROM person').pluck().get()).toBe(4);
     }
     // Without privatize the imported xrefs stay (verbatim records still point at them).
     expect(buildGedcomExport(store, { now: TODAY }).text).toContain('@ZELDAQUIXBY@');
@@ -171,6 +185,7 @@ describe('privatized exports withhold every marked record', () => {
     const store = await tree();
     const out = buildGedcomExport(store, { privatizeLiving: true, now: TODAY }).text;
     expect(out).not.toContain('Canaryfamilyname');
+    expect(out).toMatch(/^1 SOUR open-ancestry\n2 NAME open-ancestry\n1 DATE/m);
     expect(buildGedcomExport(store, { now: TODAY }).text).toContain('Canaryfamilyname');
     store.close();
   });

@@ -1,4 +1,5 @@
 import {
+  type Privacy,
   isLiving,
   type MediaRow,
   type NoteRow,
@@ -12,6 +13,7 @@ import {
   n,
   p,
   setLevels,
+  v,
   type RecordKind,
   type WriterContext,
 } from './canonical';
@@ -73,6 +75,9 @@ function allowlist(record: GedcomNode): void {
     .filter((c) => allowed.has(c.tag))
     .map((c) => ({ ...c, ...(c.tag === 'NAME' && { value: 'Private' }), children: [] }));
 }
+
+/** Privacy levels a privatized export withholds (not `locked`, which only guards edits). */
+const withheldPrivacy = (privacy: Privacy) => privacy === 'private' || privacy === 'confidential';
 
 /** Options only the GEDZIP writer uses. */
 export interface InternalOptions extends GedcomExportOptions {
@@ -146,14 +151,15 @@ class GedcomWriter implements WriterContext, MergeContext {
     this.includeMedia = options.includeMedia ?? true;
     this.privatize = options.privatizeLiving ?? false;
     if (this.privatize) {
-      // Withheld like living people: anyone marked private, confidential or locked
-      // (GEDCOM RESN), and families or events so marked.
+      // Withheld like living people: anyone marked private or confidential (GEDCOM RESN
+      // privacy/confidential), and families or events so marked. RESN locked means "do not
+      // edit", not private, so a locked record is exported.
       for (const person of this.data.persons) {
-        if (isLiving(person.living) || person.privacy !== 'public') this.living.add(person.id);
+        if (isLiving(person.living) || withheldPrivacy(person.privacy)) this.living.add(person.id);
       }
       for (const f of this.data.families) {
         if (
-          f.privacy !== 'public' ||
+          withheldPrivacy(f.privacy) ||
           this.living.has(f.partner1_id!) ||
           this.living.has(f.partner2_id!)
         ) {
@@ -161,7 +167,7 @@ class GedcomWriter implements WriterContext, MergeContext {
         }
       }
       for (const [id, event] of this.data.event) {
-        if (event.privacy !== 'public') this.hiddenEvents.add(id);
+        if (withheldPrivacy(event.privacy)) this.hiddenEvents.add(id);
       }
       this.findWithheld();
     }
@@ -706,7 +712,7 @@ class GedcomWriter implements WriterContext, MergeContext {
     const head = n('HEAD', undefined, [
       gedc,
       schema.length > 0 && n('SCHMA', undefined, schema),
-      n('SOUR', 'open-ancestry', [n('NAME', 'open-ancestry'), n('DATA', this.treeName)]),
+      n('SOUR', 'open-ancestry', [n('NAME', 'open-ancestry'), v('DATA', this.treeName)]),
       n('DATE', date, [n('TIME', time)]),
       submitter && p('SUBM', submitter),
       !this.v7 && n('CHAR', 'UTF-8'),

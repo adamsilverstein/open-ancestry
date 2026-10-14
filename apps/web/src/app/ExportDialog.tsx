@@ -78,8 +78,10 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
   const info = useQuery({ ...treeQuery(selected ?? ''), enabled: open && Boolean(selected) });
   const living = info.data?.livingCount ?? 0;
   const marked = info.data?.privateCount ?? 0;
-  // Privatize by default whenever the tree has living or private people: safe unless asked.
-  const privatize = canPrivatize(format) && (choice ?? living + marked > 0);
+  // Privatize by default whenever the tree has living or private people, and fail closed:
+  // until the counts are known (or if they cannot be loaded), assume there are some.
+  const counted = info.isSuccess;
+  const privatize = canPrivatize(format) && (choice ?? (counted ? living + marked > 0 : true));
 
   const changeOpen = (next: boolean) => {
     if (!next) setState({ status: 'idle' });
@@ -139,7 +141,8 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
             </DialogClose>
             <Button
               variant="primary"
-              disabled={!selected}
+              // Wait for the counts that decide the privatize default (a failed load keeps it on).
+              disabled={!selected || (Boolean(selected) && info.isPending)}
               loading={state.status === 'busy'}
               iconStart={<Download size={16} aria-hidden />}
               onClick={download}
@@ -195,13 +198,20 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
             label="Privatize living and private people"
             description={
               canPrivatize(format)
-                ? 'Living people, and anyone marked private, confidential or locked, are written as "Private" with only their family links.'
+                ? 'Living people, and anyone marked private or confidential, are written as "Private" with only their family links.'
                 : 'JSON is a full backup and always includes everyone.'
             }
             checked={privatize}
             disabled={!canPrivatize(format)}
             onChange={(event) => setChoice(event.target.checked)}
           />
+          {info.isError && (
+            <p className={styles.warning} role="status">
+              <TriangleAlert size={16} aria-hidden />
+              Could not check this tree for living or private people, so privatize stays on unless
+              you turn it off.
+            </p>
+          )}
           {!privatize && living + marked > 0 && (
             <p className={styles.warning} role="status">
               <TriangleAlert size={16} aria-hidden />

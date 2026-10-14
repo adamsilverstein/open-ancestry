@@ -159,6 +159,23 @@ export function gedcom7Problems(text: string): string[] {
     for (const c of node.children) visit(c, `${path}.${c.tag}`);
   };
   for (const r of doc.records) visit(r, r.tag);
+  problems.push(...fileProblems(text));
+  return problems;
+}
+
+/**
+ * FILE lines without a value, invalid in GEDCOM 5.5.1 (MULTIMEDIA_FILE_REFN
+ * is required) and 7 (the FilePath payload is required). Empty means none.
+ */
+export function fileProblems(text: string): string[] {
+  const problems: string[] = [];
+  const visit = (node: GedcomNode, path: string) => {
+    if (node.tag === 'FILE' && !node.value?.trim()) {
+      problems.push(`FILE with no value at ${path} (line ${node.line})`);
+    }
+    for (const c of node.children) visit(c, `${path}.${c.tag}`);
+  };
+  for (const r of parseGedcom(text).records) visit(r, r.tag);
   return problems;
 }
 

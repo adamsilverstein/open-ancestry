@@ -19,6 +19,7 @@ import {
   sources,
   tagLinks,
   tags,
+  undo,
   type ChangeLogRow,
   type TreeStore,
 } from './index';
@@ -374,7 +375,7 @@ describe('ending a partnership', () => {
     store.close();
   });
 
-  it('keeps a one-partner, childless family that still has something attached', () => {
+  it('keeps a one-partner, childless family with user data, not one with only imported GEDCOM', () => {
     const store = memoryTree();
     const { result: ids } = store.transact('seed', (tx) => {
       const a = persons.create(tx, {});
@@ -400,8 +401,17 @@ describe('ending a partnership', () => {
     store.transact('prune', (tx) => {
       expect(families.pruneIfEmpty(tx, ids.withEvent)).toBe(false);
       expect(families.pruneIfEmpty(tx, ids.withNote)).toBe(false);
-      expect(families.pruneIfEmpty(tx, ids.withRaw)).toBe(false);
     });
+    // Imported GEDCOM alone does not keep a family: every imported family has it.
+    const { batchId } = store.transact('prune imported', (tx) =>
+      expect(families.pruneIfEmpty(tx, ids.withRaw)).toBe(true),
+    );
+    expect(families.get(store, ids.withRaw)).toBeUndefined();
+    expect(count(store, 'raw_record')).toBe(0);
+    // Undo brings the family back with its raw record, for round-trip export.
+    undo(store, batchId);
+    expect(families.get(store, ids.withRaw)).toBeDefined();
+    expect(count(store, 'raw_record')).toBe(1);
     store.close();
   });
 });

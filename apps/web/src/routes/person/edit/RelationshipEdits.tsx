@@ -133,6 +133,8 @@ export function useRelationshipEdits(tree: string, detail: PersonDetail) {
   useEffect(() => {
     const target = returnTo.current;
     if (!target) return;
+    // Only the first update after the change counts; later ones are unrelated.
+    returnTo.current = null;
     if (!target.isConnected && document.activeElement === document.body) {
       document.querySelector<HTMLElement>('[data-relationships-add]')?.focus();
     }
@@ -183,11 +185,27 @@ export function useRelationshipEdits(tree: string, detail: PersonDetail) {
         send: () => apiSend('PATCH', `${base}/families/${family.family.id}`, { [slot]: null }),
       };
     };
+    // No partner recorded: the family itself can go (with its events), whatever
+    // else is attached to it.
+    const removeRelationship = (): Confirm => ({
+      title: 'Remove this relationship?',
+      description:
+        children.length > 0
+          ? `The relationship and its events are removed, and ${names(children.map((c) => c.person))} will no longer be recorded as ${self}'s children here. Everyone stays in the tree, and you can undo this.`
+          : `The relationship and its events (such as a marriage) are removed. ${self} stays in the tree, and you can undo this.`,
+      confirmLabel: 'Remove relationship',
+      label: 'Remove relationship',
+      send: () => apiSend('DELETE', `${base}/families/${family.family.id}`),
+    });
     return (
       <GroupMenu group={group}>
         <MenuItem onSelect={() => setTypeFor(family)}>Edit relationship type…</MenuItem>
-        {partner && (
+        {partner ? (
           <MenuItem onSelect={() => setConfirm(removePartner())}>Remove partner…</MenuItem>
+        ) : (
+          <MenuItem onSelect={() => setConfirm(removeRelationship())}>
+            Remove relationship…
+          </MenuItem>
         )}
         {children.map(({ person, link }) => (
           <MenuItem

@@ -1,5 +1,8 @@
+import { join } from 'node:path';
+import { openTree } from '@open-ancestry/db';
+import { importGedcom } from '@open-ancestry/import';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { seed, testApi, type Seeded, type TestApi } from './test/helpers';
+import { createTestTree, seed, testApi, type Seeded, type TestApi } from './test/helpers';
 
 let api: TestApi;
 let s: Seeded;
@@ -215,6 +218,38 @@ describe('ending relationships', () => {
       .id;
     await api.del(`${s.base}/family-children/${link}`);
     expect((await api.get(`${s.base}/families/${s.marriage}`)).statusCode).toBe(200);
+  });
+
+  it('removes an imported one-parent family when its last child leaves, and undo restores it', async () => {
+    const base = await createTestTree(api, 'Imported');
+    const store = openTree(join(api.root, 'Imported.oatree'));
+    let family: string;
+    let child: string;
+    try {
+      await importGedcom(
+        {
+          bytes: Buffer.from(
+            '0 HEAD\n1 GEDC\n2 VERS 5.5.1\n0 @I1@ INDI\n1 NAME Ada /Vale/\n0 @I2@ INDI\n1 NAME Eve /Vale/\n0 @F1@ FAM\n1 WIFE @I1@\n1 CHIL @I2@\n0 TRLR\n',
+          ),
+        },
+        store,
+      );
+      const owner = (type: string, xref: string) =>
+        store.db
+          .prepare('SELECT owner_id FROM raw_record WHERE owner_type = ? AND xref = ?')
+          .pluck()
+          .get(type, xref) as string;
+      family = owner('family', '@F1@');
+      child = owner('person', '@I2@');
+    } finally {
+      store.close();
+    }
+    // Every imported family has a raw record; that alone must not keep it.
+    const link = (await api.get(`${base}/people/${child}`)).json().parentFamilies[0].link.id;
+    await api.del(`${base}/family-children/${link}`);
+    expect((await api.get(`${base}/families/${family}`)).statusCode).toBe(404);
+    await api.post(`${base}/undo`);
+    expect((await api.get(`${base}/families/${family}`)).statusCode).toBe(200);
   });
 
   it('keeps a family that still has two partners when a child leaves', async () => {

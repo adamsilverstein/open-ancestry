@@ -252,7 +252,13 @@ function relationshipGroups(
     const title = groups.some((g) => g.title === name) ? `${name} (${family.id.slice(-4)})` : name;
     groups.push({
       title,
-      subtitle: relationshipTypeLabel(family.relationship_type),
+      subtitle:
+        !partner && children.length === 0
+          ? // Kept because events, notes or sources are attached; the menu can remove it.
+            [relationshipTypeLabel(family.relationship_type), 'No partner or children recorded']
+              .filter(Boolean)
+              .join(' · ')
+          : relationshipTypeLabel(family.relationship_type),
       people: partner ? [toPersonSummary(partner)] : [],
       nested: children.map((c) => toPersonSummary(c.person)),
       actions: menus.partnerMenu(title, partnerFamily),

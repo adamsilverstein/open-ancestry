@@ -330,8 +330,10 @@ export const families = {
 
   /**
    * Deletes a family that no longer records anything: at most one partner,
-   * no children, and nothing attached (events, notes, media, citations, tags,
-   * or imported GEDCOM kept for round-trip). Returns whether it was deleted.
+   * no children, and nothing a user attached (events, notes, media,
+   * citations, tags). Imported GEDCOM kept for round-trip (raw_record,
+   * unmapped_line) does not count: every imported family has it, it is
+   * deleted with the family, and undo restores it.
    */
   pruneIfEmpty(tx: Tx, id: string): boolean {
     const family = tx.store.getRow('family', id);
@@ -346,9 +348,7 @@ export const families = {
            OR EXISTS (SELECT 1 FROM note_link WHERE owner_type = 'family' AND owner_id = @id)
            OR EXISTS (SELECT 1 FROM media_link WHERE owner_type = 'family' AND owner_id = @id)
            OR EXISTS (SELECT 1 FROM citation_link WHERE owner_type = 'family' AND owner_id = @id)
-           OR EXISTS (SELECT 1 FROM tag_link WHERE owner_type = 'family' AND owner_id = @id)
-           OR EXISTS (SELECT 1 FROM raw_record WHERE owner_type = 'family' AND owner_id = @id)
-           OR EXISTS (SELECT 1 FROM unmapped_line WHERE owner_type = 'family' AND owner_id = @id)`,
+           OR EXISTS (SELECT 1 FROM tag_link WHERE owner_type = 'family' AND owner_id = @id)`,
       )
       .get({ id });
     if (attached) return false;

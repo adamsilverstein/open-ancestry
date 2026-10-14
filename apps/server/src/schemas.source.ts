@@ -25,6 +25,11 @@ export const Id = Type.String({ minLength: 1, maxLength: 64, pattern: '^[0-9A-Za
 export const TreeParams = Type.Object({ tree: Type.String({ minLength: 1, maxLength: 100 }) });
 export const TreeIdParams = Type.Object({ tree: TreeParams.properties.tree, id: Id });
 export const JobParams = Type.Object({ id: Type.String({ format: 'uuid' }) });
+/** The change ids from a re-import review the user accepted. */
+export const ReimportApplyBody = Type.Object(
+  { accept: Type.Array(Type.String({ maxLength: 32 }), { maxItems: 1_000_000 }) },
+  strict,
+);
 
 export const TreeBody = Type.Object(
   { name: Type.String({ minLength: 1, maxLength: 100 }) },
@@ -240,5 +245,14 @@ export const BatchBody = Type.Object(
     label: Type.String({ minLength: 1, maxLength: 100 }),
     operations: Type.Array(BatchOperation, { minItems: 1, maxItems: 100 }),
   },
+  strict,
+);
+
+// ---------------------------------------------------------------- checks
+
+/** Issue keys from GET /checks: `kind:id+id[:eventId]`. */
+export const CheckKey = Type.String({ maxLength: 300, pattern: '^[a-z-]+:[0-9A-Za-z_+:-]+$' });
+export const DismissBody = Type.Object(
+  { keys: Type.Array(CheckKey, { minItems: 1, maxItems: 5000 }) },
   strict,
 );

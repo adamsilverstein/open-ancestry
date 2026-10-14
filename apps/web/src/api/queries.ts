@@ -10,6 +10,10 @@ export interface TreeListItem {
 
 export interface TreeInfo extends TreeListItem {
   peopleCount: number;
+  /** People a privatized export hides because they are (or may be) living. */
+  livingCount: number;
+  /** Other people a privatized export hides: marked private or confidential. */
+  privateCount: number;
   homePersonId: string | null;
   schemaVersion: number;
 }
@@ -62,6 +66,3 @@ export const ancestorsQuery = (tree: string, id: string) =>
         signal,
       ),
   });
-
-export const mediaUrl = (tree: string, mediaId: string) =>
-  `/api/trees/${seg(tree)}/media/${seg(mediaId)}`;

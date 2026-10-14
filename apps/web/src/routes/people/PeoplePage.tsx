@@ -110,6 +110,9 @@ function PeopleTable({ tree }: { tree: string }) {
             Clear filters
           </Button>
         )}
+        <Link to="/checker" className={styles.checkLink}>
+          Check tree
+        </Link>
       </header>
 
       <div

@@ -79,7 +79,11 @@
 }
 
 /* A large library scrolls inside the menu instead of running off screen. */
-.treeMenu {
+/*
+ * Doubled class: the menu's own styles load in a lazy chunk whose order against
+ * this sheet varies, so equal specificity would make the cap a race.
+ */
+.treeMenu.treeMenu {
   max-height: min(480px, var(--radix-dropdown-menu-content-available-height, 60dvh));
   overflow-y: auto;
 }

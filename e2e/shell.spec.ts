@@ -1,5 +1,7 @@
 import type { Page } from '@playwright/test';
+import { perfOnly } from './budget';
 import { expect, test } from './fixtures';
+import { FIXTURE_TREE } from './tree-fixture';
 import { readSeed } from './tree-view-fixtures';
 
 const modKey = process.platform === 'darwin' ? 'Meta' : 'Control';
@@ -189,13 +191,73 @@ test.describe('fonts and network', () => {
   });
 });
 
+test.describe('layout stability', () => {
+  test.skip(
+    ({ browserName }) => browserName !== 'chromium',
+    'Layout shift entries are Chromium only',
+  );
+
+  test('the recent trees list appears without moving anything on the home page', async ({
+    page,
+  }) => {
+    // Hold the tree list until the page has painted with its fonts, so only its arrival is measured.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    // A fixed list: parallel specs fill the shared library with trees, and a name with
+    // characters outside Latin pulls in another font file whose swap would be measured too.
+    const modifiedAt = new Date().toISOString();
+    const trees = [FIXTURE_TREE, 'Tree one', 'Tree two', 'Tree three'].map((name) => ({
+      id: name,
+      name,
+      modifiedAt,
+    }));
+    await page.route('**/api/trees', async (route) => {
+      await held;
+      await route.fulfill({ json: { trees } });
+    });
+    await page.goto('/');
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+    // Fonts swap in when they finish loading; let that layout land before measuring.
+    const since = await page.evaluate(async () => {
+      await document.fonts.ready;
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      return performance.now();
+    });
+    release();
+    await expect(page.getByRole('navigation', { name: 'Recent trees' })).toBeVisible();
+    // Every element that moved after the list arrived, so a failure says what shifted.
+    const moved = await page.evaluate(
+      (after) =>
+        new Promise<string[]>((resolve) => {
+          const out: string[] = [];
+          type Shift = PerformanceEntry & { sources: { node?: Node | null }[] };
+          new PerformanceObserver((list) => {
+            for (const e of list.getEntries() as Shift[]) {
+              if (e.startTime < after) continue;
+              for (const { node } of e.sources) {
+                const el = node instanceof Element ? node : node?.parentElement;
+                out.push(
+                  `${el?.tagName ?? '?'} "${(node?.textContent ?? '').trim().slice(0, 40)}"`,
+                );
+              }
+            }
+          }).observe({ type: 'layout-shift', buffered: true });
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve(out)));
+        }),
+      since,
+    );
+    expect(moved).toEqual([]);
+  });
+});
+
 test.describe('performance', () => {
   test.skip(
     ({ browserName }) => browserName !== 'chromium',
     'LCP and CLS entries are Chromium only',
   );
+  test.skip(perfOnly(), 'Run with npm run e2e:perf');
 
-  test('home LCP under 1s with no layout shift', async ({ page }) => {
+  test('home LCP under 1s with no layout shift', { tag: '@perf' }, async ({ page }) => {
     await page.goto('/');
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
     const { lcp, cls } = await page.evaluate(
@@ -215,6 +277,8 @@ test.describe('performance', () => {
         }),
     );
     expect(lcp).toBeGreaterThan(0);
+    // Not scaled by OA_BENCH_FACTOR: an uninstrumented single-worker run measures about
+    // 120-180ms even on a loaded machine, so 1s holds as written.
     expect(lcp).toBeLessThan(1000);
     expect(cls).toBeLessThan(0.01);
   });

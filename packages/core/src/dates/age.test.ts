@@ -38,6 +38,19 @@ describe('ageAt', () => {
     });
   });
 
+  it.each([
+    // Full Hebrew and French dates convert exactly.
+    ['@#DHEBREW@ 1 TSH 5700', '14 SEP 1990', 51, false],
+    ['@#DHEBREW@ 1 TSH 5700', '13 SEP 1990', 50, false],
+    ['@#DFRENCH R@ 18 BRUM 8', '9 NOV 1829', 30, false],
+    // Ranges take their Gregorian bounds, whatever the calendars.
+    ['BET @#DHEBREW@ 5700 AND @#DHEBREW@ 5701', '1990', 50, true],
+    ['BET 1939 AND @#DHEBREW@ 5701', '1990', 50, true],
+    ['@#DHEBREW@ TSH 5700', '1990', 51, true],
+  ] as const)('born %s, event %s -> %i', (birth, event, years, approximate) => {
+    expect(ageAt(birth, event)).toMatchObject({ years, approximate });
+  });
+
   it('accepts parsed dates', () => {
     expect(ageAt(parseDate('1900'), parseDate('ABT 1925'))?.text).toBe('about 25');
   });

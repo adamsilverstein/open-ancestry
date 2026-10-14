@@ -5,6 +5,10 @@ import { arbGraph, crossings, makeGraph, syntheticTree } from './test-graphs';
 import type { FamilySpec } from './test-graphs';
 import type { ExpandKey, LayoutNode, Point, TreeLayout } from './types';
 
+// Property tests run hundreds of cases; under coverage on a shared CI runner that can
+// pass Vitest's 5s default, so they get room. A hang still fails.
+const PROPERTY_TIMEOUT = 30_000;
+
 const keysOf = (id: string): ExpandKey[] => [`${id}:up`, `${id}:down`, `${id}:siblings`];
 
 const arbCase = arbGraph.chain((graph) =>
@@ -104,7 +108,7 @@ function assertVerticalEdges(layout: TreeLayout) {
   }
 }
 
-describe('layout properties', () => {
+describe('layout properties', { timeout: PROPERTY_TIMEOUT }, () => {
   it('family layouts never overlap, keep parents above children and connect edges to cards', () => {
     fc.assert(
       fc.property(arbCase, (c) => {

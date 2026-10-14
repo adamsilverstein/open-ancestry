@@ -5,6 +5,10 @@ import { serializeGedcom } from './serialize';
 import { project } from './test-utils';
 import type { ParseResult } from './types';
 
+// Property tests run hundreds of cases; under coverage on a shared CI runner that can
+// pass Vitest's 5s default, so they get room. A hang still fails.
+const PROPERTY_TIMEOUT = 30_000;
+
 const RUNS = Number(process.env.FUZZ_RUNS ?? 300);
 
 function checkInvariants(result: ParseResult) {
@@ -58,7 +62,7 @@ const document = fc
   .tuple(fc.array(gedcomLine, { maxLength: 80, size: 'max' }), eol)
   .map(([lines, e]) => lines.join(e));
 
-describe('fuzz: parser never throws', () => {
+describe('fuzz: parser never throws', { timeout: PROPERTY_TIMEOUT }, () => {
   it('on random bytes', () => {
     fc.assert(
       fc.property(fc.uint8Array({ maxLength: 4000, size: 'max' }), (bytes) => {

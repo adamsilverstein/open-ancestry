@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { Outlet } from '@tanstack/react-router';
 import { ToastProvider } from '../components/Toast/Toast';
 import { ChunkBoundary } from '../lib/ChunkBoundary';
+import { trackFocus } from '../lib/returnFocus';
 import { PaletteContext } from './palette';
 import { TopBar } from './TopBar';
 import { UndoShortcuts } from './UndoShortcuts';
@@ -35,6 +36,9 @@ export function AppShell() {
     const id = setTimeout(() => void loadPalette().catch(() => {}), 1500);
     return () => clearTimeout(id);
   }, []);
+
+  // Dialogs opened from menus or plain buttons return focus to the last control used.
+  useEffect(trackFocus, []);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {

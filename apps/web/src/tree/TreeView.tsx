@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type RefObject,
+} from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
@@ -22,10 +31,20 @@ import { useToast } from '../components/Toast/Toast';
 import type { PersonSummary } from '../lib/person';
 import { TreeToolbar, type TreeLayout as LayoutKind } from '../components/TreeToolbar/TreeToolbar';
 import { Skeleton } from '../components/Skeleton/Skeleton';
-import { ApiError, fetchHome, fetchNeighborhood, treeKeys, type NeighborhoodRequest } from './api';
+import {
+  ApiError,
+  fetchHome,
+  fetchNeighborhood,
+  MAX_GENERATIONS,
+  parseGenerations,
+  treeKeys,
+  type NeighborhoodRequest,
+} from './api';
 import { usePalette } from '../app/palette';
 import { lifeEvent, toPersonSummary } from './format';
+import { onTreeChanged } from '../api/edits';
 import { GraphCache } from './graphCache';
+import { PrefetchGuess } from './prefetchGuess';
 import { LayoutClient, type LayoutRequest, type WorkerResponse } from './layoutClient';
 import { TreeCanvas, type TreeCanvasHandle } from './TreeCanvas';
 import { ZOOM_STEP, type Rect } from './viewport';
@@ -58,7 +77,12 @@ export const DEFAULT_DEPTH: Record<LayoutKind, { up: number; down: number }> = {
   fan: { up: 5, down: 0 },
 };
 
+/** Deeper fans have rings too thin to click; the pedigree goes deeper instead. */
+export const MAX_FAN_GENERATIONS = 6;
+
 const STALE = 5 * 60_000;
+/** Undos and redos in quick succession reset the tree view once, this long after the last. */
+const RESET_DEBOUNCE_MS = 250;
 /** How long the pointer or keyboard rests on a card before its layout is prepared. */
 const PREFETCH_DWELL_MS = 120;
 const NO_KIN: Record<string, string> = {};
@@ -115,19 +139,102 @@ function TreeMinimap({
     }),
     [layout],
   );
+  const ref = useRef<HTMLDivElement>(null);
+  const corner = useMinimapCorner(ref, viewport);
   return (
-    <Minimap
+    <div
+      ref={ref}
       className={styles.minimap}
-      nodes={nodes}
-      bounds={bounds}
-      viewport={viewport}
-      onNavigate={onNavigate}
-      onDismiss={onDismiss}
-    />
+      data-testid="tree-minimap"
+      data-corner={corner}
+      hidden={corner === 'collapsed'}
+    >
+      <Minimap
+        nodes={nodes}
+        bounds={bounds}
+        viewport={viewport}
+        onNavigate={onNavigate}
+        onDismiss={onDismiss}
+      />
+    </div>
   );
 }
 
+type Corner = 'left' | 'right' | 'collapsed';
+
+/** Screen gap between the minimap and the canvas edges. */
+const MINIMAP_INSET = 16;
+
+/** How long the view must rest before the minimap re-checks its corner. */
+const MINIMAP_SETTLE_MS = 150;
+
+/**
+ * Where the minimap may sit: its bottom-left corner, else bottom-right, else
+ * nowhere, so it never covers a row label or the keyboard's active card.
+ * Re-checked once a pan, zoom or re-focus settles (`viewport` stops changing),
+ * and it stays in its corner while that corner is free, so it never flips
+ * back and forth mid-gesture.
+ */
+function useMinimapCorner(ref: RefObject<HTMLDivElement | null>, viewport: Rect): Corner {
+  const size = useRef({ width: 0, height: 0 });
+  const [value, setValue] = useState<Corner>('left');
+  const current = useRef(value);
+  // `data-settling` marks a pending check, so tests (and screenshots) can wait
+  // for the final corner. Written to the DOM: no re-render per pan frame.
+  useLayoutEffect(() => {
+    if (ref.current) ref.current.dataset.settling = '';
+  }, [ref, viewport]);
+  useEffect(() => {
+    const el = ref.current;
+    const container = el?.parentElement;
+    if (!el || !container) return;
+    const timer = setTimeout(() => {
+      delete el.dataset.settling;
+      if (!el.hidden) {
+        const own = el.getBoundingClientRect();
+        if (own.width) size.current = { width: own.width, height: own.height };
+      }
+      const { width, height } = size.current;
+      if (!width) return;
+      const box = container.getBoundingClientRect();
+      const obstacles = [
+        ...container.querySelectorAll<HTMLElement>(
+          '[data-testid="tree-row-label"]:not([data-thin]), [data-key][tabindex="0"]',
+        ),
+      ]
+        .filter((o) => !o.closest('[hidden]'))
+        .map((o) => o.getBoundingClientRect())
+        .filter((r) => r.width > 0);
+      const top = box.bottom - MINIMAP_INSET - height;
+      const leftOf: Record<'left' | 'right', number> = {
+        left: box.left + MINIMAP_INSET,
+        right: box.right - MINIMAP_INSET - width,
+      };
+      const free = (corner: 'left' | 'right') =>
+        !obstacles.some(
+          (r) =>
+            r.left < leftOf[corner] + width &&
+            leftOf[corner] < r.right &&
+            r.top < top + height &&
+            top < r.bottom,
+        );
+      const was = current.current;
+      // The corner it is in first, then the left, then the right.
+      const order = was === 'right' ? (['right', 'left'] as const) : (['left', 'right'] as const);
+      // Never hide the minimap while it has keyboard focus (arrow keys pan from it).
+      const focused = el.contains(document.activeElement);
+      const next = order.find(free) ?? (focused && was !== 'collapsed' ? was : 'collapsed');
+      current.current = next;
+      setValue(next);
+    }, MINIMAP_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [ref, viewport]);
+  return value;
+}
+
 interface Result {
+  /** The graph the layout was made from; its cards' details come from it. */
+  cache: GraphCache;
   layout: TreeLayout | null;
   fan: FanLayout | null;
   kin: Record<string, string>;
@@ -178,13 +285,27 @@ export function TreeView({
   const queryClient = useQueryClient();
   const toast = useToast();
   const kind: LayoutKind = search.layout ?? 'family';
-  const up = search.up ?? DEFAULT_DEPTH[kind].up;
-  const down = search.down ?? DEFAULT_DEPTH[kind].down;
+  // Hand-edited URLs can hold anything: clamp to what the server serves.
+  const requestedUp = parseGenerations(search.up) ?? DEFAULT_DEPTH[kind].up;
+  const fanCapped = kind === 'fan' && requestedUp > MAX_FAN_GENERATIONS;
+  const up = fanCapped ? MAX_FAN_GENERATIONS : requestedUp;
+  const down = parseGenerations(search.down) ?? DEFAULT_DEPTH[kind].down;
 
   const canvas = useRef<TreeCanvasHandle>(null);
   // The page remounts this view per tree, so one cache and worker per tree.
-  const [cache] = useState(() => new GraphCache());
+  // Replaced (with a fresh worker) when an edit, undo or redo changes the tree:
+  // the cache only adds, so a removed relative would otherwise stay on screen.
+  const [cache, setCache] = useState(() => new GraphCache());
   const [client] = useState(() => new LayoutClient(() => cache.snapshot()));
+  // A new worker (after a reset or crash) starts from the current cache.
+  useEffect(() => client.setSnapshot(() => cache.snapshot()), [client, cache]);
+  /** Neighborhoods loaded beyond the focus (expanded chevrons), to reload after a reset. */
+  const extraLoads = useRef(new Map<string, NeighborhoodRequest>());
+  /** Set while a reset reloads the view, so it is not measured as a re-focus. */
+  const resetting = useRef(false);
+  // Expanded state belongs to one focus, so do its extra loads.
+  useEffect(() => () => extraLoads.current.clear(), [personId]);
+  const reload = useRef<NeighborhoodRequest[]>([]);
   const [dataVersion, setDataVersion] = useState(0);
   const [loaded, setLoaded] = useState<{ focus: string; kind: LayoutKind } | null>(null);
   const [failure, setFailure] = useState<{ focus: string; notFound: boolean } | null>(null);
@@ -222,12 +343,15 @@ export function TreeView({
         queryFn: ({ signal }) => fetchNeighborhood(tree, request, signal),
         staleTime: STALE,
       });
+      if (!quiet && request.focus !== personId) {
+        extraLoads.current.set(JSON.stringify(request), request);
+      }
       if (cache.merge(slice)) {
         client.merge(slice);
         if (!quiet) setDataVersion(cache.version);
       }
     },
-    [queryClient, tree, cache, client],
+    [queryClient, tree, cache, client, personId],
   );
 
   /**
@@ -238,9 +362,12 @@ export function TreeView({
   const speculative = useRef(
     new Map<string, { version: number; response: Promise<WorkerResponse>; id: number }>(),
   );
-  /** The guess being prepared: its pending dwell timer and neighborhood request. */
-  const guess = useRef<{ timer: ReturnType<typeof setTimeout>; request?: NeighborhoodRequest }>(
-    null,
+  /** The guess being prepared: its dwell timer, then its neighborhood fetch. */
+  const [guess] = useState(
+    () =>
+      new PrefetchGuess<NeighborhoodRequest>(PREFETCH_DWELL_MS, (request) => {
+        void queryClient.cancelQueries({ queryKey: treeKeys.neighborhood(tree, request) });
+      }),
   );
   const speculationKey = useCallback(
     (focus: string) => `${kind}|${focus}|${up}|${down}`,
@@ -250,9 +377,10 @@ export function TreeView({
   const requestFor = useCallback(
     (focus: string): NeighborhoodRequest => ({
       focus,
-      // One generation past what is shown, so the next chevron needs no request.
-      up: kind === 'descendants' ? 0 : up + 1,
-      down: kind === 'pedigree' || kind === 'fan' ? 0 : down + 1,
+      // One generation past what is shown, so the next chevron needs no request,
+      // but never past the server's limit.
+      up: kind === 'descendants' ? 0 : Math.min(up + 1, MAX_GENERATIONS),
+      down: kind === 'pedigree' || kind === 'fan' ? 0 : Math.min(down + 1, MAX_GENERATIONS),
       // The family view shows siblings, aunts and uncles (with their spouses).
       siblingsDepth: kind === 'family' ? 2 : 0,
     }),
@@ -262,13 +390,19 @@ export function TreeView({
   // Load the focus person's neighborhood.
   useEffect(() => {
     let cancelled = false;
-    if (!refocusPending.current) {
+    // A reset reloads the same focus: not a re-focus to measure.
+    if (resetting.current) resetting.current = false;
+    else if (!refocusPending.current) {
       performance.mark(REFOCUS_MARK);
       refocusPending.current = true;
     }
     (async () => {
       try {
         await ensure(requestFor(personId));
+        // After a reset, bring back what expanded chevrons had loaded.
+        const again = reload.current;
+        reload.current = [];
+        await Promise.allSettled(again.map((r) => ensure(r)));
         if (!cancelled) {
           setFailure(null);
           setLoaded({ focus: personId, kind });
@@ -323,6 +457,7 @@ export function TreeView({
       (response) => {
         if (id !== latestRequest.current) return;
         setResult({
+          cache,
           layout: response.layout,
           fan: response.fan,
           kin: response.kin,
@@ -341,10 +476,36 @@ export function TreeView({
   const shownResult = result && result.focus === personId && result.kind === kind ? result : null;
   const busy = !shownResult || rendered !== shownResult;
 
+  // Until a reset's new layout arrives, the cards on screen keep their details.
+  const shownCache = shownResult?.cache ?? cache;
   const person = useCallback(
-    (id: string) => cache.display(id, (summary) => toPersonSummary(summary, tree)),
-    [cache, tree],
+    (id: string) => shownCache.display(id, (summary) => toPersonSummary(summary, tree)),
+    [shownCache, tree],
   );
+
+  // An edit, undo or redo changed the tree (`invalidateTree`). The cache cannot
+  // tell what was removed, so start it over: refetch the focus and the current
+  // focus's expanded neighborhoods, and drop layouts guessed from the old data.
+  // A burst (several undos in a row) resets once, after it settles.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = onTreeChanged((changed) => {
+      if (changed !== tree) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        reload.current = [...extraLoads.current.values()];
+        extraLoads.current.clear();
+        speculative.current.clear();
+        resetting.current = true;
+        client.dispose();
+        setCache(new GraphCache());
+      }, RESET_DEBOUNCE_MS);
+    });
+    return () => {
+      clearTimeout(timer);
+      unsubscribe();
+    };
+  }, [tree, client]);
 
   const goTo = useCallback(
     (id: string, layout?: LayoutKind) => {
@@ -473,68 +634,45 @@ export function TreeView({
   // older one's fetch, and the client keeps guesses behind real layouts.
   const onPrefetch = useCallback(
     (id: string) => {
-      const previous = guess.current;
-      if (previous) {
-        clearTimeout(previous.timer);
-        if (previous.request) {
-          void queryClient.cancelQueries({
-            queryKey: treeKeys.neighborhood(tree, previous.request),
-          });
-        }
+      if (id === personId) {
+        guess.adopt();
+        return;
       }
-      guess.current = null;
-      if (id === personId) return;
       const key = speculationKey(id);
-      const timer = setTimeout(() => {
+      guess.next(() => {
         const request = requestFor(id);
-        const mine = { timer, request };
-        guess.current = mine;
-        void ensure(request, { quiet: true })
-          .then(() => {
-            if (guess.current === mine) guess.current = null;
-            const known = speculative.current.get(key);
-            if (known?.version === cache.version || !cache.has(id)) return;
-            const response = client.layout(
-              { kind, focusId: id, options: layoutOptions(kind, up, down, EMPTY_VIEW) },
-              { speculative: true },
-            );
-            // A failed or superseded guess just falls back to a normal layout.
-            response.catch(() => {
-              if (speculative.current.get(key)?.id === response.id) {
-                speculative.current.delete(key);
-              }
-            });
-            speculative.current.delete(key);
-            speculative.current.set(key, { version: cache.version, response, id: response.id });
-            // Keep the few most recent guesses.
-            for (const old of speculative.current.keys()) {
-              if (speculative.current.size <= 4) break;
-              speculative.current.delete(old);
+        const done = ensure(request, { quiet: true }).then(() => {
+          const known = speculative.current.get(key);
+          if (known?.version === cache.version || !cache.has(id)) return;
+          const response = client.layout(
+            { kind, focusId: id, options: layoutOptions(kind, up, down, EMPTY_VIEW) },
+            { speculative: true },
+          );
+          // A failed or superseded guess just falls back to a normal layout.
+          response.catch(() => {
+            if (speculative.current.get(key)?.id === response.id) {
+              speculative.current.delete(key);
             }
-          })
-          .catch(() => {
-            // Prefetching is best effort; a cancelled fetch lands here.
           });
-      }, PREFETCH_DWELL_MS);
-      guess.current = { timer };
+          speculative.current.delete(key);
+          speculative.current.set(key, { version: cache.version, response, id: response.id });
+          // Keep the few most recent guesses.
+          for (const old of speculative.current.keys()) {
+            if (speculative.current.size <= 4) break;
+            speculative.current.delete(old);
+          }
+        });
+        // Prefetching is best effort; a cancelled fetch lands here.
+        done.catch(() => {});
+        return { request, done };
+      });
     },
-    [
-      personId,
-      speculationKey,
-      ensure,
-      requestFor,
-      cache,
-      client,
-      kind,
-      up,
-      down,
-      queryClient,
-      tree,
-    ],
+    [personId, speculationKey, ensure, requestFor, cache, client, kind, up, down, guess],
   );
 
-  // A new focus (or leaving the view) drops a guess still waiting out its dwell.
-  useEffect(() => () => clearTimeout(guess.current?.timer), [personId]);
+  // A new focus (or leaving the view) drops a guess still waiting out its dwell,
+  // and stops a later guess from cancelling a fetch the re-focus may be sharing.
+  useEffect(() => () => guess.adopt(), [guess, personId]);
 
   const onInteract = useCallback(() => setPopoverKey(null), []);
 
@@ -637,6 +775,31 @@ export function TreeView({
   const shown = shownResult?.layout ?? shownResult?.fan ?? null;
   return (
     <>
+      {/* First in the DOM, so Tab reaches the toolbar before the canvas, as on screen. */}
+      <TreeToolbar
+        className={styles.toolbar}
+        layout={kind}
+        onLayoutChange={(layout) =>
+          void navigate({
+            to: '/tree/$personId',
+            params: { personId },
+            search: (prev) =>
+              cleanSearch({
+                tree: prev.tree,
+                layout: layout === 'family' ? undefined : layout,
+              }),
+          })
+        }
+        layoutMenuOpen={menuOpen}
+        onLayoutMenuOpenChange={setMenuOpen}
+        onFind={palette.open}
+        onHome={() => void goHome()}
+        onZoomIn={() => canvas.current?.zoomBy(ZOOM_STEP)}
+        onZoomOut={() => canvas.current?.zoomBy(1 / ZOOM_STEP)}
+        onFit={() => canvas.current?.fit()}
+        minimapVisible={minimapVisible}
+        onToggleMinimap={() => setMinimapVisible((v) => !v)}
+      />
       <TreeCanvas
         ref={canvas}
         label={focusName ? `Family tree centered on ${focusName}` : 'Family tree'}
@@ -677,30 +840,19 @@ export function TreeView({
           </Button>
         </div>
       )}
-      <TreeToolbar
-        className={styles.toolbar}
-        layout={kind}
-        onLayoutChange={(layout) =>
-          void navigate({
-            to: '/tree/$personId',
-            params: { personId },
-            search: (prev) =>
-              cleanSearch({
-                tree: prev.tree,
-                layout: layout === 'family' ? undefined : layout,
-              }),
-          })
-        }
-        layoutMenuOpen={menuOpen}
-        onLayoutMenuOpenChange={setMenuOpen}
-        onFind={palette.open}
-        onHome={() => void goHome()}
-        onZoomIn={() => canvas.current?.zoomBy(ZOOM_STEP)}
-        onZoomOut={() => canvas.current?.zoomBy(1 / ZOOM_STEP)}
-        onFit={() => canvas.current?.fit()}
-        minimapVisible={minimapVisible}
-        onToggleMinimap={() => setMinimapVisible((v) => !v)}
-      />
+      {fanCapped && !missing && (
+        <div className={styles.notice} role="status" data-surface="raised" data-tone="info">
+          The fan shows {MAX_FAN_GENERATIONS} generations.
+          <Link
+            to="/tree/$personId"
+            params={{ personId }}
+            search={(prev) => ({ ...prev, layout: 'pedigree' })}
+            className={styles.noticeLink}
+          >
+            Open the pedigree
+          </Link>
+        </div>
+      )}
       {shownResult?.layout && minimapVisible && (
         <TreeMinimap
           onDismiss={() => setMinimapVisible(false)}

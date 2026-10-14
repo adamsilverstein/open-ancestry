@@ -8,11 +8,20 @@ export {
   getSchemaVersion,
   listTables,
   migrate,
+  upgradeRow,
+  type ColumnChanges,
+  type TableRowsByName,
   type Migration,
   type MigrateOptions,
   type TableInfo,
 } from './migrations/index';
-export { NotFoundError, TreeStore, Tx, type StoreOptions } from './store';
+export {
+  NotFoundError,
+  TransactionInProgressError,
+  TreeStore,
+  Tx,
+  type StoreOptions,
+} from './store';
 export {
   TREE_EXTENSION,
   createTree,
@@ -61,3 +70,10 @@ export {
   type OaJsonTables,
 } from './json';
 export { generateSyntheticTree, type SyntheticOptions, type SyntheticTree } from './synthetic';
+export {
+  CONVERTED_CALENDARS,
+  DERIVED_STEPS,
+  deriveDateSort,
+  refreshDerivedColumns,
+  type RefreshOptions,
+} from './derived';

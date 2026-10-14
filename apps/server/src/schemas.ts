@@ -17,6 +17,7 @@ export const {
   TreeParams,
   TreeIdParams,
   JobParams,
+  ReimportApplyBody,
   TreeBody,
   Sex,
   Living,
@@ -50,6 +51,8 @@ export const {
   MediaThumbParams,
   BatchOperation,
   BatchBody,
+  CheckKey,
+  DismissBody,
 } = schemas;
 
 export type NameBody = Source.NameBody;

@@ -37,6 +37,16 @@ test.skip(({ browserName }) => browserName !== 'chromium', 'Chromium measures th
 test.skip(process.env.OA_PERF !== '1', 'Run with npm run e2e:perf');
 test.skip(process.env.E2E_COVERAGE === '1', 'Timings are not meaningful in a coverage build');
 test.describe.configure({ mode: 'serial' });
+
+// Any page error fails the run: a perf loop is also a stress test.
+let pageErrors: string[] = [];
+test.beforeEach(({ page }) => {
+  pageErrors = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+});
+test.afterEach(() => {
+  expect(pageErrors).toEqual([]);
+});
 test.use({ viewport: { width: 1440, height: 900 } });
 
 const factor = Number(process.env.OA_BENCH_FACTOR ?? 1);
@@ -173,7 +183,7 @@ for (const tree of trees) {
   const url = (person: string, extra: string) =>
     `/tree/${person}?tree=${encodeURIComponent(tree.tree)}${extra}`;
 
-  test.describe(`${people}-person tree`, () => {
+  test.describe(`${people}-person tree`, { tag: '@perf' }, () => {
     test('first paint', async ({ browser }) => {
       const times: number[] = [];
       // Fresh contexts: nothing cached, as on opening the app at the home person.

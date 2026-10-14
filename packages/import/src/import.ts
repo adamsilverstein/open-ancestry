@@ -304,6 +304,8 @@ export async function importGedcom(
       homePersonSource: mapper.homePersonSource,
       timings: { read: readMs, parse: parseMs, map: mapMs, commit: 0, total: 0 },
     };
+    // The import_batch row may still be buffered in the writer.
+    writer.flush();
     store.db
       .prepare(
         "UPDATE import_batch SET status = 'completed', counts_json = ?, warnings_json = ?, finished_at = ? WHERE id = ?",

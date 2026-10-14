@@ -1,3 +1,4 @@
+import type { Statement } from 'better-sqlite3';
 import { rebuildSearchIndex } from './search';
 import type { TreeStore } from './store';
 import { DATA_TABLES, HISTORY_TABLES, assertDataTable } from './tables';
@@ -34,12 +35,21 @@ export interface BulkWriterOptions {
   freshTree?: boolean;
 }
 
-/** Page cache for a fresh-tree load, in KiB (512 MiB; only pages actually used count). */
-const FRESH_TREE_CACHE_KIB = 512 * 1024;
+/** Page cache for a fresh-tree load, in KiB (256 MiB; only pages actually used count). */
+const FRESH_TREE_CACHE_KIB = 256 * 1024;
+
+/** Rows per multi-row INSERT. */
+const BATCH_ROWS = 32;
 
 interface Inserter {
   table: string;
   keyIndex: number;
+  columns: number;
+  /** Column values of rows not yet written, flattened. */
+  pending: unknown[];
+  rows: number;
+  /** INSERT of exactly BATCH_ROWS rows. */
+  batch: Statement;
 }
 
 export class BulkWriter {
@@ -104,13 +114,51 @@ export class BulkWriter {
     if (!inserter) {
       if (!HISTORY_TABLES.includes(table)) assertDataTable(table);
       const { key, columns } = this.store.plan(table);
-      inserter = { table, keyIndex: columns.indexOf(key) };
+      inserter = {
+        table,
+        keyIndex: columns.indexOf(key),
+        columns: columns.length,
+        pending: [],
+        rows: 0,
+        batch: this.insertRows(table, BATCH_ROWS),
+      };
       this.inserters.set(table, inserter);
     }
     const values = this.store.rowValues(table, input, this.now);
-    this.store.insertStatement(table).run(values);
+    for (const value of values) inserter.pending.push(value);
+    if (++inserter.rows === BATCH_ROWS) this.write(inserter);
     this.counts[table] = (this.counts[table] ?? 0) + 1;
     return values[inserter.keyIndex] as string;
+  }
+
+  /**
+   * Writes every buffered row. Rows are batched per table into multi-row
+   * INSERTs, which costs a third less than one statement per row; call this
+   * before reading back rows the load wrote. `commit` flushes first.
+   */
+  flush(): void {
+    for (const inserter of this.inserters.values()) this.write(inserter);
+  }
+
+  private write(inserter: Inserter): void {
+    if (inserter.rows === 0) return;
+    const statement =
+      inserter.rows === BATCH_ROWS
+        ? inserter.batch
+        : this.insertRows(inserter.table, inserter.rows);
+    // Clear first: after a failed batch the load is rolled back, never retried.
+    const values = inserter.pending;
+    inserter.pending = [];
+    inserter.rows = 0;
+    statement.run(values);
+  }
+
+  private insertRows(table: string, rows: number): Statement {
+    const { columns } = this.store.plan(table);
+    const row = `(${columns.map(() => '?').join(', ')})`;
+    return this.store.db.prepare(
+      `INSERT INTO ${table} (${columns.join(', ')}) VALUES ${Array(rows).fill(row).join(', ')}`,
+    );
   }
 
   /**
@@ -122,6 +170,7 @@ export class BulkWriter {
     if (!this.open) throw new Error('BulkWriter already finished');
     this.open = false;
     try {
+      this.flush();
       for (const { sql } of this.deferred) this.store.db.exec(sql);
       if (this.restore) {
         const broken = this.store.db.prepare('PRAGMA foreign_key_check').get() as

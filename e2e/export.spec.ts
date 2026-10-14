@@ -51,7 +51,8 @@ async function exportFrom(page: Page, tree: string, format: string, privatize = 
   await page.getByRole('option', { name: tree, exact: true }).click();
   await dialog.getByRole('combobox', { name: 'Format' }).click();
   await page.getByRole('option', { name: format, exact: true }).click();
-  if (privatize) await dialog.getByRole('checkbox', { name: 'Privatize living people' }).check();
+  // Privatize starts on for trees with living people; set it explicitly either way.
+  await dialog.getByRole('checkbox', { name: /^Privatize/ }).setChecked(privatize);
   const [download] = await Promise.all([
     page.waitForEvent('download'),
     dialog.getByRole('button', { name: 'Export' }).click(),
@@ -117,7 +118,7 @@ test('JSON export is a full backup, so privatize is not offered', async ({ page 
   const dialog = page.getByRole('dialog', { name: 'Export tree' });
   await dialog.getByRole('combobox', { name: 'Format' }).click();
   await page.getByRole('option', { name: 'JSON (full backup)' }).click();
-  await expect(dialog.getByRole('checkbox', { name: 'Privatize living people' })).toBeDisabled();
+  await expect(dialog.getByRole('checkbox', { name: /^Privatize/ })).toBeDisabled();
   await dialog.getByRole('button', { name: 'Cancel' }).click();
   await expect(dialog).toBeHidden();
   await expect(page.getByRole('button', { name: 'File' })).toBeFocused();
@@ -151,6 +152,8 @@ test('shows what an export could not carry over', async ({ page }, info) => {
   await page.getByRole('option', { name: tree, exact: true }).click();
   await dialog.getByRole('combobox', { name: 'Format' }).click();
   await page.getByRole('option', { name: 'GEDCOM 7', exact: true }).click();
+  // A full export: privatized, the person and so the warning would not be there.
+  await dialog.getByRole('checkbox', { name: /^Privatize/ }).uncheck();
   const [download] = await Promise.all([
     page.waitForEvent('download'),
     dialog.getByRole('button', { name: 'Export' }).click(),
@@ -162,4 +165,105 @@ test('shows what an export could not carry over', async ({ page }, info) => {
   await dialog.getByRole('button', { name: 'Done' }).click();
   await expect(dialog).toBeHidden();
   await expect(page.getByRole('button', { name: 'File' })).toBeFocused();
+});
+
+test('privatize starts on for a tree with living people and warns when turned off', async ({
+  page,
+  request,
+  baseURL,
+}, info) => {
+  const tree = treeName(info.title, info.project.name);
+  await seedTree(request, baseURL!, tree);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'File' }).click();
+  await page.getByRole('menuitem', { name: /Export/ }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export tree' });
+  await dialog.getByRole('combobox', { name: 'Tree' }).click();
+  await page.getByRole('option', { name: tree, exact: true }).click();
+  const privatize = dialog.getByRole('checkbox', { name: /^Privatize/ });
+  await expect(privatize).toBeChecked();
+  await expect(dialog.getByRole('status')).toHaveCount(0);
+  await privatize.uncheck();
+  await expect(dialog.getByRole('status')).toHaveText(
+    'This export includes everything about 1 person who may be living.',
+  );
+  await dialog.getByRole('combobox', { name: 'Format' }).click();
+  await page.getByRole('option', { name: 'JSON (full backup)', exact: true }).click();
+  await expect(dialog.getByRole('status')).toHaveText(
+    'JSON is a full backup: it includes everything about 1 person who may be living.',
+  );
+});
+
+test('a privatized export hides a deceased person marked confidential', async ({
+  request,
+  baseURL,
+}, info) => {
+  const tree = treeName(info.title, info.project.name);
+  const { token } = (await (await request.get('/api/session')).json()) as { token: string };
+  const headers = { origin: baseURL!, 'x-oa-token': token };
+  expect((await request.post('/api/trees', { headers, data: { name: tree } })).status()).toBe(201);
+  const base = `/api/trees/${encodeURIComponent(tree)}`;
+  const res = await request.post(`${base}/people`, {
+    headers,
+    data: {
+      sex: 'F',
+      living: 'dead',
+      privacy: 'confidential',
+      names: [{ given: 'Confida', surname: 'Hushwell' }],
+      events: [{ type: 'BIRT', date_text: '1860', place: 'Hushtown, Quietshire' }],
+    },
+  });
+  expect(res.status()).toBe(201);
+  for (const path of ['export.ged?privatize=true', 'export.ged?version=7&privatize=true']) {
+    const text = await (await request.get(`${base}/${path}`)).text();
+    for (const secret of ['Confida', 'Hushwell', '1860', 'Hushtown']) {
+      expect(text, `${path} ${secret}`).not.toContain(secret);
+    }
+    expect(text).toContain('1 NAME Private');
+  }
+  const zip = Buffer.from(await (await request.get(`${base}/export.gdz?privatize=true`)).body());
+  expect(await reimport(zip)).toEqual(['Private']);
+});
+
+test('privatize stays on until the tree is checked, and if the check fails', async ({
+  page,
+  request,
+  baseURL,
+}, info) => {
+  const tree = treeName(info.title, info.project.name);
+  await seedTree(request, baseURL!, tree);
+  // Hold the tree detail (with its living count) to catch a quick click.
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let fail = false;
+  await page.route(`**/api/trees/${encodeURIComponent(tree)}`, async (route) => {
+    await held;
+    if (fail)
+      await route.fulfill({
+        status: 500,
+        json: { error: { code: 'internal_error', message: 'x' } },
+      });
+    else await route.continue();
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'File' }).click();
+  await page.getByRole('menuitem', { name: /Export/ }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export tree' });
+  await dialog.getByRole('combobox', { name: 'Tree' }).click();
+  await page.getByRole('option', { name: tree, exact: true }).click();
+  await expect(dialog.getByRole('checkbox', { name: /^Privatize/ })).toBeChecked();
+  await expect(dialog.getByRole('button', { name: 'Export' })).toBeDisabled();
+
+  // A failed check keeps privatize on, says why, and lets the export go ahead privatized.
+  fail = true;
+  release();
+  await expect(dialog.getByRole('status')).toContainText('Could not check this tree');
+  await expect(dialog.getByRole('checkbox', { name: /^Privatize/ })).toBeChecked();
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    dialog.getByRole('button', { name: 'Export' }).click(),
+  ]);
+  const text = await readFile((await download.path())!, 'utf8');
+  expect(text).not.toContain('Adelind');
+  expect(text).toContain('Bramwell');
 });

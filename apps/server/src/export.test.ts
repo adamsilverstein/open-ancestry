@@ -67,6 +67,28 @@ describe('GEDCOM export routes', () => {
     }
   });
 
+  it('names a privatized download neutrally, not after the tree', async () => {
+    for (const path of ['export.ged?privatize=true', 'export.gdz?privatize=true']) {
+      const res = await api.get(`${s.base}/${path}`);
+      const extension = path.includes('.gdz') ? 'gdz' : 'ged';
+      expect(res.headers['content-disposition'], path).toBe(
+        `attachment; filename="private-tree.${extension}"; filename*=UTF-8''private-tree.${extension}`,
+      );
+    }
+  });
+
+  it('reports how many people a privatized export would hide', async () => {
+    const tree = async () => (await api.get(s.base)).json().tree;
+    const before = await tree();
+    expect(before.livingCount).toBeGreaterThan(0);
+    expect(before.privateCount).toBe(0);
+    await api.patch(`${s.base}/people/${s.ada}`, { living: 'dead' });
+    expect((await tree()).livingCount).toBe(before.livingCount - 1);
+    // Marked confidential: hidden like the living, counted separately.
+    await api.patch(`${s.base}/people/${s.ada}`, { privacy: 'confidential' });
+    expect(await tree()).toMatchObject({ livingCount: before.livingCount - 1, privateCount: 1 });
+  });
+
   it('downloads GEDZIP', async () => {
     const res = await api.get(`${s.base}/export.gdz`);
     expect(res.statusCode).toBe(200);

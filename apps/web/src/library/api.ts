@@ -28,6 +28,9 @@ export const getTree = (id: string, signal?: AbortSignal) =>
 export const getJob = (id: string, signal?: AbortSignal) =>
   apiGet<ImportJob>(`/jobs/${seg(id)}`, signal);
 
+/** Stops a queued or running job; 409 once it has finished. */
+export const cancelJob = (id: string) => apiSend<{ job: ImportJob }>('DELETE', `/jobs/${seg(id)}`);
+
 export const jobEventsUrl = (id: string) => `/api/jobs/${seg(id)}/events`;
 
 /** The import report (packages/import ImportReport), as much as the UI shows. */
@@ -61,12 +64,14 @@ export interface ImportProgress {
 
 export interface ImportJob {
   id: string;
+  kind: 'import' | 'reimport';
   tree: string;
   fileName: string;
   /** The server created the tree for this upload (and removed it if the import failed). */
   createdTree: boolean;
   state: 'queued' | 'running' | 'completed' | 'failed';
   progress: ImportProgress | null;
+  /** The import report, or for a re-import `{ reimportId, counts }`. */
   result: ImportReportView | null;
   error: string | null;
 }

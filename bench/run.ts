@@ -41,7 +41,17 @@ for (const c of cases) {
       warmupIterations: c.warmupIterations,
     }),
   });
-  bench.add(c.name, c.fn);
+  bench.add(
+    c.name,
+    c.fn,
+    c.beforeEach && {
+      beforeEach: async () => {
+        await c.beforeEach!();
+      },
+      // Otherwise tinybench calls fn once, outside the hooks, to see whether it is async.
+      async: c.fn.constructor.name === 'AsyncFunction',
+    },
+  );
   await bench.run();
   const result = bench.tasks[0]?.result;
   if (!result || !('latency' in result)) {

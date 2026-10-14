@@ -44,7 +44,7 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 | `GET /api/session` | Mutation token. |
 | `GET /api/trees` | `{ trees: [{ id, name, modifiedAt }] }` |
 | `POST /api/trees` `{ name }` | Create a tree (201). Names cannot contain path separators or `%`, start or end with a dot, or be a Windows device name (`CON`, `NUL`, `COM1`, ...). |
-| `GET /api/trees/:tree` | Tree info with `peopleCount`, `homePersonId`, `schemaVersion`. |
+| `GET /api/trees/:tree` | Tree info with `peopleCount`, `livingCount` and `privateCount` (who a privatized export hides: people who may be living, and others marked private or confidential), `homePersonId`, `schemaVersion`. |
 | `PATCH /api/trees/:tree` `{ name }` | Rename (folder and display name). |
 | `DELETE /api/trees/:tree` | Move to `<library>/.trash/` (204). |
 | `GET /api/trees/:tree/people?sort&dir&sex&living&tag&limit&offset` | People list `{ total, items }`; `sort` = surname, given, birth, death; `living` is comma-separated. |
@@ -58,10 +58,14 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 | `GET /api/trees/:tree/history?limit` | Change batches, `canUndo`, `canRedo`. |
 | `POST /api/trees/:tree/undo`, `/redo` | Undo or redo the latest batch; `{ batch }` (null if none). |
 | `GET /api/trees/:tree/export.json` | Full open-ancestry JSON download. |
-| `GET /api/trees/:tree/export.ged?version&privatize` | GEDCOM download (`text/vnd.familysearch.gedcom`); `version` is `5.5.1` (default, Ancestry-compatible) or `7`; `privatize=true` writes living people as "Private" with only their family links. |
+| `GET /api/trees/:tree/export.ged?version&privatize` | GEDCOM download (`text/vnd.familysearch.gedcom`); `version` is `5.5.1` (default, Ancestry-compatible) or `7`; `privatize=true` writes living people, and anyone marked private or confidential, as "Private" with only their family links, and names the download `private-tree.ged` instead of after the tree. |
 | `GET /api/trees/:tree/export.gdz?privatize` | GEDZIP download (GEDCOM 7 plus the tree's media files). |
 | `POST /api/import` (multipart `file`: .ged, .gedcom, .zip, .gdz) | Imports into a new tree named after the file (" 2", " 3", ... when taken); 202 `{ jobId, job }` with `job.tree` and `job.createdTree: true`. The server owns that tree: if the import fails or is cancelled it removes it, but only while it is still the empty tree it created. |
 | `POST /api/trees/:tree/import` (multipart `file`) | Starts an import into an existing, empty tree (202 `{ jobId, job }`); that tree is never removed. |
+| `POST /api/trees/:tree/reimport` (multipart `file`) | Compares an updated export with the tree as a job (`kind: 'reimport'`); its `result` is `{ reimportId, counts }`. Nothing is written. |
+| `GET /api/reimports/:id` | The review: `source`, `lines`, and `diff` (`people`: matched, new and missing people, each with `confidence`, `reasons` and `changes`; `counts`). Sessions live in memory for an hour, at most four at a time. |
+| `POST /api/reimports/:id/apply` `{ accept: [changeId] }` | Applies the accepted changes as one change batch labelled `Re-import <file>` (undo reverts all of it). 409 when the tree changed since the comparison. Returns `{ batchId, applied, skipped, blocked }`. |
+| `DELETE /api/reimports/:id` | Discards a review (204). |
 | `GET /api/jobs/:id` | Job state, progress, result or error. |
 | `DELETE /api/jobs/:id` | Cancel (202 `{ job }`): a queued job never runs, a running one is aborted. Cleanup removes the upload and any empty tree the import created. 409 once finished. Stopping the server (Ctrl-C or SIGTERM on `open-ancestry serve`) cancels every job the same way. |
 | `GET /api/jobs/:id/events` | Server-sent events: `state` (whole job) and `progress`; ends when the job finishes. |

@@ -24,6 +24,26 @@ async function open(page: Page, key = 'ada', extra = '') {
   await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
 }
 
+/**
+ * The top bar's File button once its menu has loaded: until then a disabled
+ * placeholder stands in, and focus on it is lost when the real one replaces it.
+ */
+async function fileMenu(page: Page) {
+  const file = page.getByRole('banner').getByRole('button', { name: 'File' });
+  await expect(file).not.toHaveAttribute('aria-disabled', 'true');
+  return file;
+}
+
+/**
+ * Waits until `name` is the laid-out focus person and the view has stopped
+ * moving: the URL changes first, the layout and re-centering come after.
+ */
+async function focusedOn(page: Page, name: string) {
+  await expect(card(page, name)).toHaveAccessibleName(/focus person/);
+  await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+  await settled(page);
+}
+
 /** Waits for pan/zoom animations to finish. */
 async function settled(page: Page) {
   await expect(world(page)).not.toHaveAttribute('data-animating');
@@ -380,6 +400,8 @@ test.describe('family view', () => {
 
   test('zoom in, zoom out, fit, wheel, drag and home', async ({ page }) => {
     await open(page, 'bram');
+    // The first view frames the family with an animation; measure from where it lands.
+    await settled(page);
     const start = await transform(page);
     await page.getByRole('button', { name: 'Zoom in' }).click();
     await expect.poll(async () => (await transform(page)).scale).toBeGreaterThan(start.scale);
@@ -434,23 +456,51 @@ test.describe('family view', () => {
 
     await page.getByRole('button', { name: 'Go to home person' }).click();
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.ada}\\?`));
+    // The new focus re-centers once its relatives load; a card is only a stable
+    // target after that, not merely after the URL changed.
+    await focusedOn(page, 'Ada Vale');
     await card(page, 'Ada Vale').focus();
     await settled(page);
     await card(page, 'Elsa Hale').dblclick();
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.elsa}\\?`));
+    await focusedOn(page, 'Elsa Hale');
     // Keyboard focus follows to the new focus card.
     await expect(card(page, 'Elsa Hale')).toBeFocused();
     await page.keyboard.press('h');
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.ada}\\?`));
+    await focusedOn(page, 'Ada Vale');
 
     // Single-key shortcuts only act while focus is in the tree (WCAG 2.1.4).
     await expect(card(page, 'Ada Vale')).toHaveAccessibleName(/focus person/);
     await card(page, 'Bram Vale').focus();
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
-    await page.getByRole('banner').getByRole('button', { name: 'File' }).focus();
+    await (await fileMenu(page)).focus();
     await page.keyboard.press('h');
     await page.keyboard.press('0');
+    await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
+  });
+
+  test('a re-focus that lands late does not take focus back from the top bar', async ({ page }) => {
+    await open(page);
+    await settled(page);
+    // Hold Bram's relatives so his layout arrives after focus has moved on.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route(`**/neighborhood?focus=${ids.bram}*`, async (route) => {
+      await held;
+      await route.continue();
+    });
+    await card(page, 'Bram Vale').focus();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
+    const file = await fileMenu(page);
+    await file.focus();
+    release();
+    await focusedOn(page, 'Bram Vale');
+    await expect(file).toBeFocused();
+    // So the tree's single-key shortcuts stay off (WCAG 2.1.4).
+    await page.keyboard.press('h');
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
   });
 
@@ -842,6 +892,80 @@ test.describe('generation depth in the URL', () => {
       }
     });
   }
+});
+
+test.describe('fan chart keyboard', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+  const segment = (page: Page, name: string) =>
+    page.getByTestId('tree-fan').getByRole('button', { name: new RegExp(`^${name},`) });
+
+  test('one tab stop, arrows by relationship, and focus follows a re-focus', async ({ page }) => {
+    await open(page, 'ada', '&layout=fan');
+    // The toolbar comes first in Tab order, as it does on screen.
+    const layoutButton = page.getByRole('button', { name: /^Layout:/ });
+    await layoutButton.focus();
+    await page.keyboard.press('Tab');
+    await expect(segment(page, 'Ada Vale')).toBeFocused();
+    await page.keyboard.press('Tab');
+    expect(
+      await page.evaluate(() =>
+        Boolean(document.activeElement?.closest('[data-testid="tree-fan"]')),
+      ),
+    ).toBe(false);
+    await page.keyboard.press('Shift+Tab');
+    await expect(segment(page, 'Ada Vale')).toBeFocused();
+    await expect(page.getByTestId('tree-fan').locator('[tabindex="0"]')).toHaveCount(1);
+
+    // Up is the father's side of the parent ring, down back toward the center.
+    await page.keyboard.press('ArrowUp');
+    await expect(segment(page, 'Bram Vale')).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await expect(segment(page, 'Otto Vale')).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(segment(page, 'Bram Vale')).toBeFocused();
+    // Along the ring.
+    await page.keyboard.press('ArrowRight');
+    await expect(segment(page, 'Elsa Hale')).toBeFocused();
+    await page.keyboard.press('ArrowLeft');
+    await expect(segment(page, 'Bram Vale')).toBeFocused();
+    await page.keyboard.press('Home');
+    await expect(segment(page, 'Ada Vale')).toBeFocused();
+
+    // Enter re-focuses; keyboard focus lands on the new center.
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?.*layout=fan`));
+    await expect(segment(page, 'Bram Vale')).toHaveAccessibleName(/focus person/);
+    await expect(segment(page, 'Bram Vale')).toBeFocused();
+  });
+});
+
+test.describe('far zoom', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  test('re-focusing while cards are painted on the canvas raises no errors', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    const { perf } = seed;
+    await page.goto(`/tree/${perf.wideId}?tree=${encodeURIComponent(perf.tree)}&down=7&up=1`);
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    await page.getByRole('button', { name: 'Fit to screen' }).click();
+    await settled(page);
+    expect((await transform(page)).scale).toBeLessThan(0.35);
+    await canvas(page).locator(`[data-key="${perf.wideId}"]`).focus();
+    for (const key of ['ArrowDown', 'ArrowUp', 'ArrowDown', 'ArrowUp']) {
+      await page.keyboard.press(key);
+      const target = await activeKey(page);
+      await page.keyboard.press('Enter');
+      // Straight on to the next, while the previous re-focus tween is still
+      // running its frames: that is where the painted layer redraws.
+      await expect(page).toHaveURL(new RegExp(`/tree/${target}\\?`));
+      await expect.poll(() => activeKey(page)).toBe(target);
+    }
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    await settled(page);
+    expect(errors).toEqual([]);
+  });
 });
 
 test.describe('visual snapshots', () => {

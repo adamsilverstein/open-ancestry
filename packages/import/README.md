@@ -66,6 +66,8 @@ Code that writes names or event dates outside an import (API edits) should use t
 
 ## Errors and warnings
 
+Bad data never throws. A failed or cancelled import into a new tree folder removes what it created (database, media it copied), leaving anything already in the folder, so it can be retried.
+
 Bad data never throws. Broken or wrong-type pointers, duplicate xrefs and links, one-sided links, people who are their own partner, child or ancestor, invalid `SEX`/`QUAY`/coordinates and media problems all become warnings with the line number; the affected lines stay in `unmapped_line`. Parser warnings (encoding, malformed lines) are included.
 
 `ImportError` (with a `code`) means nothing was imported: `not-gedcom`, `too-large`, `invalid-gedzip`, `read-failed`, `tree-exists`, `tree-not-empty` (v1 imports create a new tree; re-import is F15) or `aborted`.
@@ -76,4 +78,4 @@ The file is untrusted. Size limits apply before parsing; GEDZIP archives go thro
 
 ## Performance
 
-`npm run bench -- import`: a generated 10k-person Ancestry-style file (225k lines) imports into an in-memory tree in about 0.8 s on an M-series laptop (budget 3 s), 100k people in about 9 s (budget 30 s). Roughly two thirds of the time is SQLite inserts in `BulkWriter`.
+`npm run bench -- import`: a generated 10k-person Ancestry-style file (225k lines) imports in about 0.8 s into an in-memory tree and 0.9 s into a new tree on disk on an M-series laptop (budget 3 s), 100k people in about 9 s (budget 30 s). Shared CI runners are about 2.5 times slower. Roughly two thirds of the time is SQLite inserts in `BulkWriter`.

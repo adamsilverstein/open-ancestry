@@ -44,7 +44,7 @@ test('cancels a running import: no tree left, upload removed', async ({
   test.setTimeout(120_000);
   const name = unique(testInfo);
   const marker = `cancel-${randomUUID()}`;
-  // Large enough to still be mapping when Cancel is pressed, small enough not to stall the shared e2e server (imports still run on its event loop).
+  // Large enough to still be mapping when Cancel is pressed, small enough to keep the shared e2e server quick.
   const ged = generateGedcom({ people: 15_000, seed: 9 }).replace(
     '0 HEAD\n',
     `0 HEAD\n1 NOTE ${marker}\n`,

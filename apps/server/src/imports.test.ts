@@ -94,7 +94,8 @@ describe('POST import', () => {
     const [call] = fake.calls;
     expect(call!.content).toContain('1 SOUR Ancestry');
     expect(call!.path).toMatch(/oa-upload-[^/]+\/upload\.ged$/);
-    expect(call!.options.mediaDir).toBe(`${api.root}/Test.oatree/media`);
+    // Uploads never read media from local folders; a GEDZIP brings its own.
+    expect(call!.options).not.toHaveProperty('mediaDir');
     const running = await waitForJob(api, jobId, 'running');
     expect(running.progress).toEqual({ phase: 'parse', done: 1, total: 2 });
 
@@ -203,6 +204,53 @@ describe('POST import', () => {
     // Running is set before the importer has read its file.
     await vi.waitFor(() => expect(fake.calls).toHaveLength(2));
     fake.release();
+  });
+
+  it('refuses a new upload when the queue is full, before reading the body', async () => {
+    const fake = controllableImporter();
+    api = await testApi({ importer: fake.importer, maxQueuedImports: 1, uploadLimit: 1024 });
+    const [a, b, c] = [
+      await createTestTree(api, 'A'),
+      await createTestTree(api, 'B'),
+      await createTestTree(api, 'C'),
+    ];
+    const first = (await upload(api, a)).json().jobId;
+    await waitForJob(api, first, 'running');
+    expect((await upload(api, b)).statusCode).toBe(202);
+    // Over the size limit too: a 429 (not 413) shows the body was never streamed.
+    const third = await upload(api, c, 'big.ged', Buffer.alloc(4096, 'x'));
+    expect(third.statusCode).toBe(429);
+    expect(third.json().error.code).toBe('too_many_jobs');
+    const fresh = await api.inject({
+      method: 'POST',
+      url: '/api/import',
+      ...multipart('another.ged', '0 HEAD\n0 TRLR\n'),
+    });
+    expect(fresh.statusCode).toBe(429);
+    expect((await api.get('/api/trees')).json().trees.map((t: { id: string }) => t.id)).toEqual([
+      'A',
+      'B',
+      'C',
+    ]);
+    fake.release();
+  });
+
+  it('refuses an import into a tree with people before reading the body (issue #98)', async () => {
+    const fake = controllableImporter();
+    api = await testApi({ importer: fake.importer, uploadLimit: 1024 });
+    const base = await createTestTree(api);
+    await api.post(`${base}/people`, { names: [{ given: 'Ada' }] });
+    // Over the size limit too: a 409 (not 413) shows the body was never streamed.
+    const res = await upload(api, base, 'big.ged', Buffer.alloc(4096, 'x'));
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.message).toMatch(/empty tree/);
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it('limits import uploads to the import size cap by default', async () => {
+    const { DEFAULT_UPLOAD_LIMIT } = await import('./index');
+    const { IMPORT_LIMITS } = await import('@open-ancestry/import');
+    expect(DEFAULT_UPLOAD_LIMIT).toBe(IMPORT_LIMITS.maxBytes);
   });
 
   it('enforces the upload size limit', async () => {

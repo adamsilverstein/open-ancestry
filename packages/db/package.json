@@ -7,13 +7,17 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dump-schema": "tsx scripts/dump-schema.ts",
+    "generate:json-schema": "tsx scripts/generate-json-schema.ts && prettier --write schema/oa-json.schema.json"
   },
   "dependencies": {
     "@open-ancestry/core": "*",
-    "better-sqlite3": "^13.0.3"
+    "better-sqlite3": "^13.0.3",
+    "ajv": "^8.20.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^9.6.0"
+    "@types/better-sqlite3": "^9.6.0",
+    "fast-check": "^4.10.2"
   }
 }

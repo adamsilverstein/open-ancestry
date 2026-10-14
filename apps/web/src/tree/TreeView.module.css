@@ -1,7 +1,4 @@
 .page {
-  /* Height of the phone toolbar along the bottom, with its gap; framing leaves it free. */
-  --oa-tree-bottom-bar: 0px;
-
   position: relative;
   height: calc(100dvh - var(--oa-topbar-height));
   min-height: 320px;
@@ -127,14 +124,15 @@
 
 /*
  * Touch: a larger invisible target around the small chevrons and switcher.
- * They are drawn in the zoomed world, about 0.75 on a phone's first view,
- * so 60px here is 44px or more on screen there.
+ * They are drawn in the zoomed world (--oa-tree-scale, set on touch
+ * screens), so the target grows as the view zooms out: always 44px or more
+ * on screen, and never less than 60px in the world.
  */
 @media (pointer: coarse) {
   .chevron::before,
   .switcher::before {
     position: absolute;
-    inset: -18px;
+    inset: calc(-1 * max(18px, 24px / var(--oa-tree-scale, 1) - 12px));
     content: '';
   }
 
@@ -361,12 +359,9 @@
   font-weight: var(--oa-weight-medium);
 }
 
-/* Phones (NARROW_SCREEN): the toolbar along the bottom, the labels and minimap clear of it. */
-@media (max-width: 599px) {
-  .page {
-    --oa-tree-bottom-bar: 56px;
-  }
-
+/* The phone layout (PHONE_LAYOUT_QUERY): the toolbar along the bottom, the
+   labels and minimap clear of it. --oa-tree-bottom-bar is set by TreeView. */
+@media (max-width: 640px), (pointer: coarse) and (max-height: 500px) {
   .toolbar {
     top: auto;
     bottom: var(--oa-space-4);
@@ -375,7 +370,7 @@
   }
 
   .minimap {
-    bottom: calc(var(--oa-space-4) + var(--oa-tree-bottom-bar));
+    bottom: calc(var(--oa-tree-bottom-bar, 0px) + var(--oa-space-2));
   }
 
   .gutter {

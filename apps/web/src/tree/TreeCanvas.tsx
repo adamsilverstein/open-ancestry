@@ -516,6 +516,8 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     updateVisibleRef.current = updateVisible;
   }, [updateVisible]);
 
+  const coarse = useRef(window.matchMedia('(pointer: coarse)').matches);
+  const hitScale = useRef(0);
   const apply = useCallback(
     (t: Transform) => {
       transform.current = t;
@@ -525,6 +527,13 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         world.dataset.x = String(t.x);
         world.dataset.y = String(t.y);
         world.dataset.scale = String(t.scale);
+        // Touch targets stay 44px on screen at any zoom (see .chevron::before).
+        // Only on touch screens, and only on a real change: the property
+        // restyles every card.
+        if (coarse.current && Math.abs(t.scale - hitScale.current) > hitScale.current * 0.05) {
+          hitScale.current = t.scale;
+          world.style.setProperty('--oa-tree-scale', String(t.scale));
+        }
       }
       placeGutter();
       if (!frame.current) {

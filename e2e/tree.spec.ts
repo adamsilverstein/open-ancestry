@@ -1262,7 +1262,9 @@ test.describe('phone width (#139)', () => {
     const bar = await box(toolbar(page));
     const reserved = await page.evaluate(() =>
       parseFloat(
-        getComputedStyle(document.documentElement).getPropertyValue('--oa-tree-bottom-bar'),
+        getComputedStyle(document.querySelector('[data-tree-region]')!).getPropertyValue(
+          '--oa-tree-bottom-bar',
+        ),
       ),
     );
     const view = page.viewportSize()!;

@@ -41,7 +41,7 @@ import {
   type NeighborhoodRequest,
 } from './api';
 import { usePalette } from '../app/palette';
-import { NARROW_SCREEN, matchesMedia, useMediaQuery } from '../lib/useMediaQuery';
+import { PHONE_LAYOUT_QUERY, usePhoneLayout } from '../lib/useMediaQuery';
 import { lifeEvent, toPersonSummary } from './format';
 import { onTreeChanged } from '../api/edits';
 import { GraphCache } from './graphCache';
@@ -112,12 +112,18 @@ function TreeMinimap({
   person,
   onNavigate,
   onDismiss,
+  pinned,
+  onCollapsedChange,
 }: {
   layout: TreeLayout;
   store: ReturnType<typeof createViewportStore>;
   person: (personId: string) => PersonSummary | undefined;
   onNavigate: (center: { x: number; y: number }) => void;
   onDismiss: () => void;
+  /** The user opened it: show it even with both corners taken. */
+  pinned: boolean;
+  /** So the toolbar's Minimap button is pressed only while it shows. */
+  onCollapsedChange: (collapsed: boolean) => void;
 }) {
   const viewport = useSyncExternalStore(store.subscribe, store.get);
   const nodes = useMemo(
@@ -141,7 +147,8 @@ function TreeMinimap({
     [layout],
   );
   const ref = useRef<HTMLDivElement>(null);
-  const corner = useMinimapCorner(ref, viewport);
+  const corner = useMinimapCorner(ref, viewport, pinned);
+  useEffect(() => onCollapsedChange(corner === 'collapsed'), [corner, onCollapsedChange]);
   return (
     <div
       ref={ref}
@@ -176,7 +183,11 @@ const MINIMAP_SETTLE_MS = 150;
  * and it stays in its corner while that corner is free, so it never flips
  * back and forth mid-gesture.
  */
-function useMinimapCorner(ref: RefObject<HTMLDivElement | null>, viewport: Rect): Corner {
+function useMinimapCorner(
+  ref: RefObject<HTMLDivElement | null>,
+  viewport: Rect,
+  pinned: boolean,
+): Corner {
   const size = useRef({ width: 0, height: 0 });
   const [value, setValue] = useState<Corner>('left');
   const current = useRef(value);
@@ -226,12 +237,14 @@ function useMinimapCorner(ref: RefObject<HTMLDivElement | null>, viewport: Rect)
       const order = was === 'right' ? (['right', 'left'] as const) : (['left', 'right'] as const);
       // Never hide the minimap while it has keyboard focus (arrow keys pan from it).
       const focused = el.contains(document.activeElement);
-      const next = order.find(free) ?? (focused && was !== 'collapsed' ? was : 'collapsed');
+      // Opened by the user (or focused), it stays: in its corner, else the left.
+      const keep = pinned || focused;
+      const next = order.find(free) ?? (keep ? (was === 'collapsed' ? 'left' : was) : 'collapsed');
       current.current = next;
       setValue(next);
     }, MINIMAP_SETTLE_MS);
     return () => clearTimeout(timer);
-  }, [ref, viewport]);
+  }, [ref, viewport, pinned]);
   return value;
 }
 
@@ -323,9 +336,48 @@ export function TreeView({
   const [popoverKey, setPopoverKey] = useState<string | null>(null);
   const palette = usePalette();
   const [menuOpen, setMenuOpen] = useState(false);
-  const narrow = useMediaQuery(NARROW_SCREEN);
+  const phone = usePhoneLayout();
   // A phone has no room to spare: the minimap starts hidden there (M shows it).
-  const [minimapVisible, setMinimapVisible] = useState(() => !matchesMedia(NARROW_SCREEN));
+  // Opened by the user, it is pinned: shown even when both corners are taken.
+  const [minimap, setMinimap] = useState(() => ({
+    visible: !window.matchMedia(PHONE_LAYOUT_QUERY).matches,
+    pinned: false,
+    collapsed: false,
+  }));
+  const minimapShown = minimap.visible && !minimap.collapsed;
+  const toggleMinimap = useCallback(
+    () =>
+      setMinimap((m) => {
+        const shown = m.visible && !m.collapsed;
+        return { visible: !shown, pinned: !shown, collapsed: false };
+      }),
+    [],
+  );
+  const onMinimapCollapsed = useCallback(
+    (collapsed: boolean) =>
+      setMinimap((m) => (m.collapsed === collapsed ? m : { ...m, collapsed })),
+    [],
+  );
+  // The phone toolbar's height, from the bottom of the screen, on the tree
+  // region for anything inside it that must stay clear (framing, the quick view).
+  const barRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const bar = barRef.current;
+    const region = bar?.closest<HTMLElement>('[data-tree-region]');
+    if (!phone || !bar || !region) return;
+    const root = region.style;
+    const set = () => {
+      const gap = parseFloat(getComputedStyle(bar).bottom) || 0;
+      root.setProperty('--oa-tree-bottom-bar', `${bar.offsetHeight + gap + 8}px`);
+    };
+    set();
+    const observer = new ResizeObserver(set);
+    observer.observe(bar);
+    return () => {
+      observer.disconnect();
+      root.removeProperty('--oa-tree-bottom-bar');
+    };
+  }, [phone]);
   const viewKey = `${personId}|${kind}`;
   const [view, setView] = useState<ViewState>({
     for: viewKey,
@@ -707,7 +759,7 @@ export function TreeView({
         h: () => void goHome(),
         f: palette.open,
         l: () => setMenuOpen(true),
-        m: () => setMinimapVisible((v) => !v),
+        m: toggleMinimap,
       };
       const action = actions[event.key.length === 1 ? event.key.toLowerCase() : event.key];
       if (!action) return;
@@ -718,7 +770,7 @@ export function TreeView({
     return () => {
       window.removeEventListener('keydown', onKey);
     };
-  }, [goHome, palette]);
+  }, [goHome, palette, toggleMinimap]);
 
   const anchor = useMemo<QuickViewAnchor | null>(
     () =>
@@ -781,31 +833,32 @@ export function TreeView({
   return (
     <>
       {/* First in the DOM, so Tab reaches the toolbar before the canvas, as on screen. */}
-      <TreeToolbar
-        className={styles.toolbar}
-        layout={kind}
-        onLayoutChange={(layout) =>
-          void navigate({
-            to: '/tree/$personId',
-            params: { personId },
-            search: (prev) =>
-              cleanSearch({
-                tree: prev.tree,
-                layout: layout === 'family' ? undefined : layout,
-              }),
-          })
-        }
-        layoutMenuOpen={menuOpen}
-        onLayoutMenuOpenChange={setMenuOpen}
-        onFind={palette.open}
-        onHome={() => void goHome()}
-        onZoomIn={() => canvas.current?.zoomBy(ZOOM_STEP)}
-        onZoomOut={() => canvas.current?.zoomBy(1 / ZOOM_STEP)}
-        onFit={() => canvas.current?.fit()}
-        minimapVisible={minimapVisible}
-        onToggleMinimap={() => setMinimapVisible((v) => !v)}
-        orientation={narrow ? 'horizontal' : 'vertical'}
-      />
+      <div ref={barRef} className={styles.toolbar}>
+        <TreeToolbar
+          layout={kind}
+          onLayoutChange={(layout) =>
+            void navigate({
+              to: '/tree/$personId',
+              params: { personId },
+              search: (prev) =>
+                cleanSearch({
+                  tree: prev.tree,
+                  layout: layout === 'family' ? undefined : layout,
+                }),
+            })
+          }
+          layoutMenuOpen={menuOpen}
+          onLayoutMenuOpenChange={setMenuOpen}
+          onFind={palette.open}
+          onHome={() => void goHome()}
+          onZoomIn={() => canvas.current?.zoomBy(ZOOM_STEP)}
+          onZoomOut={() => canvas.current?.zoomBy(1 / ZOOM_STEP)}
+          onFit={() => canvas.current?.fit()}
+          minimapVisible={minimapShown}
+          onToggleMinimap={toggleMinimap}
+          orientation={phone ? 'horizontal' : 'vertical'}
+        />
+      </div>
       <TreeCanvas
         ref={canvas}
         label={focusName ? `Family tree centered on ${focusName}` : 'Family tree'}
@@ -859,9 +912,11 @@ export function TreeView({
           </Link>
         </div>
       )}
-      {shownResult?.layout && minimapVisible && (
+      {shownResult?.layout && minimap.visible && (
         <TreeMinimap
-          onDismiss={() => setMinimapVisible(false)}
+          onDismiss={() => setMinimap({ visible: false, pinned: false, collapsed: false })}
+          pinned={minimap.pinned}
+          onCollapsedChange={onMinimapCollapsed}
           layout={shownResult.layout}
           store={viewportStore}
           person={person}

@@ -26,7 +26,7 @@ import { ApiError, fetchHome, fetchNeighborhood, treeKeys, type NeighborhoodRequ
 import { usePalette } from '../app/palette';
 import { lifeEvent, toPersonSummary } from './format';
 import { GraphCache } from './graphCache';
-import { LayoutClient, type LayoutRequest } from './layoutClient';
+import { LayoutClient, type LayoutRequest, type WorkerResponse } from './layoutClient';
 import { TreeCanvas, type TreeCanvasHandle } from './TreeCanvas';
 import { ZOOM_STEP, type Rect } from './viewport';
 import styles from './TreeView.module.css';
@@ -133,6 +133,27 @@ interface Result {
   kind: LayoutKind;
 }
 
+function layoutOptions(
+  kind: LayoutKind,
+  up: number,
+  down: number,
+  view: Pick<ViewState, 'expanded' | 'collapsed' | 'parents'>,
+): LayoutRequest['options'] {
+  return kind === 'fan'
+    ? { generations: up + 1, collapsed: view.collapsed, selectedParentFamilies: view.parents }
+    : {
+        ancestorsDepth: up,
+        descendantsDepth: down,
+        // The pedigree doubles every generation: compact cards fit four on screen.
+        ...(kind === 'pedigree' && { cardSize: PEDIGREE_CARD }),
+        expanded: view.expanded,
+        collapsed: view.collapsed,
+        selectedParentFamilies: view.parents,
+      };
+}
+
+const EMPTY_VIEW = { expanded: [], collapsed: [], parents: {} };
+
 interface ViewState {
   /** Expand state belongs to one focus person and layout. */
   for: string;
@@ -192,7 +213,8 @@ export function TreeView({
   useEffect(() => () => client.dispose(), [client]);
 
   const ensure = useCallback(
-    async (request: NeighborhoodRequest) => {
+    /** `quiet` merges without re-laying out the view on screen (prefetching). */
+    async (request: NeighborhoodRequest, { quiet = false } = {}) => {
       const slice = await queryClient.fetchQuery({
         queryKey: treeKeys.neighborhood(tree, request),
         queryFn: ({ signal }) => fetchNeighborhood(tree, request, signal),
@@ -200,10 +222,23 @@ export function TreeView({
       });
       if (cache.merge(slice)) {
         client.merge(slice);
-        setDataVersion(cache.version);
+        if (!quiet) setDataVersion(cache.version);
       }
     },
     [queryClient, tree, cache, client],
+  );
+
+  /**
+   * Layouts computed ahead for likely next focus people (the card under the
+   * pointer or keyboard), so a re-focus skips the worker round trip. Each is
+   * valid only for the graph version it was computed on.
+   */
+  const speculative = useRef(
+    new Map<string, { version: number; response: Promise<WorkerResponse> }>(),
+  );
+  const speculationKey = useCallback(
+    (focus: string) => `${kind}|${focus}|${up}|${down}`,
+    [kind, up, down],
   );
 
   const requestFor = useCallback(
@@ -248,7 +283,7 @@ export function TreeView({
   const retryMissing = useCallback(async () => {
     if (!missing) return;
     const { focus, requests } = missing;
-    const settled = await Promise.allSettled(requests.map(ensure));
+    const settled = await Promise.allSettled(requests.map((r) => ensure(r)));
     const failed = requests.filter((_, i) => settled[i]!.status === 'rejected');
     setMissing(failed.length > 0 ? { focus, requests: failed } : null);
   }, [missing, ensure]);
@@ -257,24 +292,21 @@ export function TreeView({
   const latestRequest = useRef(0);
   useEffect(() => {
     if (loaded?.focus !== personId || loaded.kind !== kind || !cache.has(personId)) return;
-    const options: LayoutRequest['options'] =
-      kind === 'fan'
-        ? {
-            generations: up + 1,
-            collapsed: current.collapsed,
-            selectedParentFamilies: current.parents,
-          }
-        : {
-            ancestorsDepth: up,
-            descendantsDepth: down,
-            // The pedigree doubles every generation: compact cards fit four on screen.
-            ...(kind === 'pedigree' && { cardSize: PEDIGREE_CARD }),
-            expanded: current.expanded,
-            collapsed: current.collapsed,
-            selectedParentFamilies: current.parents,
-          };
+    const pristine =
+      current.expanded.length === 0 &&
+      current.collapsed.length === 0 &&
+      Object.keys(current.parents).length === 0;
+    const ahead = pristine ? speculative.current.get(speculationKey(personId)) : undefined;
     const id = ++latestRequest.current;
-    client.layout({ kind, focusId: personId, options }).then(
+    const response =
+      ahead && ahead.version === cache.version
+        ? ahead.response
+        : client.layout({
+            kind,
+            focusId: personId,
+            options: layoutOptions(kind, up, down, current),
+          });
+    response.then(
       (response) => {
         if (id !== latestRequest.current) return;
         setResult({
@@ -291,7 +323,7 @@ export function TreeView({
     );
     // `current` is rebuilt each render; its parts are the real dependencies.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, cache, dataVersion, loaded, personId, kind, up, down, view, attempt]);
+  }, [client, cache, dataVersion, loaded, personId, kind, up, down, view, attempt, speculationKey]);
 
   const shownResult = result && result.focus === personId && result.kind === kind ? result : null;
   const busy = !shownResult || rendered !== shownResult;
@@ -422,16 +454,36 @@ export function TreeView({
     setPopoverKey((key) => (key === node.key ? null : node.key));
   }, []);
 
+  // A likely next focus person (hovered or reached by keyboard): load their
+  // neighborhood and lay it out ahead, so re-focusing on them is instant.
   const onPrefetch = useCallback(
     (id: string) => {
-      const request = requestFor(id);
-      void queryClient.prefetchQuery({
-        queryKey: treeKeys.neighborhood(tree, request),
-        queryFn: ({ signal }) => fetchNeighborhood(tree, request, signal),
-        staleTime: STALE,
-      });
+      if (id === personId) return;
+      const key = speculationKey(id);
+      void ensure(requestFor(id), { quiet: true })
+        .then(() => {
+          const known = speculative.current.get(key);
+          if (known?.version === cache.version || !cache.has(id)) return;
+          const response = client.layout({
+            kind,
+            focusId: id,
+            options: layoutOptions(kind, up, down, EMPTY_VIEW),
+          });
+          // A failed guess just falls back to a normal layout.
+          response.catch(() => speculative.current.delete(key));
+          speculative.current.delete(key);
+          speculative.current.set(key, { version: cache.version, response });
+          // Keep the few most recent guesses.
+          for (const old of speculative.current.keys()) {
+            if (speculative.current.size <= 4) break;
+            speculative.current.delete(old);
+          }
+        })
+        .catch(() => {
+          // Prefetching is best effort.
+        });
     },
-    [queryClient, tree, requestFor],
+    [personId, speculationKey, ensure, requestFor, cache, client, kind, up, down],
   );
 
   const onInteract = useCallback(() => setPopoverKey(null), []);

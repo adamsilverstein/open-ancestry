@@ -32,6 +32,8 @@ export function reimportRoutes(app: Api, { library, reimports }: Deps): void {
     { schema: { params: JobParams, body: ReimportApplyBody } },
     async (request) => {
       const stored = find(request.params.id);
+      // No :tree param, so the global busy check can't see this write (issue #96).
+      library.assertIdle(stored.tree);
       const store = library.open(stored.tree);
       try {
         const result = await library.whileBusy(stored.tree, async () =>

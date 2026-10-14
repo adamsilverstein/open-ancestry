@@ -145,24 +145,29 @@ export function importRoutes(app: Api, deps: Deps): void {
       const { tree } = request.params;
       library.open(tree);
       const upload = await receive(request);
+      // Busy from queueing to the end of cleanup, like an import: the tree is
+      // not written, renamed or deleted under the compare.
+      const release = library.markBusy(tree);
       try {
         const job = jobs.enqueue(
           { tree, fileName: upload.fileName, kind: 'reimport' },
-          (signal, onProgress) =>
-            // Busy, like an import: the tree is not renamed or deleted under the compare.
-            library.whileBusy(tree, async () => {
-              const session = await prepareReimport(
-                library.open(tree),
-                { path: upload.path },
-                { signal, onProgress: (phase, done, total) => onProgress({ phase, done, total }) },
-              );
-              const stored = reimports.add(tree, upload.fileName, session);
-              return { reimportId: stored.id, counts: session.diff.counts };
-            }),
-          upload.cleanup,
+          async (signal, onProgress) => {
+            const session = await prepareReimport(
+              library.open(tree),
+              { path: upload.path },
+              { signal, onProgress: (phase, done, total) => onProgress({ phase, done, total }) },
+            );
+            const stored = reimports.add(tree, upload.fileName, session);
+            return { reimportId: stored.id, counts: session.diff.counts };
+          },
+          async () => {
+            await upload.cleanup();
+            release();
+          },
         );
         return reply.code(202).send({ jobId: job.id, job });
       } catch (error) {
+        release();
         await upload.cleanup();
         if (error instanceof TooManyJobsError)
           throw new ApiError(429, 'too_many_jobs', error.message);

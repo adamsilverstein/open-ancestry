@@ -8,6 +8,7 @@
 - **Validation:** params, query strings and bodies are checked against TypeBox schemas (`apps/server/src/schemas.ts`). Unknown body properties are rejected.
 - **Reads** return database DTOs from `packages/db` (`PersonSummary`, `PersonDetail`, `Neighborhood`, ...). **Write bodies** use the database column names (`date_text`, `relationship_type`, ...); derived columns are computed by the server exactly as the importer computes them: date sort keys and qualifiers, surname phonetic keys, the GEDCOM-form `person_name.full_text`, and inferred living status (person, event and relationship edits re-run living inference for the people involved and their parents, spouses and children; an explicit `living` or `dead` is never overridden, and `living: "unknown"` asks for inference again).
 - **Edits:** each mutation is one undoable change batch and returns `batchId` (null when nothing changed).
+- **Downloads** (`export.*`) send `Content-Disposition: attachment` named after the tree: an ASCII `filename` (other characters become `_`) and the exact name in `filename*`.
 - **Caching:** GET responses carry a weak `ETag` (send `If-None-Match` for a 304). JSON over 1 KB is compressed with Brotli or gzip.
 
 ## Security contract for clients
@@ -28,6 +29,7 @@ POST/PUT/PATCH/DELETE /api/...    needs  Origin: <this server>  and  x-oa-token:
 | CSP `default-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'`, `nosniff`, `Referrer-Policy: no-referrer`, COOP `same-origin` on every response | |
 | JSON bodies up to 1 MiB; import uploads up to 1 GiB (streamed to a temp file); one import at a time, four queued | Bounded memory and disk. |
 | Media paths are resolved (following symlinks) inside the tree's `media/` folder. The content type is sniffed from magic bytes against an allowlist (JPEG, PNG, GIF, WebP, AVIF, MP3, WAV, Ogg, FLAC, MP4/M4A, WebM, PDF); `media.mime` and extensions are ignored, anything else is an `application/octet-stream` attachment, and every media response carries `CSP: default-src 'none'; style-src 'unsafe-inline'; sandbox` and `nosniff` | Path traversal and stored-XSS defense; GEDCOM media is untrusted. |
+| Thumbnails decode only real raster images (by magic bytes) with sharp, capped at 100 megapixels, one image at a time in a background queue | Decompression bombs and odd files never reach the decoder or tie up the server. |
 
 The SPA fetches the token once at startup and sends it with every mutation; browsers add `Origin` themselves.
 
@@ -55,12 +57,16 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 | `GET /api/trees/:tree/history?limit` | Change batches, `canUndo`, `canRedo`. |
 | `POST /api/trees/:tree/undo`, `/redo` | Undo or redo the latest batch; `{ batch }` (null if none). |
 | `GET /api/trees/:tree/export.json` | Full open-ancestry JSON download. |
+| `GET /api/trees/:tree/export.ged?version&privatize` | GEDCOM download (`text/vnd.familysearch.gedcom`); `version` is `5.5.1` (default, Ancestry-compatible) or `7`; `privatize=true` writes living people as "Private" with only their family links. |
+| `GET /api/trees/:tree/export.gdz?privatize` | GEDZIP download (GEDCOM 7 plus the tree's media files). |
 | `POST /api/import` (multipart `file`: .ged, .gedcom, .zip, .gdz) | Imports into a new tree named after the file (" 2", " 3", ... when taken); 202 `{ jobId, job }` with `job.tree` and `job.createdTree: true`. The server owns that tree: if the import fails or is cancelled it removes it, but only while it is still the empty tree it created. |
 | `POST /api/trees/:tree/import` (multipart `file`) | Starts an import into an existing, empty tree (202 `{ jobId, job }`); that tree is never removed. |
 | `GET /api/jobs/:id` | Job state, progress, result or error. |
 | `GET /api/jobs/:id/events` | Server-sent events: `state` (whole job) and `progress`; ends when the job finishes. |
 | `GET /api/trees/:tree/media/:id` | Original media file with `Range` support. |
-| `GET /api/trees/:tree/media/:id/thumb/:size` | 404 until thumbnails exist. |
+| `GET /api/trees/:tree/media/:id/thumb/:size` | WebP thumbnail, `size` = `sm` (160 px longest edge), `md` (480) or `lg` (1280). Made on demand if missing and cached in the tree's `thumbs/` folder; 404 when the media has no decodable local image (documents, Ancestry placeholders). |
+| `GET /api/trees/:tree/people/:id/media` | `{ items: [{ media, owners }] }`: media on the person and on their events, each once; `owners` lists where it is attached (`{ type: 'person' }` or `{ type: 'event', event: { type, custom_type, date_text, date_sort } }`). |
+| `POST /api/trees/:tree/media` (multipart `owner_type` = `person` or `event`, `owner_id`, then `file`) | Attach a file from disk (201 `{ media, batchId }`). Bytes identical to media already in the tree link that media instead of a copy; new files go to `media/attached/<sha256 prefix>-<name>`. The type comes from the file's bytes; unknown types are stored as `other` and served as attachments. |
 | `POST /api/trees/:tree/people` | Create a person with `names` and `events`. |
 | `PATCH`, `DELETE /api/trees/:tree/people/:id` | Edit sex, living, privacy, primary photo; delete (cascades). |
 | `POST /api/trees/:tree/people/:id/names`; `PATCH`, `DELETE /api/trees/:tree/names/:id` | Names (the last name cannot be deleted). |
@@ -75,6 +81,8 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 | `POST /api/trees/:tree/tags`; `PATCH`, `DELETE /api/trees/:tree/tags/:id` | Tags. |
 | `POST /api/trees/:tree/people/:id/tags` `{ tagId }`; `DELETE /api/trees/:tree/people/:id/tags/:tagId` | Tag or untag a person. |
 | `POST /api/trees/:tree/batch` `{ label, operations }` | Several edits as one change batch (one undo step, labelled `label`), all or nothing. Operations: `person.update` `{ id, patch }`, `name.add` `{ personId, name }`, `name.update` `{ id, name }`, `name.delete` `{ id }`, `familyChild.update` `{ id, patch }`, `tag.create` `{ tag, attachTo? }`, `person.tag` / `person.untag` `{ personId, tagId }`, each with the body of its single route. Returns `{ batchId, results }`. |
+
+Both GEDCOM downloads send `x-oa-export-warning-count` and `x-oa-export-warnings` (the first 20 warnings as percent-encoded JSON): imported lines the export could not carry over, and media files it could not add. A tree that cannot be written as GEDCOM gets a 409 `conflict` naming the problem.
 
 ## Import jobs
 

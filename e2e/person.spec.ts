@@ -104,11 +104,11 @@ test.describe('tabs', () => {
     await expect(page.getByRole('tab', { name: 'Notes' })).toHaveAttribute('aria-selected', 'true');
   });
 
-  test('gallery shows an empty state without photos', async ({ page }) => {
+  test('gallery shows an empty state without media', async ({ page }) => {
     await openPerson(page, people.rowan, '?tab=gallery');
-    await expect(
-      page.getByRole('tabpanel').getByRole('heading', { name: 'No photos yet' }),
-    ).toBeVisible();
+    const panel = page.getByRole('tabpanel');
+    await expect(panel.getByRole('heading', { name: 'No media yet' })).toBeVisible();
+    await expect(panel.getByRole('button', { name: 'Add media' })).toBeVisible();
   });
 
   test('sources tab groups citations by source', async ({ page }) => {

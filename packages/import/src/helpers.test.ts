@@ -1,5 +1,13 @@
 import { createTree } from '@open-ancestry/db';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -256,6 +264,23 @@ describe('storing media in a tree', () => {
     expect(readFileSync(join(root, 'p', 'a-2.jpg'), 'utf8')).toBe('other');
     expect(readFileSync(join(root, 'p', 'a-3.jpg'), 'utf8')).toBe('new');
     expect(storeMediaFile(root, 'q/b.jpg', enc('x'), hash).folder).toBe(join(root, 'q'));
+  });
+
+  it('never writes through or reuses a symlink inside the media folder', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'oa-outside-'));
+    try {
+      symlinkSync(outside, join(root, 'linked'));
+      const enc = (t: string) => new TextEncoder().encode(t);
+      expect(() => storeMediaFile(root, 'linked/a.jpg', enc('x'), hash)).toThrow(
+        /outside the tree/,
+      );
+      expect(readdirSync(outside)).toEqual([]);
+      writeFileSync(join(outside, 'secret.jpg'), 'same');
+      symlinkSync(join(outside, 'secret.jpg'), join(root, 'b.jpg'));
+      expect(storeMediaFile(root, 'b.jpg', enc('same'), hash).path).toBe('b-2.jpg');
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it('keeps files already in a tree folder and stores identical content once', async () => {

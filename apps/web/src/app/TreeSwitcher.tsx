@@ -91,22 +91,8 @@ export default function TreeSwitcher() {
           <span>{currentName ?? 'No tree open'}</span>
           <ChevronDown size={14} aria-hidden />
         </MenuTrigger>
-        <MenuContent align="start">
-          {trees.length > 0 && (
-            <>
-              <MenuRadioGroup
-                value={current ?? ''}
-                onValueChange={(id) => void setCurrentTree(queryClient, id)}
-              >
-                {trees.map((tree) => (
-                  <MenuRadioItem key={tree.id} value={tree.id}>
-                    {tree.name}
-                  </MenuRadioItem>
-                ))}
-              </MenuRadioGroup>
-              <MenuSeparator />
-            </>
-          )}
+        <MenuContent align="start" className={styles.treeMenu}>
+          {/* Actions first, so they stay in reach however many trees there are. */}
           <MenuItem onSelect={() => open('create')}>
             <Plus size={16} aria-hidden />
             New tree…
@@ -119,6 +105,21 @@ export default function TreeSwitcher() {
             <Trash2 size={16} aria-hidden />
             Delete tree…
           </MenuItem>
+          {trees.length > 0 && (
+            <>
+              <MenuSeparator />
+              <MenuRadioGroup
+                value={current ?? ''}
+                onValueChange={(id) => void setCurrentTree(queryClient, id)}
+              >
+                {trees.map((tree) => (
+                  <MenuRadioItem key={tree.id} value={tree.id}>
+                    {tree.name}
+                  </MenuRadioItem>
+                ))}
+              </MenuRadioGroup>
+            </>
+          )}
         </MenuContent>
       </Menu>
 

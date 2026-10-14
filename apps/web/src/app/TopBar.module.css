@@ -77,3 +77,9 @@
     display: none;
   }
 }
+
+/* A large library scrolls inside the menu instead of running off screen. */
+.treeMenu {
+  max-height: min(480px, var(--radix-dropdown-menu-content-available-height, 60dvh));
+  overflow-y: auto;
+}

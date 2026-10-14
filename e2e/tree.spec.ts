@@ -219,6 +219,18 @@ test.describe('family view', () => {
     expect(await box(card(page, 'Ada Vale'))).toEqual(fitted);
   });
 
+  test('keyboard focus survives a chevron changing the layout', async ({ page }) => {
+    await open(page);
+    const hide = canvas(page).getByRole('button', { name: 'Hide children of Ada Vale' });
+    await hide.focus();
+    await page.keyboard.press('Enter');
+    await expect(card(page, 'Wren Ash')).toHaveCount(0);
+    // The chevron's card keeps focus, so the keyboard carries on from there.
+    await expect(card(page, 'Ada Vale')).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    expect(await activeKey(page)).toBe(ids.bram);
+  });
+
   test('descendants and siblings collapse and expand', async ({ page }) => {
     await open(page);
     await canvas(page).getByRole('button', { name: 'Hide children of Ada Vale' }).click();

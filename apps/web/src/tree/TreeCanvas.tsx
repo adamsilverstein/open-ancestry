@@ -754,6 +754,13 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     measure();
     const prev = previous.current;
     previous.current = { layout, kind, focus: focusPersonId };
+    // A new layout remounts the cards: if one had keyboard focus, give it back
+    // (or the focus card, when that person is no longer shown).
+    const had = focusedKey.current;
+    if (had && !viewportRef.current?.contains(document.activeElement)) {
+      const nodes = layout?.nodes ?? fan?.segments ?? [];
+      pendingFocus.current = nodes.some((n) => n.key === had) ? had : focusPersonId;
+    }
     if (!prev || prev.kind !== kind) {
       stopAnimation();
       apply(centeredOnFocus(transform.current, true));
@@ -1103,9 +1110,31 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   }
 
   // Keyboard focus landing on a card off screen (Tab, screen reader) brings it into view.
+  /**
+   * The card with keyboard focus, kept while a new layout briefly unmounts it
+   * (an undo, a chevron, a re-focus), so focus can be put back afterwards.
+   */
+  const focusedKey = useRef<string | null>(null);
+
+  function onBlur(event: FocusEvent<HTMLDivElement>) {
+    const target = event.target as HTMLElement;
+    const next = event.relatedTarget as Node | null;
+    if (next) {
+      if (!viewportRef.current?.contains(next)) focusedKey.current = null;
+      return;
+    }
+    // No new target: either the card was removed (keep it, to restore) or focus
+    // left for the page or another window (forget it unless it comes back).
+    setTimeout(() => {
+      if (target.isConnected && document.activeElement !== target) focusedKey.current = null;
+    }, 0);
+  }
+
   function onFocus(event: FocusEvent<HTMLDivElement>) {
     const target = event.target as HTMLElement;
     const key = target.dataset.key;
+    // A chevron or switcher counts as its card.
+    focusedKey.current = key ?? target.dataset.node ?? target.dataset.switch ?? null;
     if (key) {
       setActiveKey(key);
       // Only for keyboard focus: a click must not slide the card from under the pointer.
@@ -1189,6 +1218,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       onKeyDown={onKeyDown}
       onKeyUp={onKeyUp}
       onFocus={onFocus}
+      onBlur={onBlur}
     >
       <p id={helpId} className="oa-visually-hidden">
         Arrow keys move between relatives, Enter centers on a person, Space opens their summary.

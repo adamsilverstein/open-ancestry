@@ -19,8 +19,21 @@ export interface Edit<T = unknown> {
   onDone?: (result: T) => void;
 }
 
-/** Refetches every query of the tree: keys are `[kind, tree, ...]`. */
+const changeListeners = new Set<(tree: string) => void>();
+
+/**
+ * Tells views that keep tree data outside the query cache (the tree view's
+ * merged neighborhoods) that `tree` changed. Unlike query invalidation, this
+ * does not depend on any query still being in the cache.
+ */
+export function onTreeChanged(listener: (tree: string) => void): () => void {
+  changeListeners.add(listener);
+  return () => changeListeners.delete(listener);
+}
+
+/** Refetches every query of the tree (keys are `[kind, tree, ...]`) and notifies `onTreeChanged`. */
 export function invalidateTree(queryClient: QueryClient, tree: string) {
+  for (const listener of changeListeners) listener(tree);
   return queryClient.invalidateQueries({ predicate: (q) => q.queryKey[1] === tree });
 }
 

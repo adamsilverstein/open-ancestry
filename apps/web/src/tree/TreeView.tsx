@@ -33,6 +33,7 @@ import {
 } from './api';
 import { usePalette } from '../app/palette';
 import { lifeEvent, toPersonSummary } from './format';
+import { onTreeChanged } from '../api/edits';
 import { GraphCache } from './graphCache';
 import { PrefetchGuess } from './prefetchGuess';
 import { LayoutClient, type LayoutRequest, type WorkerResponse } from './layoutClient';
@@ -71,6 +72,8 @@ export const DEFAULT_DEPTH: Record<LayoutKind, { up: number; down: number }> = {
 export const MAX_FAN_GENERATIONS = 6;
 
 const STALE = 5 * 60_000;
+/** Undos and redos in quick succession reset the tree view once, this long after the last. */
+const RESET_DEBOUNCE_MS = 80;
 /** How long the pointer or keyboard rests on a card before its layout is prepared. */
 const PREFETCH_DWELL_MS = 120;
 const NO_KIN: Record<string, string> = {};
@@ -208,6 +211,10 @@ export function TreeView({
   useEffect(() => client.setSnapshot(() => cache.snapshot()), [client, cache]);
   /** Neighborhoods loaded beyond the focus (expanded chevrons), to reload after a reset. */
   const extraLoads = useRef(new Map<string, NeighborhoodRequest>());
+  /** Set while a reset reloads the view, so it is not measured as a re-focus. */
+  const resetting = useRef(false);
+  // Expanded state belongs to one focus, so do its extra loads.
+  useEffect(() => () => extraLoads.current.clear(), [personId]);
   const reload = useRef<NeighborhoodRequest[]>([]);
   const [dataVersion, setDataVersion] = useState(0);
   const [loaded, setLoaded] = useState<{ focus: string; kind: LayoutKind } | null>(null);
@@ -293,7 +300,9 @@ export function TreeView({
   // Load the focus person's neighborhood.
   useEffect(() => {
     let cancelled = false;
-    if (!refocusPending.current) {
+    // A reset reloads the same focus: not a re-focus to measure.
+    if (resetting.current) resetting.current = false;
+    else if (!refocusPending.current) {
       performance.mark(REFOCUS_MARK);
       refocusPending.current = true;
     }
@@ -384,28 +393,29 @@ export function TreeView({
     [shownCache, tree],
   );
 
-  // An edit, undo or redo invalidates the tree's queries (`invalidateTree`). The
-  // cache cannot tell what was removed, so start it over: refetch the focus and
-  // any expanded neighborhoods, and drop layouts guessed from the old data.
+  // An edit, undo or redo changed the tree (`invalidateTree`). The cache cannot
+  // tell what was removed, so start it over: refetch the focus and the current
+  // focus's expanded neighborhoods, and drop layouts guessed from the old data.
+  // A burst (several undos in a row) resets once, after it settles.
   useEffect(() => {
-    let scheduled = false;
-    return queryClient.getQueryCache().subscribe((event) => {
-      if (event.type !== 'updated' || event.action.type !== 'invalidate') return;
-      const key = event.query.queryKey;
-      if (key[0] !== 'tree' || key[1] !== tree || key[2] !== 'neighborhood') return;
-      // One edit invalidates every query of the tree at once: reset once.
-      if (scheduled) return;
-      scheduled = true;
-      queueMicrotask(() => {
-        scheduled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = onTreeChanged((changed) => {
+      if (changed !== tree) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
         reload.current = [...extraLoads.current.values()];
         extraLoads.current.clear();
         speculative.current.clear();
+        resetting.current = true;
         client.dispose();
         setCache(new GraphCache());
-      });
+      }, RESET_DEBOUNCE_MS);
     });
-  }, [queryClient, tree, client]);
+    return () => {
+      clearTimeout(timer);
+      unsubscribe();
+    };
+  }, [tree, client]);
 
   const goTo = useCallback(
     (id: string, layout?: LayoutKind) => {

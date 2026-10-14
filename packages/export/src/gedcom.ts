@@ -43,9 +43,10 @@ const KIND_ORDER: RecordKind[] = [
 ];
 const KINDS = new Set<string>(KIND_ORDER);
 
-/** Xrefs we may write: GEDCOM 7 allows only upper-case letters, digits and `_`. */
+/** Xrefs we may reuse: GEDCOM 7 allows only upper-case letters, digits and `_`; 5.5.1 readers take anything the tokenizer does. */
 const XREF_7 = /^@[A-Z0-9_]{1,20}@$/;
-const XREF_5 = /^@[A-Za-z0-9_]{1,20}@$/;
+// eslint-disable-next-line no-control-regex
+const XREF_5 = /^@[^@#\s\x00-\x1f\x7f][^@\s\x00-\x1f\x7f]*@$/;
 
 /** Pointer payloads in raw GEDCOM lines (`1 FAMS @F1@`). */
 const POINTER_LINE =

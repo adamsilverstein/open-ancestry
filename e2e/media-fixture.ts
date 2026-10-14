@@ -31,6 +31,11 @@ export const MEDIA_IDS = {
   christening: fixedId(),
   baptism: fixedId(),
   census: fixedId(),
+  /** People with profile photos for the tree view: a local file, an Ancestry placeholder. */
+  pippa: fixedId(),
+  pippaPortrait: fixedId(),
+  quill: fixedId(),
+  quillPlaceholder: fixedId(),
 };
 
 export const PHOTO_TITLES = ['Imogen at the mill', 'Wedding day', 'Harvest 1922'];
@@ -52,6 +57,7 @@ export async function buildMediaTree(library: string): Promise<void> {
     ['wedding.png', await photo('#b0402c', 480, 640)],
     ['harvest.png', await photo('#d9a441', 800, 500)],
     ['christening.png', await photo('#4a6fa5', 500, 500)],
+    ['portrait.png', await photo('#7a5c99', 1200, 1600)],
     ['baptism.pdf', Buffer.from('%PDF-1.4\n% synthetic baptism record\n')],
   ];
   for (const [name, bytes] of files) writeFileSync(join(media, name), bytes);
@@ -161,6 +167,29 @@ export async function buildMediaTree(library: string): Promise<void> {
         i,
       );
     }
+    const withPhoto = (
+      personId: string,
+      given: string,
+      mediaRow: InsertRow<'media'> & { id: string },
+    ) => {
+      add(mediaRow, personId);
+      person(personId, given, 'Larch');
+      tx.update('person', personId, { primary_media_id: mediaRow.id });
+    };
+    withPhoto(id.pippa, 'Pippa', {
+      id: id.pippaPortrait,
+      kind: 'photo',
+      mime: 'image/png',
+      local_path: 'photos/portrait.png',
+      title: 'Pippa portrait',
+    });
+    withPhoto(id.quill, 'Quill', {
+      id: id.quillPlaceholder,
+      kind: 'photo',
+      remote_url: `https://${REMOTE_HOST}/quill.jpg`,
+      ancestry_oid: 'oid-quill',
+      title: 'Quill (Ancestry only)',
+    });
     tx.insert('meta', { key: 'home_person_id', value: id.imogen });
   });
   store.close();

@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './fixtures';
+import { MEDIA_IDS, MEDIA_TREE } from './media-fixture';
 import { readSeed } from './tree-view-fixtures';
 
 /*
@@ -842,6 +843,58 @@ test.describe('generation depth in the URL', () => {
       }
     });
   }
+});
+
+test.describe('profile photos', () => {
+  const mediaTreeUrl = (person: string) => `/tree/${person}?tree=${encodeURIComponent(MEDIA_TREE)}`;
+
+  test('cards and the quick view load the small thumbnail, never the original', async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+    const media: string[] = [];
+    page.on('request', (r) => {
+      const path = new URL(r.url()).pathname;
+      if (path.includes('/media/')) media.push(path);
+    });
+    await page.goto(mediaTreeUrl(MEDIA_IDS.pippa));
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    const photo = card(page, 'Pippa Larch').locator('img');
+    await expect(photo).toHaveAttribute(
+      'src',
+      new RegExp(`/media/${MEDIA_IDS.pippaPortrait}/thumb/sm$`),
+    );
+    await expect
+      .poll(() => photo.evaluate((img: HTMLImageElement) => img.naturalWidth))
+      .toBeGreaterThan(0);
+    await card(page, 'Pippa Larch').click();
+    const quick = page.getByRole('dialog', { name: 'Pippa Larch' });
+    await expect(quick.locator('img')).toHaveAttribute('src', /\/thumb\/(sm|md)$/);
+    expect(media.length).toBeGreaterThan(0);
+    for (const path of media) expect(path).toMatch(/\/thumb\/(sm|md)$/);
+    expect(errors).toEqual([]);
+  });
+
+  test('a photo that exists only on Ancestry shows the silhouette with no request', async ({
+    page,
+  }) => {
+    const errors: string[] = [];
+    page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+    const media: string[] = [];
+    page.on('request', (r) => {
+      const path = new URL(r.url()).pathname;
+      if (path.includes('/media/')) media.push(path);
+    });
+    await page.goto(mediaTreeUrl(MEDIA_IDS.quill));
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    await expect(card(page, 'Quill Larch')).toBeAttached();
+    await expect(card(page, 'Quill Larch').locator('img')).toHaveCount(0);
+    await card(page, 'Quill Larch').click();
+    await expect(page.getByRole('dialog', { name: 'Quill Larch' })).toBeVisible();
+    expect(media).toEqual([]);
+    expect(errors).toEqual([]);
+  });
 });
 
 test.describe('visual snapshots', () => {

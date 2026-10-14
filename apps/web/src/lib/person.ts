@@ -15,6 +15,9 @@ export interface TagSummary {
 export interface PersonSummary {
   id: string;
   name: string;
+  /** The stored name parts, where known (the fan fits labels from them). */
+  given?: string | undefined;
+  surname?: string | undefined;
   sex: Sex;
   birth?: LifeDate | undefined;
   death?: LifeDate | undefined;

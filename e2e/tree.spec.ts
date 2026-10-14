@@ -1006,6 +1006,91 @@ test.describe('step and adoptive kinship (#138)', () => {
   });
 });
 
+test.describe('fan labels (#137)', () => {
+  const sample = seed.sample;
+  async function openFan(page: Page) {
+    await page.goto(`/tree/${sample.ids.Lily}?tree=${encodeURIComponent(sample.tree)}&layout=fan`);
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    await page.evaluate(() => document.fonts.ready);
+  }
+
+  /** Each segment's label: its text, and whether all four corners lie in the segment. */
+  function labels(page: Page) {
+    return page.getByTestId('tree-fan').evaluate((svg) =>
+      [...svg.querySelectorAll<SVGGElement>('g[role="button"]')].map((g) => {
+        const text = g.querySelector('text');
+        const path = g.querySelector('path')!;
+        if (!text) return { text: null, inside: true, fontSize: 0 };
+        const box = text.getBBox();
+        const matrix = text.transform.baseVal.consolidate()?.matrix ?? new DOMMatrix();
+        const corners = [
+          [box.x, box.y],
+          [box.x + box.width, box.y],
+          [box.x, box.y + box.height],
+          [box.x + box.width, box.y + box.height],
+        ];
+        return {
+          text: [...text.querySelectorAll('tspan')].map((t) => t.textContent).join(' | '),
+          inside: corners.every(([x, y]) =>
+            path.isPointInFill(new DOMPoint(x, y).matrixTransform(matrix)),
+          ),
+          fontSize: parseFloat(getComputedStyle(text).fontSize),
+        };
+      }),
+    );
+  }
+
+  test('names stay inside their segments, with years where they fit', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openFan(page);
+    const all = await labels(page);
+    expect(all.filter((l) => !l.inside).map((l) => l.text)).toEqual([]);
+    // Nearly every ancestor is named, and the inner rings with their years.
+    expect(all.filter((l) => l.text).length).toBeGreaterThanOrEqual(all.length - 2);
+    const withYears = all.filter((l) => l.text && /\d{4}/.test(l.text));
+    expect(withYears.length).toBeGreaterThanOrEqual(3);
+  });
+
+  for (const [width, height] of [
+    [1440, 900],
+    [390, 844],
+  ] as const) {
+    test(`hard names fit, whole, at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height });
+      const { tree, focusId } = seed.fanNames;
+      await page.goto(`/tree/${focusId}?tree=${encodeURIComponent(tree)}&layout=fan`);
+      await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+      await page.evaluate(() => document.fonts.ready);
+      await page.getByRole('button', { name: 'Fit to screen' }).click();
+      await settled(page);
+      const all = await labels(page);
+      expect(all.filter((l) => !l.inside).map((l) => l.text)).toEqual([]);
+      const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+      for (const l of all) expect(l.text ?? '').not.toMatch(lone);
+      // The father's long name, in the widest ring, keeps his first name
+      // (and at least the surname's initial), never initials alone.
+      const father = all[1]!.text ?? '';
+      expect(father).toMatch(/^Johann .*(v\.|von)/);
+      // The single-word name is shown, whole or shortened, in every ring.
+      expect(all.filter((l) => l.text?.startsWith('山田')).length).toBeGreaterThan(0);
+    });
+  }
+
+  test('Fit on a phone keeps names readable', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openFan(page);
+    await page.getByRole('button', { name: 'Fit to screen' }).click();
+    await settled(page);
+    const { scale } = await transform(page);
+    const all = await labels(page);
+    expect(all.filter((l) => !l.inside).map((l) => l.text)).toEqual([]);
+    for (const l of all.filter((l) => l.text))
+      expect(l.fontSize * scale).toBeGreaterThanOrEqual(10);
+    // The focus person stays on screen.
+    await expect(canvas(page).getByRole('button', { name: /^Lily Mosswood/ })).toBeInViewport();
+  });
+});
+
 test.describe('visual snapshots', () => {
   // Baselines are Linux Chromium only, like design.spec.ts.
   test.skip(

@@ -38,6 +38,7 @@ import { GridIndex } from './spatial';
 import {
   centerOn,
   fitBounds,
+  fitFan,
   interpolate,
   toScreen,
   visibleWorld,
@@ -656,7 +657,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       return centerOn(t, focus.x + focus.width / 2, focus.y + focus.height / 2, width, height);
     if (currentFan) {
       // The whole fan, as large as fits.
-      if (fitRows) return fitBounds(currentFan.bounds, width, height, FIT_PADDING);
+      if (fitRows) return fitFan(currentFan, width, height, FIT_PADDING);
       const b = currentFan.bounds;
       return centerOn(t, b.minX + b.width / 2, b.minY + b.height / 2, width, height);
     }
@@ -722,10 +723,14 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       },
       fit() {
         const { width, height } = measure();
-        const bounds = latest.current.layout?.bounds ?? latest.current.fan?.bounds;
-        if (!bounds) return;
+        const { layout: current, fan: currentFan } = latest.current;
+        if (!current && !currentFan) return;
         latest.current.onInteract();
-        animateTo(fitBounds(bounds, width, height, FIT_PADDING));
+        animateTo(
+          current
+            ? fitBounds(current.bounds, width, height, FIT_PADDING)
+            : fitFan(currentFan!, width, height, FIT_PADDING),
+        );
       },
       centerOnKey(key) {
         const node = nodeByKey(key);

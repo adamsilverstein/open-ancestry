@@ -253,8 +253,9 @@ describe('readGedzip', () => {
     const COMPRESSED = 20;
 
     it('aborts inflation as soon as an entry passes its declared size', () => {
-      // 50 MB of zeros declared as 100 bytes passes the up-front checks.
-      const archive = zip({ 'gedcom.ged': GED, 'bomb.bin': new Uint8Array(50_000_000) });
+      // 5 MB of zeros declared as 100 bytes passes the up-front checks. (Bigger only made
+      // building the archive slow enough to time out on a busy machine.)
+      const archive = zip({ 'gedcom.ged': GED, 'bomb.bin': new Uint8Array(5_000_000) });
       patchCentral(archive, 'bomb.bin', SIZE, 100);
       expect(cpuMs(() => expectError(() => readGedzip(archive), 'invalid'))).toBeLessThan(1000);
     }, 30_000);

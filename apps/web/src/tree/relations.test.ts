@@ -185,7 +185,7 @@ describe('step, adoptive and foster links', () => {
   const sexOfKin = (key: string) => sex[key.split('~')[0]!] ?? 'U';
   const labels = (focus: string, options: Parameters<typeof layoutFamily>[2] = {}) => {
     const l = layoutFamily(kin, focus, options);
-    return kinshipLabels(buildRelations(l, kin), l.focusKey, sexOfKin);
+    return kinshipLabels(buildRelations(l, kin), l.focusKey!, sexOfKin);
   };
 
   it('names birth parents plainly', () => {
@@ -235,7 +235,7 @@ describe('step, adoptive and foster links', () => {
       ],
     };
     const l = layoutFamily(blended, 'george', {});
-    const k = kinshipLabels(buildRelations(l, blended), l.focusKey, (key) =>
+    const k = kinshipLabels(buildRelations(l, blended), l.focusKey!, (key) =>
       key === 'ann' ? 'F' : 'M',
     );
     expect(k.ann).toBe('stepsister');

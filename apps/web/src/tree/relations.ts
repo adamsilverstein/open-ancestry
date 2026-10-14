@@ -1,4 +1,4 @@
-import type { LayoutNode, TreeLayout } from '@open-ancestry/core';
+import type { ChildRelation, LayoutNode, TreeGraph, TreeLayout } from '@open-ancestry/core';
 
 /**
  * Who is related to whom among the laid-out cards, read back from the layout's
@@ -13,6 +13,11 @@ export interface Relations {
   siblings: Map<string, string[]>;
   /** Cards sharing a row, left to right. */
   rows: Map<string, LayoutNode[]>;
+  /**
+   * How a child card is linked to a parent card (`child\nparent`), when the
+   * link is not by birth: step, adopted, foster... Needs the graph.
+   */
+  links: Map<string, ChildRelation>;
 }
 
 export type Direction = 'up' | 'down' | 'left' | 'right';
@@ -26,14 +31,17 @@ function push(map: Map<string, string[]>, key: string, value: string) {
 
 const rowKey = (n: LayoutNode) => `${n.generation}:${n.y}`;
 
-export function buildRelations(layout: TreeLayout): Relations {
+export function buildRelations(layout: TreeLayout, graph?: TreeGraph): Relations {
   const nodes = new Map(layout.nodes.map((n) => [n.key, n]));
   const parents = new Map<string, string[]>();
   const children = new Map<string, string[]>();
   const partners = new Map<string, string[]>();
   const siblings = new Map<string, string[]>();
+  const links = new Map<string, ChildRelation>();
   const groupParents = new Map<string, string[]>();
   const groupChildren = new Map<string, string[]>();
+  /** The family each child drop comes from (`group\nchild`). */
+  const childFamily = new Map<string, string>();
 
   for (const edge of layout.edges) {
     if (edge.kind === 'couple' && edge.parents?.length === 2) {
@@ -41,16 +49,26 @@ export function buildRelations(layout: TreeLayout): Relations {
       push(partners, a, b);
       push(partners, b, a);
     } else if (edge.kind === 'parent-child') {
-      if (edge.parents) groupParents.set(edge.group, edge.parents);
-      if (edge.child) push(groupChildren, edge.group, edge.child);
+      // The pedigree draws one edge per parent: gather them.
+      for (const p of edge.parents ?? []) push(groupParents, edge.group, p);
+      if (edge.child) {
+        push(groupChildren, edge.group, edge.child);
+        childFamily.set(`${edge.group}\n${edge.child}`, edge.familyId);
+      }
     }
   }
+  const families = new Map(graph?.families.map((f) => [f.id, f]));
   for (const [group, kids] of groupChildren) {
     const ps = groupParents.get(group) ?? [];
     for (const kid of kids) {
+      const family = families.get(childFamily.get(`${group}\n${kid}`)!);
+      const entry = family?.children.find((c) => c.id === nodes.get(kid)?.personId);
       for (const p of ps) {
         push(parents, kid, p);
         push(children, p, kid);
+        const side = family?.partners.indexOf(nodes.get(p)?.personId ?? null);
+        const rel = side === 0 ? entry?.rel1 : side === 1 ? entry?.rel2 : undefined;
+        if (rel && rel !== 'biological' && rel !== 'unknown') links.set(`${kid}\n${p}`, rel);
       }
       for (const other of kids) if (other !== kid) push(siblings, kid, other);
     }
@@ -64,7 +82,7 @@ export function buildRelations(layout: TreeLayout): Relations {
   }
   for (const list of rows.values()) list.sort((a, b) => a.x - b.x);
 
-  return { nodes, parents, children, partners, siblings, rows };
+  return { nodes, parents, children, partners, siblings, rows, links };
 }
 
 /**
@@ -132,14 +150,45 @@ function lineTerm(n: number, base: string): string {
   return `${ordinal(n - 2)} great-grand${base}`;
 }
 
-/** Kinship path steps: U(p), D(own), S(pouse), B(rother or sister). */
-function kinshipPaths(rel: Relations, focusKey: string, stopAt?: string): Map<string, string> {
-  const paths = new Map<string, string>([[focusKey, '']]);
+/** How a link differs from one by birth, as the words for it say. */
+type Qualifier = 'step' | 'adoptive' | 'foster' | 'half';
+
+const LINK_QUALIFIER: Partial<Record<ChildRelation, Qualifier>> = {
+  step: 'step',
+  adopted: 'adoptive',
+  foster: 'foster',
+};
+
+/** Parents by birth or adoption make full siblings; step and foster parents do not. */
+const sharesFamily = (rel: ChildRelation | undefined) => rel === undefined || rel === 'adopted';
+
+/** Half, step or foster when two siblings do not share all their parents. */
+function siblingQualifier(rel: Relations, a: string, b: string): Qualifier | undefined {
+  const theirs = rel.parents.get(b) ?? [];
+  const common = (rel.parents.get(a) ?? []).filter((p) => theirs.includes(p));
+  const linkOf = (child: string, p: string) => rel.links.get(`${child}\n${p}`);
+  const shared = common.filter((p) => sharesFamily(linkOf(a, p)) && sharesFamily(linkOf(b, p)));
+  if (shared.length === common.length) return undefined;
+  if (shared.length > 0) return 'half';
+  return common.some((p) => linkOf(a, p) === 'foster' || linkOf(b, p) === 'foster')
+    ? 'foster'
+    : 'step';
+}
+
+interface KinPath {
+  /** Steps: U(p), D(own), S(pouse), B(rother or sister). */
+  path: string;
+  /** The first link off birth on a straight line up or down, or the sibling link. */
+  qualifier?: Qualifier;
+}
+
+function kinshipPaths(rel: Relations, focusKey: string, stopAt?: string): Map<string, KinPath> {
+  const paths = new Map<string, KinPath>([[focusKey, { path: '' }]]);
   let frontier = [focusKey];
   while (frontier.length > 0 && !(stopAt && paths.has(stopAt))) {
     const next: string[] = [];
     for (const from of frontier) {
-      const path = paths.get(from)!;
+      const { path, qualifier } = paths.get(from)!;
       if (path.length >= 4) continue;
       const steps: [string, string[] | undefined][] = [
         ['B', rel.siblings.get(from)],
@@ -150,7 +199,19 @@ function kinshipPaths(rel: Relations, focusKey: string, stopAt?: string): Map<st
       for (const [step, keys] of steps) {
         for (const to of keys ?? []) {
           if (paths.has(to)) continue;
-          paths.set(to, path + step);
+          const link =
+            step === 'U'
+              ? rel.links.get(`${from}\n${to}`)
+              : step === 'D'
+                ? rel.links.get(`${to}\n${from}`)
+                : undefined;
+          paths.set(to, {
+            path: path + step,
+            qualifier:
+              step === 'B'
+                ? siblingQualifier(rel, from, to)
+                : (qualifier ?? (link ? LINK_QUALIFIER[link] : undefined)),
+          });
           next.push(to);
         }
       }
@@ -160,10 +221,24 @@ function kinshipPaths(rel: Relations, focusKey: string, stopAt?: string): Map<st
   return paths;
 }
 
-function term(path: string, sex: Sex, half: boolean): string | null {
-  if (/^U+$/.test(path)) return ancestorTerm(path.length, sex);
-  if (/^D+$/.test(path)) return descendantTerm(path.length, sex);
-  const h = half ? 'half-' : '';
+/** `stepfather`, `step-grandmother`, `adoptive father`, `foster son`... */
+function qualified(term: string, qualifier: Qualifier | undefined, generations: number): string {
+  if (qualifier === 'step') return generations === 1 ? `step${term}` : `step-${term}`;
+  if (qualifier === 'adoptive' || qualifier === 'foster') return `${qualifier} ${term}`;
+  return term;
+}
+
+function term({ path, qualifier }: KinPath, sex: Sex, half: boolean): string | null {
+  if (/^U+$/.test(path)) return qualified(ancestorTerm(path.length, sex), qualifier, path.length);
+  if (/^D+$/.test(path)) {
+    const base = descendantTerm(path.length, sex);
+    // A parent names an adopted child "adopted son", not "adoptive son".
+    return qualifier === 'adoptive' ? `adopted ${base}` : qualified(base, qualifier, path.length);
+  }
+  if (path === 'B' && qualifier && qualifier !== 'half') {
+    return qualified(gendered(sex, 'brother', 'sister', 'sibling'), qualifier, 1);
+  }
+  const h = half || qualifier === 'half' ? 'half-' : '';
   switch (path.replace('UD', 'B')) {
     case 'S':
       return gendered(sex, 'husband', 'wife', 'spouse');
@@ -202,7 +277,7 @@ export function kinship(
 ): string | null {
   if (key === focusKey || !rel.nodes.has(key) || !rel.nodes.has(focusKey)) return null;
   const path = kinshipPaths(rel, focusKey, key).get(key);
-  return path ? term(path, sexOf(key), rel.nodes.get(key)?.isHalfSibling === true) : null;
+  return path?.path ? term(path, sexOf(key), rel.nodes.get(key)?.isHalfSibling === true) : null;
 }
 
 /** Every card's kinship to the focus card from one breadth-first walk. */
@@ -214,7 +289,7 @@ export function kinshipLabels(
   const labels: Record<string, string> = {};
   if (!rel.nodes.has(focusKey)) return labels;
   for (const [key, path] of kinshipPaths(rel, focusKey)) {
-    if (!path) continue;
+    if (!path.path) continue;
     const label = term(path, sexOf(key), rel.nodes.get(key)?.isHalfSibling === true);
     if (label) labels[key] = label;
   }

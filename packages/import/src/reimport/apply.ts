@@ -649,11 +649,18 @@ const SAME_ANYWAY = new Set([
 export const staleKey = (importBatchId: string) => `export.stale:${importBatchId}`;
 
 function recordStale(tx: Tx, importBatchId: string, stale: Set<string>) {
-  if (stale.size)
+  // The exporter only reads the newest import's list; older ones would only pile up.
+  const old = tx.store
+    .stmt("SELECT key FROM meta WHERE key LIKE 'export.stale:%'")
+    .pluck()
+    .all() as string[];
+  for (const key of old) tx.delete('meta', key);
+  if (stale.size) {
     tx.insert('meta', {
       key: staleKey(importBatchId),
       value: JSON.stringify([...stale].sort()),
     } as never);
+  }
 }
 
 function localIfPresent(tx: Tx, m: MediaRow): string | null {

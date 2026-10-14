@@ -85,6 +85,8 @@ test.describe('home person and calculator (#125)', () => {
 
   async function calculate(page: Page, person: string, other: string) {
     await openSamplePerson(page, person);
+    // The calculator starts from the home person once the header knows who that is.
+    await expect(relationship(page)).not.toBeEmpty();
     await page.getByRole('button', { name: 'More actions' }).click();
     await page.getByRole('menuitem', { name: 'Relationship to…' }).click();
     const dialog = page.getByRole('dialog', { name: 'Relationship calculator' });

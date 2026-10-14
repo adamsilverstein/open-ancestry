@@ -77,7 +77,7 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 | `GET /api/trees/:tree/media/:id/thumb/:size` | WebP thumbnail, `size` = `sm` (160 px longest edge), `md` (480) or `lg` (1280). Made on demand if missing and cached in the tree's `thumbs/` folder; 404 when the media has no decodable local image (documents, Ancestry placeholders). |
 | `GET /api/trees/:tree/people/:id/media` | `{ items: [{ media, owners }] }`: media on the person and on their events, each once; `owners` lists where it is attached (`{ type: 'person' }` or `{ type: 'event', event: { type, custom_type, date_text, date_sort } }`). |
 | `POST /api/trees/:tree/media` (multipart `owner_type` = `person` or `event`, `owner_id`, then `file`) | Attach a file from disk (201 `{ media, batchId }`). Bytes identical to media already in the tree link that media instead of a copy; new files go to `media/attached/<sha256 prefix>-<name>`. The type comes from the file's bytes; unknown types are stored as `other` and served as attachments. |
-| `POST /api/trees/:tree/people` | Create a person with `names` and `events`. |
+| `POST /api/trees/:tree/people` | Create a person with `names` and `events`. The first person in an empty tree also becomes the home person, in the same undo step. |
 | `PATCH`, `DELETE /api/trees/:tree/people/:id` | Edit sex, living, privacy, primary photo; delete (cascades). |
 | `POST /api/trees/:tree/people/:id/names`; `PATCH`, `DELETE /api/trees/:tree/names/:id` | Names (the last name cannot be deleted). |
 | `POST /api/trees/:tree/people/:id/events`, `POST /api/trees/:tree/families/:id/events`; `PATCH`, `DELETE /api/trees/:tree/events/:id` | Events; `date_text` is parsed, `place` is a full place name. |

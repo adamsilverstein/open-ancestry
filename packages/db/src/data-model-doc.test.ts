@@ -4,7 +4,10 @@ import { describe, expect, it } from 'vitest';
 import { ENUM_COLUMNS, LATEST_SCHEMA_VERSION, listTables } from './index';
 import { memoryTree } from './test/helpers';
 
-const doc = readFileSync(join(import.meta.dirname, '..', '..', '..', 'docs', 'data-model.md'), 'utf8');
+const doc = readFileSync(
+  join(import.meta.dirname, '..', '..', '..', 'docs', 'data-model.md'),
+  'utf8',
+);
 
 /** Columns documented under each `### \`table\`` heading, from the first cell of its table rows. */
 function documentedTables(): Map<string, string[]> {

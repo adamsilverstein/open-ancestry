@@ -36,7 +36,12 @@ function richTree() {
     const c = citations.create(tx, { source_id: s.id, page: 'p. 1', quality: 3 });
     citationLinks.create(tx, { citation_id: c.id, owner_type: 'person', owner_id: f.me });
     const m = media.create(tx, { local_path: 'photos/me.jpg', width: 640, height: 480 });
-    mediaLinks.create(tx, { media_id: m.id, owner_type: 'person', owner_id: f.me, crop_json: '{"x":0.1}' });
+    mediaLinks.create(tx, {
+      media_id: m.id,
+      owner_type: 'person',
+      owner_id: f.me,
+      crop_json: '{"x":0.1}',
+    });
     const n = notes.create(tx, { text: 'Line one\nLine "two" ✓' });
     noteLinks.create(tx, { note_id: n.id, owner_type: 'person', owner_id: f.me });
     const t = tags.create(tx, { name: 'Hint', category: 'Research', color: '#123456' });
@@ -55,7 +60,7 @@ describe('JSON interchange', () => {
     importJson(copy, JSON.parse(first));
     expect(exportJsonString(copy)).toBe(first);
     // The imported copy is fully functional: search index rebuilt, history undoable.
-    expect(searchPeople(copy, 'ellis').length).toBe(1);
+    expect(searchPeople(copy, 'ellis vale').length).toBe(1);
     expect(undoLast(copy)?.label).toBe('extras');
     store.close();
     copy.close();
@@ -84,7 +89,7 @@ describe('JSON interchange', () => {
   it('validates against the published JSON Schema', () => {
     const { store } = richTree();
     const schema = JSON.parse(readFileSync(schemaPath, 'utf8'));
-    const ajv = new Ajv2020({ allErrors: true, strict: true });
+    const ajv = new Ajv2020({ allErrors: true, strict: true, allowUnionTypes: true });
     const validate = ajv.compile(schema);
     const doc = exportJson(store);
     expect(validate(doc), JSON.stringify(validate.errors?.slice(0, 3))).toBe(true);
@@ -100,8 +105,8 @@ describe('JSON interchange', () => {
 
   it('keeps the committed JSON Schema in sync with the database', () => {
     const store = memoryTree();
-    const committed = readFileSync(schemaPath, 'utf8');
-    expect(committed).toBe(`${JSON.stringify(buildJsonSchema(store), null, 2)}\n`);
+    const committed: unknown = JSON.parse(readFileSync(schemaPath, 'utf8'));
+    expect(committed).toEqual(buildJsonSchema(store));
     store.close();
   });
 

@@ -140,171 +140,153 @@ describe('undo / redo', () => {
     const pick = (list: string[], n: number) => list[n % list.length];
 
     const opArb: fc.Arbitrary<Op> = fc.oneof(
-      fc.record({ given: fc.string({ maxLength: 8 }), sex: fc.constantFrom('M', 'F', 'U') }).map(
-        ({ given, sex }): Op =>
-          (tx, ids) => {
-            const p = persons.create(tx, { sex: sex as 'M', names: [{ given, surname: 'Rook' }] });
-            ids.people.push(p.id);
-          },
-      ),
+      fc
+        .record({ given: fc.string({ maxLength: 8 }), sex: fc.constantFrom('M', 'F', 'U') })
+        .map(({ given, sex }): Op => (tx, ids) => {
+          const p = persons.create(tx, { sex: sex as 'M', names: [{ given, surname: 'Rook' }] });
+          ids.people.push(p.id);
+        }),
       fc.nat().map((n): Op => (tx, ids) => {
         const id = pick(ids.people, n);
         if (!id || !persons.get(tx.store, id)) return;
         persons.delete(tx, id);
       }),
-      fc.tuple(fc.nat(), fc.string({ maxLength: 8 })).map(
-        ([n, surname]): Op =>
-          (tx, ids) => {
-            const id = pick(ids.people, n);
-            if (!id || !persons.get(tx.store, id)) return;
-            ids.names.push(names.add(tx, id, { surname, type: 'aka' }).id);
-          },
-      ),
-      fc.tuple(fc.nat(), fc.string({ maxLength: 8 })).map(
-        ([n, given]): Op =>
-          (tx, ids) => {
-            const id = pick(ids.names, n);
-            if (!id || !names.get(tx.store, id)) return;
-            if (n % 3 === 0) names.setPrimary(tx, id);
-            else if (n % 3 === 1) names.update(tx, id, { given });
-            else names.delete(tx, id);
-          },
-      ),
-      fc.tuple(fc.nat(), fc.nat(), fc.nat()).map(
-        ([a, b, c]): Op =>
-          (tx, ids) => {
-            const live = ids.people.filter((id) => persons.get(tx.store, id));
-            const p1 = pick(live, a);
-            const p2 = pick(live, b);
-            const child = pick(live, c);
-            if (!p1 || !p2 || !child || p1 === p2 || child === p1 || child === p2) return;
-            const fam = families.create(tx, {
-              partner1_id: p1,
-              partner2_id: p2,
-              children: [{ child_id: child, partner1_rel: 'adopted' }],
-            });
-            ids.families.push(fam.id);
-          },
-      ),
+      fc.tuple(fc.nat(), fc.string({ maxLength: 8 })).map(([n, surname]): Op => (tx, ids) => {
+        const id = pick(ids.people, n);
+        if (!id || !persons.get(tx.store, id)) return;
+        ids.names.push(names.add(tx, id, { surname, type: 'aka' }).id);
+      }),
+      fc.tuple(fc.nat(), fc.string({ maxLength: 8 })).map(([n, given]): Op => (tx, ids) => {
+        const id = pick(ids.names, n);
+        if (!id || !names.get(tx.store, id)) return;
+        if (n % 3 === 0) names.setPrimary(tx, id);
+        else if (n % 3 === 1) names.update(tx, id, { given });
+        else names.delete(tx, id);
+      }),
+      fc.tuple(fc.nat(), fc.nat(), fc.nat()).map(([a, b, c]): Op => (tx, ids) => {
+        const live = ids.people.filter((id) => persons.get(tx.store, id));
+        const p1 = pick(live, a);
+        const p2 = pick(live, b);
+        const child = pick(live, c);
+        if (!p1 || !p2 || !child || p1 === p2 || child === p1 || child === p2) return;
+        const fam = families.create(tx, {
+          partner1_id: p1,
+          partner2_id: p2,
+          children: [{ child_id: child, partner1_rel: 'adopted' }],
+        });
+        ids.families.push(fam.id);
+      }),
       fc.nat().map((n): Op => (tx, ids) => {
         const id = pick(ids.families, n);
         if (!id || !families.get(tx.store, id)) return;
         if (n % 2) families.delete(tx, id);
         else families.update(tx, id, { relationship_type: 'partners' });
       }),
-      fc.tuple(fc.nat(), fc.nat()).map(
-        ([n, m]): Op =>
-          (tx, ids) => {
-            const fam = pick(ids.families, n);
-            const child = pick(ids.people, m);
-            if (!fam || !child || !families.get(tx.store, fam) || !persons.get(tx.store, child))
-              return;
-            const existing = familyChildren
-              .listForFamily(tx.store, fam)
-              .find((c) => c.child_id === child);
-            if (existing) familyChildren.delete(tx, existing.id);
-            else familyChildren.create(tx, { family_id: fam, child_id: child });
-          },
-      ),
-      fc.tuple(fc.nat(), fc.integer({ min: 1500, max: 2025 }), fc.nat()).map(
-        ([n, year, pl]): Op =>
-          (tx, ids) => {
-            const id = pick(ids.people, n);
-            if (!id || !persons.get(tx.store, id)) return;
-            const place_id = pick(ids.places, pl);
-            const e = events.create(tx, {
-              type: n % 2 ? 'BIRT' : 'DEAT',
-              date_sort: year * 10000 + 101,
-              date_text: String(year),
-              place_id: place_id && places.get(tx.store, place_id) ? place_id : null,
-              roles: [{ person_id: id }],
-            });
-            ids.events.push(e.id);
-          },
-      ),
-      fc.tuple(fc.nat(), fc.integer({ min: 1500, max: 2025 })).map(
-        ([n, year]): Op =>
-          (tx, ids) => {
-            const id = pick(ids.events, n);
-            if (!id || !events.get(tx.store, id)) return;
-            if (n % 2) events.delete(tx, id);
-            else events.update(tx, id, { date_sort: year * 10000 + 101 });
-          },
-      ),
-      fc.tuple(fc.nat(), fc.string({ maxLength: 10 })).map(
-        ([n, name]): Op =>
-          (tx, ids) => {
-            const id = pick(ids.places, n);
-            if (n % 3 === 0 || !id || !places.get(tx.store, id)) {
-              ids.places.push(places.create(tx, { name, full_name: `${name}, Wexmoor` }).id);
-            } else if (n % 3 === 1) {
-              places.update(tx, id, { full_name: `${name}, Fenmark` });
-            } else {
-              places.delete(tx, id);
-            }
-          },
-      ),
-      fc.tuple(fc.nat(), fc.nat()).map(
-        ([n, m]): Op =>
-          (tx, ids) => {
-            const person = pick(ids.people, n);
-            if (!person || !persons.get(tx.store, person)) return;
-            const note = notes.create(tx, { text: `note ${m}` });
-            noteLinks.create(tx, { note_id: note.id, owner_type: 'person', owner_id: person });
-            ids.notes.push(note.id);
-            const tag = pick(ids.tags, m);
-            if (tag && tags.get(tx.store, tag)) {
-              const already = tagLinks.listFor(tx.store, 'person', person).some((l) => l.tag_id === tag);
-              if (!already) tagLinks.create(tx, { tag_id: tag, owner_type: 'person', owner_id: person });
-            } else {
-              ids.tags.push(tags.create(tx, { name: `t${m}`, category: String(m % 3) }).id);
-            }
-          },
-      ),
+      fc.tuple(fc.nat(), fc.nat()).map(([n, m]): Op => (tx, ids) => {
+        const fam = pick(ids.families, n);
+        const child = pick(ids.people, m);
+        if (!fam || !child || !families.get(tx.store, fam) || !persons.get(tx.store, child)) return;
+        const existing = familyChildren
+          .listForFamily(tx.store, fam)
+          .find((c) => c.child_id === child);
+        if (existing) familyChildren.delete(tx, existing.id);
+        else familyChildren.create(tx, { family_id: fam, child_id: child });
+      }),
+      fc
+        .tuple(fc.nat(), fc.integer({ min: 1500, max: 2025 }), fc.nat())
+        .map(([n, year, pl]): Op => (tx, ids) => {
+          const id = pick(ids.people, n);
+          if (!id || !persons.get(tx.store, id)) return;
+          const place_id = pick(ids.places, pl);
+          const e = events.create(tx, {
+            type: n % 2 ? 'BIRT' : 'DEAT',
+            date_sort: year * 10000 + 101,
+            date_text: String(year),
+            place_id: place_id && places.get(tx.store, place_id) ? place_id : null,
+            roles: [{ person_id: id }],
+          });
+          ids.events.push(e.id);
+        }),
+      fc.tuple(fc.nat(), fc.integer({ min: 1500, max: 2025 })).map(([n, year]): Op => (tx, ids) => {
+        const id = pick(ids.events, n);
+        if (!id || !events.get(tx.store, id)) return;
+        if (n % 2) events.delete(tx, id);
+        else events.update(tx, id, { date_sort: year * 10000 + 101 });
+      }),
+      fc.tuple(fc.nat(), fc.string({ maxLength: 10 })).map(([n, name]): Op => (tx, ids) => {
+        const id = pick(ids.places, n);
+        if (n % 3 === 0 || !id || !places.get(tx.store, id)) {
+          ids.places.push(places.create(tx, { name, full_name: `${name}, Wexmoor` }).id);
+        } else if (n % 3 === 1) {
+          places.update(tx, id, { full_name: `${name}, Fenmark` });
+        } else {
+          places.delete(tx, id);
+        }
+      }),
+      fc.tuple(fc.nat(), fc.nat()).map(([n, m]): Op => (tx, ids) => {
+        const person = pick(ids.people, n);
+        if (!person || !persons.get(tx.store, person)) return;
+        const note = notes.create(tx, { text: `note ${m}` });
+        noteLinks.create(tx, { note_id: note.id, owner_type: 'person', owner_id: person });
+        ids.notes.push(note.id);
+        const tag = pick(ids.tags, m);
+        if (tag && tags.get(tx.store, tag)) {
+          const already = tagLinks
+            .listFor(tx.store, 'person', person)
+            .some((l) => l.tag_id === tag);
+          if (!already)
+            tagLinks.create(tx, { tag_id: tag, owner_type: 'person', owner_id: person });
+        } else {
+          ids.tags.push(tags.create(tx, { name: `t${m}`, category: String(m % 3) }).id);
+        }
+      }),
     );
 
     fc.assert(
-      fc.property(fc.array(fc.array(opArb, { minLength: 1, maxLength: 4 }), { maxLength: 12 }), (script) => {
-        const store = memoryTree();
-        const f = seedSmallFamily(store);
-        const ids: Ids = {
-          people: Object.values(f).filter((id) => persons.get(store, id)),
-          families: [f.parentsFamily, f.grandparentsFamily, f.myFamily],
-          names: [],
-          events: [],
-          places: [],
-          notes: [],
-          tags: [],
-        };
-        const snapshots = [snapshot(store)];
-        const indexes = [searchIndex(store)];
-        const batches: string[] = [];
-        for (const ops of script) {
-          const { batchId } = store.transact('step', (tx) => {
-            for (const op of ops) op(tx, ids);
-          });
-          if (store.db.prepare('SELECT 1 FROM change_batch WHERE id = ?').get(batchId)) {
-            batches.push(batchId);
-            snapshots.push(snapshot(store));
-            indexes.push(searchIndex(store));
+      fc.property(
+        fc.array(fc.array(opArb, { minLength: 1, maxLength: 4 }), { maxLength: 12 }),
+        (script) => {
+          const store = memoryTree();
+          const f = seedSmallFamily(store);
+          const ids: Ids = {
+            people: Object.values(f).filter((id) => persons.get(store, id)),
+            families: [f.parentsFamily, f.grandparentsFamily, f.myFamily],
+            names: [],
+            events: [],
+            places: [],
+            notes: [],
+            tags: [],
+          };
+          const snapshots = [snapshot(store)];
+          const indexes = [searchIndex(store)];
+          const batches: string[] = [];
+          for (const ops of script) {
+            const { batchId } = store.transact('step', (tx) => {
+              for (const op of ops) op(tx, ids);
+            });
+            if (store.db.prepare('SELECT 1 FROM change_batch WHERE id = ?').get(batchId)) {
+              batches.push(batchId);
+              snapshots.push(snapshot(store));
+              indexes.push(searchIndex(store));
+            }
           }
-        }
-        for (let i = batches.length - 1; i >= 0; i--) {
-          undo(store, batches[i] as string);
-          expect(snapshot(store)).toBe(snapshots[i]);
-          expect(searchIndex(store)).toEqual(indexes[i]);
-        }
-        for (let i = 0; i < batches.length; i++) {
-          redo(store, batches[i] as string);
-          expect(snapshot(store)).toBe(snapshots[i + 1]);
-          expect(searchIndex(store)).toEqual(indexes[i + 1]);
-        }
-        // The incrementally maintained index must equal a from-scratch rebuild.
-        const incremental = searchIndex(store);
-        rebuildSearchIndex(store);
-        expect(searchIndex(store)).toEqual(incremental);
-        store.close();
-      }),
+          for (let i = batches.length - 1; i >= 0; i--) {
+            undo(store, batches[i] as string);
+            expect(snapshot(store)).toBe(snapshots[i]);
+            expect(searchIndex(store)).toEqual(indexes[i]);
+          }
+          for (let i = 0; i < batches.length; i++) {
+            redo(store, batches[i] as string);
+            expect(snapshot(store)).toBe(snapshots[i + 1]);
+            expect(searchIndex(store)).toEqual(indexes[i + 1]);
+          }
+          // The incrementally maintained index must equal a from-scratch rebuild.
+          const incremental = searchIndex(store);
+          rebuildSearchIndex(store);
+          expect(searchIndex(store)).toEqual(incremental);
+          store.close();
+        },
+      ),
       { numRuns: 60 },
     );
   });

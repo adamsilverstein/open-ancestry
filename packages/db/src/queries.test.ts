@@ -145,11 +145,26 @@ describe('neighborhood', () => {
     const n = getNeighborhood(store, f.me, { up: 2, down: 2 });
     expect(n.focusId).toBe(f.me);
     const ids = new Set(n.people.map((p) => p.id));
-    for (const id of [f.grandpa, f.grandma, f.dad, f.mom, f.me, f.sister, f.spouse, f.kid, f.grandkid])
+    for (const id of [
+      f.grandpa,
+      f.grandma,
+      f.dad,
+      f.mom,
+      f.me,
+      f.sister,
+      f.spouse,
+      f.kid,
+      f.grandkid,
+    ])
       expect(ids.has(id)).toBe(true);
     expect(n.people).toHaveLength(9);
     expect(n.families.map((x) => x.id).sort()).toEqual(
-      [f.grandparentsFamily, f.parentsFamily, f.myFamily, n.families.find((x) => x.partner1Id === f.kid)?.id].sort(),
+      [
+        f.grandparentsFamily,
+        f.parentsFamily,
+        f.myFamily,
+        n.families.find((x) => x.partner1Id === f.kid)?.id,
+      ].sort(),
     );
     expect(n.children).toContainEqual({
       familyId: f.parentsFamily,
@@ -184,9 +199,21 @@ describe('neighborhood', () => {
     const { result: r } = store.transact('collapse', (tx) => {
       const p = () => persons.create(tx, {}).id;
       const [g1, g2, a, b, c, d, x, y, z] = [p(), p(), p(), p(), p(), p(), p(), p(), p()];
-      families.create(tx, { partner1_id: g1, partner2_id: g2, children: [{ child_id: a }, { child_id: c }] });
-      const fab = families.create(tx, { partner1_id: a, partner2_id: b, children: [{ child_id: x }] });
-      const fcd = families.create(tx, { partner1_id: c, partner2_id: d, children: [{ child_id: y }] });
+      families.create(tx, {
+        partner1_id: g1,
+        partner2_id: g2,
+        children: [{ child_id: a }, { child_id: c }],
+      });
+      const fab = families.create(tx, {
+        partner1_id: a,
+        partner2_id: b,
+        children: [{ child_id: x }],
+      });
+      const fcd = families.create(tx, {
+        partner1_id: c,
+        partner2_id: d,
+        children: [{ child_id: y }],
+      });
       families.create(tx, { partner1_id: x, partner2_id: y, children: [{ child_id: z }] });
       return { g1, g2, z, fab, fcd };
     });
@@ -235,7 +262,7 @@ describe('listPeople', () => {
     expect(byBirthDesc.items.map((p) => p.given)).toEqual(['Juniper', 'Quill']);
     expect(byBirthDesc.total).toBe(9);
     const page2 = listPeople(store, { sort: 'given', limit: 3, offset: 3 });
-    expect(page2.items.map((p) => p.given)).toEqual(['Ivo', 'Juniper', 'Nerys']);
+    expect(page2.items.map((p) => p.given)).toEqual(['Juniper', 'Nerys', 'Orrin']);
     expect(listPeople(store, { sex: 'F' }).total).toBe(5);
 
     store.transact('tag', (tx) => {

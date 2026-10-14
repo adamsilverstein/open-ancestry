@@ -18,7 +18,8 @@ describe('bulk insert', () => {
     expect(counts.person).toBe(500);
     expect(counts.person_name).toBe(500);
     expect(counts.family).toBeGreaterThan(100);
-    const n = (t: string) => (store.db.prepare(`SELECT count(*) AS n FROM ${t}`).get() as { n: number }).n;
+    const n = (t: string) =>
+      (store.db.prepare(`SELECT count(*) AS n FROM ${t}`).get() as { n: number }).n;
     expect(n('person')).toBe(500);
     expect(n('change_log')).toBe(0);
     expect(n('change_batch')).toBe(0);

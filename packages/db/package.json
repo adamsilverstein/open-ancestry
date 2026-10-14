@@ -7,7 +7,9 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dump-schema": "tsx scripts/dump-schema.ts",
+    "generate:json-schema": "tsx scripts/generate-json-schema.ts && prettier --write schema/oa-json.schema.json"
   },
   "dependencies": {
     "@open-ancestry/core": "*",

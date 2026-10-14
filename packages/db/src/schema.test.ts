@@ -34,9 +34,9 @@ describe('schema constraints', () => {
 
   it('rejects values outside an enum', () => {
     const store = memoryTree();
-    expect(() =>
-      store.transact('bad', (tx) => persons.create(tx, { sex: 'Q' as 'M' })),
-    ).toThrow(/CHECK/);
+    expect(() => store.transact('bad', (tx) => persons.create(tx, { sex: 'Q' as 'M' }))).toThrow(
+      /CHECK/,
+    );
     expect(() =>
       store.transact('bad', (tx) => persons.create(tx, { living: 'zombie' as 'living' })),
     ).toThrow(/CHECK/);
@@ -107,7 +107,13 @@ describe('schema constraints', () => {
 
   it('rejects absolute or escaping media paths', () => {
     const store = memoryTree();
-    for (const local_path of ['/etc/passwd', '../x.jpg', 'a/../../x.jpg', 'C:\\x.jpg', 'a\\b.jpg']) {
+    for (const local_path of [
+      '/etc/passwd',
+      '../x.jpg',
+      'a/../../x.jpg',
+      'C:\\x.jpg',
+      'a\\b.jpg',
+    ]) {
       expect(() => store.transact('bad path', (tx) => media.create(tx, { local_path }))).toThrow(
         /CHECK/,
       );

@@ -6,7 +6,9 @@ describe('searchPeople', () => {
   it('finds people by any name variant with prefix matching', () => {
     const store = memoryTree();
     const f = seedSmallFamily(store);
-    store.transact('aka', (tx) => names.add(tx, f.sister, { given: 'Petra', surname: 'Larch', type: 'married' }));
+    store.transact('aka', (tx) =>
+      names.add(tx, f.sister, { given: 'Petra', surname: 'Larch', type: 'married' }),
+    );
     expect(searchPeople(store, 'petra').map((r) => r.person.id)).toEqual([f.sister]);
     expect(searchPeople(store, 'Lar').map((r) => r.person.id)).toEqual([f.sister]);
     expect(searchPeople(store, 'ellis vale').map((r) => r.person.id)).toEqual([f.me]);
@@ -21,7 +23,7 @@ describe('searchPeople', () => {
       persons.create(tx, { names: [{ given: 'Zoë', surname: 'Ångström' }] }),
     );
     expect(searchPeople(store, 'zoe angstrom').map((r) => r.person.id)).toEqual([p.id]);
-    expect(searchPeople(store, '"zoe" OR NEAR(*').map((r) => r.person.id)).toEqual([p.id]);
+    expect(searchPeople(store, 'zoe" ( * -').map((r) => r.person.id)).toEqual([p.id]);
     expect(searchPeople(store, '  ')).toEqual([]);
     store.close();
   });
@@ -40,9 +42,9 @@ describe('searchPeople', () => {
       persons.create(tx, { names: [{ given: 'Ada', surname: 'Smythe', surname_key: 'SM0' }] }),
     );
     expect(searchPeople(store, 'smith')).toEqual([]);
-    expect(
-      searchPeople(store, 'smith', { phoneticKeys: ['SM0'] }).map((r) => r.person.id),
-    ).toEqual([p.id]);
+    expect(searchPeople(store, 'smith', { phoneticKeys: ['SM0'] }).map((r) => r.person.id)).toEqual(
+      [p.id],
+    );
     store.close();
   });
 

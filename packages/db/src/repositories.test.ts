@@ -88,15 +88,15 @@ describe('unit of work', () => {
   it('drops batches that change nothing', () => {
     const store = memoryTree();
     const { batchId } = store.transact('noop', () => 1);
-    expect(store.db.prepare('SELECT * FROM change_batch WHERE id = ?').get(batchId)).toBeUndefined();
+    expect(
+      store.db.prepare('SELECT * FROM change_batch WHERE id = ?').get(batchId),
+    ).toBeUndefined();
     store.close();
   });
 
   it('does not allow nested transactions', () => {
     const store = memoryTree();
-    expect(() => store.transact('outer', () => store.transact('inner', () => 1))).toThrow(
-      /nested/,
-    );
+    expect(() => store.transact('outer', () => store.transact('inner', () => 1))).toThrow(/nested/);
     store.close();
   });
 
@@ -301,7 +301,11 @@ describe('places, sources, citations, media, notes, tags', () => {
         longitude: -1.25,
       });
       const p = persons.create(tx, {});
-      const e = events.create(tx, { type: 'RESI', place_id: town.id, roles: [{ person_id: p.id }] });
+      const e = events.create(tx, {
+        type: 'RESI',
+        place_id: town.id,
+        roles: [{ person_id: p.id }],
+      });
       const repo = repositories.create(tx, { name: 'Wexmoor Archive' });
       const src = sources.create(tx, { title: 'Parish Register', repository_id: repo.id });
       const cit = citations.create(tx, { source_id: src.id, page: 'p. 12', apid: '1,7602::123' });

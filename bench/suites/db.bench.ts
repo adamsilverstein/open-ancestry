@@ -23,7 +23,8 @@ function loaded() {
   if (!store) {
     store = openMemoryTree();
     bulkInsert(store, data);
-    ids = data.person.map((p) => p.id);
+    // People with parents, so the neighborhood has ancestors to walk.
+    ids = data.family_child.map((c) => c.child_id);
   }
 }
 

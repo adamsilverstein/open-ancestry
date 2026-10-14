@@ -1,0 +1,1162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/adamsilverstein/open-ancestry/blob/main/packages/db/schema/oa-json.schema.json",
+  "title": "open-ancestry JSON interchange",
+  "description": "Full-fidelity dump of an open-ancestry tree. Row shapes mirror the SQLite tables documented in docs/data-model.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "formatVersion", "schemaVersion", "tables"],
+  "properties": {
+    "format": {
+      "const": "open-ancestry"
+    },
+    "formatVersion": {
+      "const": 1
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "tables": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "citation",
+        "citation_link",
+        "event",
+        "event_role",
+        "family",
+        "family_child",
+        "import_batch",
+        "media",
+        "media_link",
+        "meta",
+        "note",
+        "note_link",
+        "person",
+        "person_name",
+        "place",
+        "raw_record",
+        "repository",
+        "source",
+        "tag",
+        "tag_link",
+        "unmapped_line"
+      ],
+      "properties": {
+        "change_batch": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/change_batch"
+          }
+        },
+        "change_log": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/change_log"
+          }
+        },
+        "citation": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/citation"
+          }
+        },
+        "citation_link": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/citation_link"
+          }
+        },
+        "event": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/event"
+          }
+        },
+        "event_role": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/event_role"
+          }
+        },
+        "family": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/family"
+          }
+        },
+        "family_child": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/family_child"
+          }
+        },
+        "import_batch": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/import_batch"
+          }
+        },
+        "media": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/media"
+          }
+        },
+        "media_link": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/media_link"
+          }
+        },
+        "meta": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/meta"
+          }
+        },
+        "note": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/note"
+          }
+        },
+        "note_link": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/note_link"
+          }
+        },
+        "person": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/person"
+          }
+        },
+        "person_name": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/person_name"
+          }
+        },
+        "place": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/place"
+          }
+        },
+        "raw_record": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/raw_record"
+          }
+        },
+        "repository": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/repository"
+          }
+        },
+        "source": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/source"
+          }
+        },
+        "tag": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/tag"
+          }
+        },
+        "tag_link": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/tag_link"
+          }
+        },
+        "unmapped_line": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/unmapped_line"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "change_batch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "state", "created_at", "state_changed_at"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "state": {
+          "enum": ["applied", "undone", "superseded"]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "state_changed_at": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "change_log": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seq",
+        "batch_id",
+        "ts",
+        "entity",
+        "entity_id",
+        "op",
+        "before_json",
+        "after_json"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer"
+        },
+        "batch_id": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "entity": {
+          "type": "string"
+        },
+        "entity_id": {
+          "type": "string"
+        },
+        "op": {
+          "enum": ["insert", "update", "delete"]
+        },
+        "before_json": {
+          "type": ["string", "null"]
+        },
+        "after_json": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "citation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "source_id",
+        "page",
+        "quality",
+        "date_text",
+        "text",
+        "apid",
+        "url",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "page": {
+          "type": ["string", "null"]
+        },
+        "quality": {
+          "type": ["integer", "null"]
+        },
+        "date_text": {
+          "type": ["string", "null"]
+        },
+        "text": {
+          "type": ["string", "null"]
+        },
+        "apid": {
+          "type": ["string", "null"]
+        },
+        "url": {
+          "type": ["string", "null"]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      }
+    },
+    "citation_link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "citation_id", "owner_type", "owner_id", "sort_order"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "citation_id": {
+          "type": "string"
+        },
+        "owner_type": {
+          "enum": ["person", "person_name", "event", "family", "family_child", "media", "note"]
+        },
+        "owner_id": {
+          "type": "string"
+        },
+        "sort_order": {
+          "type": "integer"
+        }
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "custom_type",
+        "date_text",
+        "date_qualifier",
+        "date_sort",
+        "date_sort_end",
+        "calendar",
+        "place_id",
+        "value",
+        "description",
+        "age",
+        "cause",
+        "privacy",
+        "import_batch_id",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "custom_type": {
+          "type": ["string", "null"]
+        },
+        "date_text": {
+          "type": ["string", "null"]
+        },
+        "date_qualifier": {
+          "type": ["string", "null"]
+        },
+        "date_sort": {
+          "type": ["integer", "null"]
+        },
+        "date_sort_end": {
+          "type": ["integer", "null"]
+        },
+        "calendar": {
+          "type": ["string", "null"]
+        },
+        "place_id": {
+          "type": ["string", "null"]
+        },
+        "value": {
+          "type": ["string", "null"]
+        },
+        "description": {
+          "type": ["string", "null"]
+        },
+        "age": {
+          "type": ["string", "null"]
+        },
+        "cause": {
+          "type": ["string", "null"]
+        },
+        "privacy": {
+          "enum": ["public", "private", "confidential", "locked"]
+        },
+        "import_batch_id": {
+          "type": ["string", "null"]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      }
+    },
+    "event_role": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "event_id",
+        "person_id",
+        "family_id",
+        "role",
+        "is_preferred",
+        "sort_order"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "person_id": {
+          "type": ["string", "null"]
+        },
+        "family_id": {
+          "type": ["string", "null"]
+        },
+        "role": {
+          "enum": [
+            "principal",
+            "witness",
+            "godparent",
+            "officiator",
+            "clergy",
+            "informant",
+            "parent",
+            "father",
+            "mother",
+            "child",
+            "spouse",
+            "husband",
+            "wife",
+            "friend",
+            "neighbor",
+            "multiple",
+            "other"
+          ]
+        },
+        "is_preferred": {
+          "type": "integer"
+        },
+        "sort_order": {
+          "type": "integer"
+        }
+      }
+    },
+    "family": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "partner1_id",
+        "partner2_id",
+        "relationship_type",
+        "partner1_order",
+        "partner2_order",
+        "privacy",
+        "external_id",
+        "import_batch_id",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "partner1_id": {
+          "type": ["string", "null"]
+        },
+        "partner2_id": {
+          "type": ["string", "null"]
+        },
+        "relationship_type": {
+          "enum": ["married", "civil_union", "partners", "unknown"]
+        },
+        "partner1_order": {
+          "type": "integer"
+        },
+        "partner2_order": {
+          "type": "integer"
+        },
+        "privacy": {
+          "enum": ["public", "private", "confidential", "locked"]
+        },
+        "external_id": {
+          "type": ["string", "null"]
+        },
+        "import_batch_id": {
+          "type": ["string", "null"]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      }
+    },
+    "family_child": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "family_id", "child_id", "partner1_rel", "partner2_rel", "sort_order"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "family_id": {
+          "type": "string"
+        },
+        "child_id": {
+          "type": "string"
+        },
+        "partner1_rel": {
+          "enum": [
+            "biological",
+            "adopted",
+            "step",
+            "foster",
+            "related",
+            "guardian",
+            "private",
+            "unknown"
+          ]
+        },
+        "partner2_rel": {
+          "enum": [
+            "biological",
+            "adopted",
+            "step",
+            "foster",
+            "related",
+            "guardian",
+            "private",
+            "unknown"
+          ]
+        },
+        "sort_order": {
+          "type": "integer"
+        }
+      }
+    },
+    "import_batch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "file_name",
+        "file_sha256",
+        "format",
+        "source_software",
+        "source_version",
+        "status",
+        "counts_json",
+        "warnings_json",
+        "started_at",
+        "finished_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "file_name": {
+          "type": ["string", "null"]
+        },
+        "file_sha256": {
+          "type": ["string", "null"]
+        },
+        "format": {
+          "type": ["string", "null"]
+        },
+        "source_software": {
+          "type": ["string", "null"]
+        },
+        "source_version": {
+          "type": ["string", "null"]
+        },
+        "status": {
+          "enum": ["running", "completed", "failed"]
+        },
+        "counts_json": {
+          "type": "string"
+        },
+        "warnings_json": {
+          "type": "string"
+        },
+        "started_at": {
+          "type": "string"
+        },
+        "finished_at": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "media": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "mime",
+        "local_path",
+        "remote_url",
+        "ancestry_oid",
+        "title",
+        "date_text",
+        "description",
+        "sha256",
+        "width",
+        "height",
+        "byte_size",
+        "external_id",
+        "import_batch_id",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": ["photo", "document", "audio", "video", "other"]
+        },
+        "mime": {
+          "type": ["string", "null"]
+        },
+        "local_path": {
+          "type": ["string", "null"]
+        },
+        "remote_url": {
+          "type": ["string", "null"]
+        },
+        "ancestry_oid": {
+          "type": ["string", "null"]
+        },
+        "title": {
+          "type": ["string", "null"]
+        },
+        "date_text": {
+          "type": ["string", "null"]
+        },
+        "description": {
+          "type": ["string", "null"]
+        },
+        "sha256": {
+          "type": ["string", "null"]
+        },
+        "width": {
+          "type": ["integer", "null"]
+        },
+        "height": {
+          "type": ["integer", "null"]
+        },
+        "byte_size": {
+          "type": ["integer", "null"]
+        },
+        "external_id": {
+          "type": ["string", "null"]
+        },
+        "import_batch_id": {
+          "type": ["string", "null"]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      }
+    },
+    "media_link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "media_id", "owner_type", "owner_id", "sort_order", "crop_json"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "media_id": {
+          "type": "string"
+        },
+        "owner_type": {
+          "enum": ["person", "event", "family", "source", "citation", "place"]
+        },
+        "owner_id": {
+          "type": "string"
+        },
+        "sort_order": {
+          "type": "integer"
+        },
+        "crop_json": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "value"],
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "note": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "text", "external_id", "import_batch_id", "created_at", "updated_at"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "external_id": {
+          "type": ["string", "null"]
+        },
+        "import_batch_id": {
+          "type": ["string", "null"]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      }
+    },
+    "note_link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "note_id", "owner_type", "owner_id", "sort_order"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "note_id": {
+          "type": "string"
+        },
+        "owner_type": {
+          "enum": [
+            "person",
+            "person_name",
+            "event",
+            "family",
+            "family_child",
+            "source",
+            "citation",
+            "media",
+            "place",
+            "repository"
+          ]
+        },
+        "owner_id": {
+          "type": "string"
+        },
+        "sort_order": {
+          "type": "integer"
+        }
+      }
+    },
+    "person": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sex",
+        "living",
+        "privacy",
+        "primary_media_id",
+        "external_id",
+        "import_batch_id",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "sex": {
+          "enum": ["M", "F", "X", "U"]
+        },
+        "living": {
+          "enum": ["living", "dead", "inferred_living", "inferred_dead", "unknown"]
+        },
+        "privacy": {
+          "enum": ["public", "private", "confidential", "locked"]
+        },
+        "primary_media_id": {
+          "type": ["string", "null"]
+        },
+        "external_id": {
+          "type": ["string", "null"]
+        },
+        "import_batch_id": {
+          "type": ["string", "null"]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      }
+    },
+    "person_name": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "person_id",
+        "type",
+        "given",
+        "surname",
+        "surname_prefix",
+        "prefix",
+        "suffix",
+        "nickname",
+        "full_text",
+        "surname_key",
+        "is_primary",
+        "sort_order"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "person_id": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "birth",
+            "married",
+            "maiden",
+            "aka",
+            "immigrant",
+            "professional",
+            "religious",
+            "other"
+          ]
+        },
+        "given": {
+          "type": ["string", "null"]
+        },
+        "surname": {
+          "type": ["string", "null"]
+        },
+        "surname_prefix": {
+          "type": ["string", "null"]
+        },
+        "prefix": {
+          "type": ["string", "null"]
+        },
+        "suffix": {
+          "type": ["string", "null"]
+        },
+        "nickname": {
+          "type": ["string", "null"]
+        },
+        "full_text": {
+          "type": ["string", "null"]
+        },
+        "surname_key": {
+          "type": ["string", "null"]
+        },
+        "is_primary": {
+          "type": "integer"
+        },
+        "sort_order": {
+          "type": "integer"
+        }
+      }
+    },
+    "place": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "full_name",
+        "parent_id",
+        "type",
+        "latitude",
+        "longitude",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "full_name": {
+          "type": "string"
+        },
+        "parent_id": {
+          "type": ["string", "null"]
+        },
+        "type": {
+          "type": ["string", "null"]
+        },
+        "latitude": {
+          "type": ["number", "null"]
+        },
+        "longitude": {
+          "type": ["number", "null"]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      }
+    },
+    "raw_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "import_batch_id",
+        "seq",
+        "owner_type",
+        "owner_id",
+        "gedcom_tag",
+        "xref",
+        "raw_text"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "import_batch_id": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "owner_type": {
+          "type": ["string", "null"]
+        },
+        "owner_id": {
+          "type": ["string", "null"]
+        },
+        "gedcom_tag": {
+          "type": "string"
+        },
+        "xref": {
+          "type": ["string", "null"]
+        },
+        "raw_text": {
+          "type": "string"
+        }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "address",
+        "url",
+        "email",
+        "phone",
+        "external_id",
+        "import_batch_id",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "address": {
+          "type": ["string", "null"]
+        },
+        "url": {
+          "type": ["string", "null"]
+        },
+        "email": {
+          "type": ["string", "null"]
+        },
+        "phone": {
+          "type": ["string", "null"]
+        },
+        "external_id": {
+          "type": ["string", "null"]
+        },
+        "import_batch_id": {
+          "type": ["string", "null"]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "author",
+        "publication",
+        "abbreviation",
+        "text",
+        "repository_id",
+        "call_number",
+        "apid",
+        "external_id",
+        "import_batch_id",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "author": {
+          "type": ["string", "null"]
+        },
+        "publication": {
+          "type": ["string", "null"]
+        },
+        "abbreviation": {
+          "type": ["string", "null"]
+        },
+        "text": {
+          "type": ["string", "null"]
+        },
+        "repository_id": {
+          "type": ["string", "null"]
+        },
+        "call_number": {
+          "type": ["string", "null"]
+        },
+        "apid": {
+          "type": ["string", "null"]
+        },
+        "external_id": {
+          "type": ["string", "null"]
+        },
+        "import_batch_id": {
+          "type": ["string", "null"]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      }
+    },
+    "tag": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "category",
+        "color",
+        "external_id",
+        "import_batch_id",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "color": {
+          "type": ["string", "null"]
+        },
+        "external_id": {
+          "type": ["string", "null"]
+        },
+        "import_batch_id": {
+          "type": ["string", "null"]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        }
+      }
+    },
+    "tag_link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "tag_id", "owner_type", "owner_id"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "tag_id": {
+          "type": "string"
+        },
+        "owner_type": {
+          "enum": ["person", "family", "event", "media", "source"]
+        },
+        "owner_id": {
+          "type": "string"
+        }
+      }
+    },
+    "unmapped_line": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "import_batch_id", "owner_type", "owner_id", "path", "line_no", "line"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "import_batch_id": {
+          "type": "string"
+        },
+        "owner_type": {
+          "type": ["string", "null"]
+        },
+        "owner_id": {
+          "type": ["string", "null"]
+        },
+        "path": {
+          "type": "string"
+        },
+        "line_no": {
+          "type": "integer"
+        },
+        "line": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

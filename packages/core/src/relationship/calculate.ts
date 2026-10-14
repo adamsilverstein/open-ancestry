@@ -43,6 +43,7 @@ import type {
   RelationshipResult,
 } from './types';
 import type { ChildRelation } from '../layout/types';
+import { isVirtualParent } from './graph';
 
 interface Arrival {
   id: string;
@@ -127,36 +128,42 @@ function joinPath(a: Arrival, b: Arrival): RelationshipPath {
 }
 
 /** Parent ids of `child`, biological links only when `bio`. */
+/** Recorded parent ids of `child` (not parentless-family stand-ins), biological only when `bio`. */
 function parentSet(g: KinshipGraph, child: string, bio: boolean): Set<string> {
   return new Set(
     g
       .parents(child)
-      .filter((p) => !bio || BIO.has(p.rel))
+      .filter((p) => (!bio || BIO.has(p.rel)) && !isVirtualParent(p.id))
       .map((p) => p.id),
   );
 }
 
 /**
  * Half when the two children below the common ancestor have different
- * parents. Compared by person, not family record, so duplicate family
- * records for one couple stay full, and a lone recorded parent is full.
+ * recorded parents. Compared by person, not family record, so duplicate
+ * family records for one couple stay full, and a lone recorded parent is
+ * full. A child with no recorded parents (only a parentless family) gives
+ * nothing to compare, so the siblings count as full.
  */
 function isHalf(g: KinshipGraph, childA: string, childB: string, bio: boolean): boolean {
   const pa = parentSet(g, childA, bio);
   const pb = parentSet(g, childB, bio);
+  if (pa.size === 0 || pb.size === 0) return false;
   return pa.size !== pb.size || [...pa].some((p) => !pb.has(p));
 }
+
+/** The ancestors of one person: walked fresh, or from a calculator's cache. */
+type Walk = (id: string) => ReturnType<typeof ancestors>;
 
 function bloodRelationships(
   g: KinshipGraph,
   a: string,
   b: string,
-  maxGenerations: number,
-  maxNodes: number,
+  walk: Walk,
   style: NameStyle,
 ): { relationships: Relationship[]; cut: boolean } {
-  const fromA = ancestors(g, a, maxGenerations, maxNodes);
-  const fromB = ancestors(g, b, maxGenerations, maxNodes);
+  const fromA = walk(a);
+  const fromB = walk(b);
   // Pairs of lines meeting only at their top, grouped by the lines below it:
   // the partners of one couple share both lines.
   const groups = new Map<string, Line[]>();
@@ -445,6 +452,52 @@ export function relationship(
 ): RelationshipResult {
   const maxGenerations = options.maxGenerations ?? 20;
   const maxNodes = options.maxNodes ?? 50_000;
+  return compute(g, a, b, options, (id) => ancestors(g, id, maxGenerations, maxNodes));
+}
+
+export interface CalculatorOptions extends RelationshipOptions {
+  /** People whose ancestor walks are kept, least recently used dropped first. Default 512. */
+  cacheSize?: number;
+}
+
+/**
+ * `relationship()` for many queries over one unchanging graph, such as "what
+ * is everyone to the home person": each person's ancestor walk is cached,
+ * so repeated people cost only the comparison. Make a new calculator when
+ * the graph changes.
+ */
+export function relationshipCalculator(g: KinshipGraph, defaults: CalculatorOptions = {}) {
+  const cacheSize = defaults.cacheSize ?? 512;
+  const cache = new Map<string, ReturnType<typeof ancestors>>();
+  return (a: string, b: string, options: RelationshipOptions = {}): RelationshipResult => {
+    const merged = { ...defaults, ...options };
+    const maxGenerations = merged.maxGenerations ?? 20;
+    const maxNodes = merged.maxNodes ?? 50_000;
+    const walk: Walk = (id) => {
+      const key = `${id}|${maxGenerations}|${maxNodes}`;
+      let found = cache.get(key);
+      if (found) {
+        cache.delete(key);
+      } else {
+        found = ancestors(g, id, maxGenerations, maxNodes);
+        if (cache.size >= cacheSize) cache.delete(cache.keys().next().value!);
+      }
+      cache.set(key, found);
+      return found;
+    };
+    return compute(g, a, b, merged, walk);
+  };
+}
+
+function compute(
+  g: KinshipGraph,
+  a: string,
+  b: string,
+  options: RelationshipOptions,
+  walk: Walk,
+): RelationshipResult {
+  const maxGenerations = options.maxGenerations ?? 20;
+  const maxNodes = options.maxNodes ?? 50_000;
   const maxMarriages = options.maxMarriages ?? 2;
   const maxPaths = options.maxPaths ?? 8;
   const maxRelationships = options.maxRelationships ?? 4;
@@ -482,7 +535,7 @@ export function relationship(
       pathCount: 1,
     });
   }
-  const blood = bloodRelationships(g, a, b, maxGenerations, maxNodes, style);
+  const blood = bloodRelationships(g, a, b, walk, style);
   found.push(...blood.relationships);
   if (found.length) return result(found, blood.cut);
 

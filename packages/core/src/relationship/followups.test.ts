@@ -70,10 +70,10 @@ describe('relationshipCalculator', () => {
     const calc = relationshipCalculator(wrapped);
     calc('cousin1', 'me');
     const first = counter.parents;
-    calc('cousin2', 'me');
     calc('cousin1', 'me');
-    // Only cousin2's own line is new; me's and cousin1's come from the cache.
-    expect(counter.parents - first).toBeLessThan(first / 2 + 1);
+    // Both walks come from the cache; only the half check looks at two parents.
+    expect(counter.parents - first).toBeLessThanOrEqual(2);
+    expect(first).toBeGreaterThan(8);
     expect(calc('gc3', 'me', { style: 'formal' }).name).toBe('2nd cousin once removed');
   });
 

@@ -66,6 +66,10 @@ async function reimport(bytes: Uint8Array) {
   return names;
 }
 
+/** WebKit on Linux replaces spaces in download names with underscores; the header is tested in the server. */
+const sameFileName = (actual: string, expected: string) =>
+  actual.replace(/_/g, ' ') === expected.replace(/_/g, ' ');
+
 const treeName = (title: string, project: string) =>
   `export ${project} ${title.replace(/[^\w ]/g, '')} ${Date.now()}`.slice(0, 100);
 
@@ -77,7 +81,7 @@ test('exports GEDCOM 7 that re-imports with everyone in it', async ({
   const tree = treeName(info.title, info.project.name);
   await seedTree(request, baseURL!, tree);
   const file = await exportFrom(page, tree, 'GEDCOM 7');
-  expect(file.name).toBe(`${tree}.ged`);
+  expect(sameFileName(file.name, `${tree}.ged`)).toBe(true);
   expect(new TextDecoder().decode(file.bytes)).toMatch(/^0 HEAD\n1 GEDC\n2 VERS 7\.0/);
   expect(await reimport(file.bytes)).toEqual(['Adelind', 'Bramwell']);
 });
@@ -100,7 +104,7 @@ test('exports a GEDZIP archive that re-imports', async ({ page, request, baseURL
   const tree = treeName(info.title, info.project.name);
   await seedTree(request, baseURL!, tree);
   const file = await exportFrom(page, tree, 'GEDZIP (GEDCOM 7 with media)');
-  expect(file.name).toBe(`${tree}.gdz`);
+  expect(sameFileName(file.name, `${tree}.gdz`)).toBe(true);
   expect(await reimport(file.bytes)).toEqual(['Adelind', 'Bramwell']);
 });
 

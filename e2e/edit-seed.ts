@@ -62,7 +62,26 @@ export async function openTree(page: Page, tree: string, path: string) {
 export function uniqueTreeName(prefix: string, label: string): string {
   const unique = `${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
   // Long titles are cut to the 100-character limit, so the unique part leads.
-  return `${prefix} ${unique} ${label.replace(/[^\w ]/g, '')}`.slice(0, 100);
+  return `${prefix} ${unique} ${label.replace(/[^\w ]/g, '')}`.slice(0, 100).trimEnd();
+}
+
+/** A new tree with nobody in it, as made by Tree > New tree. */
+export async function createEmptyTree(
+  request: APIRequestContext,
+  baseURL: string,
+  label: string,
+): Promise<string> {
+  const s = await session(request, baseURL);
+  const tree = uniqueTreeName('empty', label);
+  await send(request, s, 'post', '/api/trees', { name: tree });
+  return tree;
+}
+
+/** Opens `path` with `tree` as the current tree. */
+export async function openTree(page: Page, tree: string, path: string) {
+  await page.addInitScript((name) => localStorage.setItem('oa-tree', name), tree);
+  await page.goto(path);
+  await page.locator('html[data-shell-ready]').waitFor({ state: 'attached' });
 }
 
 export async function seedTree(

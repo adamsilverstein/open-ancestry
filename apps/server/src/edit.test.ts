@@ -44,6 +44,33 @@ describe('people', () => {
     expect(death.event).toMatchObject({ date_qualifier: 'text', date_sort: null });
   });
 
+  it('makes the first person in an empty tree the home person, undoably', async () => {
+    const base = await createTestTree(api, 'Empty');
+    const res = await api.post(`${base}/people`, { names: [{ given: 'Wren', surname: 'Ashby' }] });
+    const { person } = res.json();
+    expect((await api.get(`${base}/home`)).json().personId).toBe(person.id);
+
+    // Later people leave the home person alone.
+    const second = (await api.post(`${base}/people`, { names: [{ given: 'Ivo' }] })).json();
+    expect(second.person.id).not.toBe(person.id);
+    expect((await api.get(`${base}/home`)).json().personId).toBe(person.id);
+
+    // Undoing the second add keeps the home; undoing the first clears it with the person.
+    await api.post(`${base}/undo`);
+    expect((await api.get(`${base}/home`)).json().personId).toBe(person.id);
+    await api.post(`${base}/undo`);
+    expect((await api.get(`${base}/home`)).json().personId).toBeNull();
+    expect((await api.get(`${base}/people/${person.id}`)).statusCode).toBe(404);
+    await api.post(`${base}/redo`);
+    expect((await api.get(`${base}/home`)).json().personId).toBe(person.id);
+  });
+
+  it('does not change the home person of a tree that already has people', async () => {
+    const before = (await api.get(`${s.base}/home`)).json().personId;
+    await api.post(`${s.base}/people`, { names: [{ given: 'Ivo' }] });
+    expect((await api.get(`${s.base}/home`)).json().personId).toBe(before);
+  });
+
   it('validates the body', async () => {
     for (const body of [
       { sex: 'Q' },

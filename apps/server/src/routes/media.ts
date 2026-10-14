@@ -1,4 +1,4 @@
-import { createReadStream } from 'node:fs';
+import { createReadStream, realpathSync } from 'node:fs';
 import { open, realpath, stat } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import { treePaths } from '@open-ancestry/db';
@@ -57,6 +57,20 @@ async function readHead(file: string): Promise<Buffer> {
 }
 
 /** Resolves a media.local_path inside the tree's media folder, following symlinks; null if it escapes. */
+/** `resolveMediaPath` for synchronous callers (the profile-photo check inside a transaction). */
+export function resolveMediaPathSync(mediaRoot: string, localPath: string): string | null {
+  const root = resolve(mediaRoot);
+  const candidate = resolve(root, localPath);
+  if (!candidate.startsWith(root + sep)) return null;
+  try {
+    const realRoot = realpathSync(root);
+    const realFile = realpathSync(candidate);
+    return realFile.startsWith(realRoot + sep) ? realFile : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function resolveMediaPath(
   mediaRoot: string,
   localPath: string,

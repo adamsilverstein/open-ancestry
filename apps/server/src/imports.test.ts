@@ -247,10 +247,30 @@ describe('POST import', () => {
     expect(fake.calls).toHaveLength(0);
   });
 
-  it('limits import uploads to the import size cap by default', async () => {
-    const { DEFAULT_UPLOAD_LIMIT } = await import('./index');
+  it('limits import uploads to the import size caps by default', async () => {
+    const { DEFAULT_UPLOAD_LIMIT, DEFAULT_ARCHIVE_UPLOAD_LIMIT } = await import('./index');
     const { IMPORT_LIMITS } = await import('@open-ancestry/import');
     expect(DEFAULT_UPLOAD_LIMIT).toBe(IMPORT_LIMITS.maxBytes);
+    expect(DEFAULT_ARCHIVE_UPLOAD_LIMIT).toBe(IMPORT_LIMITS.maxArchiveBytes);
+  });
+
+  it('lets a GEDZIP upload past the GEDCOM cap, up to the archive cap', async () => {
+    // A GEDZIP with photos is far larger than its GEDCOM text, which the
+    // importer caps once it has inflated it.
+    const fake = controllableImporter();
+    api = await testApi({
+      importer: fake.importer,
+      importLimits: { maxBytes: 1024, maxArchiveBytes: 8192 },
+    });
+    const base = await createTestTree(api);
+    expect((await upload(api, base, 'big.ged', Buffer.alloc(4096, 'x'))).statusCode).toBe(413);
+    const huge = await upload(api, base, 'huge.gdz', Buffer.alloc(16_384, 'x'));
+    expect(huge.statusCode).toBe(413);
+    expect(huge.json().error.message).toMatch(/8192/);
+    expect(fake.calls).toHaveLength(0);
+    const zip = await upload(api, base, 'photos.zip', Buffer.alloc(4096, 'x'));
+    expect(zip.statusCode, zip.body).toBe(202);
+    expect(fake.calls).toHaveLength(1);
   });
 
   it('enforces the upload size limit', async () => {

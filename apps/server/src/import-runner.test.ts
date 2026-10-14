@@ -59,6 +59,16 @@ describe('worker importer', () => {
     await expect(done).rejects.toThrow(/does not look like GEDCOM/);
   }, 30_000);
 
+  it('applies the import limits it was given inside the worker', async () => {
+    const text = ['0 HEAD', '0 @I1@ INDI', '1 NOTE a', '2 CONT b', '2 CONT c', '0 TRLR', ''].join(
+      '\n',
+    );
+    const { done } = run(file('conts.ged', text), undefined, {
+      limits: { maxContinuations: 1 },
+    });
+    await expect(done).rejects.toThrow(/continuation lines/);
+  }, 30_000);
+
   it('cancels promptly, even mid-parse, and leaves the tree writable', async () => {
     const controller = new AbortController();
     const { done, progress } = run(

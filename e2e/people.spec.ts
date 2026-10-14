@@ -39,18 +39,21 @@ test('sorts by each column from the headers', async ({ page }) => {
   await expect(page).toHaveURL(/dir=desc/);
   await expect(bodyRows(page).first().getByRole('cell').nth(1)).toHaveText('Yarrow');
 
-  const birth = page.getByRole('columnheader', { name: /Birth/ });
+  const birth = page.getByRole('columnheader', { name: 'Birth', exact: true });
   await birth.getByRole('button').click();
   await expect(birth).toHaveAttribute('aria-sort', 'ascending');
   await expect(surname).not.toHaveAttribute('aria-sort', /ascending|descending/);
   await expect(page).toHaveURL(/sort=birth/);
-  const years = await bodyRows(page).locator('[data-column="birth"]').allTextContents();
-  const numbers = years.map((y) => Number(/\d{4}/.exec(y)?.[0])).filter(Boolean);
-  expect(numbers.length).toBeGreaterThan(5);
+  const birthYears = async () =>
+    (await bodyRows(page).locator('[data-column="birth"]').allTextContents())
+      .map((y) => Number(/\d{4}/.exec(y)?.[0]))
+      .filter(Boolean);
+  await expect.poll(async () => (await birthYears()).length).toBeGreaterThan(5);
+  const numbers = await birthYears();
   expect(numbers).toEqual([...numbers].sort((a, b) => a - b));
 
-  for (const name of ['Given', 'Death']) {
-    const header = page.getByRole('columnheader', { name: new RegExp(name) });
+  for (const name of ['Given names', 'Death']) {
+    const header = page.getByRole('columnheader', { name, exact: true });
     await header.getByRole('button').click();
     await expect(header).toHaveAttribute('aria-sort', 'ascending');
   }
@@ -68,7 +71,7 @@ test('filters by sex, living status and tag, kept in the URL', async ({ page }) 
   await expect(bodyRows(page).first()).toContainText('Wren');
 
   await page.getByRole('combobox', { name: 'Living' }).click();
-  await page.getByRole('option', { name: 'Living' }).click();
+  await page.getByRole('option', { name: 'Living', exact: true }).click();
   await expect(count).toHaveText('0 people');
   await expect(page.getByText('No people match these filters')).toBeVisible();
   await page.getByRole('combobox', { name: 'Living' }).click();
@@ -76,7 +79,7 @@ test('filters by sex, living status and tag, kept in the URL', async ({ page }) 
   await expect(count).toHaveText('1 person');
 
   await page.getByRole('combobox', { name: 'Sex' }).click();
-  await page.getByRole('option', { name: 'Male' }).click();
+  await page.getByRole('option', { name: 'Male', exact: true }).click();
   await expect(count).toHaveText('0 people');
   await expect(page).toHaveURL(/sex=M/);
   await expect(page).toHaveURL(/living=deceased/);
@@ -89,10 +92,21 @@ test('filters by sex, living status and tag, kept in the URL', async ({ page }) 
   await expect(count).toHaveText(`${SEARCH_TREE_PEOPLE.toLocaleString('en-US')} people`);
 });
 
+test('the top bar links to the people list', async ({ page }) => {
+  await page.addInitScript((t) => localStorage.setItem('oa-tree', t), SEARCH_TREE);
+  await page.goto('/');
+  await page.getByRole('banner').getByRole('link', { name: 'People' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'People' })).toBeVisible();
+  await expect(page.getByRole('banner').getByRole('link', { name: 'People' })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
+});
+
 test('opens a person from the list', async ({ page }) => {
   await open(page, SEARCH_TREE, '/people?sort=surname');
   const link = bodyRows(page).first().getByRole('link');
-  await expect(link).toHaveText(/Ashgrove/);
+  await expect(link).toHaveAccessibleName(/Ashgrove/);
   await link.click();
   await expect(page).toHaveURL(/\/person\/[0-9A-Z]{26}$/);
 });

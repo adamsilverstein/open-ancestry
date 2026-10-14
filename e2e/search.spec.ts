@@ -66,6 +66,8 @@ test('arrow keys move through results and Shift+Enter or Alt+Enter focus the tre
   await page.keyboard.press('Shift+Enter');
   await expect(page).toHaveURL(new RegExp(`/tree/${ezra}$`));
 
+  await page.goto('/');
+  await expect(page.locator('html[data-shell-ready]')).toBeAttached();
   dialog = await search(page, 'ezra thackery');
   await expect(people(dialog).first()).toContainText('Ezra Thackery');
   await page.keyboard.press('Alt+Enter');

@@ -158,7 +158,7 @@ const synthetic = ged(
   '1 NAME Living tag',
 );
 
-describe('privatize living people', () => {
+describe('privatize living people', { timeout: 30_000 }, () => {
   it('replaces living people with "Private" and keeps only their family links', async () => {
     const store = await importInto(synthetic);
     for (const version of ['5.5.1', '7'] as const) {

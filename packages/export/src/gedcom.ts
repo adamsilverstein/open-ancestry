@@ -105,6 +105,7 @@ class GedcomWriter implements WriterContext {
   /** How each record is written, by `kind|id`. */
   private readonly planned = new Map<string, 'verbatim' | 'generate'>();
   private readonly queue: [RecordKind, string][] = [];
+  private next = 0;
   private readonly generated = new Map<string, GedcomNode>();
   private readonly slots: Slot[] = [];
   private readonly slotByKey = new Map<string, Slot>();
@@ -381,8 +382,9 @@ class GedcomWriter implements WriterContext {
 
   /** Generates every record `ref` has promised. */
   private drain(): void {
-    for (let item = this.queue.shift(); item; item = this.queue.shift()) {
-      const [kind, id] = item;
+    // An index instead of shift(): the queue holds every record of a large tree.
+    for (; this.next < this.queue.length; this.next++) {
+      const [kind, id] = this.queue[this.next]!;
       const xref = this.xrefOf(kind, id);
       const d = this.data;
       let node: GedcomNode;

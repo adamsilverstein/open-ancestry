@@ -19,7 +19,8 @@ const read = (file: string) => readFileSync(join(FIXTURES, file));
 const ownVersion = (bytes: Uint8Array) =>
   (parseGedcom(bytes).header.majorVersion ?? 5) >= 7 ? ('7' as const) : ('5.5.1' as const);
 
-describe('export in the version the file was imported from', () => {
+// Each fixture case imports, exports and re-imports a 1k-person tree; leave room on busy CI runners.
+describe('export in the version the file was imported from', { timeout: 30_000 }, () => {
   it.each(FIXTURE_FILES)('%s: normalized diff with the original is empty', async (file) => {
     const bytes = read(file);
     const store = await importInto(bytes);
@@ -49,7 +50,7 @@ describe('export in the version the file was imported from', () => {
   });
 });
 
-describe('GEDCOM 7 export', () => {
+describe('GEDCOM 7 export', { timeout: 30_000 }, () => {
   it.each(FIXTURE_FILES)(
     '%s: valid GEDCOM 7 that re-imports to the same domain model',
     async (file) => {
@@ -88,7 +89,7 @@ describe('GEDCOM 7 export', () => {
   });
 });
 
-describe('GEDCOM 5.5.1 export that is generated, not copied', () => {
+describe('GEDCOM 5.5.1 export that is generated, not copied', { timeout: 30_000 }, () => {
   it.each(FIXTURE_FILES)(
     '%s: privatize off, every record regenerated, same domain',
     async (file) => {

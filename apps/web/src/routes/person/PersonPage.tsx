@@ -84,7 +84,7 @@ export function PersonPage() {
             <NotesTab tree={tree} detail={detail} />
           </TabsContent>
           <TabsContent value="lifestory">
-            <LifeStoryTab detail={detail} />
+            <LifeStoryTab tree={tree} detail={detail} />
           </TabsContent>
           <TabsContent value="sources">
             <SourcesTab detail={detail} />

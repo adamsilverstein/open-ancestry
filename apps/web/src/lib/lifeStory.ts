@@ -2,13 +2,17 @@ import { ageAt, formatDate, parseDate } from '@open-ancestry/core';
 import type { ChildRelationship } from '@open-ancestry/db';
 import type { ApiPersonSummary, EventBrief, EventDetail, PersonDetail } from '../api/types';
 import {
+  childWord,
+  closest,
   isBirthLink,
   isParentLink,
   linkToOtherPartner,
   linkToPartner,
+  parentLink,
   parentWord,
   siblingWord,
   siblingsOf,
+  type Sibling,
   type SiblingKind,
 } from './kin';
 import { eventLabel } from './timeline';
@@ -23,13 +27,15 @@ import { fullName } from './person';
 interface Pronouns {
   subject: string;
   possessive: string;
+  /** Past tense of "to be" that agrees with `subject`. */
+  be: 'was' | 'were';
 }
 
 const PRONOUNS: Record<string, Pronouns> = {
-  M: { subject: 'he', possessive: 'his' },
-  F: { subject: 'she', possessive: 'her' },
+  M: { subject: 'he', possessive: 'his', be: 'was' },
+  F: { subject: 'she', possessive: 'her', be: 'was' },
 };
-const THEY: Pronouns = { subject: 'they', possessive: 'their' };
+const THEY: Pronouns = { subject: 'they', possessive: 'their', be: 'were' };
 
 const NUMBERS = [
   'no',
@@ -149,13 +155,23 @@ function parentLinks(detail: PersonDetail): ParentLink[] {
   return [...found.values()];
 }
 
-const SIBLING_ORDER: SiblingKind[] = ['full', 'half', 'step'];
+const SIBLING_ORDER: SiblingKind[] = ['full', 'half', 'adopted', 'step', 'foster'];
 
-export function lifeStory(detail: PersonDetail): string[] {
+export interface LifeStoryOptions {
+  /** Children of the parents' other partnerships, loaded separately (`otherSiblings`). */
+  otherSiblings?: Sibling[];
+}
+
+export function lifeStory(detail: PersonDetail, options: LifeStoryOptions = {}): string[] {
   const { summary, events } = detail;
   const name = fullName(summary);
   const me = PRONOUNS[summary.sex] ?? THEY;
   const possessive = capitalize(me.possessive);
+  /** A verb phrase agreeing with the pronoun: "was naturalized" becomes "were naturalized". */
+  const agree = (verb: string) => verb.replace(/^was\b/, me.be);
+  /** "stepfather" for a man or woman; "a stepparent" reads better after "they were". */
+  const stepRole = (sex: string) =>
+    sex === 'M' || sex === 'F' ? parentWord(sex, 'step') : `a ${parentWord(sex, 'step')}`;
   const paragraphs: string[] = [];
   const birthText = summary.birth?.dateText;
   const ageText = (text: string | null | undefined) => {
@@ -171,7 +187,7 @@ export function lifeStory(detail: PersonDetail): string[] {
   const birthParents = ofRel(isBirthLink);
   const adoptive = ofRel((rel) => rel === 'adopted');
   const step = ofRel((rel) => rel === 'step');
-  const foster = ofRel((rel) => rel === 'foster' || rel === 'guardian');
+  const foster = ofRel((rel) => parentLink(rel) === 'foster' || parentLink(rel) === 'guardian');
 
   const birthParts: string[] = [];
   const birth = firstOwn(events, ['BIRT', 'CHR', 'BAPM']);
@@ -188,7 +204,7 @@ export function lifeStory(detail: PersonDetail): string[] {
   if (adoptive.length > 0 || adoption) {
     const by = adoptive.length > 0 ? `by ${list(adoptive.map(fullName))}` : '';
     birthParts.push(
-      `${capitalize(words(me.subject, 'was adopted', when(adoption?.event.date_text), by))}.`,
+      `${capitalize(words(me.subject, agree('was adopted'), when(adoption?.event.date_text), by))}.`,
     );
   }
   if (step.length > 0) {
@@ -200,9 +216,14 @@ export function lifeStory(detail: PersonDetail): string[] {
     );
   }
   if (foster.length > 0) {
-    birthParts.push(`${capitalize(me.subject)} was fostered by ${list(foster.map(fullName))}.`);
+    birthParts.push(
+      `${capitalize(me.subject)} ${agree('was fostered')} by ${list(foster.map(fullName))}.`,
+    );
   }
-  const siblings = siblingsOf(detail.parentFamilies);
+  const siblings = closest([
+    ...siblingsOf(detail.parentFamilies),
+    ...(options.otherSiblings ?? []),
+  ]);
   if (siblings.length > 0) {
     const parts: string[] = [];
     for (const kind of SIBLING_ORDER) {
@@ -239,7 +260,7 @@ export function lifeStory(detail: PersonDetail): string[] {
       const at = [where(place?.full_name), when(event.date_text)];
       work.push(
         verb
-          ? `${capitalize(words(me.subject, verb, ...at))}.`
+          ? `${capitalize(words(me.subject, agree(verb), ...at))}.`
           : `${capitalize(words(me.possessive, label.toLowerCase(), 'was recorded', ...at))}.`,
       );
     }
@@ -265,12 +286,20 @@ export function lifeStory(detail: PersonDetail): string[] {
       (c) => isParentLink(mine(c)) && (!partner || isParentLink(theirs(c))),
     );
     const born = shared.filter((c) => mine(c) !== 'adopted').map((c) => given(c.person));
-    const adopted = shared.filter((c) => mine(c) === 'adopted').map((c) => given(c.person));
+    const adopted = shared.filter((c) => mine(c) === 'adopted');
+    // Adopting the partner's own child (a step-adoption) is this person's act alone.
+    const alone = adopted.filter((c) => partner && isBirthLink(theirs(c)));
+    const together = adopted.filter((c) => !alone.includes(c));
     const subject = partner ? 'Together they' : capitalize(me.subject);
     if (born.length > 0)
       parts.push(`${subject} had ${count(born.length, 'child')}: ${list(born)}.`);
-    if (adopted.length > 0) {
-      parts.push(`${subject} adopted ${count(adopted.length, 'child')}: ${list(adopted)}.`);
+    if (together.length > 0) {
+      const names = together.map((c) => given(c.person));
+      parts.push(`${subject} adopted ${count(names.length, 'child')}: ${list(names)}.`);
+    }
+    if (alone.length > 0) {
+      const names = alone.map((c) => given(c.person));
+      parts.push(`${given(summary)} adopted ${list(names)}.`);
     }
     if (partner) {
       const partnerSteps = children.filter(
@@ -278,13 +307,13 @@ export function lifeStory(detail: PersonDetail): string[] {
       );
       if (partnerSteps.length > 0) {
         parts.push(
-          `${given(partner)} was ${parentWord(partner.sex, 'step')} to ${list(partnerSteps.map((c) => given(c.person)))}.`,
+          `${given(partner)} was ${stepRole(partner.sex)} to ${list(partnerSteps.map((c) => given(c.person)))}.`,
         );
       }
       const mySteps = children.filter((c) => !isParentLink(mine(c)) && isParentLink(theirs(c)));
       if (mySteps.length > 0) {
         parts.push(
-          `${capitalize(me.subject)} was ${parentWord(summary.sex, 'step')} to ${list(mySteps.map((c) => given(c.person)))}.`,
+          `${capitalize(me.subject)} ${me.be} ${stepRole(summary.sex)} to ${list(mySteps.map((c) => given(c.person)))}.`,
         );
       }
     }
@@ -303,7 +332,7 @@ export function lifeStory(detail: PersonDetail): string[] {
       text: `${possessive} ${parentWord(parent.sex, rel)}, ${fullName(parent)}, died ${inYear(parent.death!)}${age ? `, when ${given(summary)} was ${age}` : ''}.`,
     });
   }
-  for (const { partner, children } of detail.partnerFamilies) {
+  for (const { family, partner, children } of detail.partnerFamilies) {
     if (partner && died(partner.death)) {
       const role = partner.sex === 'M' ? 'husband' : partner.sex === 'F' ? 'wife' : 'partner';
       losses.push({
@@ -311,9 +340,10 @@ export function lifeStory(detail: PersonDetail): string[] {
         text: `${possessive} ${role}, ${fullName(partner)}, died ${inYear(partner.death!)}.`,
       });
     }
-    for (const { person } of children) {
+    for (const { person, link } of children) {
       if (!died(person.death)) continue;
-      const role = person.sex === 'M' ? 'son' : person.sex === 'F' ? 'daughter' : 'child';
+      // Worded from this person's own link, as in the timeline: "stepson".
+      const role = childWord(person.sex, linkToPartner(family, detail.person.id, link));
       losses.push({
         when: person.death!.dateSort!,
         text: `${possessive} ${role} ${given(person)} died ${inYear(person.death!)}.`,
@@ -335,7 +365,7 @@ export function lifeStory(detail: PersonDetail): string[] {
     );
     if (age) sentence += `, at the age of ${age}`;
     if (burial?.place) {
-      sentence += `, and was ${burial.event.type === 'BURI' ? 'buried' : 'cremated'} in ${burial.place.full_name}`;
+      sentence += `, and ${me.be} ${burial.event.type === 'BURI' ? 'buried' : 'cremated'} in ${burial.place.full_name}`;
     }
     paragraphs.push(`${sentence}.`);
   }

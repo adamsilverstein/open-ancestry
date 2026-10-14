@@ -5,13 +5,15 @@ import { EmptyState } from '../../components/EmptyState/EmptyState';
 import { Panel } from '../../components/Panel/Panel';
 import { SourceItem } from '../../components/SourceItem/SourceItem';
 import { lifeStory } from '../../lib/lifeStory';
+import { useOtherSiblings } from './useOtherSiblings';
 import { collectCitations, groupBySource } from '../../lib/sources';
 import styles from './PersonPage.module.css';
 
 export { GalleryTab } from './gallery/GalleryTab';
 
-export function LifeStoryTab({ detail }: { detail: PersonDetail }) {
-  const paragraphs = useMemo(() => lifeStory(detail), [detail]);
+export function LifeStoryTab({ tree, detail }: { tree: string; detail: PersonDetail }) {
+  const others = useOtherSiblings(tree, detail);
+  const paragraphs = useMemo(() => lifeStory(detail, { otherSiblings: others }), [detail, others]);
   if (paragraphs.length === 0) {
     return (
       <EmptyState

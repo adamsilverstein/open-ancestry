@@ -143,6 +143,8 @@ describe('lifeStory family wording', () => {
     expect(story[2]).toBe(
       'He married Iris Vale on 14 Jun 1905 in Ashcombe, Eastholm. Iris was stepmother to Lena. He was stepfather to Arthur.',
     );
+    // Losses use the same link as the timeline.
+    expect(story[3]).toContain('His stepson Arthur died in 1944.');
   });
 
   it('says when the couple adopted', () => {
@@ -177,5 +179,105 @@ describe('lifeStory family wording', () => {
     expect(story).toContain(
       'He arrived in Millbrook, Vermont in 1866. His land grant was recorded in Millbrook, Vermont about 1870.',
     );
+  });
+
+  it('says who adopted a partner’s own child', () => {
+    const partner = rowan.partnerFamilies[0]!;
+    const mine = partner.family.partner1_id === rowan.person.id ? 'partner1_rel' : 'partner2_rel';
+    const [lena, arthur] = partner.children;
+    const story = lifeStory({
+      ...rowan,
+      partnerFamilies: [
+        {
+          ...partner,
+          children: [lena!, { ...arthur!, link: { ...arthur!.link, [mine]: 'adopted' } }],
+        },
+      ],
+    });
+    expect(story[2]).toContain('Together they had one child: Lena. Rowan adopted Arthur.');
+    expect(story[2]).not.toContain('Together they adopted');
+  });
+
+  it('counts siblings from other partnerships by kind', () => {
+    const nell = fixtureDetail('nell').summary;
+    const story = lifeStory(rowan, {
+      otherSiblings: [
+        { person: nell, kind: 'half' },
+        { person: { ...nell, id: 'silas', given: 'Silas', sex: 'M' }, kind: 'step' },
+        { person: { ...nell, id: 'finn', given: 'Finn', sex: 'M' }, kind: 'foster' },
+      ],
+    });
+    expect(story[0]).toContain(
+      'He had one brother, one sister, one half-sister, one stepbrother and one foster brother.',
+    );
+  });
+});
+
+describe('lifeStory verb agreement', () => {
+  const rowan = fixtureDetail('rowan');
+  const [family] = rowan.parentFamilies;
+  const partner = rowan.partnerFamilies[0]!;
+  const mine = partner.family.partner1_id === rowan.person.id ? 'partner1_rel' : 'partner2_rel';
+  const base = rowan.events[0]!;
+  const event = (id: string, type: string, custom: string | null, date: string) => ({
+    ...base,
+    event: { ...base.event, id, type, custom_type: custom, date_text: date },
+    role: { ...base.role, is_preferred: 1 as const },
+  });
+  const fay = { ...family!.partner1!, id: 'fay', given: 'Fay', surname: 'Moss', sex: 'F' as const };
+
+  /** Every sentence template with a "to be" verb: adoption, fostering, stepparent, events, burial. */
+  const story = (sex: 'M' | 'F' | 'U') =>
+    lifeStory({
+      ...rowan,
+      summary: { ...rowan.summary, sex },
+      events: [
+        ...rowan.events,
+        event('adop', 'ADOP', null, '1882'),
+        event('nat', 'EVEN', 'Naturalization', '1890'),
+      ],
+      parentFamilies: [
+        { ...family!, link: { ...family!.link, partner1_rel: 'adopted' } },
+        {
+          ...family!,
+          family: { ...family!.family, id: 'foster-family', partner1_id: 'fay', partner2_id: null },
+          partner1: fay,
+          partner2: null,
+          link: { ...family!.link, partner1_rel: 'foster' },
+          siblings: [],
+        },
+      ],
+      partnerFamilies: [
+        {
+          ...partner,
+          children: partner.children.map((c, i) =>
+            i === 1 ? { ...c, link: { ...c.link, [mine]: 'step' as const } } : c,
+          ),
+        },
+      ],
+    }).join(' ');
+
+  it('conjugates with they for unknown sex', () => {
+    const text = story('U');
+    expect(text).not.toMatch(/\b[Tt]hey was\b/);
+    expect(text).toContain('They were adopted in 1882 by Edmund Ashdown.');
+    expect(text).toContain('They were fostered by Fay Moss.');
+    expect(text).toContain('They were naturalized');
+    expect(text).toContain('They were a stepparent to Arthur.');
+    expect(text).toMatch(/, and were buried in /);
+  });
+
+  it.each([
+    ['M', 'He'],
+    ['F', 'She'],
+  ] as const)('keeps "was" for %s', (sex, pronoun) => {
+    const text = story(sex);
+    expect(text).toContain(`${pronoun} was adopted in 1882 by Edmund Ashdown.`);
+    expect(text).toContain(`${pronoun} was fostered by Fay Moss.`);
+    expect(text).toContain(`${pronoun} was naturalized`);
+    expect(text).toContain(
+      `${pronoun} was ${sex === 'M' ? 'stepfather' : 'stepmother'} to Arthur.`,
+    );
+    expect(text).toMatch(/, and was buried in /);
   });
 });

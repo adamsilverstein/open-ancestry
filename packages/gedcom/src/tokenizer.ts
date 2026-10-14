@@ -45,12 +45,6 @@ export function tokenizeLine(line: string): Token | undefined {
   let i = 0;
   while (i < n && isDelimiter(line.charCodeAt(i))) i++;
   let canonical = i === 0;
-  /** Skips a delimiter run; canonical runs are exactly one space. */
-  const skip = () => {
-    const from = i;
-    while (i < n && isDelimiter(line.charCodeAt(i))) i++;
-    if (i - from !== 1 || line.charCodeAt(from) !== SPACE) canonical = false;
-  };
 
   const levelStart = i;
   while (i < n && line.charCodeAt(i) >= ZERO && line.charCodeAt(i) <= NINE) i++;
@@ -60,7 +54,9 @@ export function tokenizeLine(line: string): Token | undefined {
     digits === 1
       ? line.charCodeAt(levelStart) - ZERO
       : (line.charCodeAt(levelStart) - ZERO) * 10 + line.charCodeAt(levelStart + 1) - ZERO;
-  skip();
+  // Canonical delimiter runs are exactly one space.
+  if (line.charCodeAt(i) !== SPACE || isDelimiter(line.charCodeAt(i + 1))) canonical = false;
+  while (i < n && isDelimiter(line.charCodeAt(i))) i++;
 
   let xref: string | undefined;
   if (line.charCodeAt(i) === AT) {
@@ -70,7 +66,8 @@ export function tokenizeLine(line: string): Token | undefined {
     if (xref.includes(' ')) return undefined;
     i = close + 1;
     if (i === n || !isDelimiter(line.charCodeAt(i))) return undefined;
-    skip();
+    if (line.charCodeAt(i) !== SPACE || isDelimiter(line.charCodeAt(i + 1))) canonical = false;
+    while (i < n && isDelimiter(line.charCodeAt(i))) i++;
   }
 
   const tagStart = i;

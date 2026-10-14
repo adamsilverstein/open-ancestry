@@ -78,6 +78,62 @@ describe('decades, centuries and hyphenated ranges', () => {
   );
 });
 
+describe('periods bounded by decades and centuries', () => {
+  // [input, the GEDCOM date it means]
+  it.each<[string, string]>([
+    // A period from a span starts at its first year; to a span ends at its last (the
+    // loose reading, as with BEF and AFT, so nothing is assumed beyond what was written).
+    ['FROM 1850s', 'FROM 1850'],
+    ['from 1850s', 'FROM 1850'],
+    ["From 1850's", 'FROM 1850'],
+    ['FROM 1700s', 'FROM 1700'],
+    ['FROM 2000s', 'FROM 2000'],
+    ['TO 1850s', 'TO 1859'],
+    ['to 1700s', 'TO 1799'],
+    ['TO 2000s', 'TO 2009'],
+    // Both ends.
+    ['FROM 1850s TO 1860s', 'FROM 1850 TO 1869'],
+    ['FROM 1700s TO 1800s', 'FROM 1700 TO 1899'],
+    ['FROM 1850 TO 1860s', 'FROM 1850 TO 1869'],
+    ['FROM 1850s TO 1855', 'FROM 1850 TO 1855'],
+    ['FROM 2000s TO 2010s', 'FROM 2000 TO 2019'],
+    // A span written as one range after FROM is the whole period.
+    ['FROM 1850s-1860s', 'FROM 1850 TO 1869'],
+    ['FROM 1850-1860', 'FROM 1850 TO 1860'],
+    ['FROM 1850-60', 'FROM 1850 TO 1860'],
+  ])('%j means %s', (input, gedcom) => {
+    const date = parseDate(input);
+    expect(date.text).toBe(input);
+    expect(date.valid).toBe(true);
+    expect(shape(date)).toEqual(shape(parseDate(gedcom)));
+  });
+
+  it.each([
+    'FROM 1860s TO 1850s',
+    'FROM 1860s TO 1855',
+    'FROM 1870 TO 1850s',
+    'FROM 1860-1850',
+    'TO 0s',
+  ])('%j runs backwards or is no span, so it stays text', (input) => {
+    expect(parseDate(input).qualifier).toBe('text');
+  });
+
+  it.each([
+    'FROM 1850s',
+    'TO 1850s',
+    'FROM 1850s TO 1860s',
+    'FROM 1700s TO 1800s',
+    'TO 2000s',
+    'FROM 1850-60',
+  ])('%j round-trips through GEDCOM and the display form', (input) => {
+    const parsed = parseDate(input);
+    for (const version of ['5.5.1', '7'] as const) {
+      expect(shape(parseDate(toGedcom(parsed, version)))).toEqual(shape(parsed));
+    }
+    expect(shape(parseDate(formatDate(parsed)))).toEqual(shape(parsed));
+  });
+});
+
 describe('inverted ranges', () => {
   it.each(['BEF 1850-13', 'AFT 1850-13', 'BEF 1950-1913', 'abt 1950-13', 'Bet. 1950-13'])(
     '%j stays text whatever qualifier comes first',

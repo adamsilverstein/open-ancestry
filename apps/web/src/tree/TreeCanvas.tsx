@@ -277,9 +277,17 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     const gutter = gutterRef.current;
     // Rows closer than a label's height would overlap: hide them when zoomed far out.
     if (gutter) gutter.hidden = t.scale < 0.15;
+    const offset = gutter?.offsetLeft ?? 0;
     for (const el of gutter?.children ?? []) {
       const label = el as HTMLElement;
-      label.style.transform = `translateY(${Number(label.dataset.y) * t.scale + t.y}px) translateY(-50%)`;
+      // Beside the row while the row's cards start right of the label; once a
+      // wide row slides under the gutter, up in the gap above it instead, so
+      // the label never covers a card.
+      const right = offset + label.offsetLeft + label.offsetWidth + 8;
+      const under = Number(label.dataset.left) * t.scale + t.x < right;
+      const y = under ? Number(label.dataset.gapY) : Number(label.dataset.y);
+      label.style.transform = `translateY(${y * t.scale + t.y}px) translateY(-50%)`;
+      label.toggleAttribute('data-above', under);
     }
   };
   const transform = useRef<Transform>({ x: 0, y: 0, scale: 1 });
@@ -1061,6 +1069,25 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     focusGiven ? `${focusGiven}’s ${text.toLowerCase()}` : text;
 
   const shown = visible.source === layout && layout ? visible : null;
+  // Per labelled row: its leftmost card, and the middle of the gap above it.
+  const rowExtent = useMemo(() => {
+    const extent = new Map<number, { 'data-left': number; 'data-gap-y': number }>();
+    if (!layout) return extent;
+    const rows = new Map<number, { left: number; top: number }>();
+    for (const n of layout.nodes) {
+      const row = rows.get(n.generation);
+      if (!row) rows.set(n.generation, { left: n.x, top: n.y });
+      else row.left = Math.min(row.left, n.x);
+    }
+    for (const [generation, row] of rows) {
+      const above = rows.get(generation - 1);
+      const height = layout.nodes[0]!.height;
+      // Chevrons sit on the cards' top edges: keep the label clear of them.
+      const gapY = above ? (above.top + height + row.top) / 2 - 7 : row.top - 28;
+      extent.set(generation, { 'data-left': row.left, 'data-gap-y': gapY });
+    }
+    return extent;
+  }, [layout]);
   // Column heads (pedigree) wrap within a card and most of the gap after it.
   const columnLabelWidth = (layout?.nodes[0]?.width ?? 120) + 48;
   const cardIndexes = useMemo(() => {
@@ -1176,7 +1203,13 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         {layout?.labels
           .filter((l) => l.anchor === 'right-middle')
           .map((l) => (
-            <div key={l.generation} className={styles.labelGutter} data-y={l.y}>
+            <div
+              key={l.generation}
+              className={styles.labelGutter}
+              data-testid="tree-row-label"
+              data-y={l.y}
+              {...rowExtent.get(l.generation)}
+            >
               <GenerationLabel>{relativeLabel(l.text)}</GenerationLabel>
             </div>
           ))}

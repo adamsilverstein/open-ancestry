@@ -657,6 +657,35 @@ test.describe('pedigree, descendant and fan views', () => {
     }
   });
 
+  test('row labels move clear of cards when a wide row slides under them', async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 700 });
+    await open(page, 'bram', '&layout=descendants');
+    await settled(page);
+    const intersects = (a: { x: number; y: number; width: number; height: number }, b: typeof a) =>
+      a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+    const labels = page.getByTestId('tree-row-label');
+    const cards = canvas(page).getByRole('button', { name: /, (male|female)/ });
+    // Pan right so the rows run under the label column, then check every pair.
+    for (const dx of [0, 300]) {
+      if (dx) {
+        await page.mouse.move(600, 400);
+        await page.mouse.down();
+        await page.mouse.move(600 + dx, 400, { steps: 5 });
+        await page.mouse.up();
+        await settled(page);
+      }
+      const labelBoxes = [];
+      for (const label of await labels.all())
+        if (await label.isVisible()) labelBoxes.push(await box(label));
+      expect(labelBoxes.length).toBeGreaterThan(0);
+      for (const card of await cards.all()) {
+        const c = await card.boundingBox();
+        if (!c) continue;
+        for (const l of labelBoxes) expect(intersects(l, c)).toBe(false);
+      }
+    }
+  });
+
   test('the fan chart fits the screen and marks unknown parents as empty slots', async ({
     page,
   }) => {

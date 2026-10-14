@@ -1020,6 +1020,14 @@ for (const [width, height] of [
           overlap,
           `${name} covered by its quick view: ${JSON.stringify({ b, cardBox })}`,
         ).toBe(false);
+        // The name stays in sight, not scrolled under the actions.
+        const title = quick.getByText(name, { exact: true });
+        const t = await box(title);
+        const shown = await page.evaluate(
+          ({ x, y }) => document.elementFromPoint(x, y)?.textContent ?? '',
+          { x: t.x + Math.min(t.width / 2, 20), y: t.y + t.height / 2 },
+        );
+        expect(shown, `${name} hidden in its quick view`).toBe(name);
         const actions = [
           quick.getByRole('link', { name: 'Profile' }),
           quick.getByRole('button', { name: 'Make focus' }),
@@ -1051,10 +1059,12 @@ test.describe('quick view above a bottom toolbar', () => {
   test('keeps clear of the phone layout bottom bar', async ({ page }) => {
     await open(page);
     await settled(page);
-    // Stand in for the phone toolbar: the layout publishes its height.
+    // Stand in for the phone toolbar: the layout publishes its height on the tree region.
     const bar = 120;
     await page.evaluate((height) => {
-      document.documentElement.style.setProperty('--oa-tree-bottom-bar', `${height}px`);
+      document
+        .querySelector<HTMLElement>('[data-tree-region]')!
+        .style.setProperty('--oa-tree-bottom-bar', `${height}px`);
     }, bar);
     // Pan so Ada's card ends where the popover fits below it on the bare screen
     // but not above the bar.

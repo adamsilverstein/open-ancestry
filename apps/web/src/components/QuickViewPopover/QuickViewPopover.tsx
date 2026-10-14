@@ -57,10 +57,13 @@ const TOP_BAR_HEIGHT = 48;
 /** The popover's width (see the CSS) plus its offset from the card. */
 const NEEDED_BESIDE = 300 + 6 + EDGE;
 
-/** The tree's bottom toolbar in the phone layout (`--oa-tree-bottom-bar`), or 0. */
+/**
+ * The tree's bottom toolbar in the phone layout (`--oa-tree-bottom-bar`, set
+ * on the tree region), or 0.
+ */
 function bottomBarHeight(): number {
-  const value = getComputedStyle(document.documentElement).getPropertyValue('--oa-tree-bottom-bar');
-  return Number.parseFloat(value) || 0;
+  const region = document.querySelector('[data-tree-region]') ?? document.documentElement;
+  return Number.parseFloat(getComputedStyle(region).getPropertyValue('--oa-tree-bottom-bar')) || 0;
 }
 
 /**
@@ -130,7 +133,7 @@ export function QuickViewPopover({
       >
         <div className={styles.header}>
           <Avatar name={person.name} sex={person.sex} src={person.photoUrl} size={64} decorative />
-          <div>
+          <div className={styles.title}>
             <p className={styles.name}>{person.name}</p>
             <LifespanText className={styles.lifespan} {...person} />
           </div>

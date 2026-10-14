@@ -1216,3 +1216,43 @@ describe('UX QA (#72): a partner the export dropped', () => {
     );
   });
 });
+
+describe('UX QA (#72): new people who look like someone in the tree', () => {
+  it('offers a near-name record unticked as a possible match, and a stranger as new', async () => {
+    const extra = [
+      '0 @I90@ INDI',
+      '1 NAME Edyth /Ashgrove/',
+      '1 SEX F',
+      '1 BIRT',
+      '2 DATE 1897',
+      '0 @I91@ INDI',
+      '1 NAME Harold /Ashgrove/',
+      '1 SEX M',
+      '1 BIRT',
+      '2 DATE 1955',
+      '',
+    ].join('\n');
+    const s2 = await prepareReimport(
+      store,
+      { bytes: renumber(SAMPLE.replace('0 TRLR', `${extra}0 TRLR`)) },
+      { today: TODAY },
+    );
+    try {
+      const of = (name: string) =>
+        s2.diff.people
+          .find((p) => p.name === name && p.status === 'new')!
+          .changes.map((c) => [c.kind, c.defaultAccept]);
+      expect(of('Edyth Ashgrove')).toEqual([
+        ['possible-match', false],
+        ['person.new', false],
+      ]);
+      const hint = s2.diff.people
+        .find((p) => p.name === 'Edyth Ashgrove')!
+        .changes.find((c) => c.kind === 'possible-match');
+      expect(hint).toMatchObject({ existingName: 'Edith Ashgrove', applicable: false });
+      expect(of('Harold Ashgrove')).toEqual([['person.new', true]]);
+    } finally {
+      closeReimport(s2);
+    }
+  });
+});

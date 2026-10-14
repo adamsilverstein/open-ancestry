@@ -474,7 +474,14 @@ export interface NeighborhoodOptions {
   up?: number;
   /** Generations of descendants (default 3). */
   down?: number;
-  /** Include the focus person's siblings (default true). */
+  /**
+   * Ancestor generations whose siblings to include: 0 none, 1 the focus
+   * person's siblings (default), 2 also aunts and uncles, and so on, up to
+   * `up`. Siblings come without their partners or descendants; those with
+   * children are listed in `moreDown`.
+   */
+  siblingsDepth?: number;
+  /** `false` is the same as `siblingsDepth: 0` (kept for older callers). */
   siblings?: boolean;
   /** Stop expanding past this many people (default and maximum 5000). */
   maxPeople?: number;
@@ -490,7 +497,8 @@ const clamp = (value: number, min: number, max: number) =>
 /**
  * A compact graph slice around a person for the tree views: ancestors `up`
  * generations, descendants `down` generations with their partners, and the
- * focus person's siblings. One batched query per generation and direction.
+ * siblings of the focus person and of ancestors `siblingsDepth` generations
+ * up. One batched query per generation and direction.
  */
 export function getNeighborhood(
   store: TreeStore,
@@ -502,7 +510,13 @@ export function getNeighborhood(
   const up = clamp(options.up ?? 4, 0, MAX_NEIGHBORHOOD_GENERATIONS);
   const down = clamp(options.down ?? 3, 0, MAX_NEIGHBORHOOD_GENERATIONS);
   const maxPeople = clamp(options.maxPeople ?? MAX_NEIGHBORHOOD_PEOPLE, 1, MAX_NEIGHBORHOOD_PEOPLE);
-  const siblings = options.siblings ?? true;
+  const siblingsDepth = clamp(
+    options.siblingsDepth ?? (options.siblings === false ? 0 : 1),
+    0,
+    MAX_NEIGHBORHOOD_GENERATIONS,
+  );
+  // Siblings of ancestors who are themselves on the line are not siblings here.
+  const siblingIds = new Set<string>();
   let truncated = false;
   const full = () => {
     if (people.size >= maxPeople) truncated = true;
@@ -585,8 +599,12 @@ export function getNeighborhood(
         }
       }
     }
-    if (generation === 0 && siblings && found.length > 0) {
-      for (const c of childrenOf(found.map((f) => f.id))) addChild(c);
+    if (generation < siblingsDepth && found.length > 0) {
+      const line = new Set(frontier);
+      for (const c of childrenOf(found.map((f) => f.id))) {
+        addChild(c);
+        if (!line.has(c.child_id)) siblingIds.add(c.child_id);
+      }
     }
     frontier = next;
   }
@@ -633,6 +651,22 @@ export function getNeighborhood(
       }
     }
     frontier = next;
+  }
+
+  // Siblings are leaves here; flag the ones whose children were not fetched.
+  const leafSiblings = [...siblingIds].filter((id) => !seenDown.has(id) && !seenUp.has(id));
+  if (leafSiblings.length > 0) {
+    const json = JSON.stringify(leafSiblings);
+    const withChildren = rows<{ id: string }>(
+      store,
+      `SELECT f.partner1_id AS id FROM family f WHERE f.partner1_id IN (${IDS})
+         AND EXISTS (SELECT 1 FROM family_child fc WHERE fc.family_id = f.id)
+       UNION SELECT f.partner2_id FROM family f WHERE f.partner2_id IN (${IDS})
+         AND EXISTS (SELECT 1 FROM family_child fc WHERE fc.family_id = f.id)`,
+      json,
+      json,
+    ).map((r) => r.id);
+    moreDown = [...new Set([...moreDown, ...withChildren])].sort();
   }
 
   // One generation can overshoot the cap: keep the first maxPeople (focus

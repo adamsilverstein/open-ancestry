@@ -91,10 +91,10 @@ export function peopleRoutes(app: Api, { library }: Deps): void {
     { schema: { params: TreeParams, querystring: NeighborhoodQuery } },
     async (request) => {
       const store = library.open(request.params.tree);
-      const { focus, up, down, siblings } = request.query;
+      const { focus, up, down, siblings, siblingsDepth } = request.query;
       const focusId = focus ?? meta.getHomePersonId(store);
       if (!focusId) throw badRequest('Give a focus person (no home person is set)');
-      return getNeighborhood(store, focusId, { up, down, siblings });
+      return getNeighborhood(store, focusId, { up, down, siblings, siblingsDepth });
     },
   );
 

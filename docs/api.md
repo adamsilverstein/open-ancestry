@@ -48,7 +48,7 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 | `GET /api/trees/:tree/people/:id` | `PersonDetail` (names, timeline events, families, media, notes, tags). |
 | `GET /api/trees/:tree/people/:id/summary` | `PersonSummary`. |
 | `GET /api/trees/:tree/families/:id` | Family with partners, children and events. |
-| `GET /api/trees/:tree/neighborhood?focus&up&down&siblings` | Graph slice for the tree views (focus defaults to the home person; up/down 0-10). |
+| `GET /api/trees/:tree/neighborhood?focus&up&down&siblingsDepth` | Graph slice for the tree views (focus defaults to the home person; up/down 0-10). `siblingsDepth` 0-10 adds siblings of the focus person (1, the default), parents (2, aunts and uncles) and so on up to `up`; siblings with unfetched children are in `moreDown`. `siblings=false` equals `siblingsDepth=0`. |
 | `GET /api/trees/:tree/search?q&limit` | Ranked search; the last word also matches by surname sound. |
 | `GET`, `PUT /api/trees/:tree/home` `{ personId }` | Home person. |
 | `GET /api/trees/:tree/tags` | Tags with person counts. |

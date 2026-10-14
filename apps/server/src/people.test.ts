@@ -142,6 +142,21 @@ describe('GET neighborhood', () => {
     expect(JSON.stringify(layout)).toContain(s.eve);
   });
 
+  it('includes aunts and uncles with siblingsDepth', async () => {
+    const aunt = (
+      await api.post(`${s.base}/people/${s.bram}/siblings`, {
+        person: { names: [{ given: 'Fay', surname: 'Vale' }] },
+      })
+    ).json().siblingId;
+    const given = (n: { people: { given: string }[] }) => n.people.map((p) => p.given);
+    const url = `${s.base}/neighborhood?focus=${s.eve}&up=3&down=0`;
+    expect(given((await api.get(url)).json())).not.toContain('Fay');
+    const deep = (await api.get(`${url}&siblingsDepth=3`)).json();
+    expect(given(deep)).toContain('Fay');
+    expect(deep.people.map((p: { id: string }) => p.id)).toContain(aunt);
+    expect((await api.get(`${url}&siblingsDepth=11`)).statusCode).toBe(400);
+  });
+
   it('limits generations', async () => {
     const n = (await api.get(`${s.base}/neighborhood?focus=${s.eve}&up=0&down=0`)).json();
     expect(n.people.map((p: { id: string }) => p.id)).toEqual([s.eve]);

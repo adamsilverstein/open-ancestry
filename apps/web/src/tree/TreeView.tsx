@@ -327,14 +327,24 @@ export function TreeView({
 
   const onRendered = useCallback(() => {
     setRendered(shownResult);
-    if (refocusPending.current) {
-      refocusPending.current = false;
-      try {
-        performance.measure('oa-tree-refocus', REFOCUS_MARK);
-      } catch {
-        // The start mark was cleared; nothing to measure.
-      }
-    }
+    const measure = refocusPending.current;
+    refocusPending.current = false;
+    // For perf tests and profiling, once the frame showing this layout is painted:
+    // a task queued from the next animation frame runs after that frame's paint.
+    requestAnimationFrame(() => {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => {
+        // When each layout is on screen; the first is the tree's first paint.
+        performance.mark('oa-tree-ready');
+        if (!measure) return;
+        try {
+          performance.measure('oa-tree-refocus', REFOCUS_MARK, 'oa-tree-ready');
+        } catch {
+          // The start mark was cleared; nothing to measure.
+        }
+      };
+      channel.port2.postMessage(null);
+    });
   }, [shownResult]);
 
   const onToggle = useCallback(

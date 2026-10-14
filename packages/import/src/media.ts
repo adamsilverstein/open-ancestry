@@ -1,6 +1,15 @@
 import type { MediaKind } from '@open-ancestry/db';
 import { safeEntryPath } from '@open-ancestry/gedcom';
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import {
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+  type Stats,
+} from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 
 /** What a GEDCOM `FILE` value points at. */
@@ -172,6 +181,14 @@ export class MediaSource {
   }
 }
 
+function lstatOrNull(path: string): Stats | null {
+  try {
+    return lstatSync(path);
+  } catch {
+    return null;
+  }
+}
+
 /** `photos/a.jpg` -> `photos/a-2.jpg`. */
 export function suffixedPath(relPath: string, n: number): string {
   const slash = relPath.lastIndexOf('/');
@@ -206,13 +223,21 @@ export function storeMediaFile(
     const candidate = n === 1 ? relPath : suffixedPath(relPath, n);
     const target = resolve(root, ...candidate.split('/'));
     if (!target.startsWith(root + sep)) throw new Error(`unsafe media path ${relPath}`);
-    if (existsSync(target)) {
-      if (statSync(target).isFile() && sha256(readFileSync(target)) === hash) {
+    const existing = lstatOrNull(target);
+    if (existing) {
+      // A symlink is never followed or reused: it could point anywhere.
+      if (existing.isFile() && sha256(readFileSync(target)) === hash) {
         return { path: candidate, written: false, folder: undefined };
       }
       continue;
     }
     const folder = mkdirSync(dirname(target), { recursive: true });
+    // A symlinked folder inside media/ must not carry the write elsewhere.
+    const realRoot = realpathSync(root);
+    const realDir = realpathSync(dirname(target));
+    if (realDir !== realRoot && !realDir.startsWith(realRoot + sep)) {
+      throw new Error(`media folder for ${relPath} leads outside the tree`);
+    }
     // `wx` fails rather than replace a file that appeared since the check.
     writeFileSync(target, bytes, { flag: 'wx' });
     return { path: candidate, written: true, folder };

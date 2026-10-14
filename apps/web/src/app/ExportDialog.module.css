@@ -3,3 +3,45 @@
   flex-direction: column;
   gap: var(--oa-space-4);
 }
+
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-2);
+  font: var(--oa-text-sm);
+}
+
+/* Icon plus text, so the warning is not signalled by color alone. */
+.warning,
+.error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--oa-space-2);
+  margin: 0;
+  font: var(--oa-text-sm);
+  font-weight: var(--oa-weight-medium);
+}
+
+.warning > svg {
+  flex: none;
+  color: var(--oa-warning);
+}
+
+.error {
+  color: var(--oa-danger);
+}
+
+.list {
+  max-height: 240px;
+  margin: 0;
+  padding: var(--oa-space-2) var(--oa-space-2) var(--oa-space-2) var(--oa-space-5);
+  overflow: auto;
+  border-radius: var(--oa-radius-md);
+  background: var(--oa-surface-sunken);
+  overflow-wrap: anywhere;
+}
+
+.more {
+  margin: 0;
+  color: var(--oa-text-muted);
+}

@@ -21,3 +21,31 @@ export function exportUrl(tree: string, format: ExportFormat, privatize: boolean
   const search = query.toString();
   return `${base}/${path}${search ? `?${search}` : ''}`;
 }
+
+/** File name from a Content-Disposition header (RFC 8187 `filename*` first), else `fallback`. */
+export function downloadName(header: string | null, fallback: string): string {
+  const star = /filename\*=UTF-8''([^;]+)/i.exec(header ?? '');
+  if (star) {
+    try {
+      return decodeURIComponent(star[1]!);
+    } catch {
+      // fall through to the plain name
+    }
+  }
+  return /filename="([^"]+)"/i.exec(header ?? '')?.[1] ?? fallback;
+}
+
+/** Warnings the server sent with an export (`x-oa-export-warning-count` / `x-oa-export-warnings`). */
+export function exportWarnings(headers: Headers): { count: number; shown: string[] } {
+  const count = Number(headers.get('x-oa-export-warning-count') ?? 0) || 0;
+  let shown: string[] = [];
+  try {
+    const parsed: unknown = JSON.parse(
+      decodeURIComponent(headers.get('x-oa-export-warnings') ?? '[]'),
+    );
+    if (Array.isArray(parsed)) shown = parsed.filter((w): w is string => typeof w === 'string');
+  } catch {
+    shown = [];
+  }
+  return { count: Math.max(count, shown.length), shown };
+}

@@ -118,17 +118,29 @@ function addParent(tx: Tx, childId: string, body: AddParentBody) {
 }
 
 /** History label for a family patch: a removed partner or a type change, named as such. */
-function familyPatchLabel(
-  store: TreeStore,
-  family: FamilyRow,
-  body: { partner1_id?: string | null; partner2_id?: string | null },
-): string {
-  const slots = ['partner1_id', 'partner2_id'] as const;
-  const removed = slots.find((slot) => body[slot] === null && family[slot]);
+type PartnerPatch = { partner1_id?: string | null; partner2_id?: string | null };
+
+/**
+ * The partner a family patch takes out of the partnership, or null. Moving
+ * a partner between slots, or replacing one, is not a removal.
+ */
+function removedPartner(family: FamilyRow, body: PartnerPatch): string | null {
+  const before = [family.partner1_id, family.partner2_id].filter((p): p is string => !!p);
+  const after = [
+    body.partner1_id === undefined ? family.partner1_id : body.partner1_id,
+    body.partner2_id === undefined ? family.partner2_id : body.partner2_id,
+  ].filter((p): p is string => !!p);
+  if (after.length >= before.length) return null;
+  return before.find((p) => !after.includes(p)) ?? null;
+}
+
+/** History label for a family patch: a removed partner or a type change, named as such. */
+function familyPatchLabel(store: TreeStore, family: FamilyRow, body: PartnerPatch): string {
+  const removed = removedPartner(family, body);
   if (removed) {
-    const other = family[removed === 'partner1_id' ? 'partner2_id' : 'partner1_id'];
+    const other = [family.partner1_id, family.partner2_id].find((p) => p && p !== removed);
     const from = other ? ` from ${personLabel(store, other)}` : '';
-    return `Remove partner: ${personLabel(store, family[removed])}${from}`;
+    return `Remove partner: ${personLabel(store, removed)}${from}`;
   }
   const keys = Object.keys(body);
   if (keys.length === 1 && keys[0] === 'relationship_type') {
@@ -409,11 +421,8 @@ export function editRoutes(app: Api, { library }: Deps): void {
         (tx) => {
           const before = familyMembers(tx.store, id);
           const updated = families.update(tx, id, request.body);
-          const removedPartner = (['partner1_id', 'partner2_id'] as const).some(
-            (slot) => request.body[slot] === null && family[slot],
-          );
           let result: typeof updated | null = updated;
-          if (removedPartner) {
+          if (removedPartner(family, request.body)) {
             // The partnership has ended: its marriage and other events go with it,
             // and a family left with one partner and no children goes too.
             families.deleteEvents(tx, id);

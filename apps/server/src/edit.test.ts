@@ -186,6 +186,37 @@ describe('ending relationships', () => {
     expect((await api.get(`${s.base}/families/${s.marriage}`)).statusCode).toBe(200);
   });
 
+  it('moving a partner to the other slot is not a removal', async () => {
+    const fam = (await api.get(`${s.base}/families/${s.marriage}`)).json().family;
+    const [danSlot, adaSlot] =
+      fam.partner1_id === s.dan ? ['partner1_id', 'partner2_id'] : ['partner2_id', 'partner1_id'];
+    await api.patch(`${s.base}/families/${s.marriage}`, { [danSlot]: null });
+    await api.post(`${s.base}/families/${s.marriage}/events`, { type: 'RESI', date_text: '1970' });
+    // Ada moves from her slot to the empty one: same partnership, same events.
+    const res = await api.patch(`${s.base}/families/${s.marriage}`, {
+      [adaSlot]: null,
+      [danSlot]: s.ada,
+    });
+    expect(res.statusCode).toBe(200);
+    const label = (await api.get(`${s.base}/history?limit=1`)).json().items[0].label;
+    expect(label).toMatch(/^Edit relationship: /);
+    expect((await api.get(`${s.base}/families/${s.marriage}`)).json().events).toHaveLength(1);
+  });
+
+  it('keeps a one-partner family whose last child leaves while it still has events', async () => {
+    await api.post(`${s.base}/families/${s.marriage}/events`, { type: 'RESI', date_text: '1970' });
+    const fam = (await api.get(`${s.base}/families/${s.marriage}`)).json().family;
+    const slot = fam.partner1_id === s.dan ? 'partner1_id' : 'partner2_id';
+    // Removing Dan ends the partnership and drops its events…
+    await api.patch(`${s.base}/families/${s.marriage}`, { [slot]: null });
+    // …then a note on the family keeps it after its last child leaves.
+    await api.post(`${s.base}/notes`, { text: 'Kept', owner_type: 'family', owner_id: s.marriage });
+    const link = (await (await api.get(`${s.base}/people/${s.eve}`)).json()).parentFamilies[0].link
+      .id;
+    await api.del(`${s.base}/family-children/${link}`);
+    expect((await api.get(`${s.base}/families/${s.marriage}`)).statusCode).toBe(200);
+  });
+
   it('keeps a family that still has two partners when a child leaves', async () => {
     const link = (await familyOf(s.eve)).parentFamilies[0].link.id;
     await api.del(`${s.base}/family-children/${link}`);

@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { RelationshipType } from '@open-ancestry/db';
 import { MoreHorizontal } from 'lucide-react';
 import { apiSend, seg } from '../../../api/client';
@@ -24,8 +24,6 @@ type ParentFamily = PersonDetail['parentFamilies'][number];
 type PartnerFamily = PersonDetail['partnerFamilies'][number];
 
 interface Confirm {
-  /** The change removes the group the menu was in, so focus cannot go back there. */
-  removesGroup?: boolean;
   title: string;
   description: string;
   confirmLabel: string;
@@ -124,21 +122,25 @@ export function useRelationshipEdits(tree: string, detail: PersonDetail) {
   // change, so the panel's Add family member button is the fallback.
   const returnTo = useRef<HTMLElement | null>(null);
   const setConfirm = (next: Confirm) => {
-    returnTo.current = next.removesGroup
-      ? document.querySelector<HTMLElement>('[data-relationships-add]')
-      : document.querySelector<HTMLElement>('button[aria-haspopup="menu"][aria-expanded="true"]');
+    returnTo.current = document.querySelector<HTMLElement>(
+      'button[aria-haspopup="menu"][aria-expanded="true"]',
+    );
     setConfirmState(next);
   };
+  // Once the change refetches, the group (and its menu button) may be gone;
+  // which ones go depends on server data the page does not have (notes, raw
+  // GEDCOM), so check after the update rather than predicting it.
+  useEffect(() => {
+    const target = returnTo.current;
+    if (!target) return;
+    if (!target.isConnected && document.activeElement === document.body) {
+      document.querySelector<HTMLElement>('[data-relationships-add]')?.focus();
+    }
+  }, [detail]);
   const self = fullName(detail.summary);
   const base = `/trees/${seg(tree)}`;
 
-  const removeChildLink = (
-    child: string,
-    parents: string,
-    linkId: string,
-    removesGroup: boolean,
-  ): Confirm => ({
-    removesGroup,
+  const removeChildLink = (child: string, parents: string, linkId: string): Confirm => ({
     title: `Remove ${child} from the family of ${parents}?`,
     description: `${child} will no longer be recorded as their child. Everyone stays in the tree, and you can undo this.`,
     confirmLabel: 'Remove link',
@@ -150,7 +152,7 @@ export function useRelationshipEdits(tree: string, detail: PersonDetail) {
     const parents = names([family.partner1, family.partner2]);
     return (
       <GroupMenu group={group}>
-        <MenuItem onSelect={() => setConfirm(removeChildLink(self, parents, family.link.id, true))}>
+        <MenuItem onSelect={() => setConfirm(removeChildLink(self, parents, family.link.id))}>
           Remove from these parents…
         </MenuItem>
       </GroupMenu>
@@ -167,7 +169,6 @@ export function useRelationshipEdits(tree: string, detail: PersonDetail) {
           title: `Remove ${name} as partner?`,
           description: `The relationship and its events (such as a marriage) are removed. Both people stay in the tree, and you can undo this.`,
           confirmLabel: 'Remove partner',
-          removesGroup: true,
           label: 'Remove relationship',
           send: () => apiSend('DELETE', `${base}/families/${family.family.id}`),
         };
@@ -191,16 +192,7 @@ export function useRelationshipEdits(tree: string, detail: PersonDetail) {
         {children.map(({ person, link }) => (
           <MenuItem
             key={link.id}
-            onSelect={() =>
-              setConfirm(
-                removeChildLink(
-                  fullName(person),
-                  parents,
-                  link.id,
-                  !partner && children.length === 1,
-                ),
-              )
-            }
+            onSelect={() => setConfirm(removeChildLink(fullName(person), parents, link.id))}
           >
             Remove child {fullName(person)}…
           </MenuItem>

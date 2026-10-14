@@ -373,6 +373,37 @@ describe('ending a partnership', () => {
     expect(persons.get(store, ids.a)).toBeDefined();
     store.close();
   });
+
+  it('keeps a one-partner, childless family that still has something attached', () => {
+    const store = memoryTree();
+    const { result: ids } = store.transact('seed', (tx) => {
+      const a = persons.create(tx, {});
+      const withEvent = families.create(tx, { partner1_id: a.id });
+      events.create(tx, { type: 'MARR', roles: [{ family_id: withEvent.id, role: 'principal' }] });
+      const withNote = families.create(tx, { partner1_id: a.id });
+      const note = notes.create(tx, { text: 'Kept' });
+      noteLinks.create(tx, { note_id: note.id, owner_type: 'family', owner_id: withNote.id });
+      const withRaw = families.create(tx, { partner1_id: a.id });
+      const batch = tx.insert('import_batch', { started_at: '2026-01-01T00:00:00Z' } as never) as {
+        id: string;
+      };
+      tx.insert('raw_record', {
+        import_batch_id: batch.id,
+        seq: 0,
+        owner_type: 'family',
+        owner_id: withRaw.id,
+        gedcom_tag: 'FAM',
+        raw_text: '0 @F1@ FAM',
+      } as never);
+      return { withEvent: withEvent.id, withNote: withNote.id, withRaw: withRaw.id };
+    });
+    store.transact('prune', (tx) => {
+      expect(families.pruneIfEmpty(tx, ids.withEvent)).toBe(false);
+      expect(families.pruneIfEmpty(tx, ids.withNote)).toBe(false);
+      expect(families.pruneIfEmpty(tx, ids.withRaw)).toBe(false);
+    });
+    store.close();
+  });
 });
 
 describe('parent families of a child', () => {

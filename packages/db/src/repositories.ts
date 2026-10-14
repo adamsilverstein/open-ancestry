@@ -329,15 +329,29 @@ export const families = {
   },
 
   /**
-   * Deletes a family that no longer records a relationship: at most one
-   * partner and no children. Returns whether it was deleted.
+   * Deletes a family that no longer records anything: at most one partner,
+   * no children, and nothing attached (events, notes, media, citations, tags,
+   * or imported GEDCOM kept for round-trip). Returns whether it was deleted.
    */
   pruneIfEmpty(tx: Tx, id: string): boolean {
     const family = tx.store.getRow('family', id);
     if (!family) return false;
     const partners = [family.partner1_id, family.partner2_id].filter(Boolean).length;
-    const hasChildren = tx.store.stmt('SELECT 1 FROM family_child WHERE family_id = ?').get(id);
-    if (partners > 1 || hasChildren) return false;
+    if (partners > 1) return false;
+    const attached = tx.store
+      .stmt(
+        `SELECT 1 WHERE
+           EXISTS (SELECT 1 FROM family_child WHERE family_id = @id)
+           OR EXISTS (SELECT 1 FROM event_role WHERE family_id = @id)
+           OR EXISTS (SELECT 1 FROM note_link WHERE owner_type = 'family' AND owner_id = @id)
+           OR EXISTS (SELECT 1 FROM media_link WHERE owner_type = 'family' AND owner_id = @id)
+           OR EXISTS (SELECT 1 FROM citation_link WHERE owner_type = 'family' AND owner_id = @id)
+           OR EXISTS (SELECT 1 FROM tag_link WHERE owner_type = 'family' AND owner_id = @id)
+           OR EXISTS (SELECT 1 FROM raw_record WHERE owner_type = 'family' AND owner_id = @id)
+           OR EXISTS (SELECT 1 FROM unmapped_line WHERE owner_type = 'family' AND owner_id = @id)`,
+      )
+      .get({ id });
+    if (attached) return false;
     families.delete(tx, id);
     return true;
   },

@@ -75,6 +75,7 @@ export function ImportPage() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const settled = useRef(false);
+  const [cancelAccepted, setCancelAccepted] = useState(false);
 
   useEffect(() => {
     if (!job || !finished(job) || settled.current) return;
@@ -108,7 +109,14 @@ export function ImportPage() {
   }
 
   if (job?.state === 'completed' && job.result) {
-    return <ImportReport job={job} report={job.result} />;
+    // A cancel the server took as the import reached saving: it finished anyway.
+    return (
+      <ImportReport
+        job={job}
+        report={job.result}
+        note={cancelAccepted ? 'Too late to cancel; the import finished.' : undefined}
+      />
+    );
   }
 
   if (job?.state === 'failed' && job.cancelled) {
@@ -166,7 +174,7 @@ export function ImportPage() {
       </p>
       {job && !finished(job) && (
         <div className={styles.actions}>
-          <CancelImportButton job={job} />
+          <CancelImportButton job={job} onCancelAccepted={() => setCancelAccepted(true)} />
         </div>
       )}
     </div>

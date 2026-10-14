@@ -22,7 +22,14 @@ export function canCancel(job: Pick<ImportJob, 'state' | 'progress'>): boolean {
  * Cancels a running or queued import (or reimport) job. The job's own state
  * then reports the outcome; this only asks the server and shows progress.
  */
-export function CancelImportButton({ job }: { job: Pick<ImportJob, 'id' | 'state' | 'progress'> }) {
+export function CancelImportButton({
+  job,
+  onCancelAccepted,
+}: {
+  job: Pick<ImportJob, 'id' | 'state' | 'progress'>;
+  /** The server took the cancel (202); the job may still finish if it was already saving. */
+  onCancelAccepted?: () => void;
+}) {
   const [cancelling, setCancelling] = useState(false);
   const toast = useToast();
   const hintId = useId();
@@ -39,7 +46,8 @@ export function CancelImportButton({ job }: { job: Pick<ImportJob, 'id' | 'state
         onClick={async () => {
           setCancelling(true);
           try {
-            if (!(await cancelJob(job.id))) {
+            if (await cancelJob(job.id)) onCancelAccepted?.();
+            else {
               setCancelling(false);
               toast({ title: 'Too late to cancel', description: 'The import is finishing.' });
             }

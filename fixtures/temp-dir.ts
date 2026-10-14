@@ -5,11 +5,16 @@ import { join } from 'node:path';
 /*
  * Temp folders for tests and benches. Every folder made here is removed when
  * the Vitest file that made it finishes (and, as a backstop, when the process
- * exits), so tests clean up without remembering to. Use this instead of
+ * exits or is interrupted), so tests clean up without remembering to. Use this instead of
  * mkdtemp; the lint config enforces it in tests.
  */
 
-const made = new Set<string>();
+// Shared per process: Vitest re-imports this module for every test file in a
+// worker, and the process hooks below must be added only once.
+const REGISTRY = Symbol.for('open-ancestry.temp-dirs');
+const shared = globalThis as typeof globalThis & { [REGISTRY]?: Set<string> };
+const firstLoad = shared[REGISTRY] === undefined;
+const made = (shared[REGISTRY] ??= new Set<string>());
 
 /** A fresh folder in the OS temp dir, removed after the current test file. */
 export function makeTempDir(prefix = 'oa-test-'): string {
@@ -31,4 +36,15 @@ if (process.env.VITEST) {
   const { afterAll } = await import('vitest');
   afterAll(removeTempDirs);
 }
-process.once('exit', removeTempDirs);
+if (firstLoad) {
+  process.once('exit', removeTempDirs);
+
+  // Ctrl-C or a kill skips afterAll and 'exit': remove this process's folders
+  // (never anyone else's), then let the signal end the process as it would have.
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.once(signal, () => {
+      removeTempDirs();
+      process.kill(process.pid, signal);
+    });
+  }
+}

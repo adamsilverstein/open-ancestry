@@ -46,7 +46,10 @@ describe('every route schema', () => {
     const app = createServer({ library: '/nonexistent-oa-library' });
     const routes: { method: string | string[]; url: string; schema?: Record<string, unknown> }[] =
       [];
-    app.addHook('onRoute', (route) => void routes.push(route));
+    app.addHook(
+      'onRoute',
+      (route) => void routes.push(route as unknown as (typeof routes)[number]),
+    );
     await app.ready();
     const compile = AjvCompiler()(
       {},

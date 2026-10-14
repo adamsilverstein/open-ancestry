@@ -231,6 +231,31 @@ describe('merge people', () => {
     expect((await detail(keep)).person).toMatchObject({ privacy: 'public' });
   });
 
+  it('never drops an edit lock silently: locked against private needs a choice', async () => {
+    const keep = await person('Rowan', 'Ashdown', 'M');
+    const other = await person('Rowan', 'Ashdown', 'M');
+    await api.patch(`${base}/people/${keep}`, { privacy: 'locked' });
+    await api.patch(`${base}/people/${other}`, { privacy: 'private' });
+    const refused = await api.post(`${base}/people/${keep}/merge`, { otherId: other });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().error.message).toContain('locked');
+    expect(await status(other)).toBe(200);
+    const res = await api.post(`${base}/people/${keep}/merge`, {
+      otherId: other,
+      choices: { privacy: 'keep' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect((await detail(keep)).person).toMatchObject({ privacy: 'locked' });
+  });
+
+  it('keeps a lock merged into a public record', async () => {
+    const keep = await person('Rowan', 'Ashdown', 'M');
+    const other = await person('Rowan', 'Ashdown', 'M');
+    await api.patch(`${base}/people/${other}`, { privacy: 'locked' });
+    await api.post(`${base}/people/${keep}/merge`, { otherId: other });
+    expect((await detail(keep)).person).toMatchObject({ privacy: 'locked' });
+  });
+
   it('drops checker dismissals that name the merged-away person', async () => {
     const keep = await person('Rowan', 'Ashdown', 'M');
     const other = await person('Rowan', 'Ashdown', 'M');

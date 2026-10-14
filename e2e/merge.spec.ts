@@ -10,9 +10,11 @@ const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
 let tree: string;
 let rowan: string;
 let twin: string;
+let seedSession: Awaited<ReturnType<typeof session>>;
 
 test.beforeEach(async ({ request, baseURL }, testInfo) => {
   const s = await session(request, baseURL!);
+  seedSession = s;
   tree = uniqueTreeName('merge', `${testInfo.project.name} ${testInfo.title}`);
   await send(request, s, 'post', '/api/trees', { name: tree });
   const base = `/api/trees/${encodeURIComponent(tree)}`;
@@ -71,6 +73,18 @@ test('compares two records, merges with the chosen facts, and undoes', async ({ 
   ).toBeVisible();
   await expect(births).toHaveCount(1);
   expect([rowan, twin]).toContain(id);
+});
+
+test('asks which privacy to keep, starting from the stricter one', async ({ page, request }) => {
+  const base = `/api/trees/${encodeURIComponent(tree)}`;
+  await send(request, seedSession, 'patch', `${base}/people/${rowan}`, { privacy: 'locked' });
+  await send(request, seedSession, 'patch', `${base}/people/${twin}`, { privacy: 'private' });
+  await openCompare(page);
+  const table = page.getByRole('table', { name: 'Compare records' });
+  const row = table.getByRole('row', { name: /Privacy/ });
+  await expect(row).toContainText('Locked against edits');
+  await expect(row).toContainText('Private');
+  await expect(row.getByRole('radio', { name: /Privacy from Rowan Ashdowne:/ })).toBeChecked();
 });
 
 test('can swap which record is kept and take its name', async ({ page }) => {

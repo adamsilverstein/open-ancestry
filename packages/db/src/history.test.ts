@@ -315,6 +315,12 @@ describe('a future migration keeps older history working (simulated)', () => {
     importJson(store, doc);
     expect(exportJson(store).schemaVersion).toBe(SIMULATED.version);
     expect(exportJson(store).tables).toHaveProperty('future_table', []);
+    // A table the backup's own version had is still required.
+    const broken = structuredClone(doc) as { tables: Record<string, unknown> };
+    delete broken.tables.place;
+    const strict = openMemoryTree({ migrations: UPGRADED });
+    expect(() => importJson(strict, broken)).toThrow(/required property 'place'/);
+    strict.close();
     expect(snapshot(store)).toBe(snapshot(migrated));
     migrated.close();
     expect(undoRedoAll(store).undone).toEqual(STEPS.map(([label]) => label).reverse());

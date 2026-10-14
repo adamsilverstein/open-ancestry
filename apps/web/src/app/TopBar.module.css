@@ -76,6 +76,22 @@
   .kbd {
     display: none;
   }
+
+  /* The open tree's name matters more than the labels: People and Find become
+     icons (their text stays as the accessible name) and the name takes the room. */
+  .label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .treeName {
+    flex: 1 1 auto;
+    max-width: none;
+  }
 }
 
 /* A large library scrolls inside the menu instead of running off screen. */

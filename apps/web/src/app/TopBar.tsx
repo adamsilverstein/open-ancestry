@@ -69,7 +69,7 @@ export function TopBar({ onFind }: { onFind: () => void }) {
           activeProps={{ 'aria-current': 'page' }}
         >
           <Users size={16} aria-hidden />
-          People
+          <span className={styles.label}>People</span>
         </Link>
         <Button
           size="sm"
@@ -79,7 +79,7 @@ export function TopBar({ onFind }: { onFind: () => void }) {
           onClick={onFind}
           aria-keyshortcuts="Meta+K Control+K"
         >
-          Find
+          <span className={styles.label}>Find</span>
           <kbd className={styles.kbd}>{isMac ? '⌘K' : 'Ctrl K'}</kbd>
         </Button>
         <ChunkBoundary fallback={<FileMenuPlaceholder />}>

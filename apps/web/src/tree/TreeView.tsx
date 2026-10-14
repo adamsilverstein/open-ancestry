@@ -34,6 +34,7 @@ import {
 import { usePalette } from '../app/palette';
 import { lifeEvent, toPersonSummary } from './format';
 import { GraphCache } from './graphCache';
+import { PrefetchGuess } from './prefetchGuess';
 import { LayoutClient, type LayoutRequest, type WorkerResponse } from './layoutClient';
 import { TreeCanvas, type TreeCanvasHandle } from './TreeCanvas';
 import { ZOOM_STEP, type Rect } from './viewport';
@@ -264,9 +265,12 @@ export function TreeView({
   const speculative = useRef(
     new Map<string, { version: number; response: Promise<WorkerResponse>; id: number }>(),
   );
-  /** The guess being prepared: its pending dwell timer and neighborhood request. */
-  const guess = useRef<{ timer: ReturnType<typeof setTimeout>; request?: NeighborhoodRequest }>(
-    null,
+  /** The guess being prepared: its dwell timer, then its neighborhood fetch. */
+  const [guess] = useState(
+    () =>
+      new PrefetchGuess<NeighborhoodRequest>(PREFETCH_DWELL_MS, (request) => {
+        void queryClient.cancelQueries({ queryKey: treeKeys.neighborhood(tree, request) });
+      }),
   );
   const speculationKey = useCallback(
     (focus: string) => `${kind}|${focus}|${up}|${down}`,
@@ -530,68 +534,45 @@ export function TreeView({
   // older one's fetch, and the client keeps guesses behind real layouts.
   const onPrefetch = useCallback(
     (id: string) => {
-      const previous = guess.current;
-      if (previous) {
-        clearTimeout(previous.timer);
-        if (previous.request) {
-          void queryClient.cancelQueries({
-            queryKey: treeKeys.neighborhood(tree, previous.request),
-          });
-        }
+      if (id === personId) {
+        guess.adopt();
+        return;
       }
-      guess.current = null;
-      if (id === personId) return;
       const key = speculationKey(id);
-      const timer = setTimeout(() => {
+      guess.next(() => {
         const request = requestFor(id);
-        const mine = { timer, request };
-        guess.current = mine;
-        void ensure(request, { quiet: true })
-          .then(() => {
-            if (guess.current === mine) guess.current = null;
-            const known = speculative.current.get(key);
-            if (known?.version === cache.version || !cache.has(id)) return;
-            const response = client.layout(
-              { kind, focusId: id, options: layoutOptions(kind, up, down, EMPTY_VIEW) },
-              { speculative: true },
-            );
-            // A failed or superseded guess just falls back to a normal layout.
-            response.catch(() => {
-              if (speculative.current.get(key)?.id === response.id) {
-                speculative.current.delete(key);
-              }
-            });
-            speculative.current.delete(key);
-            speculative.current.set(key, { version: cache.version, response, id: response.id });
-            // Keep the few most recent guesses.
-            for (const old of speculative.current.keys()) {
-              if (speculative.current.size <= 4) break;
-              speculative.current.delete(old);
+        const done = ensure(request, { quiet: true }).then(() => {
+          const known = speculative.current.get(key);
+          if (known?.version === cache.version || !cache.has(id)) return;
+          const response = client.layout(
+            { kind, focusId: id, options: layoutOptions(kind, up, down, EMPTY_VIEW) },
+            { speculative: true },
+          );
+          // A failed or superseded guess just falls back to a normal layout.
+          response.catch(() => {
+            if (speculative.current.get(key)?.id === response.id) {
+              speculative.current.delete(key);
             }
-          })
-          .catch(() => {
-            // Prefetching is best effort; a cancelled fetch lands here.
           });
-      }, PREFETCH_DWELL_MS);
-      guess.current = { timer };
+          speculative.current.delete(key);
+          speculative.current.set(key, { version: cache.version, response, id: response.id });
+          // Keep the few most recent guesses.
+          for (const old of speculative.current.keys()) {
+            if (speculative.current.size <= 4) break;
+            speculative.current.delete(old);
+          }
+        });
+        // Prefetching is best effort; a cancelled fetch lands here.
+        done.catch(() => {});
+        return { request, done };
+      });
     },
-    [
-      personId,
-      speculationKey,
-      ensure,
-      requestFor,
-      cache,
-      client,
-      kind,
-      up,
-      down,
-      queryClient,
-      tree,
-    ],
+    [personId, speculationKey, ensure, requestFor, cache, client, kind, up, down, guess],
   );
 
-  // A new focus (or leaving the view) drops a guess still waiting out its dwell.
-  useEffect(() => () => clearTimeout(guess.current?.timer), [personId]);
+  // A new focus (or leaving the view) drops a guess still waiting out its dwell,
+  // and stops a later guess from cancelling a fetch the re-focus may be sharing.
+  useEffect(() => () => guess.adopt(), [guess, personId]);
 
   const onInteract = useCallback(() => setPopoverKey(null), []);
 

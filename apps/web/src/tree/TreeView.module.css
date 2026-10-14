@@ -35,6 +35,12 @@
   contain: layout paint style;
 }
 
+/* Mid zoom: name and dates only, centered; avatar and badges are too small to see. */
+.world .lightCard {
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Far zoomed out, every card is painted here instead of mounted. */
 .lodLayer {
   position: absolute;

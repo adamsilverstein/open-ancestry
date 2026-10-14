@@ -26,6 +26,9 @@ import type {
 } from '@open-ancestry/core';
 import { GenerationLabel } from '../components/GenerationLabel/GenerationLabel';
 import { PersonCard, personCardLabel } from '../components/PersonCard/PersonCard';
+import cardStyles from '../components/PersonCard/PersonCard.module.css';
+import { cx } from '../lib/cx';
+import { formatLifespan } from '../lib/lifespan';
 import { useTheme } from '../lib/useTheme';
 import type { TreeLayout as LayoutKind } from '../components/TreeToolbar/TreeToolbar';
 import type { PersonSummary } from '../lib/person';
@@ -54,6 +57,12 @@ const OVERSCAN = 240;
  * one canvas instead of mounted (only the keyboard's active card stays in the DOM).
  */
 const LOD_SCALE = 0.35;
+/**
+ * Below this zoom (but above LOD_SCALE) cards drop their avatar and badges:
+ * mounting about 100 full cards on a re-focus cost most of its time, and at
+ * this size the silhouettes and icons are a few pixels wide.
+ */
+const LIGHT_SCALE = 0.6;
 const ANIMATION_MS = 180;
 const FIT_PADDING = 64;
 const DRAG_THRESHOLD = 4;
@@ -97,6 +106,7 @@ interface Visible {
   nodes: number[];
   edges: number[];
   lod: boolean;
+  light: boolean;
 }
 
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -137,6 +147,7 @@ interface CardProps {
   tabbable: boolean;
   expanded: boolean;
   lod: boolean;
+  light: boolean;
   alternate: ParentFamilyChoice | undefined;
 }
 
@@ -148,6 +159,7 @@ const TreeCard = memo(function TreeCard({
   tabbable,
   expanded,
   lod,
+  light,
   alternate,
 }: CardProps) {
   const tabIndex = tabbable ? 0 : -1;
@@ -175,6 +187,23 @@ const TreeCard = memo(function TreeCard({
           data-focus={node.isFocus || undefined}
           {...common}
         />
+      ) : light ? (
+        <button
+          type="button"
+          className={cx(
+            cardStyles.card,
+            cardStyles.regular,
+            cardStyles[`sex${person.sex}`],
+            node.isFocus && cardStyles.focusPerson,
+            node.isDuplicate && cardStyles.duplicate,
+            styles.card,
+            styles.lightCard,
+          )}
+          {...common}
+        >
+          <span className={cardStyles.name}>{person.name}</span>
+          <span className={cardStyles.lifespan}>{formatLifespan(person)}</span>
+        </button>
       ) : (
         <PersonCard
           person={person}
@@ -303,6 +332,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   const animation = useRef(0);
   const idle = useRef<ReturnType<typeof setTimeout>>(undefined);
   const lastCells = useRef('');
+  const lastMode = useRef('');
   const previous = useRef<{ layout: TreeLayout | null; kind: LayoutKind; focus: string } | null>(
     null,
   );
@@ -314,6 +344,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     nodes: [],
     edges: [],
     lod: false,
+    light: false,
   });
 
   const source = layout ?? fan;
@@ -428,16 +459,20 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       const c1 = Math.floor((world.x + world.width + pad) / CELL);
       const r1 = Math.floor((world.y + world.height + pad) / CELL);
       // Far out, nothing mounts while panning: the canvas layer shows it all.
-      const key = lod ? 'lod' : `${c0},${r0},${c1},${r1}`;
+      const light = t.scale < LIGHT_SCALE;
+      const key = lod ? 'lod' : `${c0},${r0},${c1},${r1},${light}`;
       if (!force && key === lastCells.current) return;
-      // Crossing the canvas threshold swaps the focused card's element: put
-      // keyboard focus back on the active card after the swap (WCAG 2.4.3).
-      if (lastCells.current !== '' && (key === 'lod') !== (lastCells.current === 'lod')) {
+      // Crossing a detail threshold (full, light, canvas) swaps the focused card's
+      // element: put keyboard focus back on the active card after the swap
+      // (WCAG 2.4.3).
+      const mode = lod ? 'lod' : light ? 'light' : 'full';
+      if (lastMode.current !== '' && mode !== lastMode.current) {
         const focused = document.activeElement as HTMLElement | null;
         if (focused?.dataset.key && viewportRef.current?.contains(focused)) {
           pendingFocus.current = focused.dataset.key;
         }
       }
+      lastMode.current = mode;
       lastCells.current = key;
       const rect = {
         x: c0 * CELL,
@@ -450,6 +485,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         nodes: lod ? [] : nodeIndex.query(rect),
         edges: lod ? [] : edgeIndex.query(rect),
         lod,
+        light,
       });
     },
     [nodeIndex, edgeIndex, drawLod],
@@ -649,6 +685,9 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       setActiveKey(key);
       pendingFocus.current = key;
       ensureOnScreen(key);
+      // Enter would re-focus here next: get its layout ready.
+      const node = nodeByKey(key);
+      if (node && !node.isDuplicate && !node.isFocus) latest.current.onPrefetch(node.personId);
       // Already mounted: focus now. Otherwise the commit effect below does.
       const el = viewportRef.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`);
       if (el) {
@@ -656,7 +695,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         pendingFocus.current = null;
       }
     },
-    [ensureOnScreen],
+    [ensureOnScreen, nodeByKey],
   );
 
   useImperativeHandle(
@@ -1197,6 +1236,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
                 tabbable={node.key === active}
                 expanded={popoverKey === node.key}
                 lod={shown.lod}
+                light={shown.light}
                 alternate={layout.alternateParentFamilies[node.personId]}
               />
             );

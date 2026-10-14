@@ -192,12 +192,6 @@ const corpus = fc
     return out.join('\n');
   });
 
-/** Problems the GEDCOM 7 check reports for valid calendar dates (#102); everything else must be clean. */
-const calendarFalsePositive = (problem: string) =>
-  /^bad DATE "(?:(?:ABT|BEF|AFT|BET|FROM|TO|CAL|EST|INT) )?(?:JULIAN|HEBREW|FRENCH_R) /.test(
-    problem,
-  );
-
 describe('property: import -> export round trips', { timeout: 300_000 }, () => {
   it('copy path: an unedited 5.5.1 export reproduces the file byte for byte', async () => {
     await fc.assert(
@@ -233,7 +227,7 @@ describe('property: import -> export round trips', { timeout: 300_000 }, () => {
       fc.asyncProperty(corpus, async (text) => {
         const store = await importInto(text);
         const out = buildGedcomExport(store, { version: '7', now: TODAY });
-        expect(gedcom7Problems(out.text).filter((p) => !calendarFalsePositive(p))).toEqual([]);
+        expect(gedcom7Problems(out.text)).toEqual([]);
         const again = await importInto(out.text);
         expect(importedSnapshot(again)).toEqual(
           domainSnapshot(store, (_table, id) => out.xrefs.get(id)!),

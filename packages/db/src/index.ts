@@ -8,6 +8,9 @@ export {
   getSchemaVersion,
   listTables,
   migrate,
+  upgradeRow,
+  type ColumnChanges,
+  type TableRowsByName,
   type Migration,
   type MigrateOptions,
   type TableInfo,
@@ -67,4 +70,11 @@ export {
   type OaJsonTables,
 } from './json';
 export { generateSyntheticTree, type SyntheticOptions, type SyntheticTree } from './synthetic';
+export {
+  CONVERTED_CALENDARS,
+  DERIVED_STEPS,
+  deriveDateSort,
+  refreshDerivedColumns,
+  type RefreshOptions,
+} from './derived';
 export { getRelationship, type RelationshipView } from './kinship';

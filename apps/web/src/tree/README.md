@@ -49,7 +49,14 @@ URL focus ──> TreeView ──fetchQuery──> GET /api/trees/:tree/neighbor
   back), Enter re-focuses, Space opens the quick view, `+ - 0` zoom and fit, `H` home, `F` (or the
   app's Cmd/Ctrl-K) opens the palette, where Enter re-focuses the tree, `L` layout menu, `M` minimap. Shortcuts act only while focus is in the tree
   (canvas, toolbar, minimap), per WCAG 2.1.4.
-- **Labels.** Generation labels are relative to the focus person ("Ada's grandparents"). Cards are announced as `Name, sex, lifespan, <kinship> of <focus>` where kinship
+- **Labels.** Generation labels are relative to the focus person ("Ada's grandparents"). Row
+  labels sit in a column beside the toolbar, beside their row while its cards start to their
+  right; when a wide row slides under the column they move up into the gap above it, and hide
+  when zoomed out so far that the gap is thinner than a label, so they never cover a card.
+- **Minimap.** Bottom-left, unless a row label or the keyboard's active card is there: then
+  bottom-right, and if both corners are taken it hides until there is room (never while it has
+  focus). Re-checked one frame after every pan or zoom.
+- **Card labels.** Cards are announced as `Name, sex, lifespan, <kinship> of <focus>` where kinship
   is read back from the layout's edges (`father`, `aunt`, `son-in-law`, `2nd great-grandmother`).
 
 ## Budgets

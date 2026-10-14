@@ -93,6 +93,12 @@ const peopleRoute = createRoute({
   component: lazyRouteComponent(() => import('../routes/people/PeoplePage'), 'PeoplePage'),
 });
 
+const checkerRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/checker',
+  component: lazyRouteComponent(() => import('../routes/checker/CheckerPage'), 'CheckerPage'),
+});
+
 const importRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/import/$jobId',
@@ -113,6 +119,7 @@ const routeTree = rootRoute.addChildren([
   peopleRoute,
   importRoute,
   reimportRoute,
+  checkerRoute,
 ]);
 
 export const router = createRouter({

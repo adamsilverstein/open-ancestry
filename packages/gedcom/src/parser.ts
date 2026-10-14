@@ -236,9 +236,10 @@ class TreeBuilder {
     if (token.nonCanonical) node.source = text;
     const raw = token.value;
     if (raw !== undefined) {
-      // Some tools pad a pointer with spaces (`1 ASSO  @I1@ `); lenient readers trim it,
-      // so reading it as text would let it keep pointing somewhere this file cannot see.
-      const trimmed = raw.trim();
+      // Some 5.5.1 tools pad a pointer with spaces (`1 ASSO  @I1@ `); lenient readers trim
+      // it, so reading it as text would let it keep pointing somewhere this file cannot see.
+      // GEDCOM 7 text escapes only a leading `@`, so there padding means text.
+      const trimmed = this.major < 7 ? raw.trim() : raw;
       if (isPointer(trimmed)) {
         node.pointer = trimmed;
         if (trimmed !== raw) node.source ??= text;

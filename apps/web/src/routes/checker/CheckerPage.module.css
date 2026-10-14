@@ -1,0 +1,92 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-4);
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--oa-space-6) var(--oa-space-4) var(--oa-space-8);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-2);
+}
+
+.title {
+  font: var(--oa-text-display);
+  font-weight: var(--oa-weight-semibold);
+}
+
+.intro,
+.note,
+.empty {
+  color: var(--oa-text-muted);
+}
+
+.tabs {
+  flex-wrap: wrap;
+}
+
+.count {
+  display: inline-block;
+  min-width: 1.5em;
+  margin-left: var(--oa-space-2);
+  padding: 0 var(--oa-space-1);
+  border-radius: var(--oa-radius-full);
+  background: var(--oa-surface-sunken);
+  font: var(--oa-text-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.issue {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--oa-space-3);
+  padding: var(--oa-space-3) var(--oa-space-4);
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-md);
+  background: var(--oa-surface);
+}
+
+.icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--oa-text-muted);
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--oa-space-1);
+  min-width: 0;
+}
+
+.message {
+  font-weight: var(--oa-weight-medium);
+}
+
+.people {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oa-space-1) var(--oa-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font: var(--oa-text-sm);
+}
+
+.lifespan {
+  color: var(--oa-text-muted);
+}

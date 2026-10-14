@@ -253,3 +253,12 @@ export const BatchBody = Type.Object(
   },
   strict,
 );
+
+// ---------------------------------------------------------------- checks
+
+/** Issue keys from GET /checks: `kind:id+id[:eventId]`. */
+export const CheckKey = Type.String({ maxLength: 300, pattern: '^[a-z-]+:[0-9A-Za-z_+:-]+$' });
+export const DismissBody = Type.Object(
+  { keys: Type.Array(CheckKey, { minItems: 1, maxItems: 5000 }) },
+  strict,
+);

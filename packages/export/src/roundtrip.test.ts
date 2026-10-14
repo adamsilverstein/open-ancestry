@@ -107,6 +107,58 @@ describe('GEDCOM 5.5.1 export that is generated, not copied', { timeout: 30_000 
   );
 });
 
+describe('calendar dates', { timeout: 30_000 }, () => {
+  // [GEDCOM 5.5.1 DATE, the GEDCOM 7 DATE it exports as]
+  const CALENDAR_DATES: [string, string][] = [
+    ['@#DJULIAN@ 1 MAR 1700', 'JULIAN 1 MAR 1700'],
+    ['@#DJULIAN@ 11 FEB 1731/32', 'JULIAN 11 FEB 1731'],
+    ['11 FEB 1731/32', '11 FEB 1731'],
+    ['@#DGREGORIAN@ 5 SEP 1941', '5 SEP 1941'],
+    ['@#DHEBREW@ 1 TSH 5780', 'HEBREW 1 TSH 5780'],
+    ['@#DHEBREW@ ADS 5784', 'HEBREW ADS 5784'],
+    ['@#DFRENCH R@ 1 VEND 10', 'FRENCH_R 1 VEND 10'],
+    ['@#DFRENCH R@ 5 COMP 3', 'FRENCH_R 5 COMP 3'],
+    ['44 B.C.', '44 BCE'],
+    ['@#DJULIAN@ 15 MAR 44 B.C.', 'JULIAN 15 MAR 44 BCE'],
+    ['ABT @#DFRENCH R@ 5', 'ABT FRENCH_R 5'],
+    ['BEF @#DJULIAN@ 1752', 'BEF JULIAN 1752'],
+    ['BET @#DJULIAN@ 1700 AND @#DJULIAN@ 1701', 'BET JULIAN 1700 AND JULIAN 1701'],
+    ['FROM @#DHEBREW@ TSH 5700 TO @#DHEBREW@ ELL 5710', 'FROM HEBREW TSH 5700 TO HEBREW ELL 5710'],
+    // Old Style to New Style: the end is Gregorian and must stay Gregorian.
+    ['BET @#DJULIAN@ 1 JAN 1751 AND 1 JAN 1753', 'BET JULIAN 1 JAN 1751 AND 1 JAN 1753'],
+    ['FROM 1700 TO @#DJULIAN@ 1710', 'FROM 1700 TO JULIAN 1710'],
+    ['@#DUNKNOWN@ 1900', '1900'],
+  ];
+  const source = ged(
+    '0 @I1@ INDI',
+    '1 NAME Ada /Calendar/',
+    ...CALENDAR_DATES.flatMap(([date], i) => ['1 EVEN', `2 TYPE Calendar ${i}`, `2 DATE ${date}`]),
+  );
+
+  it('exports valid GEDCOM 7 calendar dates with the original as PHRASE', async () => {
+    const store = await importInto(source);
+    const out = exportGedcom(store, { version: '7', now: TODAY });
+    expect(gedcom7Problems(out)).toEqual([]);
+    for (const [original, v7] of CALENDAR_DATES) {
+      const phrase = original.startsWith('@') ? `@${original}` : original;
+      expect(out).toContain(`2 DATE ${v7}\n3 PHRASE ${phrase}\n`);
+    }
+  });
+
+  it('round trips 5.5.1 -> 7 -> 5.5.1 without losing a date', async () => {
+    const store = await importInto(source);
+    const v7 = buildGedcomExport(store, { version: '7', now: TODAY });
+    const fromV7 = await importInto(v7.text);
+    expect(importedSnapshot(fromV7)).toEqual(
+      domainSnapshot(store, (_table, id) => v7.xrefs.get(id)!),
+    );
+    const v551 = buildGedcomExport(fromV7, { version: '5.5.1', now: TODAY });
+    for (const [original] of CALENDAR_DATES) expect(v551.text).toContain(`2 DATE ${original}\n`);
+    const again = await importInto(v551.text);
+    expect(importedSnapshot(again)).toEqual(importedSnapshot(fromV7));
+  });
+});
+
 describe('decade and century periods', () => {
   const periods = [
     'FROM 1850s',

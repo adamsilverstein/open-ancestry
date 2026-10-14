@@ -1,7 +1,7 @@
 import { ageAt, formatDate } from '@open-ancestry/core';
-import type { ChildRelationship } from '@open-ancestry/db';
 import type { ApiPersonSummary, EventBrief, EventDetail, PersonDetail } from '../api/types';
 import { dateRange, overlaps } from './dateRange';
+import { bySex, childWord, linkToPartner, parentWord, siblingWord, siblingsOf } from './kin';
 import { fullName } from './person';
 
 export type TimelineCategory = 'life' | 'family' | 'work' | 'other';
@@ -114,20 +114,6 @@ function categoryOf(type: string): TimelineCategory {
 const display = (text: string | null | undefined) => (text ? formatDate(text) : undefined);
 const yearOf = (text: string | null | undefined) => (text ? formatDate(text, 'year') : undefined);
 
-/** Relationship words by sex for interleaved family events. */
-function kin(sex: string, male: string, female: string, other: string): string {
-  return sex === 'M' ? male : sex === 'F' ? female : other;
-}
-
-/** `stepfather`, `adoptive mother`; plain for biological or unknown links. */
-function parentWord(sex: string, rel: ChildRelationship): string {
-  const base = kin(sex, 'father', 'mother', 'parent');
-  if (rel === 'step') return `step${base}`;
-  if (rel === 'adopted') return `adoptive ${base}`;
-  if (rel === 'foster') return `foster ${base}`;
-  return base;
-}
-
 export interface TimelineOptions {
   /** Children of the parents' other partnerships, loaded separately. */
   halfSiblings?: ApiPersonSummary[];
@@ -147,6 +133,7 @@ export function buildTimeline(
   // dates never drop an event that might fall inside it.
   const lifeStart = dateRange(birthText)?.[0] ?? -Infinity;
   const lifeEnd = dateRange(detail.summary.death?.dateText)?.[1] ?? Infinity;
+  const deathSort = detail.summary.death?.dateSort ?? null;
   // `25`, or `about 31` when either date is imprecise. No age at zero (a
   // same-year sibling would read "about 0") or after the death.
   const ageFor = (text: string | null | undefined) => {
@@ -219,6 +206,10 @@ export function buildTimeline(
     const range = dateRange(event.dateText) ?? [event.dateSort, event.dateSort];
     if (!overlaps(range, [lifeStart, afterDeath ? Infinity : lifeEnd])) return;
     seen.add(id);
+    // An open-ended date (`bef. 1920`) that only partly overlaps the life may
+    // fall after the death: it sorts just before the death and gets no age.
+    const mayFollowDeath = !afterDeath && range[1] > lifeEnd;
+    const clamp = mayFollowDeath && deathSort !== null && event.dateSort >= deathSort;
     entries.push({
       id,
       kind: 'family',
@@ -226,12 +217,12 @@ export function buildTimeline(
       title: `${what} of ${relation} ${fullName(relative)}`,
       date: display(event.dateText),
       year: yearOf(event.dateText),
-      age: ageFor(event.dateText),
+      age: mayFollowDeath ? undefined : ageFor(event.dateText),
       place: event.place ?? undefined,
       sourceCount: 0,
       personId: relative.id,
       alternates: [],
-      sortKey: event.dateSort,
+      sortKey: clamp ? deathSort - 0.5 : event.dateSort,
     });
   };
 
@@ -243,19 +234,23 @@ export function buildTimeline(
     for (const [parent, rel] of parents) {
       if (parent) relativeEvent(parent, parent.death, 'Death', parentWord(parent.sex, rel));
     }
-    for (const { person } of family.siblings) {
-      relativeEvent(person, person.birth, 'Birth', kin(person.sex, 'brother', 'sister', 'sibling'));
-    }
+  }
+  for (const { person, kind } of siblingsOf(detail.parentFamilies)) {
+    relativeEvent(person, person.birth, 'Birth', siblingWord(person.sex, kind));
   }
   for (const person of options.halfSiblings ?? []) {
-    const relation = kin(person.sex, 'half brother', 'half sister', 'half sibling');
-    relativeEvent(person, person.birth, 'Birth', relation);
+    relativeEvent(person, person.birth, 'Birth', siblingWord(person.sex, 'half'));
   }
-  for (const { partner, children } of detail.partnerFamilies) {
+  for (const { family, partner, children } of detail.partnerFamilies) {
     if (partner)
-      relativeEvent(partner, partner.death, 'Death', kin(partner.sex, 'husband', 'wife', 'spouse'));
-    for (const { person } of children) {
-      const relation = kin(person.sex, 'son', 'daughter', 'child');
+      relativeEvent(
+        partner,
+        partner.death,
+        'Death',
+        bySex(partner.sex, 'husband', 'wife', 'spouse'),
+      );
+    for (const { person, link } of children) {
+      const relation = childWord(person.sex, linkToPartner(family, detail.person.id, link));
       // A child can be born after a parent's death.
       relativeEvent(person, person.birth, 'Birth', relation, { afterDeath: true });
       relativeEvent(person, person.death, 'Death', relation);

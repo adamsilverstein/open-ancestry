@@ -17,6 +17,7 @@ import {
 import { SourceItem } from '../../components/SourceItem/SourceItem';
 import { TimelineItem } from '../../components/TimelineItem/TimelineItem';
 import { halfSiblings, parentIds } from '../../lib/halfSiblings';
+import { siblingsOf, type SiblingKind } from '../../lib/kin';
 import { fullName, toPersonSummary } from '../../lib/person';
 import { collectCitations } from '../../lib/sources';
 import {
@@ -200,7 +201,6 @@ function SourcesColumn({ detail }: { detail: PersonDetail }) {
 
 function relationshipGroups(detail: PersonDetail, half: ApiPersonSummary[]): RelationshipGroup[] {
   const groups: RelationshipGroup[] = [];
-  const seen = new Set<string>();
   detail.parentFamilies.forEach((family, index) => {
     const rel = family.link.partner1_rel;
     const title =
@@ -210,22 +210,18 @@ function relationshipGroups(detail: PersonDetail, half: ApiPersonSummary[]): Rel
     const parents = [family.partner1, family.partner2].filter((p) => p !== null);
     if (parents.length > 0) groups.push({ title, people: parents.map((p) => toPersonSummary(p)) });
   });
-  const siblings = detail.parentFamilies
-    .flatMap((f) => f.siblings.map((s) => s.person))
-    .filter((p) => !seen.has(p.id) && seen.add(p.id));
-  if (siblings.length > 0) {
-    groups.push({
-      title: 'Siblings',
-      people: siblings.map((p) => toPersonSummary(p)),
-      collapsible: true,
-    });
-  }
-  if (half.length > 0) {
-    groups.push({
-      title: 'Half siblings',
-      people: half.map((p) => toPersonSummary(p)),
-      collapsible: true,
-    });
+  const siblings = siblingsOf(detail.parentFamilies);
+  const ofKind = (kind: SiblingKind) =>
+    siblings.filter((s) => s.kind === kind).map((s) => s.person);
+  const kinds: [string, ApiPersonSummary[]][] = [
+    ['Siblings', ofKind('full')],
+    ['Half-siblings', [...ofKind('half'), ...half]],
+    ['Step-siblings', ofKind('step')],
+  ];
+  for (const [title, people] of kinds) {
+    if (people.length > 0) {
+      groups.push({ title, people: people.map((p) => toPersonSummary(p)), collapsible: true });
+    }
   }
   const many = detail.partnerFamilies.length > 1;
   for (const { family, partner, children } of detail.partnerFamilies) {

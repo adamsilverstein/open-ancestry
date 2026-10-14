@@ -5,7 +5,7 @@
 ## Conventions
 
 - **Errors** are always `{ "error": { "code": "...", "message": "..." } }`. Codes: `bad_request`, `validation_failed`, `forbidden`, `forbidden_host`, `not_found`, `conflict`, `payload_too_large`, `unsupported_media_type`, `range_not_satisfiable`, `too_many_jobs`, `not_implemented`, `internal_error`.
-- **Validation:** params, query strings and bodies are checked against TypeBox schemas (`apps/server/src/schemas.ts`). Unknown body properties are rejected.
+- **Validation:** params, query strings and bodies are checked against JSON Schemas written with TypeBox in `apps/server/src/schemas.source.ts` and loaded at runtime from the generated `schemas.generated.json` (no TypeBox at startup). After editing the source run `npm run generate:schemas -w @open-ancestry/server`; a test fails until you do. Each route's validator is compiled on its first request. Unknown body properties are rejected.
 - **Reads** return database DTOs from `packages/db` (`PersonSummary`, `PersonDetail`, `Neighborhood`, ...). **Write bodies** use the database column names (`date_text`, `relationship_type`, ...); derived columns (date sort keys, surname phonetic keys) are computed by the server.
 - **Edits:** each mutation is one undoable change batch and returns `batchId` (null when nothing changed).
 - **Caching:** GET responses carry a weak `ETag` (send `If-None-Match` for a 304). JSON over 1 KB is compressed with Brotli or gzip.

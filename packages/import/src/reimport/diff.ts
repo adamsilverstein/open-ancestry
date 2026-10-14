@@ -266,8 +266,14 @@ export function diffTrees(
       return item;
     };
 
-  // Matched people: facts, names, sex, citations, tags and media.
-  for (const m of matches.values()) {
+  // Matched people: facts, names, sex, citations, tags and media. When several
+  // exported records match one person (merged in this tree), the best match
+  // is compared; the others are folded into it, not added again.
+  const compared = new Set<string>();
+  const ordered = [...matches.values()].sort((a, b) => b.confidence - a.confidence);
+  for (const m of ordered) {
+    if (compared.has(m.existingId)) continue;
+    compared.add(m.existingId);
     const e = existing.people.get(m.existingId)!;
     const i = incoming.people.get(m.incomingId)!;
     const r: PersonReview = {

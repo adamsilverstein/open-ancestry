@@ -56,6 +56,11 @@ export interface Snapshot {
   familyChildren: FamilyChildRow[];
   /** Family events (marriage, divorce, ...) by family id. */
   familyEvents: Map<string, EventRow[]>;
+  /**
+   * The latest import's person records by xref, mapped to the person they
+   * belong to now. A merge (#70) points several xrefs at one person.
+   */
+  importXrefs: Map<string, string>;
 }
 
 const year = (sort: number | null | undefined) => (sort ? Math.floor(sort / 10000) : null);
@@ -230,5 +235,15 @@ export function snapshot(store: TreeStore): Snapshot {
     familyEvents.set(family_id, list);
   }
 
-  return { people, families, familyChildren, familyEvents };
+  const importXrefs = new Map<string, string>();
+  for (const r of all<{ xref: string; owner_id: string }>(
+    store,
+    `SELECT xref, owner_id FROM raw_record
+     WHERE owner_type = 'person' AND xref IS NOT NULL AND owner_id IS NOT NULL
+       AND import_batch_id = (SELECT id FROM import_batch ORDER BY started_at DESC, id DESC LIMIT 1)`,
+  )) {
+    if (people.has(r.owner_id)) importXrefs.set(r.xref, r.owner_id);
+  }
+
+  return { people, families, familyChildren, familyEvents, importXrefs };
 }

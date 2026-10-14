@@ -129,13 +129,22 @@ interface Candidate {
   reasons: string[];
 }
 
-function assign(candidates: Candidate[]): Map<string, Candidate> {
+/**
+ * One-to-one, best scores first, except that a person merged in the tree
+ * (several of the last import's records point at them) takes as many
+ * incoming people as records were merged into them.
+ */
+function assign(
+  candidates: Candidate[],
+  capacity: (existingId: string) => number,
+): Map<string, Candidate> {
   const byIncoming = new Map<string, Candidate>();
-  const taken = new Set<string>();
+  const taken = new Map<string, number>();
   for (const c of [...candidates].sort((x, y) => y.score - x.score || x.i.localeCompare(y.i))) {
-    if (c.score < MATCH_THRESHOLD || byIncoming.has(c.i) || taken.has(c.e)) continue;
+    const used = taken.get(c.e) ?? 0;
+    if (c.score < MATCH_THRESHOLD || byIncoming.has(c.i) || used >= capacity(c.e)) continue;
     byIncoming.set(c.i, c);
-    taken.add(c.e);
+    taken.set(c.e, used + 1);
   }
   return byIncoming;
 }
@@ -156,19 +165,33 @@ export function matchPeople(existing: Snapshot, incoming: Snapshot): Map<string,
       else byApid.set(apid, [e.row.id]);
     }
   }
+  const capacity = new Map<string, number>();
+  for (const owner of existing.importXrefs.values())
+    capacity.set(owner, (capacity.get(owner) ?? 0) + 1);
+  const capacityOf = (id: string) => Math.max(1, capacity.get(id) ?? 1);
+
   const candidates: Candidate[] = [];
   for (const i of incoming.people.values()) {
     const ids = new Set<string>();
+    // Ancestry sometimes keeps xrefs between exports: the last import's mapping is a hint.
+    const sameXref = i.row.external_id ? existing.importXrefs.get(i.row.external_id) : undefined;
+    if (sameXref) ids.add(sameXref);
     for (const key of blockKeys(i)) for (const id of blocks.get(key) ?? []) ids.add(id);
     for (const apid of i.apids) for (const id of byApid.get(apid) ?? []) ids.add(id);
     for (const id of ids) {
-      const { score, reasons } = baseScore(existing.people.get(id)!, i);
+      const base = baseScore(existing.people.get(id)!, i);
+      let { score } = base;
+      const reasons = [...base.reasons];
+      if (id === sameXref) {
+        score = Math.min(1, score + 0.15);
+        reasons.push('same xref as the last import');
+      }
       if (score >= MATCH_THRESHOLD - 0.4) candidates.push({ e: id, i: i.row.id, score, reasons });
     }
   }
 
   // Second pass: relatives that were matched to each other confirm (or tell apart) a pair.
-  const first = assign(candidates);
+  const first = assign(candidates, capacityOf);
   const toExisting = new Map([...first.values()].map((c) => [c.i, c.e]));
   const related = (ids: string[]) => new Set(ids);
   for (const c of candidates) {
@@ -190,9 +213,12 @@ export function matchPeople(existing: Snapshot, incoming: Snapshot): Map<string,
       c.reasons = [...c.reasons, `${agree} matching relative${agree > 1 ? 's' : ''}`];
     }
   }
-  const final = assign(candidates);
+  const final = assign(candidates, capacityOf);
+  const perExisting = new Map<string, number>();
+  for (const c of final.values()) perExisting.set(c.e, (perExisting.get(c.e) ?? 0) + 1);
   const result = new Map<string, PersonMatch>();
   for (const c of final.values()) {
+    if ((perExisting.get(c.e) ?? 0) > 1) c.reasons = [...c.reasons, 'merged in this tree'];
     result.set(c.i, {
       existingId: c.e,
       incomingId: c.i,

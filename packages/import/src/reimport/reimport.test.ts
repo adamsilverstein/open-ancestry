@@ -185,6 +185,87 @@ describe('matching', () => {
   });
 });
 
+describe('after people were merged in the tree (#70)', () => {
+  /** The sample with a duplicate of Thaddeus, as Ancestry trees often have. */
+  const withDuplicate = SAMPLE.replace(
+    '0 @I2@ INDI',
+    [
+      '0 @I30@ INDI',
+      '1 NAME Thaddeus /Ashgrove/',
+      '1 SEX M',
+      '1 BIRT',
+      '2 DATE Abt. 1842',
+      '2 PLAC Hollin Cross, Westmarch, England',
+      '0 @I2@ INDI',
+    ].join('\n'),
+  );
+
+  /** What #70's merge leaves behind: one person, and both records' raw_record pointing at it. */
+  function mergeLocally(tree: TreeStore, keepXref: string, otherXref: string) {
+    const keep = pid(tree, keepXref);
+    const other = pid(tree, otherXref);
+    tree.transact('Merge', (tx) => {
+      for (const r of rows<{ id: string }>(
+        tree,
+        "SELECT id FROM raw_record WHERE owner_type = 'person' AND owner_id = ?",
+        other,
+      )) {
+        tx.update('raw_record', r.id, { owner_id: keep });
+      }
+      for (const n of rows<{ id: string }>(
+        tree,
+        'SELECT id FROM person_name WHERE person_id = ?',
+        other,
+      )) {
+        tx.delete('person_name', n.id);
+      }
+      for (const r of rows<{ id: string; event_id: string }>(
+        tree,
+        'SELECT id, event_id FROM event_role WHERE person_id = ?',
+        other,
+      )) {
+        tx.delete('event_role', r.id);
+        tx.delete('event', r.event_id);
+      }
+      tx.delete('person', other);
+    });
+    return keep;
+  }
+
+  it('maps both exported duplicates onto the merged person instead of adding one back', async () => {
+    const tree = openMemoryTree();
+    await importGedcom({ bytes: withDuplicate }, tree, { today: TODAY });
+    const keep = mergeLocally(tree, '@I1@', '@I30@');
+    const merged = await prepareReimport(
+      tree,
+      { bytes: renumber(withDuplicate) },
+      { today: TODAY },
+    );
+    try {
+      expect(merged.diff.counts).toMatchObject({ newPeople: 0, missingPeople: 0 });
+      const onto = [...merged.matches.values()].filter((m) => m.existingId === keep);
+      expect(onto).toHaveLength(2);
+      expect(onto.every((m) => m.reasons.includes('merged in this tree'))).toBe(true);
+      const accepted = defaults(merged);
+      applyReimport(tree, merged, accepted, 'Re-import');
+      expect(value(tree, 'SELECT count(*) FROM person')).toBe(26);
+    } finally {
+      closeReimport(merged);
+      tree.close();
+    }
+  });
+
+  it("uses the previous import's xrefs as a hint when Ancestry keeps them", async () => {
+    const same = await prepareReimport(store, { bytes: SAMPLE }, { today: TODAY });
+    try {
+      for (const m of same.matches.values())
+        expect(m.reasons).toContain('same xref as the last import');
+    } finally {
+      closeReimport(same);
+    }
+  });
+});
+
 describe('diff', () => {
   beforeEach(async () => {
     session = await prepareReimport(store, { bytes: updatedSample() }, { today: TODAY });

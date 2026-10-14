@@ -103,9 +103,11 @@ function PersonCard({
                 description={
                   change.conflict === 'local-edit'
                     ? 'Edited in this tree since the last import; your edit is kept unless you tick this.'
-                    : waiting
-                      ? 'Needs the new person above.'
-                      : undefined
+                    : change.conflict === 'local-delete'
+                      ? 'You deleted this in this tree; it stays deleted unless you tick this.'
+                      : waiting
+                        ? 'Needs the new person above.'
+                        : undefined
                 }
                 onChange={(event) => onToggle(change, event.target.checked)}
               />
@@ -141,13 +143,13 @@ function Review({ review }: { review: ReimportReview }) {
   }
 
   function acceptHighConfidence() {
-    // Every change of confident matches and new people, but never over a local edit.
+    // Every change of confident matches and new people, but never over a local edit or delete.
     setSelected(
       new Set(
         review.diff.people
           .filter((p) => p.status === 'new' || (p.confidence ?? 0) >= HIGH_CONFIDENCE)
           .flatMap((p) => p.changes)
-          .filter((c) => c.applicable && c.conflict !== 'local-edit')
+          .filter((c) => c.applicable && !c.conflict)
           .map((c) => c.id),
       ),
     );

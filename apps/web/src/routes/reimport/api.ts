@@ -13,7 +13,7 @@ export type ReviewChange = {
   id: string;
   defaultAccept: boolean;
   applicable: boolean;
-  conflict?: 'local-edit';
+  conflict?: 'local-edit' | 'local-delete';
   requires?: string[];
 } & (
   | { kind: 'person.new'; incomingId: string }

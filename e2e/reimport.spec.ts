@@ -217,6 +217,33 @@ test('rejecting changes, overriding a local edit and bulk selection', async ({
   expect(await personByName(request, seeded.tree, 'Noah')).toBeUndefined();
 });
 
+test('a fact deleted here is offered back unticked, and stays deleted by default', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const mercy = (await personByName(request, seeded.tree, 'Mercy'))!;
+  const death = await eventDate(request, seeded.tree, mercy, 'DEAT');
+  const removed = await request.delete(
+    `/api/trees/${encodeURIComponent(seeded.tree)}/events/${death.id}`,
+    { headers: seeded.headers },
+  );
+  expect(removed.ok()).toBe(true);
+  await startReimport(page, seeded);
+  const restore = card(page, 'Mercy Bellweather').getByRole('checkbox', {
+    name: /Add fact: Death/,
+  });
+  await expect(restore).not.toBeChecked();
+  await expect(
+    card(page, 'Mercy Bellweather').getByText(
+      'You deleted this in this tree; it stays deleted unless you tick this.',
+    ),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Accept all high-confidence' }).click();
+  await expect(restore).not.toBeChecked();
+});
+
 test('discarding a review changes nothing', async ({ page, request, baseURL }, testInfo) => {
   const seeded = await seed(request, baseURL!, testInfo);
   await startReimport(page, seeded);

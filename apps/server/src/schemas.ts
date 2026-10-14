@@ -53,6 +53,8 @@ export const NeighborhoodQuery = Type.Object({
   up: Type.Optional(Type.Integer({ minimum: 0, maximum: 10 })),
   down: Type.Optional(Type.Integer({ minimum: 0, maximum: 10 })),
   siblings: Type.Optional(Type.Boolean()),
+  /** 0 none, 1 the focus person's siblings (default), 2 also aunts and uncles, ... */
+  siblingsDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 10 })),
 });
 
 export const SearchQuery = Type.Object({

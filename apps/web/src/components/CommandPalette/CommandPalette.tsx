@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 
 import * as RadixDialog from '@radix-ui/react-dialog';
 import { Command } from 'cmdk';
 import { Search } from 'lucide-react';
-import { substringFilter } from '../../lib/filter';
+import { actionFilter } from '../../lib/filter';
 import selectStyles from '../Select/Select.module.css';
 import dialogStyles from '../Dialog/Dialog.module.css';
 import styles from './CommandPalette.module.css';
@@ -89,7 +89,7 @@ export function CommandPalette({
         (g.unfiltered ||
           !shouldFilter ||
           !query.trim() ||
-          substringFilter(i.label, query, i.keywords) > 0),
+          actionFilter(i.label, query, i.keywords) > 0),
     ),
   );
   const visible = visibleItems.map(itemValue);
@@ -160,15 +160,12 @@ export function CommandPalette({
         >
           <RadixDialog.Title className="oa-visually-hidden">{title}</RadixDialog.Title>
           <Command
-            // Server results arrive pre-ranked; local actions match on their label and keywords.
+            // Server results arrive pre-ranked and score 1; local actions match the
+            // start of their label or a whole keyword and score lower, so they sort after.
             filter={(itemValue, search, keywords) =>
               unfiltered.has(itemValue.toLowerCase())
                 ? 1
-                : substringFilter(
-                    labels.get(itemValue.toLowerCase()) ?? itemValue,
-                    search,
-                    keywords,
-                  )
+                : actionFilter(labels.get(itemValue.toLowerCase()) ?? itemValue, search, keywords)
             }
             shouldFilter={shouldFilter}
             label={title}

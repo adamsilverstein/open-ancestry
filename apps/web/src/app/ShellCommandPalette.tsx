@@ -7,6 +7,7 @@ import {
   CommandPalette,
   type PaletteAction,
   type PaletteGroup,
+  type TypeAhead,
 } from '../components/CommandPalette/CommandPalette';
 import { formatLifespan } from '../lib/lifespan';
 import { toPersonSummary } from '../lib/person';
@@ -16,7 +17,7 @@ interface ShellCommandPaletteProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Keys typed before the input took focus, to start the query with. */
-  takeTypeAhead?: () => string;
+  takeTypeAhead?: () => TypeAhead;
 }
 
 /** "1850–1921 · Kestrel Cove, Saltmarsh" */

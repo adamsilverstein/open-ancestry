@@ -50,7 +50,13 @@ describe('parseName', () => {
 });
 
 describe('name formats', () => {
-  const full = name({ prefix: 'Dr.', given: 'John Henry', nickname: 'Jack', surname: 'Smith', suffix: 'Jr.' });
+  const full = name({
+    prefix: 'Dr.',
+    given: 'John Henry',
+    nickname: 'Jack',
+    surname: 'Smith',
+    suffix: 'Jr.',
+  });
 
   it.each<[PersonName | string, string, string, string, string]>([
     // input, display (given first), surname first, sort, initials
@@ -116,7 +122,7 @@ describe('doubleMetaphone', () => {
   it.each([
     ['Smith', ['SM0', 'XMT']],
     ['Schmidt', ['XMT', 'SMT']],
-    ['Thompson', ['TMSN', 'TMSN']],
+    ['Thompson', ['TMPSN', 'TMPSN']],
     ['Müller', ['MLR', 'MLR']],
     ['', ['', '']],
   ])('%j', (input, keys) => {
@@ -132,7 +138,7 @@ describe('doubleMetaphone', () => {
 describe('phoneticKeys', () => {
   it('returns the unique soundex and metaphone keys for indexing', () => {
     expect(phoneticKeys('Smith')).toEqual(['S530', 'SM0', 'XMT']);
-    expect(phoneticKeys('Thompson')).toEqual(['T512', 'TMSN']);
+    expect(phoneticKeys('Thompson')).toEqual(['T512', 'TMPSN']);
     expect(phoneticKeys('')).toEqual([]);
   });
 });

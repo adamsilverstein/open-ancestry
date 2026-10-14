@@ -18,7 +18,8 @@ import type { Calendar, DatePoint } from './types';
 
 export const UNDATED_SORT_KEY = Number.MAX_SAFE_INTEGER;
 
-const encode = (year: number, month: number, day: number): number => year * 10000 + month * 100 + day;
+const encode = (year: number, month: number, day: number): number =>
+  year * 10000 + month * 100 + day;
 
 type Bound = 'low' | 'mid' | 'high';
 
@@ -28,12 +29,26 @@ export function pointKey(point: DatePoint, calendar: Calendar, bound: Bound): nu
   if (calendar === 'hebrew' || calendar === 'french_r') {
     const last = monthsInYear(calendar);
     const m = month ?? (bound === 'low' ? 1 : bound === 'high' ? last : 7);
-    const d = day ?? (bound === 'low' ? 1 : bound === 'high' ? daysInMonth(calendar, year, m) : month === undefined ? 1 : 15);
+    const d =
+      day ??
+      (bound === 'low'
+        ? 1
+        : bound === 'high'
+          ? daysInMonth(calendar, year, m)
+          : month === undefined
+            ? 1
+            : 15);
     const g = toGregorian(calendar, year, m, d);
     return encode(g.year, g.month, g.day);
   }
-  if (month === undefined) return bound === 'low' ? encode(year, 1, 1) : bound === 'high' ? encode(year, 12, 31) : encode(year, 7, 1);
-  if (day === undefined) return encode(year, month, bound === 'low' ? 1 : bound === 'high' ? 31 : 15);
+  if (month === undefined)
+    return bound === 'low'
+      ? encode(year, 1, 1)
+      : bound === 'high'
+        ? encode(year, 12, 31)
+        : encode(year, 7, 1);
+  if (day === undefined)
+    return encode(year, month, bound === 'low' ? 1 : bound === 'high' ? 31 : 15);
   const g = toGregorian(calendar, year, month, day);
   return encode(g.year, g.month, g.day);
 }

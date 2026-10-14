@@ -51,9 +51,23 @@ const gedcom: Row[] = [
   ['TO 1895', 'to', d(1895)],
   ['FROM JUN 1918', 'from', d(1918, 6)],
   ['TO 11 NOV 1918', 'to', d(1918, 11, 11)],
-  ['INT 5 SEP 1941 (fifth of September)', 'interpreted', d(1941, 9, 5), undefined, { phrase: 'fifth of September' }],
+  [
+    'INT 5 SEP 1941 (fifth of September)',
+    'interpreted',
+    d(1941, 9, 5),
+    undefined,
+    { phrase: 'fifth of September' },
+  ],
   ['INT 1941', 'interpreted', d(1941)],
-  ['INT ABT 1941 (around the war)', 'interpreted', d(1941), undefined, { phrase: 'around the war' }],
+  // A phrase after a plain date is read as an interpreted date.
+  ['5 SEP 1941 (a note)', 'interpreted', d(1941, 9, 5), undefined, { phrase: 'a note' }],
+  [
+    'INT ABT 1941 (around the war)',
+    'interpreted',
+    d(1941),
+    undefined,
+    { phrase: 'around the war' },
+  ],
   // Dual years.
   ['1750/51', 'exact', d(1750, undefined, undefined, 1751)],
   ['11 FEB 1731/32', 'exact', d(1731, 2, 11, 1732)],
@@ -182,7 +196,13 @@ const human: Row[] = [
   ['From Sep 1890 to Oct 1890', 'from_to', d(1890, 9), d(1890, 10)],
   ['from 1890', 'from', d(1890)],
   ['to 1895', 'to', d(1895)],
-  ['int. 5 Sep 1941 (fifth of September)', 'interpreted', d(1941, 9, 5), undefined, { phrase: 'fifth of September' }],
+  [
+    'int. 5 Sep 1941 (fifth of September)',
+    'interpreted',
+    d(1941, 9, 5),
+    undefined,
+    { phrase: 'fifth of September' },
+  ],
   ['Julian 5 Sep 1700', 'exact', d(1700, 9, 5), undefined, { calendar: 'julian' }],
 ];
 
@@ -205,13 +225,49 @@ const months: Row[] = monthNames.flatMap(([abbr, full], i) => [
   [`${full} 1900`, 'exact', d(1900, i + 1)] as Row,
 ]);
 
-const hebrewMonths = ['TSH', 'CSH', 'KSL', 'TVT', 'SHV', 'ADR', 'ADS', 'NSN', 'IYR', 'SVN', 'TMZ', 'AAV', 'ELL'];
+const hebrewMonths = [
+  'TSH',
+  'CSH',
+  'KSL',
+  'TVT',
+  'SHV',
+  'ADR',
+  'ADS',
+  'NSN',
+  'IYR',
+  'SVN',
+  'TMZ',
+  'AAV',
+  'ELL',
+];
 const hebrew: Row[] = hebrewMonths.map(
-  (m, i) => [`@#DHEBREW@ 2 ${m} 5700`, 'exact', d(5700, i + 1, 2), undefined, { calendar: 'hebrew' }] as Row,
+  (m, i) =>
+    [
+      `@#DHEBREW@ 2 ${m} 5700`,
+      'exact',
+      d(5700, i + 1, 2),
+      undefined,
+      { calendar: 'hebrew' },
+    ] as Row,
 );
-const frenchMonths = ['VEND', 'BRUM', 'FRIM', 'NIVO', 'PLUV', 'VENT', 'GERM', 'FLOR', 'PRAI', 'MESS', 'THER', 'FRUC', 'COMP'];
+const frenchMonths = [
+  'VEND',
+  'BRUM',
+  'FRIM',
+  'NIVO',
+  'PLUV',
+  'VENT',
+  'GERM',
+  'FLOR',
+  'PRAI',
+  'MESS',
+  'THER',
+  'FRUC',
+  'COMP',
+];
 const french: Row[] = frenchMonths.map(
-  (m, i) => [`@#DFRENCH R@ 3 ${m} 7`, 'exact', d(7, i + 1, 3), undefined, { calendar: 'french_r' }] as Row,
+  (m, i) =>
+    [`@#DFRENCH R@ 3 ${m} 7`, 'exact', d(7, i + 1, 3), undefined, { calendar: 'french_r' }] as Row,
 );
 
 const unparseable = [
@@ -265,6 +321,8 @@ const unparseable = [
   '(no closing paren',
   'INT 1941 (unbalanced',
   'abt abt 1890',
+  'BET @#DKLINGON@ 1700 AND 1701',
+  'BET 1890 AND 1895 (a range with a note)',
 ];
 
 describe('parseDate', () => {
@@ -289,7 +347,12 @@ describe('parseDate', () => {
 
   it.each(unparseable)('%j is preserved as text', (input) => {
     const parsed = parseDate(input);
-    expect(parsed).toMatchObject({ text: input, qualifier: 'text', valid: false, sortKey: UNDATED_SORT_KEY });
+    expect(parsed).toMatchObject({
+      text: input,
+      qualifier: 'text',
+      valid: false,
+      sortKey: UNDATED_SORT_KEY,
+    });
     expect(parsed.start).toBeUndefined();
     expect(parsed.end).toBeUndefined();
   });
@@ -306,6 +369,9 @@ describe('parseDate', () => {
     for (const input of [null, undefined, 42, {}, 'x'.repeat(100_000), '\u0000', '\ud800']) {
       expect(() => parseDate(input as unknown as string)).not.toThrow();
     }
-    expect(parseDate(undefined as unknown as string)).toMatchObject({ text: '', qualifier: 'text' });
+    expect(parseDate(undefined as unknown as string)).toMatchObject({
+      text: '',
+      qualifier: 'text',
+    });
   });
 });

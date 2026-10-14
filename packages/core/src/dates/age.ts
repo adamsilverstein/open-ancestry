@@ -23,7 +23,9 @@ function reference(date: ParsedDate): Reference | undefined {
   if (!start) return undefined;
   if (end || calendar === 'hebrew' || calendar === 'french_r') {
     // Ranges and approximate calendars only resolve to a year.
-    const year = end ? Math.floor((yearOf(start) + yearOf(end)) / 2) : astronomical(Math.floor(date.sortKey / 10000));
+    const year = end
+      ? Math.floor((yearOf(start) + yearOf(end)) / 2)
+      : astronomical(Math.floor(date.sortKey / 10000));
     return { year, approximate: true };
   }
   const approximate = qualifier !== 'exact' && qualifier !== 'interpreted';

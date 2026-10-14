@@ -28,13 +28,17 @@ export function pointText(point: DatePoint): string {
   return parts.join(' ');
 }
 
-const order = (a: DatePoint, b: DatePoint): [DatePoint, DatePoint] => (a.year <= b.year ? [a, b] : [b, a]);
+const order = (a: DatePoint, b: DatePoint): [DatePoint, DatePoint] =>
+  a.year <= b.year ? [a, b] : [b, a];
 
 /** Valid GEDCOM date strings across every qualifier and range form. */
 export const arbDateText: fc.Arbitrary<string> = fc.oneof(
   arbPoint.map(pointText),
   fc
-    .tuple(fc.constantFrom('ABT', 'CAL', 'EST', 'BEF', 'AFT', 'FROM', 'TO', '@#DJULIAN@', 'INT'), arbPoint)
+    .tuple(
+      fc.constantFrom('ABT', 'CAL', 'EST', 'BEF', 'AFT', 'FROM', 'TO', '@#DJULIAN@', 'INT'),
+      arbPoint,
+    )
     .map(([q, p]) => `${q} ${pointText(p)}`),
   fc.tuple(arbPoint, arbPoint).map(([a, b]) => {
     const [lo, hi] = order({ year: a.year }, { year: b.year });

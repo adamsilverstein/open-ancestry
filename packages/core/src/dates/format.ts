@@ -5,7 +5,8 @@ import type { Calendar, DateInput, DatePoint, ParsedDate } from './types';
 export type DateStyle = 'long' | 'year';
 export type GedcomVersion = '5.5.1' | '7';
 
-export const asParsed = (date: DateInput): ParsedDate => (typeof date === 'string' ? parseDate(date) : date);
+export const asParsed = (date: DateInput): ParsedDate =>
+  typeof date === 'string' ? parseDate(date) : date;
 
 const DISPLAY_PREFIX: Partial<Record<ParsedDate['qualifier'], string>> = {
   about: 'abt. ',
@@ -50,7 +51,9 @@ export function formatDate(date: DateInput, style: DateStyle = 'long'): string {
     return parts.join('') + year;
   };
   if (end) {
-    return parsed.qualifier === 'between' ? `bet. ${point(start)} and ${point(end)}` : `from ${point(start)} to ${point(end)}`;
+    return parsed.qualifier === 'between'
+      ? `bet. ${point(start)} and ${point(end)}`
+      : `from ${point(start)} to ${point(end)}`;
   }
   const text = (DISPLAY_PREFIX[parsed.qualifier] ?? '') + point(start);
   return parsed.phrase ? `${text} (${parsed.phrase})` : text;
@@ -102,10 +105,14 @@ export function toGedcom(date: DateInput, version: GedcomVersion = '5.5.1'): str
     return parts.join('');
   };
   if (end) {
-    return parsed.qualifier === 'between' ? `BET ${point(start)} AND ${point(end)}` : `FROM ${point(start)} TO ${point(end)}`;
+    return parsed.qualifier === 'between'
+      ? `BET ${point(start)} AND ${point(end)}`
+      : `FROM ${point(start)} TO ${point(end)}`;
   }
   if (parsed.qualifier === 'interpreted' && !v7) {
-    return parsed.phrase ? `INT ${point(start)} (${parsed.phrase.replace(/[()]/g, '')})` : `INT ${point(start)}`;
+    return parsed.phrase
+      ? `INT ${point(start)} (${parsed.phrase.replace(/[()]/g, '')})`
+      : `INT ${point(start)}`;
   }
   return (GEDCOM_QUALIFIER[parsed.qualifier] ?? '') + point(start);
 }

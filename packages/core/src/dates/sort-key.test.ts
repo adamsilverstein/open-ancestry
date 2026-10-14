@@ -30,8 +30,14 @@ describe('sortKey', () => {
   });
 
   it('sets both bounds for ranges', () => {
-    expect(parseDate('BET 1890 AND 1895')).toMatchObject({ sortKey: 18900101, sortKeyEnd: 18951231 });
-    expect(parseDate('FROM SEP 1890 TO 5 OCT 1895')).toMatchObject({ sortKey: 18900901, sortKeyEnd: 18951005 });
+    expect(parseDate('BET 1890 AND 1895')).toMatchObject({
+      sortKey: 18900101,
+      sortKeyEnd: 18951231,
+    });
+    expect(parseDate('FROM SEP 1890 TO 5 OCT 1895')).toMatchObject({
+      sortKey: 18900901,
+      sortKeyEnd: 18951005,
+    });
     expect(parseDate('1941').sortKeyEnd).toBeUndefined();
   });
 
@@ -66,21 +72,35 @@ describe('sortKey properties', () => {
 
   it('places every day of a partial date strictly between its BEF and AFT keys', () => {
     fc.assert(
-      fc.property(fc.integer({ min: 1, max: 2100 }), fc.integer({ min: 1, max: 12 }), fc.integer({ min: 1, max: 28 }), (y, m, day) => {
-        const full = parseDate(pointText({ year: y, month: m, day })).sortKey;
-        for (const partial of [pointText({ year: y, month: m }), String(y)]) {
-          expect(parseDate(`BEF ${partial}`).sortKey).toBeLessThan(full);
-          expect(parseDate(`AFT ${partial}`).sortKey).toBeGreaterThan(full);
-        }
-      }),
+      fc.property(
+        fc.integer({ min: 1, max: 2100 }),
+        fc.integer({ min: 1, max: 12 }),
+        fc.integer({ min: 1, max: 28 }),
+        (y, m, day) => {
+          const full = parseDate(pointText({ year: y, month: m, day })).sortKey;
+          for (const partial of [pointText({ year: y, month: m }), String(y)]) {
+            expect(parseDate(`BEF ${partial}`).sortKey).toBeLessThan(full);
+            expect(parseDate(`AFT ${partial}`).sortKey).toBeGreaterThan(full);
+          }
+        },
+      ),
     );
   });
 
   it('matches chronological order for full Gregorian dates', () => {
-    const arbDay = fc.date({ min: new Date('0100-01-01T00:00:00Z'), max: new Date('2100-12-31T00:00:00Z'), noInvalidDate: true });
+    const arbDay = fc.date({
+      min: new Date('0100-01-01T00:00:00Z'),
+      max: new Date('2100-12-31T00:00:00Z'),
+      noInvalidDate: true,
+    });
     fc.assert(
       fc.property(arbDay, arbDay, (a, b) => {
-        const text = (dt: Date) => pointText({ year: dt.getUTCFullYear(), month: dt.getUTCMonth() + 1, day: dt.getUTCDate() });
+        const text = (dt: Date) =>
+          pointText({
+            year: dt.getUTCFullYear(),
+            month: dt.getUTCMonth() + 1,
+            day: dt.getUTCDate(),
+          });
         const da = Date.UTC(a.getUTCFullYear(), a.getUTCMonth(), a.getUTCDate());
         const db = Date.UTC(b.getUTCFullYear(), b.getUTCMonth(), b.getUTCDate());
         expect(Math.sign(compareDates(text(a), text(b)))).toBe(Math.sign(da - db));
@@ -113,7 +133,9 @@ describe('sortKey properties', () => {
 
 describe('compareDates', () => {
   it('sorts undated text after every real date', () => {
-    const sorted = ['unknown', 'AFT 2000', '44 B.C.', 'BEF 1900', '1900', 'ABT 1900'].sort(compareDates);
+    const sorted = ['unknown', 'AFT 2000', '44 B.C.', 'BEF 1900', '1900', 'ABT 1900'].sort(
+      compareDates,
+    );
     expect(sorted).toEqual(['44 B.C.', 'BEF 1900', '1900', 'ABT 1900', 'AFT 2000', 'unknown']);
   });
 

@@ -31,7 +31,11 @@ describe('ageAt', () => {
     ['JULIAN 5 SEP 1700', '15 SEP 1725', 24, false],
     ['05/28/1960', '2010-2019', 54, true],
   ] as const)('born %s, event %s -> %i (approximate %s)', (birth, event, years, approximate) => {
-    expect(ageAt(birth, event)).toEqual({ years, approximate, text: approximate ? `about ${years}` : String(years) });
+    expect(ageAt(birth, event)).toEqual({
+      years,
+      approximate,
+      text: approximate ? `about ${years}` : String(years),
+    });
   });
 
   it('accepts parsed dates', () => {

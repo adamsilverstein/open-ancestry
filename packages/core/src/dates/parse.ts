@@ -5,7 +5,8 @@ import type { Calendar, DatePoint, DateQualifier, ParsedDate } from './types';
 /** Longer input is never a date; bail out before running any pattern on it. */
 const MAX_DATE_LENGTH = 200;
 
-const CALENDAR_PREFIX = /^(?:@#D([A-Z ]+)@|(GREGORIAN|JULIAN|HEBREW|FRENCH_R|FRENCH REPUBLICAN)(?= )) ?/;
+const CALENDAR_PREFIX =
+  /^(?:@#D([A-Z ]+)@|(GREGORIAN|JULIAN|HEBREW|FRENCH_R|FRENCH REPUBLICAN)(?= )) ?/;
 const CALENDAR_NAMES: Record<string, Calendar> = {
   GREGORIAN: 'gregorian',
   JULIAN: 'julian',
@@ -76,11 +77,18 @@ export function parseDate(text: string): ParsedDate {
     body = match[1]!;
     if (!body) return textDate(original, phrase);
   }
-  const s = body.toUpperCase().replace(/\s+/g, ' ').replace(/[.,;:]+$/, '');
+  const s = body
+    .toUpperCase()
+    .replace(/\s+/g, ' ')
+    .replace(/[.,;:]+$/, '');
   return parseNormalized(original, s, phrase) ?? textDate(original, phrase);
 }
 
-function parseNormalized(original: string, input: string, phrase: string | undefined): ParsedDate | undefined {
+function parseNormalized(
+  original: string,
+  input: string,
+  phrase: string | undefined,
+): ParsedDate | undefined {
   let s = input;
   let calendar: Calendar = 'gregorian';
   // A calendar before the qualifier (`@#DJULIAN@ ABT 1700`) applies to every point.
@@ -118,14 +126,26 @@ function parseNormalized(original: string, input: string, phrase: string | undef
   }
   if ((match = DECADE.exec(s))) {
     const year = Number(match[1]) * 10;
-    return year > 0 ? build(original, 'between', { point: { year }, calendar }, { point: { year: year + 9 }, calendar }) : undefined;
+    return year > 0
+      ? build(
+          original,
+          'between',
+          { point: { year }, calendar },
+          { point: { year: year + 9 }, calendar },
+        )
+      : undefined;
   }
   // `1890-95` is a range but `1890-09` is ISO year-month.
   if ((match = YEAR_RANGE.exec(s)) && (match[2]!.length === 4 || Number(match[2]) > 12)) {
     const start = Number(match[1]);
     let end = Number(match[2]);
     if (match[2]!.length === 2) end += start - (start % 100);
-    return build(original, 'between', { point: { year: start }, calendar }, { point: { year: end }, calendar });
+    return build(
+      original,
+      'between',
+      { point: { year: start }, calendar },
+      { point: { year: end }, calendar },
+    );
   }
   const p = parsePoint(s, calendar);
   return p && single(original, 'exact', p);
@@ -236,7 +256,8 @@ function validPoint(
     point.month = month;
   }
   if (day !== undefined) {
-    if (month === undefined || !(day >= 1 && day <= daysInMonth(calendar, point.year, month))) return undefined;
+    if (month === undefined || !(day >= 1 && day <= daysInMonth(calendar, point.year, month)))
+      return undefined;
     point.day = day;
   }
   if (dual !== undefined) {
@@ -267,13 +288,24 @@ function single(original: string, qualifier: DateQualifier, p: Point, phrase?: s
   return date;
 }
 
-function range(original: string, qualifier: DateQualifier, a: string, b: string, calendar: Calendar): ParsedDate | undefined {
+function range(
+  original: string,
+  qualifier: DateQualifier,
+  a: string,
+  b: string,
+  calendar: Calendar,
+): ParsedDate | undefined {
   const start = parsePoint(a, calendar);
   const end = start && parsePoint(b, calendar);
   return end && build(original, qualifier, start!, end);
 }
 
-function build(original: string, qualifier: DateQualifier, start: Point, end: Point): ParsedDate | undefined {
+function build(
+  original: string,
+  qualifier: DateQualifier,
+  start: Point,
+  end: Point,
+): ParsedDate | undefined {
   const sortKey = pointKey(start.point, start.calendar, 'low');
   const sortKeyEnd = pointKey(end.point, end.calendar, 'high');
   if (sortKey > sortKeyEnd) return undefined;
@@ -290,7 +322,13 @@ function build(original: string, qualifier: DateQualifier, start: Point, end: Po
 }
 
 function textDate(text: string, phrase?: string): ParsedDate {
-  const date: ParsedDate = { text, qualifier: 'text', calendar: 'gregorian', sortKey: UNDATED_SORT_KEY, valid: false };
+  const date: ParsedDate = {
+    text,
+    qualifier: 'text',
+    calendar: 'gregorian',
+    sortKey: UNDATED_SORT_KEY,
+    valid: false,
+  };
   if (phrase) date.phrase = phrase;
   return date;
 }

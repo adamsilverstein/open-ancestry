@@ -1,8 +1,49 @@
 import type { Calendar, DatePoint } from './types';
 
-export const GREGORIAN_MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-export const HEBREW_MONTHS = ['TSH', 'CSH', 'KSL', 'TVT', 'SHV', 'ADR', 'ADS', 'NSN', 'IYR', 'SVN', 'TMZ', 'AAV', 'ELL'];
-export const FRENCH_MONTHS = ['VEND', 'BRUM', 'FRIM', 'NIVO', 'PLUV', 'VENT', 'GERM', 'FLOR', 'PRAI', 'MESS', 'THER', 'FRUC', 'COMP'];
+export const GREGORIAN_MONTHS = [
+  'JAN',
+  'FEB',
+  'MAR',
+  'APR',
+  'MAY',
+  'JUN',
+  'JUL',
+  'AUG',
+  'SEP',
+  'OCT',
+  'NOV',
+  'DEC',
+];
+export const HEBREW_MONTHS = [
+  'TSH',
+  'CSH',
+  'KSL',
+  'TVT',
+  'SHV',
+  'ADR',
+  'ADS',
+  'NSN',
+  'IYR',
+  'SVN',
+  'TMZ',
+  'AAV',
+  'ELL',
+];
+export const FRENCH_MONTHS = [
+  'VEND',
+  'BRUM',
+  'FRIM',
+  'NIVO',
+  'PLUV',
+  'VENT',
+  'GERM',
+  'FLOR',
+  'PRAI',
+  'MESS',
+  'THER',
+  'FRUC',
+  'COMP',
+];
 
 const GREGORIAN_LOOKUP = new Map<string, number>();
 GREGORIAN_MONTHS.forEach((abbr, i) => GREGORIAN_LOOKUP.set(abbr, i + 1));
@@ -33,7 +74,12 @@ export function monthNumber(token: string, calendar: Calendar): number | undefin
 }
 
 export function monthCode(month: number, calendar: Calendar): string {
-  const table = calendar === 'hebrew' ? HEBREW_MONTHS : calendar === 'french_r' ? FRENCH_MONTHS : GREGORIAN_MONTHS;
+  const table =
+    calendar === 'hebrew'
+      ? HEBREW_MONTHS
+      : calendar === 'french_r'
+        ? FRENCH_MONTHS
+        : GREGORIAN_MONTHS;
   return table[month - 1]!;
 }
 
@@ -52,7 +98,8 @@ export function daysInMonth(calendar: Calendar, year: number, month: number): nu
   if (calendar === 'french_r') return month === 13 ? 6 : 30;
   if (month !== 2) return DAYS[month - 1]!;
   const y = astronomical(year);
-  const leap = calendar === 'julian' ? y % 4 === 0 : (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  const leap =
+    calendar === 'julian' ? y % 4 === 0 : (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
   return leap ? 29 : 28;
 }
 
@@ -61,7 +108,15 @@ function gregorianToJdn(y: number, m: number, d: number): number {
   const a = Math.floor((14 - m) / 12);
   const yy = y + 4800 - a;
   const mm = m + 12 * a - 3;
-  return d + Math.floor((153 * mm + 2) / 5) + 365 * yy + Math.floor(yy / 4) - Math.floor(yy / 100) + Math.floor(yy / 400) - 32045;
+  return (
+    d +
+    Math.floor((153 * mm + 2) / 5) +
+    365 * yy +
+    Math.floor(yy / 4) -
+    Math.floor(yy / 100) +
+    Math.floor(yy / 400) -
+    32045
+  );
 }
 
 function julianToJdn(y: number, m: number, d: number): number {
@@ -108,7 +163,9 @@ export function toGregorian(
       return { year: m >= 9 ? year - 3761 : year - 3760, month: m, day: Math.min(day, 28) };
     }
     case 'french_r':
-      return jdnToGregorian(FRENCH_EPOCH_JDN + Math.floor((year - 1) * 365.2425) + (month - 1) * 30 + day - 1);
+      return jdnToGregorian(
+        FRENCH_EPOCH_JDN + Math.floor((year - 1) * 365.2425) + (month - 1) * 30 + day - 1,
+      );
     default:
       return { year, month, day };
   }

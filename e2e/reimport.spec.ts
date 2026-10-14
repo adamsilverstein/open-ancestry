@@ -81,7 +81,7 @@ async function eventDate(request: APIRequestContext, tree: string, personId: str
   return detail.events.find((e) => e.event.type === type)!.event;
 }
 
-async function startReimport(page: Page, seeded: Seeded) {
+async function startReimport(page: Page, seeded: Seeded, text = laterExport()) {
   await page.addInitScript((tree) => localStorage.setItem('oa-tree', tree), seeded.tree);
   await page.goto('/');
   await page.getByRole('button', { name: 'File' }).click();
@@ -92,7 +92,7 @@ async function startReimport(page: Page, seeded: Seeded) {
   ).setFiles({
     name: 'Ashgrove 2026.ged',
     mimeType: 'application/octet-stream',
-    buffer: Buffer.from(laterExport()),
+    buffer: Buffer.from(text),
   });
   await expect(
     page.getByRole('heading', { level: 1, name: 'Review the updated export' }),
@@ -237,4 +237,27 @@ test('the review screen has no accessibility violations', async ({
   await startReimport(page, seeded);
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations).toEqual([]);
+});
+
+test('a large review is shown in pages, and bulk choices cover every page', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const many = Array.from(
+    { length: 150 },
+    (_, i) => `0 @I${900 + i}@ INDI\n1 NAME Extra${i} /Newfield/\n1 BIRT\n2 DATE ${1900 + i}`,
+  ).join('\n');
+  await startReimport(page, seeded, laterExport().replace('0 TRLR', `${many}\n0 TRLR`));
+  const cards = page.locator('section[data-status]');
+  await expect(cards).toHaveCount(100);
+  await expect(page.getByRole('button', { name: /Show 54 more/ })).toBeVisible();
+  // Every default change counts, shown or not: 151 new people and the matched changes.
+  const apply = page.getByRole('button', { name: /^Apply \d+ changes$/ });
+  const total = Number(/\d+/.exec((await apply.textContent())!)![0]);
+  expect(total).toBeGreaterThan(151);
+  await page.getByRole('button', { name: /Show 54 more/ }).click();
+  await expect(cards).toHaveCount(154);
+  await expect(page.getByRole('button', { name: /Show \d+ more/ })).toHaveCount(0);
 });

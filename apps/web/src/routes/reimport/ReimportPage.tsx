@@ -22,6 +22,9 @@ import {
 import { describeChange } from './labels';
 import styles from './Reimport.module.css';
 
+/** People shown per page of the review. */
+export const PAGE = 100;
+
 const STATUS: Record<PersonReview['status'], string> = {
   matched: 'Matched',
   new: 'New person',
@@ -122,6 +125,8 @@ function Review({ review }: { review: ReimportReview }) {
     () => new Set(all.filter((c) => c.applicable && c.defaultAccept).map((c) => c.id)),
   );
   const [pending, setPending] = useState(false);
+  // A large export can change thousands of people: render cards in pages.
+  const [shown, setShown] = useState(PAGE);
   const active = useMemo(() => effective(review, selected), [review, selected]);
   const { counts } = review.diff;
 
@@ -206,9 +211,17 @@ function Review({ review }: { review: ReimportReview }) {
           This export matches your tree: there is nothing to change.
         </p>
       ) : (
-        review.diff.people.map((person) => (
-          <PersonCard key={person.key} person={person} active={active} onToggle={toggle} />
-        ))
+        <>
+          {review.diff.people.slice(0, shown).map((person) => (
+            <PersonCard key={person.key} person={person} active={active} onToggle={toggle} />
+          ))}
+          {review.diff.people.length > shown && (
+            <Button onClick={() => setShown((n) => n + PAGE)}>
+              Show {Math.min(PAGE, review.diff.people.length - shown)} more (
+              {review.diff.people.length - shown} not shown; bulk choices include them)
+            </Button>
+          )}
+        </>
       )}
       <div className={styles.footer}>
         <Button variant="ghost" onClick={() => void discard()}>

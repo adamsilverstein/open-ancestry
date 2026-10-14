@@ -1,10 +1,10 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { generateGedcom } from '../../fixtures/generate';
 import { openMemoryTree } from '../../packages/db/src/index';
 import { importGedcom } from '../../packages/import/src/index';
 import type { BenchCase } from '../types';
+import { makeTempDir } from '../../fixtures/temp-dir';
 
 // design.md section 7: a 10k-person Ancestry GEDCOM imports in under 3s,
 // 100k in under 30s (parse + map + load + search index). The on-disk case is
@@ -27,7 +27,7 @@ async function run(people: number) {
 }
 
 async function runOnDisk(people: number) {
-  const root = mkdtempSync(join(tmpdir(), 'oa-bench-'));
+  const root = makeTempDir('oa-bench-');
   try {
     const report = await importGedcom({ bytes: input(people) }, { dir: join(root, 'b.oatree') });
     if (report.records.INDI !== people) throw new Error(`imported ${report.records.INDI} people`);

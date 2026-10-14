@@ -4,23 +4,22 @@ import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { importFile, importGedcom } from './import';
 import { FIXTURES, TODAY, ged, importInto, row, rows, value } from './test-helpers';
 import { ImportError } from './types';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 let tmp: string;
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'oa-import-'));
+  tmp = makeTempDir('oa-import-');
 });
 afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });

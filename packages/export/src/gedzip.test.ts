@@ -2,8 +2,7 @@ import { openMemoryTree, openTree, treePaths } from '@open-ancestry/db';
 import { readGedzip, safeEntryPath } from '@open-ancestry/gedcom';
 import { importGedcom } from '@open-ancestry/import';
 import { unzipSync, zipSync } from 'fflate';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildGedzipExport, exportGedzip } from './index';
@@ -15,13 +14,14 @@ import {
   importedSnapshot,
   rows,
 } from './test-helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 const dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 const tempDir = () => {
-  const d = mkdtempSync(join(tmpdir(), 'oa-export-'));
+  const d = makeTempDir('oa-export-');
   dirs.push(d);
   return d;
 };

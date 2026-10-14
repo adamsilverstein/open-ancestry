@@ -1,11 +1,12 @@
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { generateGedcom } from '../../../fixtures/generate';
 import { exposureWarning, parseCliArgs, progressReporter, run } from './main';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 describe('parseCliArgs', () => {
   it('parses serve with defaults', () => {
@@ -45,9 +46,9 @@ describe('parseCliArgs', () => {
 
 describe('run', () => {
   async function serve(extra: string[] = []) {
-    const dir = await mkdtemp(join(tmpdir(), 'oa-cli-'));
+    const dir = makeTempDir('oa-cli-');
     await writeFile(join(dir, 'index.html'), '<!doctype html><title>cli</title>');
-    const library = await mkdtemp(join(tmpdir(), 'oa-cli-lib-'));
+    const library = makeTempDir('oa-cli-lib-');
     const logs: string[] = [];
     const warnings: string[] = [];
     const opened: string[] = [];
@@ -104,7 +105,7 @@ const fixture = join(import.meta.dirname, '../../../fixtures/ancestry-sample.ged
 
 describe('import', () => {
   async function importCli(args: string[]) {
-    const library = await mkdtemp(join(tmpdir(), 'oa-cli-import-'));
+    const library = makeTempDir('oa-cli-import-');
     const logs: string[] = [];
     const errors: string[] = [];
     await run(['import', ...args, '--library', library], {
@@ -134,7 +135,7 @@ describe('import', () => {
   });
 
   it('uses --name and --media, and lists warnings and unmapped tags', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'oa-cli-ged-'));
+    const dir = makeTempDir('oa-cli-ged-');
     const ged = join(dir, 'family.ged');
     await writeFile(
       ged,
@@ -175,7 +176,7 @@ describe('import', () => {
   });
 
   it('refuses a --media folder that does not exist', async () => {
-    const library = await mkdtemp(join(tmpdir(), 'oa-cli-media-'));
+    const library = makeTempDir('oa-cli-media-');
     await expect(
       run(['import', fixture, '--media', join(library, 'nope'), '--library', library], {
         log: () => {},
@@ -188,7 +189,7 @@ describe('import', () => {
   });
 
   it('writes progress lines when asked (stderr on a terminal)', async () => {
-    const library = await mkdtemp(join(tmpdir(), 'oa-cli-progress-'));
+    const library = makeTempDir('oa-cli-progress-');
     const chunks: string[] = [];
     await run(['import', fixture, '--library', library], {
       log: () => {},
@@ -206,7 +207,7 @@ describe('import', () => {
   });
 
   it('fails cleanly on a missing or non-GEDCOM file', async () => {
-    const library = await mkdtemp(join(tmpdir(), 'oa-cli-bad-'));
+    const library = makeTempDir('oa-cli-bad-');
     await expect(
       run(['import', join(library, 'nope.ged'), '--library', library], { log: () => {} }),
     ).rejects.toThrow(/Cannot read/);
@@ -221,9 +222,9 @@ describe('import', () => {
 
 describe('serve with import', () => {
   it('wires the real importer into the server', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'oa-cli-'));
+    const dir = makeTempDir('oa-cli-');
     await writeFile(join(dir, 'index.html'), '<!doctype html>');
-    const library = await mkdtemp(join(tmpdir(), 'oa-cli-lib-'));
+    const library = makeTempDir('oa-cli-lib-');
     const server = await run(['serve', '--port', '0', '--static-dir', dir, '--library', library], {
       log: () => {},
     });
@@ -263,9 +264,9 @@ describe('serve with import', () => {
 
 describe('serve on SIGINT/SIGTERM', () => {
   it('aborts a running import, cleans up its new tree and upload, then exits 0', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'oa-cli-'));
+    const dir = makeTempDir('oa-cli-');
     await writeFile(join(dir, 'index.html'), '<!doctype html>');
-    const library = await mkdtemp(join(tmpdir(), 'oa-cli-lib-'));
+    const library = makeTempDir('oa-cli-lib-');
     const signals = new EventEmitter();
     const exits: number[] = [];
     const logs: string[] = [];
@@ -307,9 +308,9 @@ describe('serve on SIGINT/SIGTERM', () => {
   }, 30_000);
 
   it('exits at once on a second signal', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'oa-cli-'));
+    const dir = makeTempDir('oa-cli-');
     await writeFile(join(dir, 'index.html'), '<!doctype html>');
-    const library = await mkdtemp(join(tmpdir(), 'oa-cli-lib-'));
+    const library = makeTempDir('oa-cli-lib-');
     const signals = new EventEmitter();
     const exits: number[] = [];
     const server = await run(['serve', '--port', '0', '--static-dir', dir, '--library', library], {

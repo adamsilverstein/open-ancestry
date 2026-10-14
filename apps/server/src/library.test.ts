@@ -1,10 +1,11 @@
 import { existsSync } from 'node:fs';
-import { mkdtemp, readdir } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { readdir } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Library, defaultLibraryRoot, treeNameProblem } from './library';
 import { testApi, type TestApi } from './test/helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 describe('treeNameProblem', () => {
   it.each([
@@ -56,7 +57,7 @@ describe('defaultLibraryRoot', () => {
 
 describe('Library', () => {
   it('creates its root lazily and caches one store per tree', async () => {
-    const root = join(await mkdtemp(join(tmpdir(), 'oa-lib-')), 'nested');
+    const root = join(makeTempDir('oa-lib-'), 'nested');
     const library = new Library(root);
     expect(existsSync(root)).toBe(false);
     expect(library.list()).toEqual([]);
@@ -70,7 +71,7 @@ describe('Library', () => {
   });
 
   it('refuses to rename or delete a busy tree', async () => {
-    const library = new Library(await mkdtemp(join(tmpdir(), 'oa-lib-')));
+    const library = new Library(makeTempDir('oa-lib-'));
     library.create('Busy');
     let release!: () => void;
     const running = library.whileBusy('Busy', () => new Promise<void>((r) => (release = r)));

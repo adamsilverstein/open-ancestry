@@ -1,10 +1,10 @@
-import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Library } from './library';
 import { MEDIA_CSP, parseRange, resolveMediaPath, sniffMediaType } from './routes/media';
 import { createTestTree, testApi, type TestApi } from './test/helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 let api: TestApi;
 let base: string;
@@ -20,7 +20,7 @@ function addMedia(fields: { local_path?: string | null; mime?: string | null }) 
 
 describe('with a tree', () => {
   beforeEach(async () => {
-    const root = await mkdtemp(join(tmpdir(), 'oa-lib-'));
+    const root = makeTempDir('oa-lib-');
     library = new Library(root);
     api = await testApi({ library });
     base = await createTestTree(api);
@@ -121,7 +121,7 @@ describe('with a tree', () => {
     });
 
     it('refuses symlinks that escape the media folder', async () => {
-      const outside = join(await mkdtemp(join(tmpdir(), 'oa-secret-')), 'secret.txt');
+      const outside = join(makeTempDir('oa-secret-'), 'secret.txt');
       await writeFile(outside, 'secret');
       await symlink(outside, join(library.root, 'Test.oatree', 'media', 'link.txt'));
       const id = addMedia({ local_path: 'link.txt' });

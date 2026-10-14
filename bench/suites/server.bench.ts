@@ -1,10 +1,8 @@
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { createServer, Library } from '../../apps/server/src/index';
 import { bulkInsert, generateSyntheticTree } from '../../packages/db/src/index';
 import type { BenchCase } from '../types';
+import { makeTempDir } from '../../fixtures/temp-dir';
 
 // API budgets from design.md section 7, measured through the whole Fastify
 // pipeline (security hooks, validation, serialization, ETag, compression).
@@ -19,7 +17,7 @@ const nextId = () => ids[i++ % ids.length] as string;
 
 async function loaded() {
   if (root) return;
-  root = mkdtempSync(join(tmpdir(), 'oa-bench-'));
+  root = makeTempDir('oa-bench-');
   const library = new Library(root);
   const data = generateSyntheticTree({ people: 10_000, seed: 1 });
   bulkInsert(library.create(TREE), data);

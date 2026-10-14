@@ -127,3 +127,34 @@ describe('kinshipLabels', () => {
     expect(kinshipLabels(relations, 'missing', sexOf)).toEqual({});
   });
 });
+
+describe('a very large family', () => {
+  // Bad data the import accepts (one "unknown parents" family holding everyone).
+  const kids = Array.from({ length: 3000 }, (_, i) => `k${i}`);
+  const big: TreeGraph = {
+    people: Object.fromEntries(
+      ['dad', 'mum', ...kids].map((id) => [id, person(id, id === 'mum' ? 'F' : 'M')]),
+    ),
+    families: [{ id: 'f', partners: ['dad', 'mum'], children: kids.map((id) => ({ id })) }],
+  };
+  const male = (key: string) => (key.startsWith('mum') ? 'F' : 'M');
+
+  it('links and labels 3,000 children in linear time', () => {
+    for (const focus of ['dad', 'k1500']) {
+      const layout = layoutFamily(big, focus, {});
+      const start = performance.now();
+      const rel = buildRelations(layout);
+      const labels = kinshipLabels(rel, focus, male);
+      const elapsed = performance.now() - start;
+      expect(elapsed, `focus ${focus}`).toBeLessThan(100);
+      if (focus === 'dad') {
+        expect(labels.k0).toBe('son');
+        expect(rel.children.get('dad')).toHaveLength(3000);
+      } else {
+        expect(labels.k0).toBe('brother');
+        expect(labels.dad).toBe('father');
+        expect(rel.parents.get('k1500')).toEqual(['dad', 'mum']);
+      }
+    }
+  });
+});

@@ -322,3 +322,88 @@ describe('privatized exports read RESN and pointers the way the strictest reader
     store.close();
   });
 });
+
+/*
+ * Issue #195: a living person named in free text on a deceased relative's
+ * record (a note, an event TYPE, a custom tag, a photo title or file name).
+ * Privatizing removes withheld people's names, in every form, from text on
+ * the records it writes, and leaves out imported custom tags, whose content
+ * nobody vetted. The deceased keep their own names, a shared surname too.
+ */
+const mentions = [
+  '0 HEAD',
+  '1 GEDC',
+  '2 VERS 5.5.1',
+  '1 CHAR UTF-8',
+  '0 @I1@ INDI',
+  '1 NAME Zedekiah Quillon /Livingson/',
+  '2 NICK Zeddo',
+  '1 NAME Zed /Marriedname/',
+  '2 TYPE married',
+  '1 BIRT',
+  '2 DATE 2001',
+  '1 FAMC @F1@',
+  '0 @I2@ INDI',
+  '1 NAME Old /Livingson/',
+  '1 BIRT',
+  '2 DATE 1850',
+  '1 DEAT',
+  '2 DATE 1920',
+  '1 _MYNOTE My grandson Zeddo',
+  '1 EVEN Read by Quillon',
+  '2 TYPE Witnessed by Zedekiah Livingson',
+  '1 NOTE Zed (Zedekiah Marriedname) kept his watch.',
+  '1 NOTE @N1@',
+  '1 OBJE @O1@',
+  '1 FAMS @F1@',
+  '0 @F1@ FAM',
+  '1 HUSB @I2@',
+  '1 CHIL @I1@',
+  '0 @N1@ NOTE Told by zedekiah, his great-grandson.',
+  '0 @O1@ OBJE',
+  '1 FILE photos/zedekiah-graduation.png',
+  '2 FORM png',
+  '2 TITL Zedekiah at graduation',
+  '0 TRLR',
+  '',
+];
+
+describe('privatized exports remove withheld people named in other records (#195)', () => {
+  const named = (text: string) => text.match(/zedekiah|quillon|zeddo|marriedname|\bzed\b/gi) ?? [];
+
+  it('5.5.1, 7 and GEDZIP name no withheld person, and keep the deceased name', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'oa-privacy-'));
+    dirs.push(root);
+    const dir = join(root, 'Mentions.oatree');
+    const archive = zipSync({
+      'gedcom.ged': new TextEncoder().encode(mentions.join('\n')),
+      'photos/zedekiah-graduation.png': PNG,
+    });
+    await importGedcom({ gedzip: archive }, { dir }, { today: TODAY });
+    const store = openTree(dir);
+    for (const version of ['5.5.1', '7'] as const) {
+      const out = buildGedcomExport(store, { version, privatizeLiving: true, now: TODAY });
+      expect(named(out.text), version).toEqual([]);
+      expect(named(out.warnings.join('\n')), version).toEqual([]);
+      if (version === '7') expect(gedcom7Problems(out.text)).toEqual([]);
+      // The grandfather keeps his own name, though the surname is shared.
+      expect(out.text, version).toMatch(/^1 NAME Old \/Livingson\/$/m);
+      expect(out.text, version).toContain('kept his watch');
+      // Imported custom tags are left out: nobody vetted what they say.
+      expect(out.text, version).not.toContain('_MYNOTE');
+      expect(out.warnings.join('\n'), version).toMatch(/custom/);
+      // Without privatizing, everything is written as it was.
+      const full = buildGedcomExport(store, { version, now: TODAY }).text;
+      expect(full).toContain('Witnessed by Zedekiah Livingson');
+    }
+    const zip = buildGedzipExport(store, { privatizeLiving: true, now: TODAY });
+    const files = unzipSync(zip.bytes);
+    expect(named(Object.keys(files).join('\n'))).toEqual([]);
+    const ged = new TextDecoder().decode(files['gedcom.ged']);
+    expect(named(ged)).toEqual([]);
+    // The renamed file is still the one the FILE line points at.
+    const file = /^1 FILE (.+)$/m.exec(ged)![1]!;
+    expect(Object.keys(files)).toContain(file);
+    store.close();
+  });
+});

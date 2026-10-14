@@ -968,12 +968,113 @@ test.describe('far zoom', () => {
   });
 });
 
+test.describe('wide descendant charts (#74)', () => {
+  test.use({ viewport: { width: 900, height: 700 } });
+
+  type Box = { x: number; y: number; width: number; height: number };
+  const intersects = (a: Box, b: Box) =>
+    a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+
+  async function visibleBoxes(locator: Locator) {
+    const out: Box[] = [];
+    for (const el of await locator.all()) {
+      if (!(await el.isVisible())) continue;
+      const b = await el.boundingBox();
+      if (b) out.push(b);
+    }
+    return out;
+  }
+
+  const labels = (page: Page) => page.getByTestId('tree-row-label');
+  const cards = (page: Page) => canvas(page).getByRole('button', { name: /, (male|female)/ });
+
+  async function expectLabelsClear(page: Page) {
+    const cardBoxes = await visibleBoxes(cards(page));
+    for (const l of await visibleBoxes(labels(page))) {
+      for (const c of cardBoxes) expect(intersects(l, c)).toBe(false);
+    }
+  }
+
+  async function drag(page: Page, dx: number, dy: number) {
+    await page.mouse.move(450, 350);
+    await page.mouse.down();
+    await page.mouse.move(450 + dx, 350 + dy, { steps: 5 });
+    await page.mouse.up();
+    await settled(page);
+  }
+
+  test('row labels never cover a card, at fit, 100% and zoomed out', async ({ page }) => {
+    await open(page, 'bram', '&layout=descendants');
+    await settled(page);
+    await expectLabelsClear(page);
+    await drag(page, 300, 0);
+    await expectLabelsClear(page);
+    // 100%, then zoomed out to just above the canvas level of detail.
+    await page.getByRole('button', { name: 'Fit to screen' }).click();
+    await settled(page);
+    while ((await transform(page)).scale < 1) {
+      await page.getByRole('button', { name: 'Zoom in' }).click();
+      await settled(page);
+    }
+    await drag(page, 250, 0);
+    await expectLabelsClear(page);
+    for (let i = 0; i < 4 && (await transform(page)).scale > 0.45; i++) {
+      await page.getByRole('button', { name: 'Zoom out' }).click();
+      await settled(page);
+      await expectLabelsClear(page);
+    }
+  });
+
+  test('the minimap moves or collapses rather than cover a label or the active card', async ({
+    page,
+  }) => {
+    await open(page, 'bram', '&layout=descendants');
+    await settled(page);
+    const minimap = page.getByTestId('tree-minimap');
+    // Shown at the start, in its usual bottom-left corner.
+    await expect(minimap).toBeVisible();
+    await expect(minimap).toHaveAttribute('data-corner', 'left');
+    const check = async () => {
+      const m = await visibleBoxes(minimap);
+      if (!m.length) return; // collapsed
+      for (const l of await visibleBoxes(labels(page))) expect(intersects(m[0]!, l)).toBe(false);
+      const active = canvas(page).locator('[data-key][tabindex="0"]');
+      for (const a of await visibleBoxes(active)) expect(intersects(m[0]!, a)).toBe(false);
+    };
+    await check();
+    // Bring the focus card and the lowest rows down to the bottom-left corner:
+    // the minimap gets out of the way.
+    await drag(page, -150, 250);
+    await check();
+    await expect(minimap).not.toHaveAttribute('data-corner', 'left');
+    await drag(page, 300, 0);
+    await check();
+  });
+});
+
 test.describe('visual snapshots', () => {
   // Baselines are Linux Chromium only, like design.spec.ts.
   test.skip(
     ({ browserName }) => browserName !== 'chromium' || process.platform !== 'linux',
     'Linux Chromium baselines only',
   );
+
+  for (const zoom of ['fit', '100'] as const) {
+    test(`wide descendant chart at ${zoom === 'fit' ? 'fit' : '100%'}`, async ({ page }) => {
+      await page.setViewportSize({ width: 900, height: 700 });
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await open(page, 'bram', '&layout=descendants');
+      await settled(page);
+      if (zoom === '100') {
+        while ((await transform(page)).scale < 1) {
+          await page.getByRole('button', { name: 'Zoom in' }).click();
+          await settled(page);
+        }
+      }
+      await page.evaluate(() => document.fonts.ready);
+      await expect(canvas(page)).toHaveScreenshot(`tree-descendants-wide-${zoom}.png`);
+    });
+  }
 
   for (const colorScheme of ['light', 'dark'] as const) {
     test(`family view canvas (${colorScheme})`, async ({ page }) => {

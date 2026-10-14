@@ -3,21 +3,39 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { test as base } from '@playwright/test';
+import { expect, test as base } from '@playwright/test';
 import { FIXTURE_TREE } from './tree-fixture';
 import libCoverage, { type CoverageMapData } from 'istanbul-lib-coverage';
 import libSourceMaps from 'istanbul-lib-source-maps';
 
-export { expect } from '@playwright/test';
+export { expect };
 
 const rawCoverageDir = join(import.meta.dirname, '..', 'coverage', 'e2e', 'raw');
 
 /**
- * Playwright `test` with automatic fixtures: `currentTree` opens the fixture
- * tree from global-setup.ts, and `collectCoverage` saves the instrumented
+ * Playwright `test` with automatic fixtures: `cspGuard` fails a test that trips
+ * the CSP, `currentTree` opens the fixture tree from global-setup.ts, and `collectCoverage` saves the instrumented
  * build's `window.__coverage__` after each test when E2E_COVERAGE=1.
  */
-export const test = base.extend<{ collectCoverage: void; currentTree: void }>({
+export const test = base.extend<{ collectCoverage: void; currentTree: void; cspGuard: void }>({
+  // Issue #106: any Content Security Policy violation in any test fails it.
+  cspGuard: [
+    async ({ page }, use) => {
+      await page.addInitScript(() => {
+        const seen: string[] = [];
+        (globalThis as unknown as { __cspViolations: string[] }).__cspViolations = seen;
+        document.addEventListener('securitypolicyviolation', (event) => {
+          seen.push(`${event.violatedDirective} at ${event.sourceFile}:${event.lineNumber}`);
+        });
+      });
+      await use();
+      const violations = await page
+        .evaluate(() => (globalThis as unknown as { __cspViolations?: string[] }).__cspViolations)
+        .catch(() => undefined);
+      expect(violations ?? [], 'Content Security Policy violations').toEqual([]);
+    },
+    { auto: true },
+  ],
   currentTree: [
     async ({ page }, use) => {
       // Other specs create trees in the same library; always open the fixture.

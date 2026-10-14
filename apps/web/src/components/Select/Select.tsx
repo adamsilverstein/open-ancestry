@@ -1,5 +1,6 @@
 import * as RadixSelect from '@radix-ui/react-select';
 import { Check, ChevronDown } from 'lucide-react';
+import { cspNonce } from '../../lib/cspNonce';
 import { cx } from '../../lib/cx';
 import { Field } from '../Field/Field';
 import fieldStyles from '../Field/Field.module.css';
@@ -24,6 +25,15 @@ export interface SelectProps {
   name?: string;
 }
 
+/*
+ * Radix renders a hidden native <select> so the value can take part in a
+ * native form submission. Our forms never submit natively, and WebKit reports
+ * every <select> as a style-src-attr CSP violation (its built-in rendering
+ * uses inline styles), so without a `name` the Select skips it.
+ */
+const FORM_ROOT = RadixSelect.Root;
+const ROOT_WITHOUT_NATIVE_SELECT = RadixSelect.unstable_Provider;
+
 export function Select({
   label,
   options,
@@ -36,10 +46,11 @@ export function Select({
   disabled,
   name,
 }: SelectProps) {
+  const Root = name === undefined ? ROOT_WITHOUT_NATIVE_SELECT : FORM_ROOT;
   return (
     <Field label={label} hint={hint} error={error}>
       {(control) => (
-        <RadixSelect.Root
+        <Root
           value={value}
           defaultValue={defaultValue}
           onValueChange={onValueChange}
@@ -54,7 +65,7 @@ export function Select({
           </RadixSelect.Trigger>
           <RadixSelect.Portal>
             <RadixSelect.Content className={styles.content} position="popper" sideOffset={4}>
-              <RadixSelect.Viewport className={styles.viewport}>
+              <RadixSelect.Viewport className={styles.viewport} nonce={cspNonce()}>
                 {options.map((option) => (
                   <RadixSelect.Item
                     key={option.value}
@@ -71,7 +82,7 @@ export function Select({
               </RadixSelect.Viewport>
             </RadixSelect.Content>
           </RadixSelect.Portal>
-        </RadixSelect.Root>
+        </Root>
       )}
     </Field>
   );

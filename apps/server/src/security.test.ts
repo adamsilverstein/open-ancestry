@@ -3,7 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createServer } from './index';
-import { createToken, isLoopbackHost, parseHostHeader, SECURITY_HEADERS } from './security';
+import {
+  createToken,
+  isLoopbackHost,
+  isSameOrigin,
+  parseHostHeader,
+  SECURITY_HEADERS,
+} from './security';
 import {
   HOST,
   MUTATION_HEADERS,
@@ -70,6 +76,9 @@ describe('Host allowlist (DNS rebinding)', () => {
     'evil.example:4317',
     '127.0.0.1.evil.example',
     'localhost.evil.example:4317',
+    'localhost.:4317',
+    'user@localhost:4317',
+    '127.0.0.1:4317, evil.example',
     '10.0.0.5:4317',
     'local host',
     '[::2]:4317',
@@ -144,6 +153,32 @@ describe('session token and mutation guard', () => {
     ['https', { host: HOST, origin: 'https://127.0.0.1:4317', 'x-oa-token': TOKEN }],
     ['a null Origin', { host: HOST, origin: 'null', 'x-oa-token': TOKEN }],
     ['a malformed Origin', { host: HOST, origin: 'http://[bad', 'x-oa-token': TOKEN }],
+    [
+      'an Origin with userinfo',
+      { host: HOST, origin: 'http://evil@127.0.0.1:4317', 'x-oa-token': TOKEN },
+    ],
+    ['an Origin with a path', { host: HOST, origin: `${ORIGIN}/`, 'x-oa-token': TOKEN }],
+    [
+      'an Origin with a trailing dot',
+      { host: HOST, origin: 'http://127.0.0.1.:4317', 'x-oa-token': TOKEN },
+    ],
+    [
+      'an uppercase Origin',
+      { host: 'localhost:4317', origin: 'http://LOCALHOST:4317', 'x-oa-token': TOKEN },
+    ],
+    [
+      'an Origin prefix match',
+      { host: HOST, origin: 'http://127.0.0.1:4317.evil.example', 'x-oa-token': TOKEN },
+    ],
+    [
+      'a look-alike Origin',
+      { host: HOST, origin: 'http://localhost.evil.example:4317', 'x-oa-token': TOKEN },
+    ],
+    ['two Origins', { host: HOST, origin: `${ORIGIN}, http://evil.example`, 'x-oa-token': TOKEN }],
+    [
+      'an explicit default port mismatch',
+      { host: '127.0.0.1', origin: 'http://127.0.0.1:8080', 'x-oa-token': TOKEN },
+    ],
     ['no token', { host: HOST, origin: ORIGIN }],
     ['a wrong token', { host: HOST, origin: ORIGIN, 'x-oa-token': 'nope' }],
     [
@@ -157,6 +192,20 @@ describe('session token and mutation guard', () => {
       expect(res.json().error.code).toBe('forbidden');
     }
     expect((await api.get('/api/trees')).json().trees).toEqual([]);
+  });
+
+  it('rejects duplicate Origin and token headers', async () => {
+    const res = await api.inject({
+      method: 'POST',
+      url: '/api/trees',
+      headers: {
+        host: HOST,
+        origin: [ORIGIN, 'http://evil.example'],
+        'x-oa-token': [TOKEN, TOKEN],
+      } as unknown as Record<string, string>,
+      payload: { name: 'A' },
+    });
+    expect(res.statusCode).toBe(403);
   });
 
   it('lets reads through without a token', async () => {
@@ -207,7 +256,18 @@ describe('helpers', () => {
       expect(isLoopbackHost(h)).toBe(false);
   });
 
+  it('isSameOrigin compares exact serialized origins', () => {
+    const allowed = new Set(['localhost', '127.0.0.1', '[::1]']);
+    expect(isSameOrigin('http://[::1]:4317', '[::1]:4317', allowed)).toBe(true);
+    expect(isSameOrigin('http://localhost', 'localhost:80', allowed)).toBe(true);
+    expect(isSameOrigin('http://evil.example', 'evil.example', allowed)).toBe(false);
+    expect(isSameOrigin(['http://localhost'], 'localhost', allowed)).toBe(false);
+    expect(isSameOrigin('http://localhost', undefined, allowed)).toBe(false);
+  });
+
   it('parseHostHeader', () => {
+    expect(parseHostHeader('localhost.')?.hostname).toBe('localhost.');
+    expect(parseHostHeader('user@localhost')).toBeNull();
     expect(parseHostHeader('LocalHost:80')).toEqual({ hostname: 'localhost', port: '80' });
     expect(parseHostHeader('[::1]')).toEqual({ hostname: '[::1]', port: '' });
     expect(parseHostHeader('a b')).toBeNull();

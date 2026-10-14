@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { errorBody } from './errors';
 
 /*
@@ -73,17 +73,33 @@ function reject(
   return reply.code(status).send(errorBody(code, message));
 }
 
-/** Origin must be exactly this server: http, same host and port as the Host header. */
-function isSameOrigin(request: FastifyRequest): boolean {
-  const origin = request.headers.origin;
-  const host = request.headers.host;
-  if (!origin || !host) return false;
+/**
+ * The Origin header must be exactly the origin a browser serializes for this
+ * server: `http://` + the (already allowlisted) Host header, nothing else. The
+ * raw string is compared to its own normalized serialization, so userinfo,
+ * paths, uppercase, trailing dots, `null`, duplicates joined by Node and other
+ * parser-differential tricks are all refused rather than normalized away.
+ */
+export function isSameOrigin(
+  origin: string | string[] | undefined,
+  host: string | undefined,
+  allowed: ReadonlySet<string>,
+): boolean {
+  if (typeof origin !== 'string' || typeof host !== 'string') return false;
+  let parsed: URL;
+  let self: URL;
   try {
-    const parsed = new URL(origin);
-    return parsed.protocol === 'http:' && parsed.host === new URL(`http://${host}`).host;
+    parsed = new URL(origin);
+    self = new URL(`http://${host}`);
   } catch {
     return false;
   }
+  return (
+    parsed.protocol === 'http:' &&
+    origin === parsed.origin &&
+    allowed.has(parsed.hostname) &&
+    parsed.origin === self.origin
+  );
 }
 
 export function registerSecurity(app: FastifyInstance, options: SecurityOptions): void {
@@ -107,7 +123,8 @@ export function registerSecurity(app: FastifyInstance, options: SecurityOptions)
       return reject(reply, 403, 'forbidden', 'Cross-site requests are not allowed');
     }
     if (SAFE_METHODS.has(request.method)) return;
-    if (!isSameOrigin(request)) {
+    // Every method other than GET, HEAD and OPTIONS is a mutation, uploads included.
+    if (!isSameOrigin(request.headers.origin, request.headers.host, allowed)) {
       return reject(reply, 403, 'forbidden', 'Missing or cross-origin Origin header');
     }
     if (!sameToken(request.headers[TOKEN_HEADER], options.token)) {

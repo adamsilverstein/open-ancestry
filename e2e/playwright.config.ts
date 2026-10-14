@@ -23,11 +23,11 @@ function freePort(): Promise<number> {
 // the environment they inherit.
 process.env.E2E_PORT ??= String(await freePort());
 const port = Number(process.env.E2E_PORT);
-// Fixture library built by global-setup.ts; unique per run so worktrees never share one.
+// A throwaway library per run, never the user's ~/OpenAncestry. global-setup.ts
+// adds the fixture tree to it; workers find it through the environment.
 process.env.OA_E2E_LIBRARY ??= join(tmpdir(), `oa-e2e-library-${port}`);
+const library = process.env.OA_E2E_LIBRARY;
 const baseURL = `http://127.0.0.1:${port}`;
-// A throwaway library per run, never the user's ~/OpenAncestry.
-const library = join(tmpdir(), `oa-e2e-library-${port}`);
 const ci = Boolean(process.env.CI);
 
 export default defineConfig({

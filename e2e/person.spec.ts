@@ -1,6 +1,5 @@
 import type { Page } from '@playwright/test';
-import { readManifest } from './api-mock';
-import { FIXTURE_PEOPLE } from './tree-fixture';
+import { FIXTURE_PEOPLE, readManifest } from './tree-fixture';
 import { expect, test } from './fixtures';
 
 const people = FIXTURE_PEOPLE;

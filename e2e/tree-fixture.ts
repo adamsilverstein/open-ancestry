@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   bulkInsert,
@@ -307,4 +307,11 @@ export function buildFixtureLibrary(library: string): FixtureManifest {
   };
   writeFileSync(join(library, MANIFEST), JSON.stringify(manifest));
   return manifest;
+}
+
+/** The manifest global-setup.ts wrote for this run. */
+export function readManifest(): FixtureManifest {
+  const library = process.env.OA_E2E_LIBRARY;
+  if (!library) throw new Error('OA_E2E_LIBRARY is not set');
+  return JSON.parse(readFileSync(join(library, MANIFEST), 'utf8')) as FixtureManifest;
 }

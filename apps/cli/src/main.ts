@@ -26,32 +26,74 @@ import { escapeControls } from './escape';
 
 export const DEFAULT_PORT = 4317;
 
-const USAGE = `Usage: open-ancestry <command> [options]
-
-Commands:
-  serve                Start the app on http://127.0.0.1:${DEFAULT_PORT}
-  import <file>        Import a GEDCOM (.ged) or GEDZIP (.zip, .gdz) file into a new tree
-  help                 Show this message
-
-Options for serve:
-  --port <n>           Port to listen on (default ${DEFAULT_PORT})
-  --host <host>        Interface to bind (default ${DEFAULT_HOST}; loopback only)
-  --library <dir>      Folder holding your trees (default $OA_LIBRARY or ~/OpenAncestry)
-  --open               Open the app in your browser
-  --static-dir <dir>   Built web app to serve (default: bundled build)
-  --import-heap-mb <n> Memory for each import's worker, in MB (default 2048; $OA_IMPORT_HEAP_MB)
-
-Options for import:
-  --name <tree>        Tree name (default: the file name)
-  --media <dir>        Folder holding the media files a .ged file refers to
-  --library <dir>      Folder holding your trees (default $OA_LIBRARY or ~/OpenAncestry)
-
-Import size limits (serve and import):
+const LIMIT_OPTIONS = `Import size limits:
   --max-gedcom-mb <n>  Largest GEDCOM text, also inside a GEDZIP (default 64; $OA_MAX_GEDCOM_MB)
   --max-archive-mb <n> Largest GEDZIP with its photos (default 1024; $OA_MAX_ARCHIVE_MB)`;
 
+const SERVE_OPTIONS = `Options for serve:
+  --port <n>           Port to listen on (default ${DEFAULT_PORT})
+  --host <host>        Interface to bind (default ${DEFAULT_HOST}; loopback only)
+  --library <dir>      Folder holding your trees (default $OA_LIBRARY or ~/OpenAncestry)
+  --no-open            Do not open the app in your browser (opened by default on a terminal)
+  --open               Open it even when output is not a terminal
+  --static-dir <dir>   Built web app to serve (default: bundled build)
+  --import-heap-mb <n> Memory for each import's worker, in MB (default 2048; $OA_IMPORT_HEAP_MB)`;
+
+const IMPORT_OPTIONS = `Options for import:
+  --name <tree>        Tree name (default: the file name)
+  --media <dir>        Folder holding the media files a .ged file refers to
+  --library <dir>      Folder holding your trees (default $OA_LIBRARY or ~/OpenAncestry)`;
+
+const USAGE = `Usage: open-ancestry <command> [options]
+
+Commands:
+  serve                Start the app on http://127.0.0.1:${DEFAULT_PORT} and open it in your browser
+  import <file>        Import a GEDCOM (.ged) or GEDZIP (.zip, .gdz) file into a new tree
+  help                 Show this message (also -h, --help; "<command> --help" for one command)
+
+${SERVE_OPTIONS}
+
+${IMPORT_OPTIONS}
+
+${LIMIT_OPTIONS} (serve and import)`;
+
+const COMMAND_USAGE = {
+  serve: `Usage: open-ancestry serve [options]
+
+Starts the app on http://127.0.0.1:${DEFAULT_PORT} and opens it in your browser.
+
+${SERVE_OPTIONS}
+
+${LIMIT_OPTIONS}`,
+  import: `Usage: open-ancestry import <file> [options]
+
+Imports a GEDCOM (.ged) or GEDZIP (.zip, .gdz) file into a new tree.
+
+${IMPORT_OPTIONS}
+
+${LIMIT_OPTIONS}`,
+} as const;
+
+type Topic = keyof typeof COMMAND_USAGE;
+
+/** The usage text for the CLI, or for one command. */
+export function usage(topic?: Topic): string {
+  return topic ? COMMAND_USAGE[topic] : USAGE;
+}
+
+/** A command line the CLI does not understand: exit 2, with the usage. */
+export class UsageError extends Error {
+  readonly topic: Topic | undefined;
+
+  constructor(message: string, topic?: Topic) {
+    super(message);
+    this.name = 'UsageError';
+    this.topic = topic;
+  }
+}
+
 export type CliCommand =
-  | { command: 'help' }
+  | { command: 'help'; topic?: Topic }
   | {
       command: 'serve';
       host: string;
@@ -103,27 +145,49 @@ function importLimits(
   };
 }
 
-export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliCommand {
-  const { positionals, values } = parseArgs({
-    args: argv,
-    allowPositionals: true,
-    options: {
-      port: { type: 'string' },
-      host: { type: 'string' },
-      library: { type: 'string' },
-      open: { type: 'boolean' },
-      'static-dir': { type: 'string' },
-      name: { type: 'string' },
-      media: { type: 'string' },
-      'max-gedcom-mb': { type: 'string' },
-      'max-archive-mb': { type: 'string' },
-      'import-heap-mb': { type: 'string' },
-    },
-  });
-  if (positionals[0] === 'import') {
-    const file = positionals[1];
-    if (!file)
-      throw new Error('Usage: open-ancestry import <file> [--media <dir>] [--name <tree>]');
+export function parseCliArgs(
+  argv: string[],
+  env: NodeJS.ProcessEnv = process.env,
+  { tty = Boolean(process.stdout.isTTY) }: { tty?: boolean } = {},
+): CliCommand {
+  const isTopic = (word: string | undefined): word is Topic =>
+    word === 'serve' || word === 'import';
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: argv,
+      allowPositionals: true,
+      allowNegative: true,
+      options: {
+        help: { type: 'boolean', short: 'h' },
+        port: { type: 'string' },
+        host: { type: 'string' },
+        library: { type: 'string' },
+        open: { type: 'boolean' },
+        'static-dir': { type: 'string' },
+        name: { type: 'string' },
+        media: { type: 'string' },
+        'max-gedcom-mb': { type: 'string' },
+        'max-archive-mb': { type: 'string' },
+        'import-heap-mb': { type: 'string' },
+      },
+    });
+  } catch (error) {
+    // Node's message suggests "--" for positionals; name the option plainly instead.
+    const option = /'(-[^']*)'/.exec((error as Error).message)?.[1];
+    const topic = argv.find(isTopic);
+    throw new UsageError(option ? `Unknown option: ${option}` : (error as Error).message, topic);
+  }
+  const { positionals, values } = parsed;
+  const [command, second] = positionals;
+  if (command === undefined) return { command: 'help' };
+  if (command === 'help')
+    return isTopic(second) ? { command: 'help', topic: second } : { command: 'help' };
+  if (!isTopic(command)) throw new UsageError(`Unknown command: ${command}`);
+  if (values.help) return { command: 'help', topic: command };
+  if (command === 'import') {
+    const file = second;
+    if (!file) throw new UsageError('Missing the file to import', 'import');
     return {
       command: 'import',
       file,
@@ -133,7 +197,6 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
       importLimits: importLimits(values, env),
     };
   }
-  if (positionals[0] !== 'serve') return { command: 'help' };
 
   const port = values.port === undefined ? DEFAULT_PORT : Number(values.port);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
@@ -144,7 +207,8 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     host: values.host ?? DEFAULT_HOST,
     port,
     library: values.library ?? defaultLibraryRoot(env),
-    open: values.open ?? false,
+    // On a terminal, open the app (spec F6); piped output (CI, e2e) gets no browser.
+    open: values.open ?? tty,
     staticDir: values['static-dir'],
     importLimits: importLimits(values, env),
     importHeapMb: megabytes('import-heap-mb', values['import-heap-mb'], env, 'OA_IMPORT_HEAP_MB'),
@@ -395,6 +459,10 @@ export async function main(
     await run(argv, deps);
     return 0;
   } catch (failure) {
+    if (failure instanceof UsageError) {
+      error(`${escapeControls(failure.message)}\n\n${usage(failure.topic)}`);
+      return 2;
+    }
     error(escapeControls(failure instanceof Error ? failure.message : String(failure)));
     return 1;
   }
@@ -413,7 +481,7 @@ export async function run(
 ): Promise<RunningServer | undefined> {
   const cli = parseCliArgs(argv);
   if (cli.command === 'help') {
-    log(USAGE);
+    log(usage(cli.topic));
     return undefined;
   }
   if (cli.command === 'import') {

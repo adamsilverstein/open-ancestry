@@ -21,7 +21,7 @@ export interface CheckReport {
 }
 
 /** Rows the server lists per category (counts are complete). */
-export const CHECK_ITEM_LIMIT = 500;
+export const CHECK_ITEM_LIMIT = 200;
 
 export const checksQuery = (tree: string) =>
   queryOptions({

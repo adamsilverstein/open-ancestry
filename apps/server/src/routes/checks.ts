@@ -1,5 +1,5 @@
 import type { Api, Deps } from '../context';
-import { checkTree, dismissLabel, setDismissed } from '../checks';
+import { checkTree, dismissLabel, keepingScan, setDismissed } from '../checks';
 import { edit } from '../edits';
 import { DismissBody, TreeParams } from '../schemas';
 
@@ -19,8 +19,9 @@ export function checkRoutes(app: Api, { library }: Deps): void {
       async (request) => {
         const store = library.open(request.params.tree);
         const { keys } = request.body;
-        const { batchId, result } = edit(store, dismissLabel(store, keys, dismissed), (tx) =>
-          setDismissed(tx, keys, dismissed),
+        const label = dismissLabel(store, keys, dismissed);
+        const { batchId, result } = keepingScan(store, () =>
+          edit(store, label, (tx) => setDismissed(tx, keys, dismissed)),
         );
         return { batchId, changed: result };
       },

@@ -52,7 +52,7 @@ export interface CheckReport {
 }
 
 /** Rows listed per category; counts are always complete. */
-export const ITEM_LIMIT = 500;
+export const ITEM_LIMIT = 200;
 export const MIN_PARENT_AGE = 12;
 export const MAX_PARENT_AGE = 70;
 /** Years either way two dates may differ and still describe the same person. */
@@ -395,6 +395,38 @@ function findIssues(store: TreeStore): Draft[] {
   return drafts;
 }
 
+/** The issues found by the last scan of each tree, and the state of the tree it saw. */
+const scans = new WeakMap<TreeStore, { version: string; drafts: Draft[] }>();
+
+/** Changes whenever any connection (this one, or an import worker's) writes to the tree. */
+function treeVersion(store: TreeStore): string {
+  const others = store.db.pragma('data_version', { simple: true }) as number;
+  const own = store.stmt('SELECT total_changes()').pluck().get() as number;
+  return `${others}:${own}`;
+}
+
+/** Scans the tree, or reuses the last scan when nothing has been written since. */
+function scan(store: TreeStore): Draft[] {
+  const version = treeVersion(store);
+  const cached = scans.get(store);
+  if (cached?.version === version) return cached.drafts;
+  const drafts = findIssues(store);
+  scans.set(store, { version, drafts });
+  return drafts;
+}
+
+/**
+ * Runs `write`, which may only add or remove dismissals, and keeps the last
+ * scan: dismissals are applied when the report is read, not by the scan.
+ */
+export function keepingScan<R>(store: TreeStore, write: () => R): R {
+  const before = treeVersion(store);
+  const result = write();
+  const cached = scans.get(store);
+  if (cached?.version === before) cached.version = treeVersion(store);
+  return result;
+}
+
 const keyOf = (d: Draft) => `${d.kind}:${d.ids.join('+')}${d.eventId ? `:${d.eventId}` : ''}`;
 
 export function dismissedKeys(store: TreeStore): Set<string> {
@@ -406,7 +438,7 @@ export function dismissedKeys(store: TreeStore): Set<string> {
 
 /** Every open and dismissed issue in the tree, with people summaries. */
 export function checkTree(store: TreeStore): CheckReport {
-  const drafts = findIssues(store);
+  const drafts = scan(store);
   const dismissed = dismissedKeys(store);
   const counts = { duplicates: 0, dates: 0, sources: 0, dismissed: 0 };
   const open: Draft[] = [];
@@ -455,6 +487,6 @@ export function setDismissed(tx: Tx, keys: string[], dismissed: boolean): number
 export function dismissLabel(store: TreeStore, keys: string[], dismissed: boolean): string {
   const verb = dismissed ? 'Dismiss' : 'Restore';
   if (keys.length !== 1) return `${verb} ${keys.length} checks`;
-  const draft = findIssues(store).find((d) => keyOf(d) === keys[0]);
+  const draft = scan(store).find((d) => keyOf(d) === keys[0]);
   return draft ? `${verb} check: ${draft.message}` : `${verb} check`;
 }

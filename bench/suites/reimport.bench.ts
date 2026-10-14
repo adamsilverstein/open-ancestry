@@ -107,7 +107,7 @@ export default [
       applyReimport(tree!, session!, accepted, 'Re-import');
       closeReimport(session!);
     },
-    budgetMs: 10_000,
+    budgetMs: 5000,
     metric: 'mean',
     iterations: 2,
     time: 0,

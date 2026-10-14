@@ -195,7 +195,10 @@ test.describe('tree switcher', () => {
     await switcher.click();
     await page.getByRole('menuitemradio', { name: b }).click();
     await expect(switcher).toContainText(b);
-    await page.reload();
+    // The choice is stored where the person and tree views read it. (A reload would
+    // not prove it here: the e2e fixture re-selects the fixture tree on every load.)
+    expect(await page.evaluate(() => localStorage.getItem('oa-tree'))).toBe(b);
+    await page.getByRole('link', { name: 'open-ancestry home' }).click();
     await expect(switcher).toContainText(b);
     await switcher.click();
     await page.getByRole('menuitemradio', { name: a }).click();

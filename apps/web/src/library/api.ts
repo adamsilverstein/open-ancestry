@@ -3,95 +3,38 @@
  * carry the per-process token from `/api/session`; the browser adds Origin.
  */
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
+import { ApiError, apiGet, apiSend, seg } from '../api/client';
+import {
+  CURRENT_TREE_KEY,
+  currentTreeQuery,
+  type TreeInfo,
+  type TreeListItem,
+} from '../api/queries';
 
-export class ApiError extends Error {
-  readonly status: number;
-  readonly code: string;
+export { ApiError, currentTreeQuery, type TreeListItem };
 
-  constructor(status: number, code: string, message: string) {
-    super(message);
-    this.name = 'ApiError';
-    this.status = status;
-    this.code = code;
-  }
-}
-
-export interface TreeListItem {
-  id: string;
-  name: string;
-  modifiedAt: string;
-}
-
-let session: Promise<{ token: string; tokenHeader: string }> | undefined;
-
-function sessionToken() {
-  session ??= request<{ token: string; tokenHeader: string }>('GET', '/session').catch(
-    (error: unknown) => {
-      session = undefined;
-      throw error;
-    },
-  );
-  return session;
-}
-
-async function request<T>(
-  method: string,
-  path: string,
-  body?: unknown,
-  signal?: AbortSignal,
-): Promise<T> {
-  const headers: Record<string, string> = { accept: 'application/json' };
-  let payload: BodyInit | undefined;
-  if (method !== 'GET') {
-    const { token, tokenHeader } = await sessionToken();
-    headers[tokenHeader] = token;
-  }
-  if (body instanceof FormData) payload = body;
-  else if (body !== undefined) {
-    headers['content-type'] = 'application/json';
-    payload = JSON.stringify(body);
-  }
-  const response = await fetch(`/api${path}`, { method, headers, body: payload, signal });
-  if (!response.ok) {
-    const error = (await response.json().catch(() => null)) as {
-      error?: { code?: string; message?: string };
-    } | null;
-    throw new ApiError(
-      response.status,
-      error?.error?.code ?? 'http_error',
-      error?.error?.message ?? response.statusText,
-    );
-  }
-  return (response.status === 204 ? undefined : await response.json()) as T;
-}
-
-const tree = (id: string) => `/trees/${encodeURIComponent(id)}`;
+const tree = (id: string) => `/trees/${seg(id)}`;
 
 export const listTrees = (signal?: AbortSignal) =>
-  request<{ trees: TreeListItem[] }>('GET', '/trees', undefined, signal).then((r) => r.trees);
+  apiGet<{ trees: TreeListItem[] }>('/trees', signal).then((r) => r.trees);
 export const createTree = (name: string) =>
-  request<{ tree: TreeListItem }>('POST', '/trees', { name }).then((r) => r.tree);
+  apiSend<{ tree: TreeInfo }>('POST', '/trees', { name }).then((r) => r.tree);
 export const renameTree = (id: string, name: string) =>
-  request<{ tree: TreeListItem }>('PATCH', tree(id), { name }).then((r) => r.tree);
-export const deleteTree = (id: string) => request<void>('DELETE', tree(id));
+  apiSend<{ tree: TreeInfo }>('PATCH', tree(id), { name }).then((r) => r.tree);
+export const deleteTree = (id: string) => apiSend<void>('DELETE', tree(id));
 export const getTree = (id: string, signal?: AbortSignal) =>
-  request<{ tree: TreeListItem & { homePersonId: string | null; peopleCount: number } }>(
-    'GET',
-    tree(id),
-    undefined,
-    signal,
-  ).then((r) => r.tree);
+  apiGet<{ tree: TreeInfo }>(tree(id), signal).then((r) => r.tree);
 
 export function startImport(treeId: string, file: File): Promise<{ jobId: string }> {
   const form = new FormData();
   form.append('file', file, file.name);
-  return request('POST', `${tree(treeId)}/import`, form);
+  return apiSend('POST', `${tree(treeId)}/import`, form);
 }
 
 export const getJob = (id: string, signal?: AbortSignal) =>
-  request<ImportJob>('GET', `/jobs/${encodeURIComponent(id)}`, undefined, signal);
+  apiGet<ImportJob>(`/jobs/${seg(id)}`, signal);
 
-export const jobEventsUrl = (id: string) => `/api/jobs/${encodeURIComponent(id)}/events`;
+export const jobEventsUrl = (id: string) => `/api/jobs/${seg(id)}/events`;
 
 /** The import report (packages/import ImportReport), as much as the UI shows. */
 export interface ImportReportView {
@@ -134,31 +77,9 @@ export interface ImportJob {
 
 // ---------------------------------------------------------------- current tree
 
-/** localStorage key of the tree the user last opened (shared with the person and tree views). */
-export const CURRENT_TREE_KEY = 'oa-tree';
-
-function storedTree(): string | null {
-  try {
-    return localStorage.getItem(CURRENT_TREE_KEY);
-  } catch {
-    return null;
-  }
-}
-
 export const treesQuery = queryOptions({
   queryKey: ['trees'],
   queryFn: ({ signal }) => listTrees(signal),
-});
-
-/** The open tree: the last one chosen if it still exists, else the first, else null. */
-export const currentTreeQuery = queryOptions({
-  queryKey: ['current-tree'],
-  queryFn: async ({ signal }) => {
-    const trees = await listTrees(signal);
-    const stored = storedTree();
-    return (trees.find((t) => t.id === stored) ?? trees[0])?.id ?? null;
-  },
-  staleTime: Infinity,
 });
 
 /** Makes `id` the open tree (or none) and refreshes everything that depends on it. */
@@ -170,7 +91,10 @@ export async function setCurrentTree(queryClient: QueryClient, id: string | null
     // Private mode: the choice lasts for this page only.
   }
   queryClient.setQueryData(currentTreeQuery.queryKey, id);
-  await queryClient.invalidateQueries({ queryKey: treesQuery.queryKey });
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: treesQuery.queryKey }),
+    queryClient.invalidateQueries({ queryKey: ['tree'] }),
+  ]);
 }
 
 // ---------------------------------------------------------------- import flow

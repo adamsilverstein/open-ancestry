@@ -169,3 +169,32 @@ test('the cancelled page has its heading focused and no accessibility violations
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations).toEqual([]);
 });
+
+test('a cancel accepted as the import reached saving shows the finished import', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  const name = unique(testInfo);
+  // The race (202 for the cancel, then the worker commits anyway) is too
+  // narrow to hit on purpose, so accept the cancel without passing it on.
+  await page.route('**/api/jobs/*', async (route) => {
+    if (route.request().method() !== 'DELETE') return route.fallback();
+    await route.fulfill({ status: 202, contentType: 'application/json', body: '{"job":{}}' });
+  });
+  await page.goto('/');
+  await page.getByLabel('Choose a GEDCOM or GEDZIP').setInputFiles({
+    name: `${name}.ged`,
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from(generateGedcom({ people: 5_000, seed: 8 })),
+  });
+  const cancel = page.getByRole('button', { name: 'Cancel import' });
+  await expect(cancel).toBeEnabled({ timeout: 60_000 });
+  await cancel.click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Import complete' })).toBeVisible({
+    timeout: 60_000,
+  });
+  await expect(page.getByRole('status').filter({ hasText: 'Too late to cancel' })).toHaveText(
+    'Too late to cancel; the import finished.',
+  );
+  await expect(page.getByText('Import cancelled')).toHaveCount(0);
+});

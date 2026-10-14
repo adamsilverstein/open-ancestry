@@ -44,14 +44,14 @@ describe('buildRelations', () => {
 
 describe('neighbor', () => {
   it('moves up to a parent and down to a child', () => {
-    expect(neighbor(relations, layout, 'ada', 'up')).toBe('bram');
-    expect(neighbor(relations, layout, 'ada', 'down')).toBe('wren');
-    expect(neighbor(relations, layout, 'wren', 'up')).toBe('ada');
+    expect(neighbor(relations, 'ada', 'up')).toBe('bram');
+    expect(neighbor(relations, 'ada', 'down')).toBe('wren');
+    expect(neighbor(relations, 'wren', 'up')).toBe('ada');
   });
 
   it('moves left and right to the nearest card in the same row', () => {
-    const left = neighbor(relations, layout, 'ada', 'left');
-    const right = neighbor(relations, layout, 'ada', 'right');
+    const left = neighbor(relations, 'ada', 'left');
+    const right = neighbor(relations, 'ada', 'right');
     for (const key of [left, right].filter(Boolean)) {
       expect(['hugo', 'corin']).toContain(key);
     }
@@ -60,8 +60,8 @@ describe('neighbor', () => {
   });
 
   it('returns null when there is nothing in that direction', () => {
-    expect(neighbor(relations, layout, 'juno', 'down')).toBeNull();
-    expect(neighbor(relations, layout, 'missing', 'up')).toBeNull();
+    expect(neighbor(relations, 'juno', 'down')).toBeNull();
+    expect(neighbor(relations, 'missing', 'up')).toBeNull();
   });
 });
 

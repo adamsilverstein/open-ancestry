@@ -24,6 +24,9 @@ export interface TreeToolbarProps {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onFit: () => void;
+  /** Control the layout menu, e.g. to open it from the `L` shortcut. */
+  layoutMenuOpen?: boolean;
+  onLayoutMenuOpenChange?: (open: boolean) => void;
   className?: string;
 }
 
@@ -38,12 +41,14 @@ export function TreeToolbar({
   onZoomIn,
   onZoomOut,
   onFit,
+  layoutMenuOpen,
+  onLayoutMenuOpenChange,
   className,
 }: TreeToolbarProps) {
   const side = 'right';
   return (
     <Toolbar label="Tree tools" orientation="vertical" className={cx(styles.toolbar, className)}>
-      <Menu>
+      <Menu open={layoutMenuOpen} onOpenChange={onLayoutMenuOpenChange}>
         <Tooltip content="Change layout" shortcut="L" side={side}>
           <MenuTrigger
             className={cx(iconButtonStyles.iconButton, iconButtonStyles.md)}

@@ -29,6 +29,10 @@ export interface CommandPaletteProps {
   /** Search text changes, for wiring people and place search. */
   onQueryChange?: (query: string) => void;
   placeholder?: string;
+  /** Dialog name for assistive tech. */
+  title?: string;
+  /** Turn off client filtering when the items are already search results. */
+  shouldFilter?: boolean;
 }
 
 /** Cmd/Ctrl-K palette. Selecting an item closes the palette, then runs it. */
@@ -38,6 +42,8 @@ export function CommandPalette({
   groups,
   onQueryChange,
   placeholder = 'Search people, places, actions',
+  title = 'Command palette',
+  shouldFilter = true,
 }: CommandPaletteProps) {
   // Opened by shortcut, not a Radix trigger, so remember where focus was and restore it.
   const returnFocus = useRef<HTMLElement | null>(null);
@@ -57,8 +63,8 @@ export function CommandPalette({
             returnFocus.current.focus();
           }}
         >
-          <RadixDialog.Title className="oa-visually-hidden">Command palette</RadixDialog.Title>
-          <Command filter={substringFilter} label="Command palette" loop>
+          <RadixDialog.Title className="oa-visually-hidden">{title}</RadixDialog.Title>
+          <Command filter={substringFilter} shouldFilter={shouldFilter} label={title} loop>
             <div className={styles.inputRow}>
               <Search size={18} aria-hidden className={styles.searchIcon} />
               <Command.Input

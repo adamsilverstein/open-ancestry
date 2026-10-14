@@ -31,6 +31,13 @@ const sexToken: Record<Sex, string> = {
   U: '--oa-person-unknown',
 };
 
+/** Tokens are light-dark() pairs, so resolve them through a real color property. */
+function resolveColor(el: HTMLElement, token: string): string {
+  el.style.transition = 'none';
+  el.style.color = `var(${token})`;
+  return getComputedStyle(el).color;
+}
+
 /** Canvas overview of the whole tree with the viewport rectangle. Click, drag or use arrows. */
 export function Minimap({
   nodes,
@@ -48,20 +55,15 @@ export function Minimap({
   const { theme } = useTheme();
   const transform = useMemo(() => fitTransform(bounds, width, height), [bounds, width, height]);
 
+  // The nodes are drawn into an offscreen layer once per tree, theme or size;
+  // viewport moves (every pan frame) only composite it and stroke the rectangle.
+  const layer = useRef<{ key: unknown[]; canvas: HTMLCanvasElement } | null>(null);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    // Tokens are light-dark() pairs, so resolve them through a real color property.
-    canvas.style.transition = 'none';
-    const color = (token: string) => {
-      canvas.style.color = `var(${token})`;
-      return getComputedStyle(canvas).color;
-    };
     const { scale, offsetX, offsetY } = transform;
     const project = (r: Rect) =>
       [
@@ -71,13 +73,32 @@ export function Minimap({
         Math.max(1, r.height * scale),
       ] as const;
 
-    ctx.clearRect(0, 0, width, height);
-    for (const node of nodes) {
-      ctx.fillStyle = color(sexToken[node.sex ?? 'U']);
-      ctx.fillRect(...project(node));
+    const key = [nodes, bounds, transform, width, height, theme, dpr];
+    if (!layer.current || key.some((value, i) => value !== layer.current!.key[i])) {
+      const offscreen = document.createElement('canvas');
+      offscreen.width = width * dpr;
+      offscreen.height = height * dpr;
+      const off = offscreen.getContext('2d');
+      if (off) {
+        off.setTransform(dpr, 0, 0, dpr, 0, 0);
+        const fills = new Map<Sex, string>();
+        for (const sex of Object.keys(sexToken) as Sex[]) {
+          fills.set(sex, resolveColor(canvas, sexToken[sex]));
+        }
+        for (const node of nodes) {
+          off.fillStyle = fills.get(node.sex ?? 'U')!;
+          off.fillRect(...project(node));
+        }
+      }
+      layer.current = { key, canvas: offscreen };
     }
+
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    ctx.drawImage(layer.current.canvas, 0, 0);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     // The viewport sits on the canvas color, so it uses the canvas focus color.
-    ctx.strokeStyle = color('--oa-focus-canvas');
+    ctx.strokeStyle = resolveColor(canvas, '--oa-focus-canvas');
     ctx.lineWidth = 2;
     ctx.strokeRect(...project(viewport));
   }, [nodes, bounds, viewport, transform, width, height, theme]);

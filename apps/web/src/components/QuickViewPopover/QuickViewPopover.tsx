@@ -16,11 +16,21 @@ export interface LifeEvent {
   place?: string | undefined;
 }
 
+/**
+ * What the popover points at: a card element, or a virtual anchor for a
+ * virtualized canvas whose card may be recycled while the popover is open.
+ */
+export interface QuickViewAnchor {
+  getBoundingClientRect: () => DOMRect;
+  focus: (options?: FocusOptions) => void;
+  readonly isConnected: boolean;
+}
+
 export interface QuickViewPopoverProps {
   /** The person shown; null renders nothing. */
   person: PersonSummary | null;
   /** The card the popover points at. Focus returns to it on close. */
-  anchor: HTMLElement | null;
+  anchor: QuickViewAnchor | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   birth?: LifeEvent | undefined;
@@ -55,7 +65,7 @@ export function QuickViewPopover({
   onMakeFocus,
   onEdit,
 }: QuickViewPopoverProps) {
-  const virtualRef = useMemo(() => ({ current: anchor as HTMLElement }), [anchor]);
+  const virtualRef = useMemo(() => ({ current: anchor as QuickViewAnchor }), [anchor]);
   if (!person || !anchor) return null;
   const run = (action?: (p: PersonSummary) => void) => () => {
     onOpenChange(false);

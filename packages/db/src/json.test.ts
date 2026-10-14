@@ -235,6 +235,17 @@ describe('JSON interchange', () => {
       target.close();
     });
 
+    it('rejects a raw __proto__ table key', () => {
+      const doc = baseDoc();
+      const text = JSON.stringify(doc).replace('"tables":{', '"tables":{"__proto__":[],');
+      expect(text).toContain('"__proto__":[]');
+      const target = memoryTree();
+      expect(() => importJsonString(target, text)).toThrow(/Unknown table "__proto__"/);
+      const old = JSON.parse(text.replace(/"schemaVersion":\d+/, '"schemaVersion":1')) as unknown;
+      expect(() => importJson(target, old)).toThrow(/Unknown table "__proto__"/);
+      target.close();
+    });
+
     it('caps rows and bytes', () => {
       const doc = baseDoc();
       rejects(doc, /limit/, { maxRows: 10 });

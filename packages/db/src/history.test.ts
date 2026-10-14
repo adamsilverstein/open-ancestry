@@ -13,6 +13,8 @@ import {
   exportJsonString,
   importJson,
   listBatches,
+  listTables,
+  migrate,
   openMemoryTree,
   openTree,
   parseLogImage,
@@ -178,8 +180,13 @@ describe('history from every released version stays usable (#101)', () => {
   });
 });
 
+// Written in decomposed form (e + combining diaeresis); the simulated migration NFC-normalizes it.
+const DECOMPOSED = 'We\u0308xmoor';
+const NFC = (value: unknown) => (typeof value === 'string' ? value.normalize('NFC') : value);
+
 // A stand-in for the next real migrations: adds, renames and drops columns,
-// and rewrites existing values (as a Unicode normalization pass would).
+// backfills a new column from each row, and rewrites existing values in JS
+// (Unicode NFC, as #99 will).
 const SIMULATED: Migration = {
   version: LATEST_SCHEMA_VERSION + 1,
   name: 'simulated',
@@ -187,18 +194,31 @@ const SIMULATED: Migration = {
     ALTER TABLE person ADD COLUMN future_col TEXT NOT NULL DEFAULT 'none';
     ALTER TABLE place RENAME COLUMN type TO kind;
     ALTER TABLE event DROP COLUMN cause;
-    UPDATE place SET name = upper(name);
+    ALTER TABLE person_name ADD COLUMN display TEXT;
+    UPDATE person_name SET display = given || ' ' || surname;
   `,
+  run(db) {
+    const update = db.prepare('UPDATE place SET name = ?, full_name = ? WHERE id = ?');
+    for (const row of db.prepare('SELECT id, name, full_name FROM place').all() as {
+      id: string;
+      name: string;
+      full_name: string;
+    }[])
+      update.run(NFC(row.name), NFC(row.full_name), row.id);
+  },
   columns: {
     person: { added: { future_col: 'none' } },
     place: { renamed: { type: 'kind' } },
     event: { dropped: ['cause'] },
+    person_name: { added: { display: null } },
   },
-  // Without this, undoing "Rename town" would see the rewritten name as a later edit.
-  upgradeRow: (table, row) =>
-    table === 'place' && typeof row.name === 'string'
-      ? { ...row, name: row.name.toUpperCase() }
-      : row,
+  // Without this, undo would see every rewritten or backfilled value as a later edit.
+  upgradeRow(table, row) {
+    if (table === 'place') return { ...row, name: NFC(row.name), full_name: NFC(row.full_name) };
+    if (table === 'person_name')
+      return { ...row, display: `${String(row.given)} ${String(row.surname)}` };
+    return row;
+  },
 };
 const UPGRADED = [...MIGRATIONS, SIMULATED];
 
@@ -206,7 +226,7 @@ const STEPS: [string, (tx: Tx, ids: Record<string, string>) => void][] = [
   [
     'Seed',
     (tx, ids) => {
-      ids.town = places.create(tx, { name: 'Wexmoor', full_name: 'Wexmoor', type: 'town' }).id;
+      ids.town = places.create(tx, { name: DECOMPOSED, full_name: DECOMPOSED, type: 'town' }).id;
       ids.person = persons.create(tx, {
         sex: 'F',
         names: [{ given: 'Hazel', surname: 'Moor' }],
@@ -261,7 +281,10 @@ describe('a future migration keeps older history working (simulated)', () => {
     expect(store.schemaVersion).toBe(SIMULATED.version);
     expect(store.db.prepare('SELECT kind, name FROM place').get()).toEqual({
       kind: 'town',
-      name: 'WEXMOOR',
+      name: 'W\u00ebxmoor',
+    });
+    expect(store.db.prepare('SELECT display FROM person_name').get()).toEqual({
+      display: 'Hazel Moor',
     });
     const full = snapshot(store);
     for (let i = STEPS.length - 1; i >= 0; i--) {
@@ -343,5 +366,88 @@ describe('change_log images are tolerant and versioned', () => {
       { v: LATEST_SCHEMA_VERSION },
     ]);
     store.close();
+  });
+});
+
+/** Columns of every regular table in a schema. */
+function tableColumns(db: Database.Database): Map<string, string[]> {
+  return new Map(
+    listTables(db)
+      .filter((t) => !t.virtual)
+      .map((t) => [t.name, t.columns]),
+  );
+}
+
+/**
+ * Column changes between two schemas that the migration's `columns` map does
+ * not declare (or declares wrongly). A rename left out of the map would make
+ * undo restore NULL into the renamed column, so every change must be declared.
+ */
+function undeclaredColumnChanges(
+  before: Map<string, string[]>,
+  after: Map<string, string[]>,
+  migration: Migration,
+): string[] {
+  const problems: string[] = [];
+  for (const [table, newColumns] of after) {
+    const oldColumns = before.get(table);
+    if (!oldColumns) continue; // a new table needs no entry
+    const added = new Set(newColumns.filter((c) => !oldColumns.includes(c)));
+    const dropped = new Set(oldColumns.filter((c) => !newColumns.includes(c)));
+    const declared = migration.columns?.[table] ?? {};
+    for (const [from, to] of Object.entries(declared.renamed ?? {})) {
+      if (!dropped.delete(from) || !added.delete(to))
+        problems.push(`${table}: rename ${from} -> ${to} did not happen`);
+    }
+    const declaredAdded = Object.keys(declared.added ?? {}).sort();
+    const declaredDropped = [...(declared.dropped ?? [])].sort();
+    if (JSON.stringify([...added].sort()) !== JSON.stringify(declaredAdded))
+      problems.push(
+        `${table}: added ${[...added].join(', ') || 'nothing'}, declared ${declaredAdded.join(', ') || 'nothing'}`,
+      );
+    if (JSON.stringify([...dropped].sort()) !== JSON.stringify(declaredDropped))
+      problems.push(
+        `${table}: dropped ${[...dropped].join(', ') || 'nothing'}, declared ${declaredDropped.join(', ') || 'nothing'}`,
+      );
+  }
+  return problems;
+}
+
+function schemaAt(version: number): Map<string, string[]> {
+  const db = new Database(':memory:');
+  db.exec(readFileSync(join(historyDir, `schema-v${version}.sql`), 'utf8'));
+  const columns = tableColumns(db);
+  db.close();
+  return columns;
+}
+
+describe('every migration declares its column changes', () => {
+  it.each(MIGRATIONS.slice(1).map((m) => [m.version, m] as const))(
+    'v%i: the columns map matches the frozen schemas',
+    (version, migration) => {
+      expect(undeclaredColumnChanges(schemaAt(version - 1), schemaAt(version), migration)).toEqual(
+        [],
+      );
+    },
+  );
+
+  function simulatedSchemas() {
+    const db = new Database(':memory:');
+    migrate(db);
+    const before = tableColumns(db);
+    migrate(db, { migrations: UPGRADED });
+    const after = tableColumns(db);
+    db.close();
+    return { before, after };
+  }
+
+  it('catches a forgotten rename (simulated)', () => {
+    const { before, after } = simulatedSchemas();
+    expect(undeclaredColumnChanges(before, after, SIMULATED)).toEqual([]);
+    const forgot: Migration = { ...SIMULATED, columns: { ...SIMULATED.columns, place: {} } };
+    expect(undeclaredColumnChanges(before, after, forgot)).toEqual([
+      'place: added kind, declared nothing',
+      'place: dropped type, declared nothing',
+    ]);
   });
 });

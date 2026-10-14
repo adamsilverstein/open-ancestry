@@ -705,6 +705,53 @@ test.describe('pedigree, descendant and fan views', () => {
   });
 });
 
+test.describe('generation depth in the URL', () => {
+  /** The `up` and `down` of every neighborhood request the page makes. */
+  function depths(page: Page) {
+    const seen: { up: number; down: number }[] = [];
+    page.on('request', (r) => {
+      const url = new URL(r.url());
+      if (!url.pathname.startsWith('/api/') || !url.pathname.endsWith('/neighborhood')) return;
+      seen.push({
+        up: Number(url.searchParams.get('up')),
+        down: Number(url.searchParams.get('down')),
+      });
+    });
+    return seen;
+  }
+
+  for (const layout of ['family', 'pedigree', 'fan']) {
+    test(`up=10 (the maximum) renders the ${layout} view`, async ({ page }) => {
+      const seen = depths(page);
+      await open(page, 'ada', `&layout=${layout}&up=10&down=10`);
+      await expect(page.getByText('Could not load the tree')).toHaveCount(0);
+      const focus =
+        layout === 'fan'
+          ? canvas(page).getByRole('button', { name: /^Ada Vale/ })
+          : card(page, 'Ada Vale');
+      await expect(focus).toBeAttached();
+      expect(seen.length).toBeGreaterThan(0);
+      for (const { up, down } of seen) {
+        expect(up).toBeLessThanOrEqual(10);
+        expect(down).toBeLessThanOrEqual(10);
+      }
+    });
+  }
+
+  test('out-of-range depths clamp instead of failing', async ({ page }) => {
+    const seen = depths(page);
+    await open(page, 'ada', '&up=99&down=-4');
+    await expect(page.getByText('Could not load the tree')).toHaveCount(0);
+    await expect(card(page, 'Ada Vale')).toBeAttached();
+    // 99 clamps to the maximum; a negative depth to none.
+    expect(seen.length).toBeGreaterThan(0);
+    for (const { up, down } of seen) {
+      expect(up).toBeLessThanOrEqual(10);
+      expect(down).toBeGreaterThanOrEqual(0);
+    }
+  });
+});
+
 test.describe('visual snapshots', () => {
   // Baselines are Linux Chromium only, like design.spec.ts.
   test.skip(

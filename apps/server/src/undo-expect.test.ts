@@ -13,7 +13,7 @@ describe('POST /undo?expect=<batch>', () => {
   it('undoes the expected batch when it is still the newest', async () => {
     const created = (await api.post(`${s.base}/people`, { names: [{ given: 'Lea' }] })).json();
     const res = await api.post(`${s.base}/undo?expect=${created.batchId}`);
-    expect(res.statusCode).toBe(200);
+    expect(res.statusCode, res.body).toBe(200);
     expect(res.json().batch).toMatchObject({ id: created.batchId, state: 'undone' });
   });
 
@@ -23,7 +23,7 @@ describe('POST /undo?expect=<batch>', () => {
     expect(renamed.statusCode).toBe(200);
     const res = await api.post(`${s.base}/undo?expect=${created.batchId}`);
     expect(res.statusCode).toBe(409);
-    expect(res.json().error).toMatchObject({ code: 'conflict' });
+    expect(res.json().error).toMatchObject({ code: 'not_newest' });
     // Neither the newer edit nor the expected batch was undone.
     expect((await api.get(`${s.base}/people/${s.ada}`)).json().person.sex).toBe('X');
     expect((await api.get(`${s.base}/people/${created.person.id}`)).statusCode).toBe(200);

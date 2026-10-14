@@ -2950,5 +2950,16 @@
         "maxLength": 100
       }
     }
+  },
+  "UndoQuery": {
+    "type": "object",
+    "properties": {
+      "expect": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      }
+    }
   }
 }

@@ -30,6 +30,7 @@ export const {
   NeighborhoodQuery,
   SearchQuery,
   HistoryQuery,
+  UndoQuery,
   HomeBody,
   NameBody,
   EventBody,

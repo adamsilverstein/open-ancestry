@@ -5,13 +5,23 @@ import {
   listBatches,
   meta,
   redoLast,
+  undo,
   undoLatest,
   type TreeStore,
 } from '@open-ancestry/db';
 import { buildGedcomExport, buildGedzipExport } from '@open-ancestry/export';
 import type { Api, Deps } from '../context';
 import { edit } from '../edits';
-import { ExportQuery, GedzipQuery, HistoryQuery, HomeBody, TreeBody, TreeParams } from '../schemas';
+import {
+  ExportQuery,
+  GedzipQuery,
+  HistoryQuery,
+  HomeBody,
+  TreeBody,
+  TreeParams,
+  UndoQuery,
+} from '../schemas';
+import { notNewest } from '../errors';
 
 function treeDetail(deps: Deps, id: string) {
   const store = deps.library.open(id);
@@ -141,11 +151,27 @@ export function treeRoutes(app: Api, deps: Deps): void {
     },
   );
 
-  app.post('/api/trees/:tree/undo', { schema: { params: TreeParams } }, async (request) => {
-    const store = library.open(request.params.tree);
-    // `skipped`: newer batches stepped over because the NFC upgrade made them un-undoable.
-    return undoLatest(store);
-  });
+  app.post(
+    '/api/trees/:tree/undo',
+    { schema: { params: TreeParams, querystring: UndoQuery } },
+    async (request) => {
+      const store = library.open(request.params.tree);
+      const { expect } = request.query;
+      if (expect === undefined) {
+        // `skipped`: newer batches stepped over because the NFC upgrade made them un-undoable.
+        return undoLatest(store);
+      }
+      // A toast's Undo names its own batch: undo exactly that one, and only while nothing
+      // newer exists, so it never undoes a later change in its place.
+      const newest = store
+        .stmt("SELECT id FROM change_batch WHERE state = 'applied' ORDER BY seq DESC LIMIT 1")
+        .get() as { id: string } | undefined;
+      if (newest?.id !== expect) {
+        throw notNewest('Newer changes were made since; undo them from History first');
+      }
+      return { batch: undo(store, expect), skipped: [] };
+    },
+  );
 
   app.post('/api/trees/:tree/redo', { schema: { params: TreeParams } }, async (request) => {
     const store = library.open(request.params.tree);

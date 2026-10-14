@@ -20,6 +20,7 @@ const CALENDAR_NAMES: Record<string, Calendar> = {
 
 const PHRASE = /^([^()]*?)\s*\(([^()]*)\)[\s.,;:]*$/;
 const BETWEEN = /^(?:BET|BETWEEN|BTW)\.? (.+?) (?:AND|&|-|–) (.+)$/;
+const BET_SPAN = /^(?:BET|BETWEEN|BTW)\.? (.+)$/;
 const FROM_TO = /^FROM (.+?) TO (.+)$/;
 const FROM = /^FROM (.+)$/;
 const TO = /^TO (.+)$/;
@@ -47,7 +48,8 @@ const SIMPLE_QUALIFIERS: Record<string, DateQualifier> = {
   AFT: 'after',
 };
 const YEAR_RANGE = /^(\d{3,4}) ?(?:-|–|TO) ?(\d{2}|\d{4})$/;
-const DECADE = /^(\d{2,3})0S$/;
+/** `1850S`, `1700S`, `1850'S`, `1850S-1860S`: decades, or centuries when ending in 00. */
+const DECADES = /^(\d{1,3}0)'?S(?: ?(?:-|–|TO) ?(\d{1,3}0)'?S)?$/;
 const ISO = /^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$/;
 const NUMERIC = /^(\d{1,2})([/.-])(\d{1,2})\2(\d{3,4})$/;
 const MONTH_YEAR = /^(\d{1,2})\/(\d{3,4})$/;
@@ -121,35 +123,64 @@ function parseNormalized(
     const p = parsePoint(match[1]!, calendar);
     return p && single(original, 'to', p);
   }
-  if ((match = SIMPLE.exec(s))) {
-    const p = parsePoint(match[2]!, calendar);
-    return p && single(original, SIMPLE_QUALIFIERS[match[1]!]!, p);
+  if ((match = BET_SPAN.exec(s))) {
+    const span = yearSpan(match[1]!);
+    return span && spanDate(original, 'between', span, calendar);
   }
-  if ((match = DECADE.exec(s))) {
-    const year = Number(match[1]) * 10;
-    return year > 0
-      ? build(
-          original,
-          'between',
-          { point: { year }, calendar },
-          { point: { year: year + 9 }, calendar },
-        )
-      : undefined;
+  if ((match = SIMPLE.exec(s))) {
+    const qualifier = SIMPLE_QUALIFIERS[match[1]!]!;
+    const p = parsePoint(match[2]!, calendar);
+    if (p) return single(original, qualifier, p);
+    const span = yearSpan(match[2]!);
+    return span && spanDate(original, qualifier, span, calendar);
+  }
+  const span = yearSpan(s);
+  if (span) return spanDate(original, 'between', span, calendar);
+  const p = parsePoint(s, calendar);
+  return p && single(original, 'exact', p);
+}
+
+/**
+ * Years written as one span: `1850S` (decade), `1700S` (century), `1850S-1860S`,
+ * `1850-1860` or `1850-60`. Undefined when `s` is not a span.
+ */
+function yearSpan(s: string): [number, number] | undefined {
+  let match = DECADES.exec(s);
+  if (match) {
+    const start = Number(match[1]);
+    const last = match[2] === undefined ? start : Number(match[2]);
+    const end = last + (last % 100 === 0 ? 99 : 9);
+    return start > 0 && end >= start ? [start, end] : undefined;
   }
   // `1890-95` is a range but `1890-09` is ISO year-month.
-  if ((match = YEAR_RANGE.exec(s)) && (match[2]!.length === 4 || Number(match[2]) > 12)) {
+  match = YEAR_RANGE.exec(s);
+  if (match && (match[2]!.length === 4 || Number(match[2]) > 12)) {
     const start = Number(match[1]);
     let end = Number(match[2]);
     if (match[2]!.length === 2) end += start - (start % 100);
-    return build(
-      original,
-      'between',
-      { point: { year: start }, calendar },
-      { point: { year: end }, calendar },
-    );
+    return [start, end];
   }
-  const p = parsePoint(s, calendar);
-  return p && single(original, 'exact', p);
+  return undefined;
+}
+
+/**
+ * A qualified span. GEDCOM has no "about between", so approximate spans keep
+ * their range; before a span is before its last year, after it after its first.
+ */
+function spanDate(
+  original: string,
+  qualifier: DateQualifier,
+  [start, end]: [number, number],
+  calendar: Calendar,
+): ParsedDate | undefined {
+  if (qualifier === 'before') return single(original, 'before', { point: { year: end }, calendar });
+  if (qualifier === 'after') return single(original, 'after', { point: { year: start }, calendar });
+  return build(
+    original,
+    'between',
+    { point: { year: start }, calendar },
+    { point: { year: end }, calendar },
+  );
 }
 
 /** Reads a leading calendar escape or keyword. Null means an unknown calendar. */

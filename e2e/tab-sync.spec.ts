@@ -73,6 +73,17 @@ test('a save made from stale data is refused, not mixed in', async ({ page, requ
   await expect(h1(page)).toHaveText('Roland Ashdown');
   const after = await (await request.get(`${base}/people/${seeded.rowan}`)).json();
   expect(after.names[0]).toMatchObject({ given: 'Roland', surname: 'Ashdown' });
+
+  // The form stays open with the typed edit and offers to reload: the latest
+  // given name, with the surname the user changed kept.
+  await expect(dialog.getByRole('alert')).toContainText('changed in another window (or by undo)');
+  await dialog.getByRole('button', { name: 'Reload form' }).click();
+  await expect(dialog.getByRole('textbox', { name: 'Given names' }).first()).toHaveValue('Roland');
+  await expect(dialog.getByRole('textbox', { name: 'Surname' }).first()).toHaveValue('Ashby');
+  await expect(dialog.getByRole('alert')).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(h1(page)).toHaveText('Roland Ashby');
 });
 
 test('an open form does not save over an undo from another tab', async ({ page }) => {
@@ -95,4 +106,8 @@ test('an open form does not save over an undo from another tab', async ({ page }
   await expect(staleToast(a)).toBeVisible();
   await expect(h1(a)).toHaveText('Rowan Ashdown');
   await expect(h1(b)).toHaveText('Rowan Ashdown');
+  // Still open, with "Ashby" typed in; reloading shows the undone given name.
+  await dialog.getByRole('button', { name: 'Reload form' }).click();
+  await expect(dialog.getByRole('textbox', { name: 'Given names' }).first()).toHaveValue('Rowan');
+  await expect(dialog.getByRole('textbox', { name: 'Surname' }).first()).toHaveValue('Ashby');
 });

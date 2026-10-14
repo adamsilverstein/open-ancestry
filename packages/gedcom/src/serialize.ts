@@ -1,6 +1,6 @@
 import { composeValue } from './parser';
-import { TAG_PATTERN, XREF_PATTERN, parseLine } from './tokenizer';
-import type { GedcomNode, ParseResult, SkippedLine } from './types';
+import { TAG_PATTERN, XREF_PATTERN, looksStructural, parseLine } from './tokenizer';
+import type { Continuation, GedcomNode, ParseResult, SkippedLine } from './types';
 
 export interface SerializeOptions {
   /** Line terminator (default `\n`). */
@@ -20,7 +20,8 @@ export type GedcomSerializeErrorCode =
   | 'invalid-xref'
   | 'invalid-pointer'
   | 'invalid-eol'
-  | 'line-break-in-source';
+  | 'line-break-in-source'
+  | 'structural-extra';
 
 /** Thrown when a node cannot be written without corrupting or injecting GEDCOM lines. */
 export class GedcomSerializeError extends Error {
@@ -173,19 +174,100 @@ function headLine(node: GedcomNode, raw: string | undefined): string {
   return same ? assertSingleLine(node.source, node) : canonical;
 }
 
-function pushExtra(out: string[], extra: SkippedLine[] | undefined, node: GedcomNode) {
-  if (extra) for (const e of extra) out.push(assertSingleLine(e.text, node));
+/**
+ * Blank and unparseable lines are the only kind the parser stores in `extra`
+ * and `preamble`. Anything that tokenizes would come back as a new node.
+ */
+function checkExtra(text: string, where: string): string {
+  if (CR_OR_LF.test(text)) {
+    throw new GedcomSerializeError('line-break-in-source', `${where} contains a line break`);
+  }
+  if (parseLine(text) !== undefined) {
+    throw new GedcomSerializeError('structural-extra', `${where} is a GEDCOM line, not extra text`);
+  }
+  return text;
 }
 
-/** Raw text from parsing never holds CR or LF; if it does, re-encode the value instead. */
-function rawIsSafe(node: GedcomNode): boolean {
-  if (node.rawValue !== undefined && CR_OR_LF.test(node.rawValue)) return false;
-  return !node.continuations?.some(
-    (c) => CR_OR_LF.test(c.value) || (c.source !== undefined && CR_OR_LF.test(c.source)),
+/** A skipped level-0 line ends the open record when parsed, so nothing of this record may follow it. */
+const CLOSES_RECORD = /^[ \t]*0+[ \t]/;
+
+interface EmitState {
+  /** Source line of an extra line that ends the record when parsed. */
+  closedLine?: number;
+}
+
+/** Writes a node or continuation line, which must not follow a record-closing extra line. */
+function pushLine(out: string[], text: string, state: EmitState) {
+  if (state.closedLine !== undefined) {
+    throw new GedcomSerializeError(
+      'structural-extra',
+      `Extra line ${state.closedLine} would end the record before the rest of it`,
+    );
+  }
+  out.push(text);
+}
+
+function pushExtra(out: string[], extra: SkippedLine[] | undefined, state: EmitState) {
+  if (!extra) return;
+  for (const e of extra) {
+    out.push(checkExtra(e.text, `Extra line ${e.line}`));
+    if (CLOSES_RECORD.test(e.text)) state.closedLine ??= e.line;
+  }
+}
+
+/**
+ * Whether a continuation's stored text still writes the line the parser read:
+ * a CONC/CONT one level below its owner whose source re-tokenizes to the same
+ * tag and value, or (for Ancestry bare text) a line that is neither GEDCOM nor
+ * structure, so it parses back as text again.
+ */
+function trustedContinuation(c: Continuation, owner: GedcomNode): boolean {
+  if (c.level !== owner.level + 1 || c.level > 99 || CR_OR_LF.test(c.value)) return false;
+  if (c.broken) {
+    // The parser only continues text values with bare lines, never pointers.
+    return (
+      owner.pointer === undefined &&
+      c.source === undefined &&
+      parseLine(c.value) === undefined &&
+      !looksStructural(c.value)
+    );
+  }
+  if (c.source === undefined) return true;
+  const t = parseLine(c.source);
+  return (
+    !CR_OR_LF.test(c.source) &&
+    t !== undefined &&
+    t.level === c.level &&
+    t.tag === c.tag &&
+    t.xref === undefined &&
+    (t.value ?? '') === c.value
   );
 }
 
-function emit(node: GedcomNode, out: string[], options: SerializeOptions) {
+/** Raw text is only re-emitted when it is exactly what parsing would have stored. */
+function rawIsSafe(node: GedcomNode): boolean {
+  if (node.rawValue !== undefined && CR_OR_LF.test(node.rawValue)) return false;
+  return !node.continuations?.some((c) => !trustedContinuation(c, node));
+}
+
+/**
+ * Children must parse back under this node and in this order: deeper than the
+ * node, and each sibling no deeper than the one before it (or it would nest).
+ */
+function checkChildLevels(node: GedcomNode) {
+  let previous = Infinity;
+  for (const child of node.children) {
+    if (child.level <= node.level || child.level > previous) {
+      throw new GedcomSerializeError(
+        'invalid-level',
+        `Child level ${child.level} (line ${child.line}) does not nest under level ${node.level} (line ${node.line})`,
+      );
+    }
+    previous = child.level;
+  }
+}
+
+function emit(node: GedcomNode, out: string[], options: SerializeOptions, state: EmitState) {
   validate(node);
   const { level, tag, xref, pointer, value, continuations } = node;
   const head = pointer === undefined ? node.rawValue : undefined;
@@ -193,11 +275,12 @@ function emit(node: GedcomNode, out: string[], options: SerializeOptions) {
 
   if (continuations && safe && unedited(head, continuations, value)) {
     // Unedited: the original lines, including Ancestry's bare continuation lines.
-    out.push(headLine(node, pointer ?? node.rawValue));
-    pushExtra(out, node.extra, node);
+    pushLine(out, headLine(node, pointer ?? node.rawValue), state);
+    pushExtra(out, node.extra, state);
     for (const c of continuations) {
-      out.push(c.source ?? (c.broken ? c.value : line(c.level, c.tag, c.value || undefined)));
-      pushExtra(out, c.extra, node);
+      const text = c.source ?? (c.broken ? c.value : line(c.level, c.tag, c.value || undefined));
+      pushLine(out, text, state);
+      pushExtra(out, c.extra, state);
     }
   } else {
     let raw: string | undefined;
@@ -212,13 +295,16 @@ function emit(node: GedcomNode, out: string[], options: SerializeOptions) {
       const clean = value.replace(CONTROL, '');
       raw = encodeValue(clean, options.version);
       const max = options.maxLineLength ?? Infinity;
-      multiLine = LINE_BREAK.test(value) || line(level, tag, raw, xref).length > max;
+      // Level 99 has no room for CONC, so a long value stays on one line there.
+      multiLine =
+        LINE_BREAK.test(value) || (level < 99 && line(level, tag, raw, xref).length > max);
     }
-    if (multiLine) emitValue(level, tag, xref, value!, out, options);
-    else out.push(headLine(node, raw));
-    pushExtra(out, node.extra, node);
+    if (multiLine) emitValue(level, tag, xref, value!, out, options, state);
+    else pushLine(out, headLine(node, raw), state);
+    pushExtra(out, node.extra, state);
   }
-  for (const child of node.children) emit(child, out, options);
+  checkChildLevels(node);
+  for (const child of node.children) emit(child, out, options, state);
 }
 
 function emitValue(
@@ -228,10 +314,18 @@ function emitValue(
   value: string,
   out: string[],
   options: SerializeOptions,
+  state: EmitState,
 ) {
   const max = options.maxLineLength ?? Infinity;
   const sub = level + 1;
   const parts = valueLines(value);
+  if (sub > 99) {
+    // Its CONT/CONC lines would need level 100, which no reader accepts.
+    throw new GedcomSerializeError(
+      'invalid-level',
+      `A multi-line value at level ${level} cannot be written; levels stop at 99`,
+    );
+  }
   parts.forEach((part, i) => {
     const encoded = encodeValue(part, options.version);
     const lineTag = i === 0 ? tag : 'CONT';
@@ -240,14 +334,16 @@ function emitValue(
     const first = pieces[0]!;
     // A lone empty value keeps its delimiter so it parses back as '' rather than no value.
     const keepEmpty = parts.length === 1 && i === 0;
-    out.push(
+    pushLine(
+      out,
       i === 0
         ? line(level, tag, first === '' && !keepEmpty ? undefined : first, xref)
         : line(sub, 'CONT', first === '' ? undefined : first),
+      state,
     );
     const concRoom = Math.max(1, max - line(sub, 'CONC', '').length);
     for (const piece of concPieces(pieces.slice(1).join(''), concRoom)) {
-      if (piece !== '') out.push(line(sub, 'CONC', piece));
+      if (piece !== '') pushLine(out, line(sub, 'CONC', piece), state);
     }
   });
 }
@@ -270,7 +366,7 @@ function checkEol(eol = '\n'): string {
 export function serializeNode(node: GedcomNode, options: SerializeOptions = {}): string {
   const eol = checkEol(options.eol);
   const out: string[] = [];
-  emit(node, out, options);
+  emit(node, out, options, {});
   return out.join(eol) + eol;
 }
 
@@ -282,15 +378,7 @@ export function serializeGedcom(
   const version = options.version ?? doc.header.majorVersion ?? 5;
   const eol = checkEol(options.eol);
   const preamble = (doc.preamble ?? [])
-    .map((p) => {
-      if (CR_OR_LF.test(p.text)) {
-        throw new GedcomSerializeError(
-          'line-break-in-source',
-          `Preamble line ${p.line} contains a line break`,
-        );
-      }
-      return p.text + eol;
-    })
+    .map((p) => checkExtra(p.text, `Preamble line ${p.line}`) + eol)
     .join('');
   return preamble + doc.records.map((r) => serializeNode(r, { ...options, version })).join('');
 }

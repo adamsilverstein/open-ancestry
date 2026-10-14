@@ -1,3 +1,5 @@
+// page.evaluate callbacks run in the browser, so e2e code needs DOM types.
+/// <reference lib="dom" />
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';

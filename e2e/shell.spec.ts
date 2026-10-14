@@ -20,7 +20,12 @@ test.describe('navigation', () => {
   test('import CTA announces that import is not available yet', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('button', { name: 'Import GEDCOM' }).click();
-    await expect(page.getByRole('status').filter({ hasText: 'Import is coming soon' })).toBeVisible();
+    await expect(
+      page
+        .getByRole('region', { name: /Notifications/ })
+        .getByRole('listitem')
+        .filter({ hasText: 'Import is coming soon' }),
+    ).toBeVisible();
   });
 
   test('top bar links home and shows the tree name placeholder', async ({ page }) => {
@@ -150,6 +155,9 @@ test.describe('command palette', () => {
     await page.emulateMedia({ colorScheme: 'light' });
     await page.goto('/');
     await page.keyboard.press(`${modKey}+k`);
+    await expect(
+      page.getByRole('dialog', { name: 'Command palette' }).getByRole('combobox'),
+    ).toBeFocused();
     await page.keyboard.type('theme');
     await page.keyboard.press('Enter');
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');

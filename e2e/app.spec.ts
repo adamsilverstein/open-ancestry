@@ -5,7 +5,9 @@ test('loads the app shell', async ({ page }) => {
   await page.goto('/');
   await expect(page).toHaveTitle('open-ancestry');
   await expect(page.getByRole('banner')).toBeVisible();
-  await expect(page.getByRole('heading', { level: 1, name: 'Import your Ancestry GEDCOM' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Import your Ancestry GEDCOM' }),
+  ).toBeVisible();
 });
 
 test('deep links fall back to the SPA', async ({ page }) => {

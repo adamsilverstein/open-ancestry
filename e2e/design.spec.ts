@@ -1,6 +1,12 @@
 import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures';
 
+/** WebKit only Tabs to buttons and links with Alt, like Safari's default setting. */
+function tab(browserName: string, shift = false) {
+  const mod = browserName === 'webkit' ? 'Alt+' : '';
+  return `${shift ? 'Shift+' : ''}${mod}Tab`;
+}
+
 /** Each kitchen sink section is a region labelled by its component name. */
 function section(page: Page, name: string) {
   return page.getByRole('region', { name, exact: true });
@@ -75,24 +81,27 @@ test('buttons expose disabled and loading states', async ({ page }) => {
   await expect(loading).toBeDisabled();
 });
 
-test('visible focus ring on keyboard focus', async ({ page }) => {
+test('visible focus ring on keyboard focus', async ({ page, browserName }) => {
   const primary = section(page, 'Button').getByRole('button', { name: 'Primary' }).first();
   await primary.focus();
-  await page.keyboard.press('Shift+Tab');
-  await page.keyboard.press('Tab');
+  await page.keyboard.press(tab(browserName, true));
+  await page.keyboard.press(tab(browserName));
   await expect(primary).toBeFocused();
   const outline = await primary.evaluate((el) => getComputedStyle(el).outlineStyle);
   expect(outline).toBe('solid');
 });
 
-test('icon button pressed state and tooltip with shortcut', async ({ page }) => {
+test('icon button pressed state and tooltip with shortcut', async ({ page, browserName }) => {
   const region = section(page, 'IconButton');
   const toggle = region.getByRole('button', { name: 'Show minimap' });
   await expect(toggle).toHaveAttribute('aria-pressed', 'false');
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-pressed', 'true');
 
-  await region.getByRole('button', { name: 'Zoom in' }).focus();
+  // Radix tooltips open on keyboard (focus-visible) focus, so arrive by Tab.
+  await region.getByRole('button', { name: 'Search' }).focus();
+  await page.keyboard.press(tab(browserName, true));
+  await expect(region.getByRole('button', { name: 'Zoom in' })).toBeFocused();
   await expect(page.getByRole('tooltip')).toContainText('Zoom in');
   await expect(page.getByRole('tooltip')).toContainText('+');
 });
@@ -133,14 +142,14 @@ test('popover opens, closes on Escape and restores focus', async ({ page }) => {
   await expect(trigger).toBeFocused();
 });
 
-test('dialog traps focus and restores it on close', async ({ page }) => {
+test('dialog traps focus and restores it on close', async ({ page, browserName }) => {
   const trigger = section(page, 'Dialog').getByRole('button', { name: 'Open dialog' });
   await trigger.click();
   const dialog = page.getByRole('dialog', { name: 'Edit person' });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('textbox', { name: 'Given names' })).toBeFocused();
   for (let i = 0; i < 8; i++) {
-    await page.keyboard.press('Tab');
+    await page.keyboard.press(tab(browserName));
     expect(await dialog.evaluate((el) => el.contains(document.activeElement))).toBe(true);
   }
   await page.keyboard.press('Escape');
@@ -153,20 +162,27 @@ test('dialog traps focus and restores it on close', async ({ page }) => {
   await expect(trigger).toBeFocused();
 });
 
-test('tooltip appears on keyboard focus', async ({ page }) => {
-  await section(page, 'Tooltip').getByRole('button', { name: 'Hover for tooltip' }).focus();
+test('tooltip appears on keyboard focus', async ({ page, browserName }) => {
+  const trigger = section(page, 'Tooltip').getByRole('button', { name: 'Hover for tooltip' });
+  // Radix closes tooltips on scroll, so settle scrolling before tabbing in.
+  await trigger.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await trigger.focus();
+  await page.keyboard.press(tab(browserName, true));
+  await page.keyboard.press(tab(browserName));
+  await expect(trigger).toBeFocused();
   await expect(page.getByRole('tooltip')).toContainText('Tooltips describe controls');
 });
 
 test('toast announces and dismisses', async ({ page }) => {
   await section(page, 'Toast').getByRole('button', { name: 'Show toast' }).click();
-  const toast = page.getByRole('status').filter({ hasText: 'Changes saved' });
+  const toasts = page.getByRole('region', { name: /Notifications/ }).getByRole('listitem');
+  const toast = toasts.filter({ hasText: 'Changes saved' });
   await expect(toast).toBeVisible();
   await toast.getByRole('button', { name: 'Dismiss' }).click();
   await expect(toast).toBeHidden();
 
   await section(page, 'Toast').getByRole('button', { name: 'Show error toast' }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Could not save' })).toBeVisible();
+  await expect(toasts.filter({ hasText: 'Could not save' })).toBeVisible();
 });
 
 test('inputs show labels, hints and errors', async ({ page }) => {
@@ -179,7 +195,7 @@ test('inputs show labels, hints and errors', async ({ page }) => {
   await expect(surname).toHaveAccessibleDescription('Surname is required');
   await expect(region.getByRole('textbox', { name: 'Record id' })).toBeDisabled();
 
-  const notes = section(page, 'Textarea').getByRole('textbox', { name: 'Notes' });
+  const notes = section(page, 'Textarea').getByRole('textbox', { name: 'Notes', exact: true });
   await notes.fill('Emigrated in spring.');
   await expect(notes).toHaveValue('Emigrated in spring.');
 });
@@ -196,7 +212,7 @@ test('select picks an option with the keyboard', async ({ page }) => {
 
 test('combobox filters and selects', async ({ page }) => {
   const region = section(page, 'Combobox');
-  const trigger = region.getByRole('combobox', { name: 'Place' });
+  const trigger = region.getByRole('combobox', { name: 'Place', exact: true });
   await trigger.click();
   await page.keyboard.type('phil');
   await expect(page.getByRole('option')).toHaveCount(1);
@@ -230,8 +246,11 @@ test('avatar falls back when a photo fails to load', async ({ page }) => {
   const photo = region.getByRole('img', { name: 'Photo of Eleanor Whitcombe' }).first();
   await expect(photo).toHaveAttribute('loading', 'lazy');
   await expect(photo).toHaveAttribute('decoding', 'async');
-  await expect(region.getByRole('img', { name: 'Broken Photo' })).toBeVisible();
-  await expect(region.getByTestId('avatar-broken')).toHaveAttribute('data-fallback', 'silhouette');
+  const broken = region.getByTestId('avatar-broken');
+  // Lazy images only load (and fail) near the viewport.
+  await broken.scrollIntoViewIfNeeded();
+  await expect(broken).toHaveAttribute('data-fallback', 'silhouette');
+  await expect(broken).toHaveAccessibleName('Rafferty Quill, male');
 });
 
 test('lifespan text formats dates', async ({ page }) => {
@@ -248,8 +267,11 @@ test('person cards convey sex without color and expose states', async ({ page })
   await expect(region.getByRole('button', { name: /female/ }).first()).toBeVisible();
   await expect(region.getByRole('button', { name: /focus person/ }).first()).toBeVisible();
   await expect(region.getByRole('button', { name: /duplicate/ }).first()).toBeVisible();
-  await expect(region.getByRole('button', { name: /living/ }).first()).toBeVisible();
-  await expect(region.locator('[aria-pressed="true"]').first()).toBeVisible();
+  await expect(region.getByRole('button', { name: /–Living/ }).first()).toBeVisible();
+  await expect(
+    region.getByRole('button', { name: /^Private person, private/ }).first(),
+  ).toBeVisible();
+  await expect(region.getByRole('button', { name: /selected/ }).first()).toBeVisible();
 });
 
 test('quick view popover shows details and actions', async ({ page }) => {
@@ -264,7 +286,10 @@ test('quick view popover shows details and actions', async ({ page }) => {
   await expect(popover).toBeHidden();
 
   await region.getByRole('button', { name: /Eleanor Whitcombe/ }).click();
-  await page.getByRole('dialog', { name: 'Eleanor Whitcombe' }).getByRole('button', { name: 'Edit' }).click();
+  await page
+    .getByRole('dialog', { name: 'Eleanor Whitcombe' })
+    .getByRole('button', { name: 'Edit' })
+    .click();
   await expect(region.getByRole('status')).toHaveText('Edit: Eleanor Whitcombe');
 
   await region.getByRole('button', { name: /Eleanor Whitcombe/ }).click();
@@ -299,7 +324,13 @@ test('source item links to the external record', async ({ page }) => {
 test('tree toolbar buttons and layout menu', async ({ page }) => {
   const region = section(page, 'TreeToolbar');
   const toolbar = region.getByRole('toolbar', { name: 'Tree tools' });
-  for (const name of ['Find in tree', 'Go to home person', 'Zoom in', 'Zoom out', 'Fit to screen']) {
+  for (const name of [
+    'Find in tree',
+    'Go to home person',
+    'Zoom in',
+    'Zoom out',
+    'Fit to screen',
+  ]) {
     await toolbar.getByRole('button', { name }).click();
     await expect(region.getByRole('status')).toHaveText(name);
   }
@@ -332,7 +363,9 @@ test('minimap navigates by click and keyboard and can be dismissed', async ({ pa
 });
 
 test('command palette can be opened from the design page', async ({ page }) => {
-  await section(page, 'CommandPalette').getByRole('button', { name: 'Open command palette' }).click();
+  await section(page, 'CommandPalette')
+    .getByRole('button', { name: 'Open command palette' })
+    .click();
   const dialog = page.getByRole('dialog', { name: 'Command palette' });
   await expect(dialog).toBeVisible();
   await page.keyboard.press('ArrowDown');
@@ -342,7 +375,9 @@ test('command palette can be opened from the design page', async ({ page }) => {
 
 test('skeleton, empty state and panel render', async ({ page }) => {
   await expect(section(page, 'Skeleton').getByTestId('skeleton').first()).toBeVisible();
-  await expect(section(page, 'EmptyState').getByRole('heading', { name: 'No sources yet' })).toBeVisible();
+  await expect(
+    section(page, 'EmptyState').getByRole('heading', { name: 'No sources yet' }),
+  ).toBeVisible();
   await expect(section(page, 'Panel').getByRole('heading', { name: 'Sources' })).toBeVisible();
   await expect(section(page, 'TagBadge').getByText('Immigrant')).toBeVisible();
   await expect(section(page, 'GenerationLabel').getByText('Grandparents')).toBeVisible();
@@ -353,5 +388,5 @@ test('reduced motion disables transitions', async ({ page }) => {
   const duration = await page.evaluate(() =>
     getComputedStyle(document.documentElement).getPropertyValue('--oa-duration-base').trim(),
   );
-  expect(duration).toBe('0ms');
+  expect(duration).toMatch(/^0m?s$/);
 });

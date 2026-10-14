@@ -46,18 +46,29 @@ export default function TreeSwitcher() {
 
   const currentName = trees.find((t) => t.id === current)?.name ?? current;
   const pathname = useLocation({ select: (l) => l.pathname });
+  const urlTree = useLocation({ select: (l) => (l.search as { tree?: unknown }).tree });
 
   /**
-   * Opens another tree. A page that shows one person (the tree view, a person page)
-   * moves to the new tree's home person: it must never go on showing, or editing,
-   * someone from the tree that was open. Pages about the whole tree (people list,
-   * home) stay where they are and follow the current tree.
+   * Makes `id` the open tree; create, rename and switch all come through here.
+   * A page that shows one person (the tree view, a person page) moves to the
+   * new tree's home person when another tree opens: it must never go on
+   * showing, or editing, someone from the tree that was open. Pages about the
+   * whole tree (people list, home) stay and follow the current tree. A rename
+   * keeps the page and rewrites its `?tree=`, which names the old folder.
    */
-  async function switchTo(id: string) {
+  async function goToTree(id: string, how: 'open' | 'rename') {
     // setCurrentTree updates the current tree before it awaits anything, so the
     // home route below already resolves the new tree.
     const switched = setCurrentTree(queryClient, id);
-    if (/^\/(tree|person)\//.test(pathname)) {
+    if (how === 'rename') {
+      if (urlTree) {
+        await navigate({
+          to: '.',
+          search: (prev: Record<string, unknown>) => ({ ...prev, tree: id }),
+          replace: true,
+        });
+      }
+    } else if (/^\/(tree|person)\//.test(pathname)) {
       // The tree view keeps its layout and generations; the new tree's home person is the focus.
       await navigate({
         to: '/tree/$personId',
@@ -84,10 +95,10 @@ export default function TreeSwitcher() {
     try {
       if (mode === 'create') {
         const tree = await createTree(name.trim());
-        await setCurrentTree(queryClient, tree.id);
+        await goToTree(tree.id, 'open');
       } else if (mode === 'rename' && current) {
         const tree = await renameTree(current, name.trim());
-        await setCurrentTree(queryClient, tree.id);
+        await goToTree(tree.id, 'rename');
       } else if (mode === 'delete' && current) {
         await deleteTree(current);
         const rest = trees.filter((t) => t.id !== current);
@@ -134,7 +145,10 @@ export default function TreeSwitcher() {
           {trees.length > 0 && (
             <>
               <MenuSeparator />
-              <MenuRadioGroup value={current ?? ''} onValueChange={(id) => void switchTo(id)}>
+              <MenuRadioGroup
+                value={current ?? ''}
+                onValueChange={(id) => void goToTree(id, 'open')}
+              >
                 {trees.map((tree) => (
                   <MenuRadioItem key={tree.id} value={tree.id}>
                     {tree.name}

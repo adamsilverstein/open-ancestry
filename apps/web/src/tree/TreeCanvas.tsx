@@ -571,11 +571,15 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       );
     if (focus && current && latest.current.kind === 'pedigree') {
       // Focus at the left, ancestors spreading right, the whole chart down the screen.
-      const scale = fitRows ? fitScale(width - toolbar - 2 * pad, height - 2 * pad) : t.scale;
+      // Room above the chart for the two-line column heads.
+      const heads = 48;
+      const scale = fitRows
+        ? fitScale(width - toolbar - 2 * pad, height - 2 * pad - heads)
+        : t.scale;
       const b = current.bounds;
       return {
         x: toolbar + pad - focus.x * scale,
-        y: height / 2 - (b.minY + b.height / 2) * scale,
+        y: (height + heads) / 2 - (b.minY + b.height / 2) * scale,
         scale,
       };
     }

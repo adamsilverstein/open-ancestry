@@ -123,3 +123,16 @@ describe('fuzz: import never throws on bad data', () => {
     );
   });
 });
+
+describe('fuzz counterexamples', () => {
+  // Shrunk from a failing CI run (seed 1931474607): a SOUR under a SOUR record
+  // reached the citation_link owner CHECK and threw a SqliteError.
+  it.each([
+    '0 HEAD\n1 CHAR UTF-8\n0 SOUR\n1 SOUR !',
+    '0 HEAD\n0 @O1@ OBJE\n1 FILE x.jpg\n1 OBJE @O1@',
+  ])('imports %j without throwing', async (text) => {
+    const { store, report } = await importInto(text);
+    expect(report.lines.mapped + report.lines.preserved).toBe(report.lines.total);
+    expect(rawText(store)).toBe(serializeGedcom(parseGedcom(text)));
+  });
+});

@@ -6,6 +6,10 @@ import { formatDate, parseDate, toGedcom } from './index';
 import { arbSpanDate } from './test-arbitraries';
 import type { ParsedDate } from './types';
 
+// Property tests run hundreds of cases; under coverage on a shared CI runner that can
+// pass Vitest's 5s default, so they get room. A hang still fails.
+const PROPERTY_TIMEOUT = 30_000;
+
 const shape = (p: ParsedDate) => ({
   qualifier: p.qualifier,
   start: p.start,
@@ -154,7 +158,7 @@ describe('periods bounded by decades and centuries', () => {
   });
 });
 
-describe('span date properties', () => {
+describe('span date properties', { timeout: PROPERTY_TIMEOUT }, () => {
   it('every generated span date parses to the GEDCOM date it means', () => {
     fc.assert(
       fc.property(arbSpanDate, ({ text, means }) => {
@@ -211,7 +215,7 @@ describe('span date properties', () => {
   });
 });
 
-describe('inverted ranges', () => {
+describe('inverted ranges', { timeout: PROPERTY_TIMEOUT }, () => {
   it.each(['BEF 1850-13', 'AFT 1850-13', 'BEF 1950-1913', 'abt 1950-13', 'Bet. 1950-13'])(
     '%j stays text whatever qualifier comes first',
     (input) => {

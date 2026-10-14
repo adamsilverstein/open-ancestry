@@ -26,6 +26,10 @@ import {
 } from './index';
 import { memoryTree, seedSmallFamily } from './test/helpers';
 
+// Property tests run hundreds of cases; under coverage on a shared CI runner that can
+// pass Vitest's 5s default, so they get room. A hang still fails.
+const PROPERTY_TIMEOUT = 30_000;
+
 /** Every user-data table (change history excluded) as canonical JSON. */
 function snapshot(store: TreeStore): string {
   return exportJsonString(store, { history: false });
@@ -41,7 +45,7 @@ function searchIndex(store: TreeStore): unknown[] {
     .all();
 }
 
-describe('undo / redo', () => {
+describe('undo / redo', { timeout: PROPERTY_TIMEOUT }, () => {
   it('undoes and redoes a batch', () => {
     const store = memoryTree();
     const before = snapshot(store);

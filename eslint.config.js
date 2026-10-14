@@ -25,6 +25,24 @@ export default defineConfig(
     },
   },
   {
+    // Test-only exports pull in fast-check; keep them out of app and library code.
+    files: ['**/*.{ts,tsx,mts}'],
+    ignores: ['**/*.test.{ts,tsx}', '**/test-helpers.ts', '**/test/**', 'bench/**', 'e2e/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@open-ancestry/*/testing', '@open-ancestry/*/testing/*'],
+              message: 'Test-only module: import it from tests only.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ['apps/web/**/*.{ts,tsx}'],
     extends: [jsxA11y.flatConfigs.recommended, reactHooks.configs.flat['recommended-latest']],
     languageOptions: { globals: globals.browser },

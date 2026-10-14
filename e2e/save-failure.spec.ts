@@ -17,8 +17,6 @@ const h1 = (page: Page) => page.getByRole('heading', { level: 1 });
 const timeline = (page: Page) => page.getByRole('region', { name: 'Timeline', exact: true });
 const relationships = (page: Page) =>
   page.getByRole('region', { name: 'Relationships', exact: true });
-const toasts = (page: Page) =>
-  page.getByRole('region', { name: /Notifications/ }).getByRole('listitem');
 
 /** Fails matching writes with a 500 until the returned function is called. */
 async function failWrites(page: Page, url: string | RegExp, method?: string) {
@@ -45,7 +43,8 @@ test('Add relative keeps the typed person and retries', async ({ page }) => {
   await dialog.getByRole('button', { name: 'Add', exact: true }).click();
 
   await expect(dialog.getByRole('alert')).toContainText('Simulated failure');
-  await expect(toasts(page).filter({ hasText: 'Could not save' })).toBeVisible();
+  // The toast says so too (the open modal hides it from the accessibility tree).
+  await expect(page.locator('li').filter({ hasText: 'Could not save' })).toBeVisible();
   await expect(dialog.getByRole('textbox', { name: 'Given names' })).toHaveValue('Rollo');
   await expect(dialog.getByRole('textbox', { name: 'Surname' })).toHaveValue('Failwood');
 
@@ -66,7 +65,7 @@ test('Edit person keeps the edits after the rollback and retries', async ({ page
 
   await expect(dialog.getByRole('alert')).toContainText('Simulated failure');
   // The page rolls back to what is stored; the form keeps what was typed.
-  await expect(h1(page)).toHaveText('Rowan Ashdown');
+  await expect(page.locator('h1')).toHaveText('Rowan Ashdown');
   await expect(given).toHaveValue('Rowena');
 
   await restore();

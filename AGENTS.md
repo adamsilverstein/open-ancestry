@@ -1,6 +1,6 @@
 # Contributor guide (humans and agents)
 
-Read first: `docs/spec/design.md` (spec + acceptance criteria), `docs/design-system.md`, `docs/data-model.md`, `docs/spec/plan.md`.
+Read first: `docs/spec/design.md` (spec + acceptance criteria), `docs/design-system.md`, `docs/data-model.md`, `docs/api.md`, `docs/spec/plan.md`.
 
 ## Ground rules
 

@@ -42,12 +42,6 @@ export interface Migration {
    * tables it does not touch.
    */
   upgradeRow?: (table: string, row: Record<string, unknown>) => Record<string, unknown>;
-  /**
-   * For rewrites SQL cannot express (such as Unicode normalization): runs in
-   * the migration's transaction right after `sql`. Writes here are part of the
-   * upgrade, not edits, so they are not change-logged.
-   */
-  run?: (db: Database) => void;
 }
 
 /** v2: number existing batches by commit order, mirroring the SQL backfill. */

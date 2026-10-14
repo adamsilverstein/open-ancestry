@@ -285,6 +285,21 @@ describe('privatized exports read RESN and pointers the way the strictest reader
     store.close();
   });
 
+  it('re-reads RESN for people an older import stored as locked', async () => {
+    const store = await importInto(
+      ged(
+        ...dead('@I1@', 'Older /Canaryolder/', '1 RESN locked, privacy'),
+        ...dead('@I2@', 'Locked /Keeper/', '1 RESN locked'),
+      ),
+    );
+    // What the importer stored before locked ranked below private.
+    store.db.prepare("UPDATE person SET privacy = 'locked'").run();
+    const out = buildGedcomExport(store, { privatizeLiving: true, now: TODAY }).text;
+    expect(canaries(out)).toEqual([]);
+    expect(out).toContain('Locked /Keeper/');
+    store.close();
+  });
+
   it('keeps a record whose nested RESN only locks it', async () => {
     const store = await importInto(
       ged(

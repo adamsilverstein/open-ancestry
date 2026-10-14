@@ -48,7 +48,7 @@ export function TimelineItem({
               <span className="oa-visually-hidden">Family event</span>
             </>
           )}
-          {title}
+          <span data-title>{title}</span>
           {variant === 'alternate' && <span className={styles.chip}>alternate</span>}
         </p>
         {(date || place) && (

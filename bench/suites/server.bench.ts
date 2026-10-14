@@ -11,6 +11,8 @@ import type { BenchCase } from '../types';
 // The spec says p95 < 20ms; p99 is the stricter metric the runner offers.
 const TREE = 'Bench';
 const headers = { host: '127.0.0.1:4317', 'accept-encoding': 'br, gzip' };
+const TOKEN = 'bench-token';
+const writeHeaders = { ...headers, origin: 'http://127.0.0.1:4317', 'x-oa-token': TOKEN };
 let root: string | undefined;
 let app: FastifyInstance;
 let ids: string[];
@@ -24,7 +26,7 @@ async function loaded() {
   const data = generateSyntheticTree({ people: 10_000, seed: 1 });
   bulkInsert(library.create(TREE), data);
   ids = data.family_child.map((c) => c.child_id);
-  app = createServer({ library });
+  app = createServer({ library, token: TOKEN });
   await app.ready();
 }
 
@@ -87,6 +89,33 @@ export default [
     name: 'server: GET people list page of 100 (10k tree)',
     setup: loaded,
     fn: () => get(`/api/trees/${TREE}/people?sort=birth&limit=100&offset=${(i++ % 50) * 100}`),
+    budgetMs: 50,
+  },
+  {
+    // The checker rescans after any edit; a privacy change is about the cheapest one.
+    name: 'server: GET checks after an edit, full scan (10k tree)',
+    setup: loaded,
+    fn: async () => {
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/trees/${TREE}/people/${nextId()}`,
+        headers: writeHeaders,
+        payload: { privacy: i % 2 ? 'private' : 'public' },
+      });
+      if (res.statusCode !== 200) throw new Error(`PATCH: ${res.statusCode} ${res.body}`);
+      await get(`/api/trees/${TREE}/checks`);
+    },
+    budgetMs: 300,
+    metric: 'mean',
+    iterations: 10,
+    time: 0,
+    warmupIterations: 2,
+  },
+  {
+    // Unchanged tree: the last scan is reused (the request still builds summaries).
+    name: 'server: GET checks, unchanged tree (10k tree)',
+    setup: loaded,
+    fn: () => get(`/api/trees/${TREE}/checks`),
     budgetMs: 50,
   },
 ] satisfies BenchCase[];

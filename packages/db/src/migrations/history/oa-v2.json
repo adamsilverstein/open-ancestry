@@ -1,0 +1,641 @@
+{
+  "format": "open-ancestry",
+  "formatVersion": 1,
+  "schemaVersion": 2,
+  "tables": {
+    "change_batch": [
+      {
+        "id": "01KDWKDSW00000000000000000",
+        "label": "Set sex",
+        "state": "applied",
+        "created_at": "2026-01-01T11:00:00.000Z",
+        "state_changed_at": null,
+        "seq": 4
+      },
+      {
+        "id": "01KDWN4QP00000000000000000",
+        "label": "Delete sister",
+        "state": "applied",
+        "created_at": "2026-01-01T11:30:00.000Z",
+        "state_changed_at": null,
+        "seq": 5
+      },
+      {
+        "id": "01KDWP06K000S0000000000000",
+        "label": "Add note",
+        "state": "undone",
+        "created_at": "2026-01-01T11:45:00.000Z",
+        "state_changed_at": "2026-01-01T11:45:00.000Z",
+        "seq": 6
+      },
+      {
+        "id": "01KDWPVNG0M000000000000000",
+        "label": "Seed family",
+        "state": "applied",
+        "created_at": "2026-01-01T12:00:00.000Z",
+        "state_changed_at": null,
+        "seq": 1
+      },
+      {
+        "id": "01KDWT9H40R0000000000000R0",
+        "label": "Rename town",
+        "state": "applied",
+        "created_at": "2026-01-01T13:00:00.000Z",
+        "state_changed_at": null,
+        "seq": 2
+      },
+      {
+        "id": "01KDWXQCR00000000000000000",
+        "label": "Add married name",
+        "state": "applied",
+        "created_at": "2026-01-01T14:00:00.000Z",
+        "state_changed_at": null,
+        "seq": 3
+      }
+    ],
+    "change_log": [
+      {
+        "seq": 1,
+        "batch_id": "01KDWPVNG0M000000000000000",
+        "ts": "2026-01-01T12:00:00.000Z",
+        "entity": "place",
+        "entity_id": "01KDWPVNG0M000000000000001",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWPVNG0M000000000000001\",\"name\":\"Brackenford\",\"full_name\":\"Brackenford, Wexmoor\",\"parent_id\":null,\"type\":null,\"latitude\":null,\"longitude\":null,\"created_at\":\"2026-01-01T12:00:00.000Z\",\"updated_at\":\"2026-01-01T12:00:00.000Z\"}",
+        "schema_version": 2
+      },
+      {
+        "seq": 2,
+        "batch_id": "01KDWPVNG0M000000000000000",
+        "ts": "2026-01-01T12:00:00.000Z",
+        "entity": "person",
+        "entity_id": "01KDWPVNG0M000000000000002",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWPVNG0M000000000000002\",\"sex\":\"M\",\"living\":\"unknown\",\"privacy\":\"public\",\"primary_media_id\":null,\"external_id\":null,\"import_batch_id\":null,\"created_at\":\"2026-01-01T12:00:00.000Z\",\"updated_at\":\"2026-01-01T12:00:00.000Z\"}",
+        "schema_version": 2
+      },
+      {
+        "seq": 3,
+        "batch_id": "01KDWPVNG0M000000000000000",
+        "ts": "2026-01-01T12:00:00.000Z",
+        "entity": "person_name",
+        "entity_id": "01KDWPVNG0M000000000000003",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWPVNG0M000000000000003\",\"person_id\":\"01KDWPVNG0M000000000000002\",\"type\":\"birth\",\"given\":\"Ivo\",\"surname\":\"Vale\",\"surname_prefix\":null,\"prefix\":null,\"suffix\":null,\"nickname\":null,\"full_text\":null,\"surname_key\":null,\"is_primary\":1,\"sort_order\":0}",
+        "schema_version": 2
+      },
+      {
+        "seq": 4,
+        "batch_id": "01KDWPVNG0M000000000000000",
+        "ts": "2026-01-01T12:00:00.000Z",
+        "entity": "event",
+        "entity_id": "01KDWPVNG0M000000000000004",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWPVNG0M000000000000004\",\"type\":\"BIRT\",\"custom_type\":null,\"date_text\":\"1930\",\"date_qualifier\":null,\"date_sort\":19300701,\"date_sort_end\":null,\"calendar\":null,\"place_id\":\"01KDWPVNG0M000000000000001\",\"value\":null,\"description\":null,\"age\":null,\"cause\":null,\"privacy\":\"public\",\"import_batch_id\":null,\"created_at\":\"2026-01-01T12:00:00.000Z\",\"updated_at\":\"2026-01-01T12:00:00.000Z\"}",
+        "schema_version": 2
+      },
+      {
+        "seq": 5,
+        "batch_id": "01KDWPVNG0M000000000000000",
+        "ts": "2026-01-01T12:00:00.000Z",
+        "entity": "event_role",
+        "entity_id": "01KDWPVNG0M000000000000005",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWPVNG0M000000000000005\",\"event_id\":\"01KDWPVNG0M000000000000004\",\"person_id\":\"01KDWPVNG0M000000000000002\",\"family_id\":null,\"role\":\"principal\",\"is_preferred\":1,\"sort_order\":0}",
+        "schema_version": 2
+      },
+      {
+        "seq": 6,
+        "batch_id": "01KDWPVNG0M000000000000000",
+        "ts": "2026-01-01T12:00:00.000Z",
+        "entity": "person",
+        "entity_id": "01KDWPVNG0M000000000000006",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWPVNG0M000000000000006\",\"sex\":\"F\",\"living\":\"unknown\",\"privacy\":\"public\",\"primary_media_id\":null,\"external_id\":null,\"import_batch_id\":null,\"created_at\":\"2026-01-01T12:00:00.000Z\",\"updated_at\":\"2026-01-01T12:00:00.000Z\"}",
+        "schema_version": 2
+      },
+      {
+        "seq": 7,
+        "batch_id": "01KDWPVNG0M000000000000000",
+        "ts": "2026-01-01T12:00:00.000Z",
+        "entity": "person_name",
+        "entity_id": "01KDWPVNG0M000000000000007",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWPVNG0M000000000000007\",\"person_id\":\"01KDWPVNG0M000000000000006\",\"type\":\"birth\",\"given\":\"Nerys\",\"surname\":\"Holt\",\"surname_prefix\":null,\"prefix\":null,\"suffix\":null,\"nickname\":null,\"full_text\":null,\"surname_key\":null,\"is_primary\":1,\"sort_order\":0}",
+        "schema_version": 2
+      },
+      {
+        "seq": 8,
+        "batch_id": "01KDWPVNG0M000000000000000",
+        "ts": "2026-01-01T12:00:00.000Z",
+        "entity": "event",
+        "entity_id": "01KDWPVNG0M000000000000008",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWPVNG0M000000000000008\",\"type\":\"BIRT\",\"custom_type\":null,\"date_text\":\"1932\",\"date_qualifier\":null,\"date_sort\":19320701,\"date_sort_end\":null,\"calendar\":null,\"place_id\":\"01KDWPVNG0M000000000000001\",\"value\":null,\"description\":null,\"age\":null,\"cause\":null,\"privacy\":\"public\",\"import_batch_id\":null,\"created_at\":\"2026-01-01T12:00:00.000Z\",\"updated_at\":\"2026-01-01T12:00:00.000Z\"}",
+        "schema_version": 2
+      },
+      {
+        "seq": 9,
+        "batch_id": "01KDWPVNG0M000000000000000",
+        "ts": "2026-01-01T12:00:00.000Z",
+        "entity": "event_role",
+        "entity_id": "01KDWPVNG0M000000000000009",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWPVNG0M000000000000009\",\"event_id\":\"01KDWPVNG0M000000000000008\",\"person_id\":\"01KDWPVNG0M000000000000006\",\"family_id\":null,\"role\":\"principal\",\"is_preferred\":1,\"sort_order\":0}",
+        "schema_version": 2
+      },
+      {
+        "seq": 10,
+        "batch_id": "01KDWPVNG0M000000000000000",
+        "ts": "2026-01-01T12:00:00.000Z",
+        "entity": "person",
+        "entity_id": "01KDWPVNG0M00000000000000A",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWPVNG0M00000000000000A\",\"sex\":\"M\",\"living\":\"unknown\",\"privacy\":\"public\",\"primary_media_id\":null,\"external_id\":null,\"import_batch_id\":null,\"created_at\":\"2026-01-01T12:00:00.000Z\",\"updated_at\":\"2026-01-01T12:00:00.000Z\"}",
+        "schema_version": 2
+      },
+      {
+        "seq": 11,
+        "batch_id": "01KDWPVNG0M000000000000000",
+        "ts": "2026-01-01T12:00:00.000Z",
+        "entity": "person_name",
+        "entity_id": "01KDWPVNG0M00000000000000B",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWPVNG0M00000000000000B\",\"person_id\":\"01KDWPVNG0M00000000000000A\",\"type\":\"birth\",\"given\":\"Ellis\",\"surname\":\"Vale\",\"surname_prefix\":null,\"prefix\":null,\"suffix\":null,\"nickname\":null,\"full_text\":null,\"surname_key\":null,\"is_primary\":1,\"sort_order\":0}",
+        "schema_version": 2
+      },
+      {
+        "seq": 12,
+        "batch_id": "01KDWPVNG0M000000000000000",
+        "ts": "2026-01-01T12:00:00.000Z",
+        "entity": "event",
+        "entity_id": "01KDWPVNG0M00000000000000C",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWPVNG0M00000000000000C\",\"type\":\"BIRT\",\"custom_type\":null,\"date_text\":\"1960\",\"date_qualifier\":null,\"date_sort\":19600701,\"date_sort_end\":null,\"calendar\":null,\"place_id\":\"01KDWPVNG0M000000000000001\",\"value\":null,\"description\":null,\"age\":null,\"cause\":null,\"privacy\":\"public\",\"import_batch_id\":null,\"created_at\":\"2026-01-01T12:00:00.000Z\",\"updated_at\":\"2026-01-01T12:00:00.000Z\"}",
+        "schema_version": 2
+      },
+      {
+        "seq": 13,
+        "batch_id": "01KDWPVNG0M000000000000000",
+        "ts": "2026-01-01T12:00:00.000Z",
+        "entity": "event_role",
+        "entity_id": "01KDWPVNG0M00000000000000D",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWPVNG0M00000000000000D\",\"event_id\":\"01KDWPVNG0M00000000000000C\",\"person_id\":\"01KDWPVNG0M00000000000000A\",\"family_id\":null,\"role\":\"principal\",\"is_preferred\":1,\"sort_order\":0}",
+        "schema_version": 2
+      },
+      {
+        "seq": 14,
+        "batch_id": "01KDWPVNG0M000000000000000",
+        "ts": "2026-01-01T12:00:00.000Z",
+        "entity": "person",
+        "entity_id": "01KDWPVNG0M00000000000000E",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWPVNG0M00000000000000E\",\"sex\":\"F\",\"living\":\"unknown\",\"privacy\":\"public\",\"primary_media_id\":null,\"external_id\":null,\"import_batch_id\":null,\"created_at\":\"2026-01-01T12:00:00.000Z\",\"updated_at\":\"2026-01-01T12:00:00.000Z\"}",
+        "schema_version": 2
+      },
+      {
+        "seq": 15,
+        "batch_id": "01KDWPVNG0M000000000000000",
+        "ts": "2026-01-01T12:00:00.000Z",
+        "entity": "person_name",
+        "entity_id": "01KDWPVNG0M00000000000000F",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWPVNG0M00000000000000F\",\"person_id\":\"01KDWPVNG0M00000000000000E\",\"type\":\"birth\",\"given\":\"Petra\",\"surname\":\"Vale\",\"surname_prefix\":null,\"prefix\":null,\"suffix\":null,\"nickname\":null,\"full_text\":null,\"surname_key\":null,\"is_primary\":1,\"sort_order\":0}",
+        "schema_version": 2
+      },
+      {
+        "seq": 16,
+        "batch_id": "01KDWPVNG0M000000000000000",
+        "ts": "2026-01-01T12:00:00.000Z",
+        "entity": "event",
+        "entity_id": "01KDWPVNG0M00000000000000G",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWPVNG0M00000000000000G\",\"type\":\"BIRT\",\"custom_type\":null,\"date_text\":\"1962\",\"date_qualifier\":null,\"date_sort\":19620701,\"date_sort_end\":null,\"calendar\":null,\"place_id\":\"01KDWPVNG0M000000000000001\",\"value\":null,\"description\":null,\"age\":null,\"cause\":null,\"privacy\":\"public\",\"import_batch_id\":null,\"created_at\":\"2026-01-01T12:00:00.000Z\",\"updated_at\":\"2026-01-01T12:00:00.000Z\"}",
+        "schema_version": 2
+      },
+      {
+        "seq": 17,
+        "batch_id": "01KDWPVNG0M000000000000000",
+        "ts": "2026-01-01T12:00:00.000Z",
+        "entity": "event_role",
+        "entity_id": "01KDWPVNG0M00000000000000H",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWPVNG0M00000000000000H\",\"event_id\":\"01KDWPVNG0M00000000000000G\",\"person_id\":\"01KDWPVNG0M00000000000000E\",\"family_id\":null,\"role\":\"principal\",\"is_preferred\":1,\"sort_order\":0}",
+        "schema_version": 2
+      },
+      {
+        "seq": 18,
+        "batch_id": "01KDWPVNG0M000000000000000",
+        "ts": "2026-01-01T12:00:00.000Z",
+        "entity": "family",
+        "entity_id": "01KDWPVNG0M00000000000000J",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWPVNG0M00000000000000J\",\"partner1_id\":\"01KDWPVNG0M000000000000002\",\"partner2_id\":\"01KDWPVNG0M000000000000006\",\"relationship_type\":\"married\",\"partner1_order\":0,\"partner2_order\":0,\"privacy\":\"public\",\"external_id\":null,\"import_batch_id\":null,\"created_at\":\"2026-01-01T12:00:00.000Z\",\"updated_at\":\"2026-01-01T12:00:00.000Z\"}",
+        "schema_version": 2
+      },
+      {
+        "seq": 19,
+        "batch_id": "01KDWPVNG0M000000000000000",
+        "ts": "2026-01-01T12:00:00.000Z",
+        "entity": "family_child",
+        "entity_id": "01KDWPVNG0M00000000000000K",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWPVNG0M00000000000000K\",\"family_id\":\"01KDWPVNG0M00000000000000J\",\"child_id\":\"01KDWPVNG0M00000000000000A\",\"partner1_rel\":\"biological\",\"partner2_rel\":\"biological\",\"sort_order\":0,\"child_order\":0,\"is_preferred\":1}",
+        "schema_version": 2
+      },
+      {
+        "seq": 20,
+        "batch_id": "01KDWPVNG0M000000000000000",
+        "ts": "2026-01-01T12:00:00.000Z",
+        "entity": "family_child",
+        "entity_id": "01KDWPVNG0M00000000000000M",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWPVNG0M00000000000000M\",\"family_id\":\"01KDWPVNG0M00000000000000J\",\"child_id\":\"01KDWPVNG0M00000000000000E\",\"partner1_rel\":\"biological\",\"partner2_rel\":\"biological\",\"sort_order\":1,\"child_order\":0,\"is_preferred\":1}",
+        "schema_version": 2
+      },
+      {
+        "seq": 21,
+        "batch_id": "01KDWT9H40R0000000000000R0",
+        "ts": "2026-01-01T13:00:00.000Z",
+        "entity": "place",
+        "entity_id": "01KDWPVNG0M000000000000001",
+        "op": "update",
+        "before_json": "{\"id\":\"01KDWPVNG0M000000000000001\",\"name\":\"Brackenford\",\"full_name\":\"Brackenford, Wexmoor\",\"parent_id\":null,\"type\":null,\"latitude\":null,\"longitude\":null,\"created_at\":\"2026-01-01T12:00:00.000Z\",\"updated_at\":\"2026-01-01T12:00:00.000Z\"}",
+        "after_json": "{\"id\":\"01KDWPVNG0M000000000000001\",\"name\":\"Brackenford\",\"full_name\":\"Brackenford, Wexmoor, Westmere\",\"parent_id\":null,\"type\":null,\"latitude\":null,\"longitude\":null,\"created_at\":\"2026-01-01T12:00:00.000Z\",\"updated_at\":\"2026-01-01T13:00:00.000Z\"}",
+        "schema_version": 2
+      },
+      {
+        "seq": 22,
+        "batch_id": "01KDWXQCR00000000000000000",
+        "ts": "2026-01-01T14:00:00.000Z",
+        "entity": "person_name",
+        "entity_id": "01KDWXQCR00000000000000001",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWXQCR00000000000000001\",\"person_id\":\"01KDWPVNG0M000000000000006\",\"type\":\"married\",\"given\":\"Nerys\",\"surname\":\"Vale\",\"surname_prefix\":null,\"prefix\":null,\"suffix\":null,\"nickname\":null,\"full_text\":null,\"surname_key\":null,\"is_primary\":0,\"sort_order\":1}",
+        "schema_version": 2
+      },
+      {
+        "seq": 23,
+        "batch_id": "01KDWKDSW00000000000000000",
+        "ts": "2026-01-01T11:00:00.000Z",
+        "entity": "person",
+        "entity_id": "01KDWPVNG0M00000000000000A",
+        "op": "update",
+        "before_json": "{\"id\":\"01KDWPVNG0M00000000000000A\",\"sex\":\"M\",\"living\":\"unknown\",\"privacy\":\"public\",\"primary_media_id\":null,\"external_id\":null,\"import_batch_id\":null,\"created_at\":\"2026-01-01T12:00:00.000Z\",\"updated_at\":\"2026-01-01T12:00:00.000Z\"}",
+        "after_json": "{\"id\":\"01KDWPVNG0M00000000000000A\",\"sex\":\"U\",\"living\":\"unknown\",\"privacy\":\"public\",\"primary_media_id\":null,\"external_id\":null,\"import_batch_id\":null,\"created_at\":\"2026-01-01T12:00:00.000Z\",\"updated_at\":\"2026-01-01T11:00:00.000Z\"}",
+        "schema_version": 2
+      },
+      {
+        "seq": 24,
+        "batch_id": "01KDWN4QP00000000000000000",
+        "ts": "2026-01-01T11:30:00.000Z",
+        "entity": "person_name",
+        "entity_id": "01KDWPVNG0M00000000000000F",
+        "op": "delete",
+        "before_json": "{\"id\":\"01KDWPVNG0M00000000000000F\",\"person_id\":\"01KDWPVNG0M00000000000000E\",\"type\":\"birth\",\"given\":\"Petra\",\"surname\":\"Vale\",\"surname_prefix\":null,\"prefix\":null,\"suffix\":null,\"nickname\":null,\"full_text\":null,\"surname_key\":null,\"is_primary\":1,\"sort_order\":0}",
+        "after_json": null,
+        "schema_version": 2
+      },
+      {
+        "seq": 25,
+        "batch_id": "01KDWN4QP00000000000000000",
+        "ts": "2026-01-01T11:30:00.000Z",
+        "entity": "event_role",
+        "entity_id": "01KDWPVNG0M00000000000000H",
+        "op": "delete",
+        "before_json": "{\"id\":\"01KDWPVNG0M00000000000000H\",\"event_id\":\"01KDWPVNG0M00000000000000G\",\"person_id\":\"01KDWPVNG0M00000000000000E\",\"family_id\":null,\"role\":\"principal\",\"is_preferred\":1,\"sort_order\":0}",
+        "after_json": null,
+        "schema_version": 2
+      },
+      {
+        "seq": 26,
+        "batch_id": "01KDWN4QP00000000000000000",
+        "ts": "2026-01-01T11:30:00.000Z",
+        "entity": "event",
+        "entity_id": "01KDWPVNG0M00000000000000G",
+        "op": "delete",
+        "before_json": "{\"id\":\"01KDWPVNG0M00000000000000G\",\"type\":\"BIRT\",\"custom_type\":null,\"date_text\":\"1962\",\"date_qualifier\":null,\"date_sort\":19620701,\"date_sort_end\":null,\"calendar\":null,\"place_id\":\"01KDWPVNG0M000000000000001\",\"value\":null,\"description\":null,\"age\":null,\"cause\":null,\"privacy\":\"public\",\"import_batch_id\":null,\"created_at\":\"2026-01-01T12:00:00.000Z\",\"updated_at\":\"2026-01-01T12:00:00.000Z\"}",
+        "after_json": null,
+        "schema_version": 2
+      },
+      {
+        "seq": 27,
+        "batch_id": "01KDWN4QP00000000000000000",
+        "ts": "2026-01-01T11:30:00.000Z",
+        "entity": "family_child",
+        "entity_id": "01KDWPVNG0M00000000000000M",
+        "op": "delete",
+        "before_json": "{\"id\":\"01KDWPVNG0M00000000000000M\",\"family_id\":\"01KDWPVNG0M00000000000000J\",\"child_id\":\"01KDWPVNG0M00000000000000E\",\"partner1_rel\":\"biological\",\"partner2_rel\":\"biological\",\"sort_order\":1,\"child_order\":0,\"is_preferred\":1}",
+        "after_json": null,
+        "schema_version": 2
+      },
+      {
+        "seq": 28,
+        "batch_id": "01KDWN4QP00000000000000000",
+        "ts": "2026-01-01T11:30:00.000Z",
+        "entity": "person",
+        "entity_id": "01KDWPVNG0M00000000000000E",
+        "op": "delete",
+        "before_json": "{\"id\":\"01KDWPVNG0M00000000000000E\",\"sex\":\"F\",\"living\":\"unknown\",\"privacy\":\"public\",\"primary_media_id\":null,\"external_id\":null,\"import_batch_id\":null,\"created_at\":\"2026-01-01T12:00:00.000Z\",\"updated_at\":\"2026-01-01T12:00:00.000Z\"}",
+        "after_json": null,
+        "schema_version": 2
+      },
+      {
+        "seq": 29,
+        "batch_id": "01KDWP06K000S0000000000000",
+        "ts": "2026-01-01T11:45:00.000Z",
+        "entity": "note",
+        "entity_id": "01KDWP06K000S0000000000001",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWP06K000S0000000000001\",\"text\":\"Kept bees.\",\"external_id\":null,\"import_batch_id\":null,\"created_at\":\"2026-01-01T11:45:00.000Z\",\"updated_at\":\"2026-01-01T11:45:00.000Z\"}",
+        "schema_version": 2
+      },
+      {
+        "seq": 30,
+        "batch_id": "01KDWP06K000S0000000000000",
+        "ts": "2026-01-01T11:45:00.000Z",
+        "entity": "note_link",
+        "entity_id": "01KDWP06K000S0000000000002",
+        "op": "insert",
+        "before_json": null,
+        "after_json": "{\"id\":\"01KDWP06K000S0000000000002\",\"note_id\":\"01KDWP06K000S0000000000001\",\"owner_type\":\"person\",\"owner_id\":\"01KDWPVNG0M000000000000002\",\"sort_order\":0}",
+        "schema_version": 2
+      }
+    ],
+    "citation": [],
+    "citation_link": [],
+    "event": [
+      {
+        "id": "01KDWPVNG0M000000000000004",
+        "type": "BIRT",
+        "custom_type": null,
+        "date_text": "1930",
+        "date_qualifier": null,
+        "date_sort": 19300701,
+        "date_sort_end": null,
+        "calendar": null,
+        "place_id": "01KDWPVNG0M000000000000001",
+        "value": null,
+        "description": null,
+        "age": null,
+        "cause": null,
+        "privacy": "public",
+        "import_batch_id": null,
+        "created_at": "2026-01-01T12:00:00.000Z",
+        "updated_at": "2026-01-01T12:00:00.000Z"
+      },
+      {
+        "id": "01KDWPVNG0M000000000000008",
+        "type": "BIRT",
+        "custom_type": null,
+        "date_text": "1932",
+        "date_qualifier": null,
+        "date_sort": 19320701,
+        "date_sort_end": null,
+        "calendar": null,
+        "place_id": "01KDWPVNG0M000000000000001",
+        "value": null,
+        "description": null,
+        "age": null,
+        "cause": null,
+        "privacy": "public",
+        "import_batch_id": null,
+        "created_at": "2026-01-01T12:00:00.000Z",
+        "updated_at": "2026-01-01T12:00:00.000Z"
+      },
+      {
+        "id": "01KDWPVNG0M00000000000000C",
+        "type": "BIRT",
+        "custom_type": null,
+        "date_text": "1960",
+        "date_qualifier": null,
+        "date_sort": 19600701,
+        "date_sort_end": null,
+        "calendar": null,
+        "place_id": "01KDWPVNG0M000000000000001",
+        "value": null,
+        "description": null,
+        "age": null,
+        "cause": null,
+        "privacy": "public",
+        "import_batch_id": null,
+        "created_at": "2026-01-01T12:00:00.000Z",
+        "updated_at": "2026-01-01T12:00:00.000Z"
+      }
+    ],
+    "event_role": [
+      {
+        "id": "01KDWPVNG0M000000000000005",
+        "event_id": "01KDWPVNG0M000000000000004",
+        "person_id": "01KDWPVNG0M000000000000002",
+        "family_id": null,
+        "role": "principal",
+        "is_preferred": 1,
+        "sort_order": 0
+      },
+      {
+        "id": "01KDWPVNG0M000000000000009",
+        "event_id": "01KDWPVNG0M000000000000008",
+        "person_id": "01KDWPVNG0M000000000000006",
+        "family_id": null,
+        "role": "principal",
+        "is_preferred": 1,
+        "sort_order": 0
+      },
+      {
+        "id": "01KDWPVNG0M00000000000000D",
+        "event_id": "01KDWPVNG0M00000000000000C",
+        "person_id": "01KDWPVNG0M00000000000000A",
+        "family_id": null,
+        "role": "principal",
+        "is_preferred": 1,
+        "sort_order": 0
+      }
+    ],
+    "family": [
+      {
+        "id": "01KDWPVNG0M00000000000000J",
+        "partner1_id": "01KDWPVNG0M000000000000002",
+        "partner2_id": "01KDWPVNG0M000000000000006",
+        "relationship_type": "married",
+        "partner1_order": 0,
+        "partner2_order": 0,
+        "privacy": "public",
+        "external_id": null,
+        "import_batch_id": null,
+        "created_at": "2026-01-01T12:00:00.000Z",
+        "updated_at": "2026-01-01T12:00:00.000Z"
+      }
+    ],
+    "family_child": [
+      {
+        "id": "01KDWPVNG0M00000000000000K",
+        "family_id": "01KDWPVNG0M00000000000000J",
+        "child_id": "01KDWPVNG0M00000000000000A",
+        "partner1_rel": "biological",
+        "partner2_rel": "biological",
+        "sort_order": 0,
+        "child_order": 0,
+        "is_preferred": 1
+      }
+    ],
+    "import_batch": [],
+    "media": [],
+    "media_link": [],
+    "meta": [
+      {
+        "key": "created_at",
+        "value": "2026-01-01T12:00:00.000Z"
+      },
+      {
+        "key": "schema_version",
+        "value": "2"
+      },
+      {
+        "key": "tree_name",
+        "value": "History fixture"
+      }
+    ],
+    "note": [],
+    "note_link": [],
+    "person": [
+      {
+        "id": "01KDWPVNG0M000000000000002",
+        "sex": "M",
+        "living": "unknown",
+        "privacy": "public",
+        "primary_media_id": null,
+        "external_id": null,
+        "import_batch_id": null,
+        "created_at": "2026-01-01T12:00:00.000Z",
+        "updated_at": "2026-01-01T12:00:00.000Z"
+      },
+      {
+        "id": "01KDWPVNG0M000000000000006",
+        "sex": "F",
+        "living": "unknown",
+        "privacy": "public",
+        "primary_media_id": null,
+        "external_id": null,
+        "import_batch_id": null,
+        "created_at": "2026-01-01T12:00:00.000Z",
+        "updated_at": "2026-01-01T12:00:00.000Z"
+      },
+      {
+        "id": "01KDWPVNG0M00000000000000A",
+        "sex": "U",
+        "living": "unknown",
+        "privacy": "public",
+        "primary_media_id": null,
+        "external_id": null,
+        "import_batch_id": null,
+        "created_at": "2026-01-01T12:00:00.000Z",
+        "updated_at": "2026-01-01T11:00:00.000Z"
+      }
+    ],
+    "person_name": [
+      {
+        "id": "01KDWPVNG0M000000000000003",
+        "person_id": "01KDWPVNG0M000000000000002",
+        "type": "birth",
+        "given": "Ivo",
+        "surname": "Vale",
+        "surname_prefix": null,
+        "prefix": null,
+        "suffix": null,
+        "nickname": null,
+        "full_text": null,
+        "surname_key": null,
+        "is_primary": 1,
+        "sort_order": 0
+      },
+      {
+        "id": "01KDWPVNG0M000000000000007",
+        "person_id": "01KDWPVNG0M000000000000006",
+        "type": "birth",
+        "given": "Nerys",
+        "surname": "Holt",
+        "surname_prefix": null,
+        "prefix": null,
+        "suffix": null,
+        "nickname": null,
+        "full_text": null,
+        "surname_key": null,
+        "is_primary": 1,
+        "sort_order": 0
+      },
+      {
+        "id": "01KDWPVNG0M00000000000000B",
+        "person_id": "01KDWPVNG0M00000000000000A",
+        "type": "birth",
+        "given": "Ellis",
+        "surname": "Vale",
+        "surname_prefix": null,
+        "prefix": null,
+        "suffix": null,
+        "nickname": null,
+        "full_text": null,
+        "surname_key": null,
+        "is_primary": 1,
+        "sort_order": 0
+      },
+      {
+        "id": "01KDWXQCR00000000000000001",
+        "person_id": "01KDWPVNG0M000000000000006",
+        "type": "married",
+        "given": "Nerys",
+        "surname": "Vale",
+        "surname_prefix": null,
+        "prefix": null,
+        "suffix": null,
+        "nickname": null,
+        "full_text": null,
+        "surname_key": null,
+        "is_primary": 0,
+        "sort_order": 1
+      }
+    ],
+    "place": [
+      {
+        "id": "01KDWPVNG0M000000000000001",
+        "name": "Brackenford",
+        "full_name": "Brackenford, Wexmoor, Westmere",
+        "parent_id": null,
+        "type": null,
+        "latitude": null,
+        "longitude": null,
+        "created_at": "2026-01-01T12:00:00.000Z",
+        "updated_at": "2026-01-01T13:00:00.000Z"
+      }
+    ],
+    "raw_record": [],
+    "repository": [],
+    "source": [],
+    "tag": [],
+    "tag_link": [],
+    "unmapped_line": []
+  }
+}

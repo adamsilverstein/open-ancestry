@@ -95,6 +95,8 @@ export interface InternalOptions extends GedcomExportOptions {
 
 interface Slot {
   raw: RawRecordRow;
+  /** More records mapped to the same row, e.g. both records of two merged people. */
+  also?: RawRecordRow[];
   kind?: RecordKind;
   id?: string;
   /** verbatim: raw text; canonical: the domain row; raw: raw-only record re-parsed. */
@@ -459,9 +461,12 @@ class GedcomWriter implements WriterContext, MergeContext {
       const kind = raw.owner_type as RecordKind;
       const key = ownerKey(kind, raw.owner_id);
       const copy = verbatim && !dirty.has(key);
-      if (this.slotByKey.has(key)) {
-        // A second record mapped to the same row (repeated tag records); keep it only verbatim.
+      const first = this.slotByKey.get(key);
+      if (first) {
+        // A second record mapped to the same row (repeated tag records, or two merged
+        // people): copied as is, or its unmapped lines placed in the regenerated record.
         if (copy) this.slots.push({ raw, mode: 'verbatim' });
+        else (first.also ??= []).push(raw);
         continue;
       }
       const slot: Slot = { raw, kind, id: raw.owner_id, mode: copy ? 'verbatim' : 'canonical' };
@@ -613,8 +618,11 @@ class GedcomWriter implements WriterContext, MergeContext {
         (kind === 'person' && this.isPrivatePerson(id)) ||
         (kind === 'family' && this.isPrivateFamily(id));
       if (hidden) allowlist(node);
-      else
-        mergeUnmapped(this, node, this.slotByKey.get(key)?.raw, this.data.unmapped.get(key), xref);
+      else {
+        const slot = this.slotByKey.get(key);
+        const raws = slot ? [slot.raw, ...(slot.also ?? [])] : [];
+        mergeUnmapped(this, node, raws, this.data.unmapped.get(key), xref);
+      }
       if (this.privatize && this.scrubXrefs(node)) {
         this.warn(`${xref}: an imported record id in its text was removed`);
       }

@@ -205,6 +205,8 @@ function Lightbox({
     <Dialog
       open
       onOpenChange={(open) => !open && onClose()}
+      // The gallery focuses the tile of the photo last shown (see close()).
+      onCloseAutoFocus={(event) => event.preventDefault()}
       title={titleOf(media)}
       size="lg"
       footer={

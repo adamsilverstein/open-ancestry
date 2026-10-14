@@ -50,6 +50,15 @@ for (const colorScheme of ['light', 'dark'] as const) {
       ).toEqual([]);
     });
 
+    test('open export dialog has no violations', async ({ page }) => {
+      await page.goto('/');
+      await page.getByRole('button', { name: 'File' }).click();
+      await page.getByRole('menuitem', { name: /Export/ }).click();
+      await expect(page.getByRole('dialog', { name: 'Export tree' })).toBeVisible();
+      const results = await new AxeBuilder({ page }).analyze();
+      expect(results.violations).toEqual([]);
+    });
+
     test('open command palette has no violations', async ({ page }) => {
       await page.goto('/');
       await page.getByRole('banner').getByRole('button', { name: /^Find/ }).click();

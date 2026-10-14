@@ -48,6 +48,16 @@ export const PeopleQuery = Type.Object({
   offset: Type.Optional(Type.Integer({ minimum: 0 })),
 });
 
+export const ExportQuery = Type.Object(
+  {
+    version: Type.Optional(Type.Enum(['5.5.1', '7'])),
+    privatize: Type.Optional(Type.Boolean()),
+  },
+  strict,
+);
+
+export const GedzipQuery = Type.Object({ privatize: Type.Optional(Type.Boolean()) }, strict);
+
 export const NeighborhoodQuery = Type.Object({
   focus: Type.Optional(Id),
   up: Type.Optional(Type.Integer({ minimum: 0, maximum: 10 })),

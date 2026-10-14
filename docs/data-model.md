@@ -17,10 +17,11 @@ This is the reference for the local data format: the SQLite schema inside every 
 5. [Living status and privacy](#living-status-and-privacy)
 6. [Dates](#dates)
 7. [How GEDCOM and Ancestry map](#how-gedcom-and-ancestry-map)
-8. [Change log, undo and redo](#change-log-undo-and-redo)
-9. [Search index](#search-index)
-10. [JSON interchange](#json-interchange)
-11. [Versioning policy](#versioning-policy)
+8. [Export](#export)
+9. [Change log, undo and redo](#change-log-undo-and-redo)
+10. [Search index](#search-index)
+11. [JSON interchange](#json-interchange)
+12. [Versioning policy](#versioning-policy)
 
 ## Storage layout
 
@@ -524,7 +525,12 @@ The importer is `packages/import` (`importGedcom`); see its README for the API a
 - **Places** are deduplicated by their normalized text exactly as written (case-sensitive), so `boston, ...` and `Boston, ...` are separate places until a merge tool exists.
 - **Custom events.** Known Ancestry/FTM fact tags (`_MILT`, `_DNA`, `_FUN`, ...) and any other underscore tag with a `DATE`, `PLAC`, `TYPE` or `AGE` child become events with that tag as `type`.
 - **Media.** `FILE` URLs go to `remote_url` (never fetched). Local paths are normalized to forward slashes; paths with `..` are refused (`media-unsafe-path`). `local_path` is set only for files actually copied into the tree; unresolved, refused, too-large or failed files leave it null and their `FILE` line in `unmapped_line`. With a GEDZIP or a media folder the file is found by relative path, case-insensitively, or by a unique file name (for absolute paths from the exporting computer), copied into the tree's `media/` folder and hashed; files that are not found are listed in the report. Copies never overwrite: a file already at the path with the same bytes is reused, different bytes get a `-2`, `-3`, ... suffix, and identical content from several source files is stored once.
+- **GEDCOM 7 phrases.** A `PHRASE` under `DATE` (events, citation `DATA.DATE`), `AGE` or `NAME.TYPE OTHER` is the value as written: it becomes `date_text` (parsed when it can be, else sorted by the `DATE` value beside it), `age` or the name type. Exports put Ancestry's free-form dates there (`DATE ABT 1842` / `PHRASE Abt. 1842`), so a GEDCOM 7 round trip keeps them. GEDCOM 7 `FILE` paths are percent-decoded before matching.
 - **Home person.** A `_HOME`, `_ROOT`, `_HOMEPERSON` or `_HME` pointer under `HEAD` (or `HEAD.SOUR._TREE`) when present, else the first individual. Stored in `meta.home_person_id`.
+
+## Export
+
+`packages/export` writes GEDCOM 5.5.1, GEDCOM 7 and GEDZIP; see its [README](../packages/export/README.md). A record nothing has changed since import (no `change_log` row in an applied batch touches it or a row written inside it) is copied from `raw_record` when the export is in the version it was imported from, so custom tags survive; everything else is generated from the tables above, with each `unmapped_line` put back under the structure it came from (or reported as an export warning when it cannot be). Imported xrefs (`external_id`, `raw_record.xref`) are reused. "Privatize living" uses `isLiving()`, generates every record, and cuts living people and their families down to an allowlist of lines.
 
 ## Change log, undo and redo
 

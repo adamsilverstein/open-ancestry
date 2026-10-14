@@ -165,8 +165,15 @@ const lifespan = (p: SnapPerson) =>
 export interface LocalHistory {
   /** Rows changed by the user, as `entity|id`. */
   edited: Set<string>;
-  /** People whose names the user added, changed or removed. */
+  /** People whose names the user changed or removed (adding a name is not a rename). */
   renamed: Set<string>;
+  /**
+   * The value each locally changed row had when the export last wrote it
+   * (`entity|id` to its row image): the base of the three-way diff (#185).
+   */
+  base: Map<string, Record<string, unknown>>;
+  /** Names (normalized) a person had before the user changed or removed them. */
+  formerNames: Map<string, Set<string>>;
   /** People the user deleted: their names (normalized) and birth year. */
   deletedPeople: { names: Set<string>; birthYear: number | null }[];
   /** Things the user removed from people and families still in the tree. */
@@ -204,9 +211,13 @@ type Image = Record<string, unknown>;
 
 /** Reads the applied change batches for edits, renames and deletions. */
 export function localHistory(store: TreeStore): LocalHistory {
+  // A batch that wrote an import_batch row is a re-import's own apply: what it
+  // writes is the export's value (the new base), not the user's edit (#185).
   const rows = store.db
     .prepare(
-      `SELECT l.entity, l.entity_id, l.op, l.before_json, l.after_json
+      `SELECT l.entity, l.entity_id, l.op, l.before_json, l.after_json,
+              EXISTS (SELECT 1 FROM change_log i
+                       WHERE i.batch_id = l.batch_id AND i.entity = 'import_batch') AS reimport
          FROM change_log l JOIN change_batch b ON b.id = l.batch_id
         WHERE b.state = 'applied' AND l.entity NOT IN ('raw_record', 'unmapped_line', 'meta')
         ORDER BY l.seq`,
@@ -217,33 +228,56 @@ export function localHistory(store: TreeStore): LocalHistory {
     op: string;
     before_json: string | null;
     after_json: string | null;
+    reimport: number;
   }[];
   const edited = new Set<string>();
   const renamed = new Set<string>();
+  const base = new Map<string, Image>();
+  const formerNames = new Map<string, Set<string>>();
   /** Deleted rows as they were, by `entity|id`. */
   const gone = new Map<string, Image>();
   const deletes: { entity: string; id: string; row: Image }[] = [];
+  const former = (row: Image) => {
+    const person = row.person_id as string;
+    renamed.add(person);
+    const set = formerNames.get(person) ?? new Set<string>();
+    set.add(norm(fullName(row as { given: string | null; surname: string | null })));
+    formerNames.set(person, set);
+  };
   for (const r of rows) {
+    const key = `${r.entity}|${r.entity_id}`;
+    if (r.reimport) {
+      // The export's value now: earlier local edits to this row are settled.
+      edited.delete(key);
+      base.delete(key);
+      continue;
+    }
     if (r.op === 'update' && r.before_json && r.after_json) {
       const before = JSON.parse(r.before_json) as Image;
       const after = JSON.parse(r.after_json) as Image;
       if (onlyNormalizes(before, after)) continue;
-      if (r.entity === 'person_name') renamed.add(before.person_id as string);
+      if (!base.has(key)) base.set(key, before);
+      if (r.entity === 'person_name') former(before);
     } else if (r.op === 'delete' && r.before_json) {
       const row = JSON.parse(r.before_json) as Image;
-      gone.set(`${r.entity}|${r.entity_id}`, row);
+      if (!base.has(key)) base.set(key, row);
+      gone.set(key, row);
       deletes.push({ entity: r.entity, id: r.entity_id, row });
-      if (r.entity === 'person_name') renamed.add(row.person_id as string);
-    } else if (r.op === 'insert' && r.entity === 'person_name' && r.after_json) {
-      renamed.add((JSON.parse(r.after_json) as Image).person_id as string);
+      if (r.entity === 'person_name') former(row);
     }
-    edited.add(`${r.entity}|${r.entity_id}`);
+    edited.add(key);
   }
   /** A row as it is, or as it was when deleted. */
   const rowOf = (entity: TableName, id: unknown): Image | undefined =>
     typeof id === 'string'
       ? (gone.get(`${entity}|${id}`) ?? (store.getRow(entity, id) as Image | undefined))
       : undefined;
+  // Facts are compared by place name, as the export names them.
+  for (const [key, row] of base) {
+    if (key.startsWith('event|') && row.place_id) {
+      base.set(key, { ...row, place_name: rowOf('place', row.place_id)?.full_name ?? null });
+    }
+  }
   const push = <K, V>(map: Map<K, V[]>, key: K, value: V) => {
     const list = map.get(key);
     if (list) list.push(value);
@@ -332,6 +366,8 @@ export function localHistory(store: TreeStore): LocalHistory {
   return {
     edited,
     renamed,
+    base,
+    formerNames,
     deletedPeople,
     removed: { facts, names, citations, media, families, childLinks },
   };
@@ -418,8 +454,14 @@ function foldMerged(
 
 /** Whether the user removed something like this here: such changes are offered unticked. */
 interface Removed {
-  fact(ownerId: string, type: string, date: string | null): boolean;
+  /**
+   * Whether the user deleted a fact like this: 'same' when the export still
+   * has it as it was (nothing to offer), 'changed' when the export changed it.
+   */
+  fact(ownerId: string, type: string, date: string | null): 'same' | 'changed' | false;
   citation(ownerId: string, c: SnapCitation): boolean;
+  /** The user edited this event, but the export still has the value it had then (#185). */
+  baseUnchanged(eventId: string, incoming: SnapEvent): boolean;
 }
 
 const DELETED: Partial<ReviewChange> = { conflict: 'local-delete', defaultAccept: false };
@@ -467,6 +509,8 @@ function diffFacts(
     if (counterpart) {
       used.add(counterpart.row.id);
       const conflict = edited.has(`event|${counterpart.row.id}`);
+      // Only the user changed it: their edit stands and there is nothing to offer.
+      if (conflict && removed.baseUnchanged(counterpart.row.id, ie)) continue;
       add(
         {
           kind: 'fact.change',
@@ -479,9 +523,11 @@ function diffFacts(
       );
       diffCitations(counterpart, ie, add, undefined, removed);
     } else {
+      const deleted = removed.fact(e.row.id, ie.row.type, ie.row.date_text);
+      if (deleted === 'same') continue;
       add(
         { kind: 'fact.add', incomingEventId: ie.row.id, fact: factOf(ie), owner: 'person' },
-        removed.fact(e.row.id, ie.row.type, ie.row.date_text) ? DELETED : {},
+        deleted ? DELETED : {},
       );
     }
   }
@@ -507,17 +553,16 @@ function diffCitations(
   for (const c of incoming?.citations ?? personCitations?.incoming ?? []) {
     if (have.has(citationKey(c))) continue;
     have.add(citationKey(c));
-    add(
-      {
-        kind: 'citation.add',
-        incomingCitationId: c.id,
-        existingEventId: existing?.row.id ?? null,
-        source: c.sourceTitle,
-        page: c.page,
-        apid: c.apid,
-      },
-      owner && removed?.citation(owner, c) ? DELETED : {},
-    );
+    // The user removed this citation and the export still has it: their removal stands.
+    if (owner && removed?.citation(owner, c)) continue;
+    add({
+      kind: 'citation.add',
+      incomingCitationId: c.id,
+      existingEventId: existing?.row.id ?? null,
+      source: c.sourceTitle,
+      page: c.page,
+      apid: c.apid,
+    });
   }
 }
 
@@ -531,11 +576,23 @@ export function diffTrees(
   const { edited } = local;
   const gone = local.removed;
   const removed: Removed = {
-    fact: (owner, type, date) =>
-      (gone.facts.get(owner) ?? []).some(
-        (f) => f.type === type && (SINGULAR.has(type) || f.date === norm(date)),
-      ),
+    fact: (owner, type, date) => {
+      const like = (gone.facts.get(owner) ?? []).filter((f) => f.type === type);
+      if (like.some((f) => f.date === norm(date))) return 'same';
+      return SINGULAR.has(type) && like.length ? 'changed' : false;
+    },
     citation: (owner, c) => gone.citations.has(`${owner}|${c.sourceKey}|${norm(c.page)}`),
+    baseUnchanged: (eventId, ie) => {
+      const was = local.base.get(`event|${eventId}`);
+      return (
+        !!was &&
+        was.type === ie.row.type &&
+        sameText(was.custom_type as string | null, ie.row.custom_type) &&
+        sameText(was.date_text as string | null, ie.row.date_text) &&
+        sameText((was.place_name as string | null) ?? null, ie.place) &&
+        sameText(was.value as string | null, ie.row.value)
+      );
+    },
   };
   const people: PersonReview[] = [];
   const reviews = new Map<string, PersonReview>();
@@ -605,7 +662,9 @@ export function diffTrees(
     compared.set(m.existingId, r);
     // A low-confidence match is offered, never pre-accepted.
     const add = adder(r, m.confidence >= HIGH_CONFIDENCE ? {} : { defaultAccept: false });
-    if (i.row.sex !== 'U' && i.row.sex !== e.row.sex) {
+    const sexBase = local.base.get(`person|${e.row.id}`)?.sex;
+    // Three-way (#185): if only the user changed it, there is nothing to offer.
+    if (i.row.sex !== 'U' && i.row.sex !== e.row.sex && sexBase !== i.row.sex) {
       add(
         { kind: 'sex', before: e.row.sex, after: i.row.sex },
         edited.has(`person|${e.row.id}`) ? { conflict: 'local-edit', defaultAccept: false } : {},
@@ -615,8 +674,11 @@ export function diffTrees(
     // A name the export has but the tree lacks may be one the user changed: keep their edit.
     const renamed = local.renamed.has(e.row.id);
     const removedNames = gone.names.get(e.row.id);
+    const formerNames = local.formerNames.get(e.row.id);
     for (const n of i.names) {
       if (names.has(`${norm(n.given)}|${norm(n.surname)}`)) continue;
+      // A name the user changed or removed, still in the export as it was: their edit stands.
+      if (formerNames?.has(norm(fullName(n))) || removedNames?.has(norm(fullName(n)))) continue;
       add(
         {
           kind: 'name.add',
@@ -624,11 +686,7 @@ export function diffTrees(
           name: fullName(n),
           nameType: n.type,
         },
-        removedNames?.has(norm(fullName(n)))
-          ? DELETED
-          : renamed
-            ? { conflict: 'local-edit', defaultAccept: false }
-            : {},
+        renamed ? { conflict: 'local-edit', defaultAccept: false } : {},
       );
     }
     diffFacts(e, i, edited, add, removed);
@@ -650,11 +708,9 @@ export function diffTrees(
     }
     const media = new Set(e.media.map((x) => x.key));
     for (const x of i.media) {
-      if (!media.has(x.key))
-        add(
-          { kind: 'media.add', incomingMediaId: x.row.id, title: x.row.title },
-          gone.media.has(`${e.row.id}|${x.key}`) ? DELETED : {},
-        );
+      // A photo the user unlinked and the export still has: their removal stands.
+      if (!media.has(x.key) && !gone.media.has(`${e.row.id}|${x.key}`))
+        add({ kind: 'media.add', incomingMediaId: x.row.id, title: x.row.title });
     }
     if (r.changes.length) {
       reviews.set(r.key, r);
@@ -837,7 +893,7 @@ export function diffTrees(
       );
     const owner = partners[0] ?? incomingChildren.get(f.id)?.[0];
     if (!owner) continue;
-    if (!existingFamily && partners.length === 2) {
+    if (!existingFamily && partners.length === 2 && !gone.families.has(key)) {
       adder(reviewFor(owner), lowConfidence(partners) ? { defaultAccept: false } : {})(
         {
           kind: 'family.add',
@@ -845,7 +901,7 @@ export function diffTrees(
           partners,
           partnerNames: partners.map(nameOf),
         },
-        { requires: requiresFor(partners), ...(gone.families.has(key) ? DELETED : {}) },
+        { requires: requiresFor(partners) },
       );
     }
     if (existingFamily) {
@@ -856,6 +912,8 @@ export function diffTrees(
       );
       for (const fe of incoming.familyEvents.get(f.id) ?? []) {
         if (have.has(`${fe.type}|${norm(fe.date_text)}`)) continue;
+        const deleted = removed.fact(existingFamily, fe.type, fe.date_text);
+        if (deleted === 'same') continue;
         adder(reviewFor(owner), lowConfidence(partners) ? { defaultAccept: false } : {})(
           {
             kind: 'fact.add',
@@ -870,13 +928,19 @@ export function diffTrees(
             owner: 'family',
             familyKey: existingFamily,
           },
-          removed.fact(existingFamily, fe.type, fe.date_text) ? DELETED : {},
+          deleted ? DELETED : {},
         );
       }
     }
     for (const child of incomingChildren.get(f.id) ?? []) {
       const mappedChild = mapPerson(child)!;
       if (existingFamily && existingChildren.has(`${existingFamily}|${mappedChild}`)) continue;
+      // A parent link the user removed, still in the export: their removal stands.
+      if (
+        gone.childLinks.has(`${existingFamily ? keyOfFamily(existingFamily) : key}|${mappedChild}`)
+      ) {
+        continue;
+      }
       const involved = [child, ...partners];
       // Joining a family the export lists with a partner dropped: the user's call.
       adder(reviewFor(child), lowConfidence(involved) || partial ? { defaultAccept: false } : {})(
@@ -887,14 +951,7 @@ export function diffTrees(
           partners,
           parentNames: partners.map(nameOf),
         },
-        {
-          requires: requiresFor(involved),
-          ...(gone.childLinks.has(
-            `${existingFamily ? keyOfFamily(existingFamily) : key}|${mappedChild}`,
-          )
-            ? DELETED
-            : {}),
-        },
+        { requires: requiresFor(involved) },
       );
     }
   }

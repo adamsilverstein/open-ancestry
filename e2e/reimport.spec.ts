@@ -230,7 +230,9 @@ test('a fact deleted here is offered back unticked, and stays deleted by default
     { headers: seeded.headers },
   );
   expect(removed.ok()).toBe(true);
-  await startReimport(page, seeded);
+  // Ancestry changed the fact the user deleted: now both differ, so it asks (#185).
+  // (An export that still has it as it was offers nothing.)
+  await startReimport(page, seeded, laterExport().replace('2 DATE BEF 1920', '2 DATE ABT 1918'));
   const restore = card(page, 'Mercy Bellweather').getByRole('checkbox', {
     name: /Add fact: Death/,
   });

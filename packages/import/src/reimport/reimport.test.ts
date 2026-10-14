@@ -1398,20 +1398,22 @@ describe('three-way re-import (#185)', () => {
     closeReimport(first);
     expect(josiahDeath()).toBe('1940');
     // Second re-import: Ancestry now says 1941. Nobody edited it here.
+    // updatedSample() is already renumbered: Josiah is @I103@ there.
     const updated = updatedSample();
     const later = renumber(
       replaceRecord(
         updated,
-        '@I3@',
-        recordOf(updated, '@I3@').map((l) => (l === '2 DATE 1940' ? '2 DATE 1941' : l)),
+        '@I103@',
+        recordOf(updated, '@I103@').map((l) => (l === '2 DATE 1940' ? '2 DATE 1941' : l)),
       ),
       300,
     );
     const second = await prepareReimport(store, { bytes: later }, { today: TODAY });
     try {
-      expect(josiahChanges(second)).toEqual([
-        expect.objectContaining({ conflict: undefined, defaultAccept: true }),
-      ]);
+      const [change, ...rest] = josiahChanges(second);
+      expect(rest).toEqual([]);
+      expect(change).toMatchObject({ defaultAccept: true });
+      expect(change!.conflict).toBeUndefined();
       applyReimport(store, second, defaults(second), 'Re-import 2');
     } finally {
       closeReimport(second);

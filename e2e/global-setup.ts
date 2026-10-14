@@ -1,6 +1,7 @@
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { FIXTURE_TREE, MANIFEST, buildFixtureLibrary } from './tree-fixture';
+import { seedTreeViewTrees } from './tree-view-setup';
 
 /** Adds the fixture tree to the e2e library (OA_E2E_LIBRARY, set in playwright.config.ts). */
 export default function globalSetup() {
@@ -10,4 +11,5 @@ export default function globalSetup() {
   rmSync(join(library, `${FIXTURE_TREE}.oatree`), { recursive: true, force: true });
   rmSync(join(library, MANIFEST), { force: true });
   buildFixtureLibrary(library);
+  seedTreeViewTrees(library);
 }

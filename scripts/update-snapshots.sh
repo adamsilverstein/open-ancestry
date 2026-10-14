@@ -22,7 +22,7 @@ docker run --rm --ipc=host --platform linux/amd64 \
     apt-get update -qq && apt-get install -y -qq build-essential python3 >/dev/null
     npm ci --no-audit --no-fund --loglevel=error
     npm run build
-    CI=1 npx playwright test -c e2e design.spec.ts --project chromium \
+    CI=1 npx playwright test -c e2e design.spec.ts tree.spec.ts --project chromium \
       -g "visual snapshots" --update-snapshots=all --reporter=list
     cp -R e2e/__screenshots__/. /out/
   '

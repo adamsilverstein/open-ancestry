@@ -1,0 +1,302 @@
+.page {
+  position: relative;
+  height: calc(100dvh - var(--oa-topbar-height));
+  min-height: 320px;
+  overflow: hidden;
+  background: var(--oa-canvas);
+}
+
+/* The pan/zoom surface. `clip` (not `hidden`) so focusing an off-screen card never scrolls it. */
+.viewport {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.viewport:active {
+  cursor: grabbing;
+}
+
+.world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+}
+
+.world .card {
+  position: absolute;
+  contain: layout paint style;
+}
+
+/* Far zoomed out, every card is painted here instead of mounted. */
+.lodLayer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* Far zoomed out: a plain block per person, colored and outlined by sex like the card stripe. */
+.lodCard {
+  position: absolute;
+  width: 120px;
+  height: 150px;
+  padding: 0;
+  border: 1px solid var(--oa-border);
+  border-top: 12px solid var(--oa-person-unknown);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-surface);
+  cursor: pointer;
+}
+
+.lodCard[data-sex='M'] {
+  border-top-color: var(--oa-person-male);
+}
+
+.lodCard[data-sex='F'] {
+  border-top-color: var(--oa-person-female);
+}
+
+.lodCard[data-focus] {
+  box-shadow: 0 0 0 8px var(--oa-canvas-text);
+}
+
+.lodCard:focus-visible {
+  outline: 8px solid var(--oa-focus);
+  outline-offset: 8px;
+}
+
+.chevron,
+.switcher {
+  position: absolute;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--oa-border-strong);
+  background: var(--oa-surface);
+  color: var(--oa-text);
+  box-shadow: var(--oa-shadow-1);
+  cursor: pointer;
+}
+
+.chevron {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: var(--oa-radius-full);
+}
+
+.switcher {
+  gap: 2px;
+  height: 24px;
+  padding: 0 var(--oa-space-2);
+  border-radius: var(--oa-radius-full);
+  font: var(--oa-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.chevron:hover,
+.switcher:hover {
+  background: var(--oa-surface-hover);
+}
+
+.chevron:focus-visible,
+.switcher:focus-visible {
+  outline: var(--oa-focus-width) solid var(--oa-focus);
+  outline-offset: 2px;
+}
+
+.labelGutter,
+.labelColumn {
+  position: absolute;
+  white-space: nowrap;
+}
+
+/* Left of the canvas, clear of the toolbar; rows set each label's translateY. */
+.gutter {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: calc(var(--oa-space-4) + 56px);
+  pointer-events: none;
+}
+
+.labelGutter {
+  top: 0;
+  left: 0;
+  padding: 2px var(--oa-space-2);
+  border-radius: var(--oa-radius-sm);
+  background: color-mix(in oklab, var(--oa-canvas) 85%, transparent);
+}
+
+.labelColumn {
+  transform: translate(0, -100%);
+  padding-bottom: var(--oa-space-1);
+}
+
+.edges,
+.fan {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  /* The world layer is 0 wide; the global `svg { max-width: 100% }` would hide these. */
+  max-width: none;
+  height: 1px;
+  overflow: visible;
+}
+
+.edges {
+  pointer-events: none;
+}
+
+.edges path {
+  fill: none;
+  stroke: var(--oa-canvas-line);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.edges .edgeDashed {
+  stroke-dasharray: 6 4;
+}
+
+.edges .edgeHalf {
+  stroke-dasharray: 2 4;
+}
+
+.fanSegment {
+  cursor: pointer;
+}
+
+.fanSegment path {
+  fill: color-mix(in oklab, var(--oa-person-unknown) 30%, var(--oa-surface));
+  stroke: var(--oa-canvas);
+  stroke-width: 2;
+}
+
+.fanSegment[data-sex='M'] path {
+  fill: color-mix(in oklab, var(--oa-person-male) 30%, var(--oa-surface));
+}
+
+.fanSegment[data-sex='F'] path {
+  fill: color-mix(in oklab, var(--oa-person-female) 30%, var(--oa-surface));
+}
+
+.fanSegment[data-focus] path {
+  fill: var(--oa-surface);
+}
+
+.fanSegment:hover path {
+  fill: var(--oa-surface-hover);
+}
+
+.fanSegment:focus {
+  outline: none;
+}
+
+.fanSegment:focus-visible path {
+  stroke: var(--oa-focus);
+  stroke-width: 3;
+}
+
+.fanSegment text {
+  fill: var(--oa-text);
+  font: var(--oa-text-xs);
+  pointer-events: none;
+}
+
+.toolbar {
+  position: absolute;
+  top: var(--oa-space-4);
+  left: var(--oa-space-4);
+  z-index: 2;
+}
+
+.minimap {
+  position: absolute;
+  bottom: var(--oa-space-4);
+  left: var(--oa-space-4);
+  z-index: 2;
+}
+
+.empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: var(--oa-space-6);
+}
+
+.emptyPanel {
+  max-width: 32rem;
+  padding: var(--oa-space-6);
+  border: 1px solid var(--oa-elevated-border);
+  border-radius: var(--oa-radius-lg);
+  background: var(--oa-surface);
+  box-shadow: var(--oa-shadow-2);
+}
+
+.emptyLink {
+  color: var(--oa-accent);
+  font-weight: var(--oa-weight-medium);
+}
+
+.loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--oa-space-7);
+  padding: var(--oa-space-7) var(--oa-space-4);
+  pointer-events: none;
+}
+
+.loadingRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--oa-space-5);
+}
+
+.loadingCard {
+  border-top: 4px solid var(--oa-canvas-line);
+  opacity: 0.35;
+}
+
+.emptyActions {
+  display: flex;
+  align-items: center;
+  gap: var(--oa-space-4);
+}
+
+/* Partial load: the tree still shows, with a quiet retry at the top. */
+.notice {
+  position: absolute;
+  top: var(--oa-space-4);
+  left: 50%;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--oa-space-3);
+  padding: var(--oa-space-1) var(--oa-space-1) var(--oa-space-1) var(--oa-space-4);
+  border: 1px solid var(--oa-elevated-border);
+  border-left: 3px solid var(--oa-warning);
+  border-radius: var(--oa-radius-md);
+  background: var(--oa-surface);
+  box-shadow: var(--oa-shadow-2);
+  color: var(--oa-text);
+  font: var(--oa-text-sm);
+  transform: translateX(-50%);
+}

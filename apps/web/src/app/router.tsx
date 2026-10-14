@@ -34,9 +34,35 @@ const designRoute = createRoute({
   component: lazyRouteComponent(() => import('../routes/DesignPage'), 'DesignPage'),
 });
 
+const treeLayouts = ['family', 'pedigree', 'descendants', 'fan'] as const;
+type TreeLayoutKind = (typeof treeLayouts)[number];
+interface TreeSearch {
+  tree?: string;
+  layout?: TreeLayoutKind;
+  up?: number;
+  down?: number;
+}
+const generations = (value: unknown) =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 10
+    ? value
+    : undefined;
+
 const treeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/tree/$personId',
+  // Shareable view state: which tree, which layout, how many generations.
+  validateSearch: (search: Record<string, unknown>): TreeSearch => {
+    const valid: TreeSearch = {};
+    if (typeof search.tree === 'string' && search.tree) valid.tree = search.tree;
+    if (treeLayouts.includes(search.layout as TreeLayoutKind)) {
+      valid.layout = search.layout as TreeLayoutKind;
+    }
+    const up = generations(search.up);
+    if (up !== undefined) valid.up = up;
+    const down = generations(search.down);
+    if (down !== undefined) valid.down = down;
+    return valid;
+  },
   component: lazyRouteComponent(() => import('../routes/TreePage'), 'TreePage'),
 });
 

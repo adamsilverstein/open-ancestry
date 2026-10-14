@@ -111,6 +111,16 @@ describe('undo / redo', () => {
     store.close();
   });
 
+  it('only replays rows of known tables (change_log may come from an imported file)', () => {
+    const store = memoryTree();
+    const { batchId } = store.transact('add', (tx) => persons.create(tx, {}));
+    store.db
+      .prepare("UPDATE change_log SET entity = 'sqlite_schema' WHERE batch_id = ?")
+      .run(batchId);
+    expect(() => undo(store, batchId)).toThrow(/Cannot replay sqlite_schema/);
+    store.close();
+  });
+
   it('restores a cascading person delete exactly', () => {
     const store = memoryTree();
     const f = seedSmallFamily(store);

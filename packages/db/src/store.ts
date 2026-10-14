@@ -193,10 +193,10 @@ export class Tx {
       ([column, value]) => value !== undefined && before[column] !== value,
     );
     if (changed.length === 0) return before as unknown as TableRows[T];
-    const after: Record<string, unknown> = { ...before, ...Object.fromEntries(changed) };
+    const patchValues = Object.fromEntries(changed);
+    const after: Record<string, unknown> = { ...before, ...patchValues };
     const plan = this.store.plan(table);
-    if (plan.hasUpdatedAt && !('updated_at' in Object.fromEntries(changed)))
-      after.updated_at = this.now;
+    if (plan.hasUpdatedAt && !('updated_at' in patchValues)) after.updated_at = this.now;
     this.writeRow(table, after);
     this.record(table, before, after);
     return after as unknown as TableRows[T];

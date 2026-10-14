@@ -661,12 +661,13 @@ export function listPeople(
     );
     params.push(tagId);
   }
-  const key = {
+  const keys: Record<string, string> = {
     surname: `n.surname IS NULL, n.surname COLLATE NOCASE ${dir}, n.given COLLATE NOCASE ${dir}`,
     given: `n.given IS NULL, n.given COLLATE NOCASE ${dir}, n.surname COLLATE NOCASE ${dir}`,
     birth: `k IS NULL, k ${dir}`,
     death: `k IS NULL, k ${dir}`,
-  }[sort];
+  };
+  const key = keys[sort] ?? keys.surname;
   const sortExpr =
     sort === 'birth' ? vitalSort(BIRTH_TYPES) : sort === 'death' ? vitalSort(DEATH_TYPES) : 'NULL';
   const from = `FROM person p LEFT JOIN person_name n ON n.person_id = p.id AND n.is_primary = 1

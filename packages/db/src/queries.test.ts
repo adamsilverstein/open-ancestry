@@ -263,6 +263,8 @@ describe('listPeople', () => {
     const page2 = listPeople(store, { sort: 'given', limit: 3, offset: 3 });
     expect(page2.items.map((p) => p.given)).toEqual(['Juniper', 'Nerys', 'Orrin']);
     expect(listPeople(store, { sex: 'F' }).total).toBe(5);
+    // Untyped callers sending an unknown sort get the default order, not an SQL error.
+    expect(listPeople(store, { sort: 'bogus' as 'surname' }).items[0]?.surname).toBe('Fenn');
 
     store.transact('tag', (tx) => {
       const t = tags.create(tx, { name: 'Line A' });

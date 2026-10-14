@@ -1,3 +1,4 @@
+import { BULK_TABLE_ORDER } from './bulk';
 import { Tx, type TreeStore } from './store';
 import type { ChangeBatchRow, ChangeLogRow } from './types';
 
@@ -7,6 +8,8 @@ export class UndoConflictError extends Error {
     this.name = 'UndoConflictError';
   }
 }
+
+const REPLAYABLE = new Set<string>(BULK_TABLE_ORDER);
 
 function getBatch(store: TreeStore, batchId: string): ChangeBatchRow {
   const batch = store.stmt('SELECT * FROM change_batch WHERE id = ?').get(batchId) as
@@ -38,6 +41,8 @@ function replay(
         direction === 'undo'
           ? [entry.after_json, entry.before_json]
           : [entry.before_json, entry.after_json];
+      // change_log can come from an imported JSON file: only replay known tables.
+      if (!REPLAYABLE.has(entry.entity)) throw new Error(`Cannot replay ${entry.entity} rows`);
       const { key } = store.plan(entry.entity);
       const current = store
         .stmt(`SELECT * FROM ${entry.entity} WHERE ${key} = ?`)

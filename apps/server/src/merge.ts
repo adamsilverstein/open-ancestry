@@ -1,5 +1,15 @@
-import { meta, names, persons, events, type FamilyRow, type Tx } from '@open-ancestry/db';
-import { refreshLiving, requireRow } from './edits';
+import { ancestorWord, descendantWord } from '@open-ancestry/core';
+import {
+  ancestorGenerations,
+  meta,
+  names,
+  persons,
+  events,
+  type FamilyRow,
+  type Tx,
+} from '@open-ancestry/db';
+import { dropDismissalsFor } from './checks';
+import { personLabel, refreshLiving, requireRow } from './edits';
 import { badRequest, conflict } from './errors';
 
 /*
@@ -40,6 +50,7 @@ interface LinkRow {
 
 /** Re-points owned links (sources, media, notes, tags) from one owner to another, without duplicates. */
 function moveLinks(tx: Tx, ownerType: string, from: string, to: string): void {
+  if (from === to) return;
   for (const table of OWNED_LINKS) {
     const target = LINK_TARGET[table];
     const rows = tx.store
@@ -72,14 +83,14 @@ interface RoleRow {
   value: string | null;
 }
 
-function roles(tx: Tx, personId: string): RoleRow[] {
+function roles(tx: Tx, owner: 'person_id' | 'family_id', id: string): RoleRow[] {
   return tx.store
     .stmt(
       `SELECT r.id, r.event_id, r.role, r.is_preferred, e.type, e.date_text, e.place_id, e.value
        FROM event_role r JOIN event e ON e.id = r.event_id
-       WHERE r.person_id = ? ORDER BY r.is_preferred DESC, r.sort_order, r.id`,
+       WHERE r.${owner} = ? ORDER BY r.is_preferred DESC, r.sort_order, r.id`,
     )
-    .all(personId) as RoleRow[];
+    .all(id) as RoleRow[];
 }
 
 const sameFact = (a: RoleRow, b: RoleRow) =>
@@ -89,18 +100,25 @@ const sameFact = (a: RoleRow, b: RoleRow) =>
   a.place_id === b.place_id &&
   (a.value ?? '') === (b.value ?? '');
 
+/**
+ * The same fact recorded twice: keeps `twin`'s event, with both events' sources
+ * and notes, and drops `role`. When both roles are on one shared event (a
+ * census listing both people), only the duplicate role goes.
+ */
+function foldRole(tx: Tx, role: RoleRow, twin: RoleRow) {
+  tx.delete('event_role', role.id);
+  if (role.event_id === twin.event_id) return;
+  moveLinks(tx, 'event', role.event_id, twin.event_id);
+  const shared = tx.store.stmt('SELECT 1 FROM event_role WHERE event_id = ?').get(role.event_id);
+  if (!shared) events.delete(tx, role.event_id);
+}
+
 function moveEvents(tx: Tx, keepId: string, otherId: string, preferred: Record<string, Side>) {
-  const kept = roles(tx, keepId);
-  for (const role of roles(tx, otherId)) {
+  const kept = roles(tx, 'person_id', keepId);
+  for (const role of roles(tx, 'person_id', otherId)) {
     const twin = kept.find((k) => sameFact(k, role));
     if (twin) {
-      // Same fact recorded twice: keep one event, with both events' sources and notes.
-      moveLinks(tx, 'event', role.event_id, twin.event_id);
-      tx.delete('event_role', role.id);
-      const shared = tx.store
-        .stmt('SELECT 1 FROM event_role WHERE event_id = ?')
-        .get(role.event_id);
-      if (!shared) events.delete(tx, role.event_id);
+      foldRole(tx, role, twin);
       continue;
     }
     const rival =
@@ -163,10 +181,13 @@ function foldFamily(tx: Tx, into: string, from: string) {
       tx.delete('family_child', link.id);
     } else tx.update('family_child', link.id, { family_id: into });
   }
-  const familyRoles = tx.store.stmt('SELECT id FROM event_role WHERE family_id = ?').all(from) as {
-    id: string;
-  }[];
-  for (const role of familyRoles) tx.update('event_role', role.id, { family_id: into });
+  // Facts both families recorded (the same marriage) fold into one event.
+  const kept = roles(tx, 'family_id', into);
+  for (const role of roles(tx, 'family_id', from)) {
+    const twin = kept.find((k) => sameFact(k, role));
+    if (twin) foldRole(tx, role, twin);
+    else tx.update('event_role', role.id, { family_id: into });
+  }
   moveLinks(tx, 'family', from, into);
   tx.delete('family', from);
 }
@@ -210,10 +231,6 @@ function moveFamilies(tx: Tx, keepId: string, otherId: string) {
     .stmt('SELECT * FROM family_child WHERE child_id = ? ORDER BY child_order')
     .all(otherId) as { id: string; family_id: string; is_preferred: 0 | 1 }[];
   for (const link of asChild) {
-    const family = tx.store.getRow('family', link.family_id)!;
-    if (family.partner1_id === keepId || family.partner2_id === keepId) {
-      throw conflict('One of these people is a parent of the other; they cannot be merged');
-    }
     const already = tx.store
       .stmt('SELECT id FROM family_child WHERE family_id = ? AND child_id = ?')
       .get(link.family_id, keepId) as { id: string } | undefined;
@@ -231,11 +248,28 @@ function moveFamilies(tx: Tx, keepId: string, otherId: string) {
   foldDuplicateFamilies(tx, keepId);
 }
 
+/**
+ * Refuses merging a person with their own ancestor or descendant, which would
+ * make the merged person their own parent or grandparent (#95). Any loop a
+ * merge could create runs through such a line, so this is the only check needed.
+ */
+function refuseLineal(tx: Tx, keepId: string, otherId: string) {
+  const down = ancestorGenerations(tx.store, keepId, otherId);
+  const up = down === null ? ancestorGenerations(tx.store, otherId, keepId) : null;
+  if (down === null && up === null) return;
+  const word = down !== null ? descendantWord(down, undefined) : ancestorWord(up!, undefined);
+  throw conflict(
+    `${personLabel(tx.store, otherId)} is a ${word} of ${personLabel(tx.store, keepId)}; ` +
+      'a person cannot be merged with their own ancestor or descendant',
+  );
+}
+
 /** Merges `otherId` into `keepId` inside the caller's transaction. */
 export function mergePeople(tx: Tx, keepId: string, otherId: string, choices: MergeChoices = {}) {
   if (keepId === otherId) throw badRequest('Choose two different people to merge');
   const keep = requireRow(tx.store, 'person', keepId);
   const other = requireRow(tx.store, 'person', otherId);
+  refuseLineal(tx, keepId, otherId);
 
   moveFamilies(tx, keepId, otherId);
   moveNames(tx, keepId, otherId, choices.name ?? 'keep');
@@ -251,6 +285,7 @@ export function mergePeople(tx: Tx, keepId: string, otherId: string, choices: Me
   if (Object.keys(patch).length > 0) persons.update(tx, keepId, patch);
   const wasHome = meta.getHomePersonId(tx.store) === otherId;
 
+  dropDismissalsFor(tx, otherId);
   persons.delete(tx, otherId);
   if (wasHome) meta.set(tx, 'home_person_id', keepId);
   refreshLiving(tx, [keepId]);

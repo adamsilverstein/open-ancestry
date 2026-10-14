@@ -12,7 +12,13 @@ export {
   type MigrateOptions,
   type TableInfo,
 } from './migrations/index';
-export { NotFoundError, TreeStore, Tx, type StoreOptions } from './store';
+export {
+  NotFoundError,
+  TransactionInProgressError,
+  TreeStore,
+  Tx,
+  type StoreOptions,
+} from './store';
 export {
   TREE_EXTENSION,
   createTree,

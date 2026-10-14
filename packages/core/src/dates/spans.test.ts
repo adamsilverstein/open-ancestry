@@ -3,7 +3,12 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { inferLiving } from '../living';
 import { formatDate, parseDate, toGedcom } from './index';
+import { arbSpanDate } from './test-arbitraries';
 import type { ParsedDate } from './types';
+
+// Property tests run hundreds of cases; under coverage on a shared CI runner that can
+// pass Vitest's 5s default, so they get room. A hang still fails.
+const PROPERTY_TIMEOUT = 30_000;
 
 const shape = (p: ParsedDate) => ({
   qualifier: p.qualifier,
@@ -51,6 +56,19 @@ describe('decades, centuries and hyphenated ranges', () => {
     ['1900s', 'BET 1900 AND 1999'],
     // Spans on either side of a written-out range.
     ['BET 1850s AND 1860s', 'BET 1850 AND 1869'],
+    // A right side ending in 00s borrows the left side's granularity; any other is a decade.
+    ['1660s-1700s', 'BET 1660 AND 1709'],
+    ['1700s-1800s', 'BET 1700 AND 1899'],
+    ['1700s-1750s', 'BET 1700 AND 1759'],
+    ['1990s-2000s', 'BET 1990 AND 2009'],
+    // 2000s is a decade everywhere (#52), even after a century.
+    ['1900s-2000s', 'BET 1900 AND 2009'],
+    ['BET 1900s AND 2000s', 'BET 1900 AND 2009'],
+    ['FROM 1900s TO 2000s', 'FROM 1900 TO 2009'],
+    ['BET 1660s AND 1700s', 'BET 1660 AND 1709'],
+    ['BET 1700s AND 1800s', 'BET 1700 AND 1899'],
+    ['Abt. 1660s-1700s', 'BET 1660 AND 1709'],
+    ['Bef. 1660s-1700s', 'BEF 1709'],
   ])('%j means %s', (input, gedcom) => {
     const date = parseDate(input);
     expect(date.text).toBe(input);
@@ -78,7 +96,126 @@ describe('decades, centuries and hyphenated ranges', () => {
   );
 });
 
-describe('inverted ranges', () => {
+describe('periods bounded by decades and centuries', () => {
+  // [input, the GEDCOM date it means]
+  it.each<[string, string]>([
+    // A period from a span starts at its first year; to a span ends at its last (the
+    // loose reading, as with BEF and AFT, so nothing is assumed beyond what was written).
+    ['FROM 1850s', 'FROM 1850'],
+    ['from 1850s', 'FROM 1850'],
+    ["From 1850's", 'FROM 1850'],
+    ['FROM 1700s', 'FROM 1700'],
+    ['FROM 2000s', 'FROM 2000'],
+    ['TO 1850s', 'TO 1859'],
+    ['to 1700s', 'TO 1799'],
+    ['TO 2000s', 'TO 2009'],
+    // Both ends.
+    ['FROM 1850s TO 1860s', 'FROM 1850 TO 1869'],
+    ['FROM 1660s TO 1700s', 'FROM 1660 TO 1709'],
+    // After a plain year the right side is read alone: 1900s is the century.
+    ['FROM 1850 TO 1900s', 'FROM 1850 TO 1999'],
+    ['BET 1850 AND 1800s', 'BET 1850 AND 1899'],
+    ['FROM 1660s-1700s', 'FROM 1660 TO 1709'],
+    ['TO 1660s-1700s', 'TO 1709'],
+    ['FROM 1700s TO 1800s', 'FROM 1700 TO 1899'],
+    ['FROM 1850 TO 1860s', 'FROM 1850 TO 1869'],
+    ['FROM 1850s TO 1855', 'FROM 1850 TO 1855'],
+    ['FROM 2000s TO 2010s', 'FROM 2000 TO 2019'],
+    // A span written as one range after FROM is the whole period.
+    ['FROM 1850s-1860s', 'FROM 1850 TO 1869'],
+    ['FROM 1850-1860', 'FROM 1850 TO 1860'],
+    ['FROM 1850-60', 'FROM 1850 TO 1860'],
+  ])('%j means %s', (input, gedcom) => {
+    const date = parseDate(input);
+    expect(date.text).toBe(input);
+    expect(date.valid).toBe(true);
+    expect(shape(date)).toEqual(shape(parseDate(gedcom)));
+  });
+
+  it.each([
+    'FROM 1860s TO 1850s',
+    'FROM 1860s TO 1855',
+    'FROM 1870 TO 1850s',
+    'FROM 1860-1850',
+    'TO 0s',
+  ])('%j runs backwards or is no span, so it stays text', (input) => {
+    expect(parseDate(input).qualifier).toBe('text');
+  });
+
+  it.each([
+    'FROM 1850s',
+    'TO 1850s',
+    'FROM 1850s TO 1860s',
+    'FROM 1700s TO 1800s',
+    'TO 2000s',
+    'FROM 1850-60',
+  ])('%j round-trips through GEDCOM and the display form', (input) => {
+    const parsed = parseDate(input);
+    for (const version of ['5.5.1', '7'] as const) {
+      expect(shape(parseDate(toGedcom(parsed, version)))).toEqual(shape(parsed));
+    }
+    expect(shape(parseDate(formatDate(parsed)))).toEqual(shape(parsed));
+  });
+});
+
+describe('span date properties', { timeout: PROPERTY_TIMEOUT }, () => {
+  it('every generated span date parses to the GEDCOM date it means', () => {
+    fc.assert(
+      fc.property(arbSpanDate, ({ text, means }) => {
+        const date = parseDate(text);
+        expect(date.valid, text).toBe(true);
+        expect(shape(date), text).toEqual(shape(parseDate(means)));
+      }),
+      { numRuns: 2000 },
+    );
+  });
+
+  it('keeps sort keys ordered and inside the years written', () => {
+    fc.assert(
+      fc.property(arbSpanDate, ({ text }) => {
+        const date = parseDate(text);
+        if (date.end) {
+          expect(date.sortKey).toBeLessThanOrEqual(date.sortKeyEnd!);
+          expect(date.start!.year).toBeLessThanOrEqual(date.end.year);
+          expect(date.sortKey).toBe(parseDate(`BEF ${date.start!.year}`).sortKey + 1);
+          expect(date.sortKeyEnd).toBe(parseDate(`AFT ${date.end.year}`).sortKey - 1);
+        }
+        const years = [...text.matchAll(/\d+/g)].map((m) => Number(m[0]));
+        expect(Math.floor(date.sortKey / 10000)).toBeGreaterThanOrEqual(Math.min(...years));
+      }),
+      { numRuns: 2000 },
+    );
+  });
+
+  it('parse, format and parse again give the same date', () => {
+    fc.assert(
+      fc.property(arbSpanDate, ({ text }) => {
+        const parsed = parseDate(text);
+        for (const version of ['5.5.1', '7'] as const) {
+          expect(shape(parseDate(toGedcom(parsed, version))), `${text} ${version}`).toEqual(
+            shape(parsed),
+          );
+        }
+        expect(shape(parseDate(formatDate(parsed))), text).toEqual(shape(parsed));
+      }),
+      { numRuns: 2000 },
+    );
+  });
+
+  it.each(['TO 1850s TO 1860s', 'TO 1850 TO 1860', 'FROM 1850s FROM 1860s'])(
+    '%j repeats its keyword, so it stays text',
+    (input) => {
+      expect(parseDate(input).qualifier).toBe('text');
+    },
+  );
+
+  it('TO a range keeps its end: the period ends there, wherever it began', () => {
+    expect(shape(parseDate('TO 1850-60'))).toEqual(shape(parseDate('TO 1860')));
+    expect(shape(parseDate('TO 1850s-1860s'))).toEqual(shape(parseDate('TO 1869')));
+  });
+});
+
+describe('inverted ranges', { timeout: PROPERTY_TIMEOUT }, () => {
   it.each(['BEF 1850-13', 'AFT 1850-13', 'BEF 1950-1913', 'abt 1950-13', 'Bet. 1950-13'])(
     '%j stays text whatever qualifier comes first',
     (input) => {

@@ -4,6 +4,10 @@ import { formatDate, parseDate, toGedcom } from './index';
 import type { ParsedDate } from './types';
 import { arbDateText } from './test-arbitraries';
 
+// Property tests run hundreds of cases; under coverage on a shared CI runner that can
+// pass Vitest's 5s default, so they get room. A hang still fails.
+const PROPERTY_TIMEOUT = 30_000;
+
 describe('formatDate', () => {
   it.each([
     ['5 SEP 1941', '5 Sep 1941'],
@@ -101,7 +105,7 @@ describe('toGedcom', () => {
   });
 });
 
-describe('round trips', () => {
+describe('round trips', { timeout: PROPERTY_TIMEOUT }, () => {
   const shape = (p: ParsedDate) => ({
     qualifier: p.qualifier,
     start: p.start,
@@ -156,7 +160,7 @@ describe('round trips', () => {
   });
 });
 
-describe('toGedcom output safety', () => {
+describe('toGedcom output safety', { timeout: PROPERTY_TIMEOUT }, () => {
   // Every byte of a DATE payload ends up on one GEDCOM line, so user text must
   // not be able to start a new line, smuggle control characters or a bare `@`.
   const CAL551 = '(?:@#D(?:JULIAN|HEBREW|FRENCH R|UNKNOWN)@ )?';

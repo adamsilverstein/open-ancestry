@@ -35,6 +35,12 @@
   contain: layout paint style;
 }
 
+/* Mid zoom: name and dates only, centered; avatar and badges are too small to see. */
+.world .lightCard {
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Far zoomed out, every card is painted here instead of mounted. */
 .lodLayer {
   position: absolute;
@@ -309,4 +315,15 @@
   color: var(--oa-text);
   font: var(--oa-text-sm);
   transform: translateX(-50%);
+}
+
+/* A note rather than a warning: the view works, another goes further. */
+.notice[data-tone='info'] {
+  border-left-color: var(--oa-accent);
+}
+
+.noticeLink {
+  padding: var(--oa-space-1) var(--oa-space-2);
+  color: var(--oa-accent);
+  font-weight: var(--oa-weight-medium);
 }

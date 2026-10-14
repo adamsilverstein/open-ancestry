@@ -263,6 +263,26 @@ test('select picks an option with the keyboard', async ({ page }) => {
   await expect(region.getByRole('combobox', { name: 'Disabled select' })).toBeDisabled();
 });
 
+test('combobox options stay on screen and scroll on a short window', async ({ page }) => {
+  const region = section(page, 'Combobox');
+  const trigger = region.getByRole('combobox', { name: 'Place', exact: true });
+  await trigger.scrollIntoViewIfNeeded();
+  await page.setViewportSize({ width: 1024, height: 160 });
+  await trigger.click();
+  const options = page.getByRole('option');
+  await expect(options.first()).toBeVisible();
+  const list = page.getByRole('listbox');
+  const box = (await list.boundingBox())!;
+  expect(box.y + box.height).toBeLessThanOrEqual(160);
+  expect(await list.evaluate((el) => getComputedStyle(el).overflowY)).toBe('auto');
+  // The last place can be reached with the keyboard and comes into view.
+  const count = await options.count();
+  for (let i = 1; i < count; i++) await page.keyboard.press('ArrowDown');
+  await expect(options.last()).toHaveAttribute('aria-selected', 'true');
+  await expect(options.last()).toBeInViewport();
+  await page.keyboard.press('Escape');
+});
+
 test('combobox filters and selects', async ({ page }) => {
   const region = section(page, 'Combobox');
   const trigger = region.getByRole('combobox', { name: 'Place', exact: true });

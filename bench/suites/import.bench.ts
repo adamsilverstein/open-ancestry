@@ -67,4 +67,43 @@ export default [
     time: 0,
     warmupIterations: 0,
   },
+  {
+    // One person with 50k families and a matching MARR on both sides: the
+    // marriage matching and FAMS duplicate checks were quadratic (102s for
+    // 20k before the security review fixes).
+    name: 'import: one person with 50k families (MARR + FAMS)',
+    setup: () => manyFamilies(50_000),
+    fn: async () => {
+      const store = openMemoryTree();
+      const report = await importGedcom({ bytes: manyFamilies(50_000) }, store);
+      store.close();
+      if (report.records.FAM !== 50_000) throw new Error(`imported ${report.records.FAM} families`);
+    },
+    budgetMs: 8000,
+    metric: 'mean',
+    iterations: 1,
+    time: 0,
+    warmupIterations: 0,
+  },
 ] satisfies BenchCase[];
+
+let manyFamiliesInput: string | undefined;
+function manyFamilies(n: number): string {
+  if (manyFamiliesInput) return manyFamiliesInput;
+  const lines = ['0 HEAD', '1 CHAR UTF-8', '0 @I1@ INDI', '1 NAME Ada /Vale/'];
+  for (let i = 0; i < n; i++) lines.push(`1 FAMS @F${i}@`);
+  for (let i = 0; i < n; i++)
+    lines.push('1 MARR', `2 DATE 1 JAN ${1000 + (i % 900)}`, `2 PLAC Town ${i}`);
+  for (let i = 0; i < n; i++) {
+    lines.push(
+      `0 @F${i}@ FAM`,
+      '1 HUSB @I1@',
+      '1 MARR',
+      `2 DATE 1 JAN ${1000 + (i % 900)}`,
+      `2 PLAC Town ${i}`,
+    );
+  }
+  lines.push('0 TRLR', '');
+  manyFamiliesInput = lines.join('\n');
+  return manyFamiliesInput;
+}

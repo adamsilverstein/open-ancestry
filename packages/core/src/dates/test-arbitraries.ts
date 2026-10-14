@@ -79,6 +79,77 @@ export const arbMixedRange: fc.Arbitrary<string> = fc
     return kind === 'BET' ? `BET ${first} AND ${last}` : `FROM ${first} TO ${last}`;
   });
 
+interface Span {
+  text: string;
+  first: number;
+  last: number;
+}
+
+/** Last year of `<first>s`: a century when it ends in 00 before 2000, else a decade. */
+const spanEnd = (first: number) => first + (first % 100 === 0 && first < 2000 ? 99 : 9);
+
+/** Last year of `<right>s` after `<left>s`: a century only when the left side is one. */
+const rightEnd = (left: number, right: number) =>
+  right + (left % 100 === 0 && left < 2000 && right % 100 === 0 && right < 2000 ? 99 : 9);
+
+/** A decade (`1850s`, `1850's`, `2000s`) or a century before 2000 (`1700s`). */
+export const arbDecade: fc.Arbitrary<Span> = fc
+  .tuple(fc.integer({ min: 1, max: 209 }), fc.constantFrom('s', "'s", 'S'))
+  .map(([d, suffix]) => {
+    const first = d * 10;
+    return { text: `${first}${suffix}`, first, last: spanEnd(first) };
+  });
+
+/** A hyphenated span: `1850-1860`, `1850-60` (never a month) or `1850s-1860s`. */
+export const arbHyphenSpan: fc.Arbitrary<Span> = fc.oneof(
+  fc
+    .tuple(fc.integer({ min: 1000, max: 2099 }), fc.integer({ min: 0, max: 99 }))
+    .map(([first, gap]) => ({ text: `${first}-${first + gap}`, first, last: first + gap })),
+  fc
+    .tuple(fc.integer({ min: 1000, max: 2086 }), fc.integer({ min: 13, max: 99 }))
+    .filter(([first, two]) => first - (first % 100) + two >= first)
+    .map(([first, two]) => ({
+      text: `${first}-${two}`,
+      first,
+      last: first - (first % 100) + two,
+    })),
+  fc.tuple(fc.integer({ min: 101, max: 203 }), fc.integer({ min: 0, max: 5 })).map(([d, gap]) => ({
+    text: `${d * 10}s-${(d + gap) * 10}s`,
+    first: d * 10,
+    // The right side is read at the left side's granularity: `1350s-1400s` ends in 1409.
+    last: rightEnd(d * 10, (d + gap) * 10),
+  })),
+);
+
+/**
+ * Span dates as Ancestry writes them (#33, #52, #66), each with the GEDCOM
+ * date it means: bare and qualified spans, BEF/AFT a span, and FROM/TO
+ * periods bounded by spans.
+ */
+export const arbSpanDate: fc.Arbitrary<{ text: string; means: string }> = fc.oneof(
+  fc.oneof(arbDecade, arbHyphenSpan).chain((s) =>
+    fc.oneof(
+      fc.constant({ text: s.text, means: `BET ${s.first} AND ${s.last}` }),
+      fc
+        .constantFrom('Abt.', 'c.', 'circa', 'Est.', 'Cal', 'Bet.')
+        .map((q) => ({ text: `${q} ${s.text}`, means: `BET ${s.first} AND ${s.last}` })),
+      fc.constant({ text: `Bef. ${s.text}`, means: `BEF ${s.last}` }),
+      fc.constant({ text: `Aft. ${s.text}`, means: `AFT ${s.first}` }),
+      fc.constant({ text: `TO ${s.text}`, means: `TO ${s.last}` }),
+    ),
+  ),
+  arbDecade.map((s) => ({ text: `FROM ${s.text}`, means: `FROM ${s.first}` })),
+  arbHyphenSpan.map((s) => ({ text: `FROM ${s.text}`, means: `FROM ${s.first} TO ${s.last}` })),
+  fc
+    .tuple(arbDecade, arbDecade, fc.constantFrom(['FROM', 'TO'], ['BET', 'AND']))
+    .map(([a, b, [k1, k2]]) => {
+      const [lo, hi] = a.first <= b.first ? [a, b] : [b, a];
+      // The right side is read at the left side's granularity.
+      const end = rightEnd(lo.first, hi.first);
+      return { text: `${k1} ${lo.text} ${k2} ${hi.text}`, means: `${k1} ${lo.first} ${k2} ${end}` };
+    }),
+);
+
 /** Valid GEDCOM date strings across every qualifier and range form. */
 export const arbDateText: fc.Arbitrary<string> = fc.oneof(
   arbPoint.map(pointText),
@@ -102,4 +173,6 @@ export const arbDateText: fc.Arbitrary<string> = fc.oneof(
     .tuple(fc.constantFrom('ABT', 'BEF', 'AFT', 'EST'), arbCalendarText)
     .map(([q, d]) => `${q} ${d}`),
   arbMixedRange,
+
+  arbSpanDate.map((d) => d.text),
 );

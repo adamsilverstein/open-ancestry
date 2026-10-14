@@ -8,6 +8,7 @@ const summary = (id: string, extra: Partial<ApiPersonSummary> = {}): ApiPersonSu
   living: 'dead',
   privacy: 'public',
   primaryMediaId: null,
+  primaryPhotoLocal: false,
   given: id,
   surname: 'Vale',
   surnamePrefix: null,

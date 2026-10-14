@@ -1,3 +1,4 @@
+import AxeBuilder from '@axe-core/playwright';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Page, TestInfo } from '@playwright/test';
@@ -174,6 +175,50 @@ test.describe('tree switcher', () => {
       trees: { name: string }[];
     };
     expect(trees.trees.map((t) => t.name)).not.toContain(renamed);
+  });
+
+  test('the tree menu scrolls when the library has more trees than fit', async ({
+    page,
+    baseURL,
+  }, testInfo) => {
+    const { token } = (await (await page.request.get('/api/session')).json()) as {
+      token: string;
+    };
+    const origin = new URL(baseURL!).origin;
+    const names = Array.from({ length: 16 }, (_, i) => unique(testInfo, `Many ${i}`));
+    for (const name of names) {
+      const res = await page.request.post('/api/trees', {
+        data: { name },
+        headers: { origin, 'x-oa-token': token },
+      });
+      expect(res.status()).toBe(201);
+    }
+    await page.setViewportSize({ width: 1024, height: 420 });
+    await page.goto('/');
+    const switcher = page.getByRole('banner').getByRole('button', { name: /Tree:/ });
+    await switcher.click();
+    const menu = page.getByRole('menu');
+    // The menu stays on screen and scrolls, so every tree can be reached.
+    const box = (await menu.boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual(420);
+    expect(await menu.evaluate((el) => getComputedStyle(el).overflowY)).toBe('auto');
+    const last = names.at(-1)!;
+    // Keyboard users reach every tree: End moves focus to the last item and scrolls to it.
+    await page.keyboard.press('End');
+    const lastItem = page.getByRole('menuitemradio').last();
+    await expect(lastItem).toBeFocused();
+    await expect(lastItem).toBeInViewport();
+    // So axe's Safari-only scrollable-region rule, which does not know the ARIA menu
+    // pattern (items out of the tab order, arrow keys move focus), does not apply.
+    // Rule: https://dequeuniversity.com/rules/axe/4.13/scrollable-region-focusable
+    // Decision: https://github.com/adamsilverstein/open-ancestry/pull/94 (narrowed to this menu).
+    const axe = await new AxeBuilder({ page })
+      .include('[role="menu"]')
+      .disableRules(['scrollable-region-focusable'])
+      .analyze();
+    expect(axe.violations).toEqual([]);
+    await page.getByRole('menuitemradio', { name: last }).click();
+    await expect(switcher).toContainText(last);
   });
 
   test('switching trees remembers the choice', async ({ page, baseURL }, testInfo) => {

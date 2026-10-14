@@ -31,7 +31,18 @@ export const MEDIA_IDS = {
   christening: fixedId(),
   baptism: fixedId(),
   census: fixedId(),
+  tiny: fixedId(),
+  corrupt: fixedId(),
+  missing: fixedId(),
+  evilRemote: fixedId(),
+  /** People whose primary photo is local, only on Ancestry, or a missing file. */
+  pia: fixedId(),
+  rhoda: fixedId(),
+  mona: fixedId(),
 };
+
+/** Host of a non-Ancestry remote media URL; it must never be labelled "On Ancestry". */
+export const OTHER_REMOTE_HOST = 'evil.example';
 
 export const PHOTO_TITLES = ['Imogen at the mill', 'Wedding day', 'Harvest 1922'];
 
@@ -53,6 +64,9 @@ export async function buildMediaTree(library: string): Promise<void> {
     ['harvest.png', await photo('#d9a441', 800, 500)],
     ['christening.png', await photo('#4a6fa5', 500, 500)],
     ['baptism.pdf', Buffer.from('%PDF-1.4\n% synthetic baptism record\n')],
+    ['tiny.png', await photo('#7a5c99', 40, 40)],
+    // Named like a photo but not an image: its thumbnail fails.
+    ['notanimage.jpg', Buffer.from('these bytes are not a JPEG')],
   ];
   for (const [name, bytes] of files) writeFileSync(join(media, name), bytes);
 
@@ -71,6 +85,9 @@ export async function buildMediaTree(library: string): Promise<void> {
     person(id.imogen, 'Imogen', 'Larch');
     person(id.many, 'Marta', 'Plenty');
     person(id.hostile, 'Hal', 'Hostile');
+    person(id.pia, 'Pia', 'Portrait');
+    person(id.rhoda, 'Rhoda', 'Remote');
+    person(id.mona, 'Mona', 'Missing');
     tx.insert('event', {
       id: id.imogenBirth,
       type: 'BIRT',
@@ -139,6 +156,24 @@ export async function buildMediaTree(library: string): Promise<void> {
       id.imogenBirth,
       'event',
     );
+    local('tiny', 'tiny.png', 'Tiny scrap', 5);
+    local('corrupt', 'notanimage.jpg', 'Corrupt scan', 6);
+    // An imported FILE that was not found: neither a local file nor a URL.
+    add({ id: id.missing, kind: 'photo', title: 'Missing wedding photo' }, id.imogen, 'person', 7);
+    add(
+      {
+        id: id.evilRemote,
+        kind: 'photo',
+        remote_url: `https://${OTHER_REMOTE_HOST}/tracker.gif`,
+        title: 'Evil remote',
+      },
+      id.imogen,
+      'person',
+      8,
+    );
+    tx.update('person', id.pia, { primary_media_id: id.mill });
+    tx.update('person', id.rhoda, { primary_media_id: id.census });
+    tx.update('person', id.mona, { primary_media_id: id.missing });
     HOSTILE_URLS.forEach((url, i) =>
       add(
         { id: fixedId(), kind: 'photo', remote_url: url, title: `Hostile link ${i + 1}` },

@@ -8,6 +8,8 @@ export { GedzipError, readGedzip, safeEntryPath } from './gedzip';
 export type { GedzipLimits, GedzipOptions, GedzipResult } from './gedzip';
 export { analyzeHeader } from './header';
 export { decodeEscapes, isPointer, parseGedcom, parseGedcomStream, subtreeLines } from './parser';
+export { resnRestrictions } from './resn';
+export type { Restriction } from './resn';
 export {
   GedcomSerializeError,
   encodeValue,

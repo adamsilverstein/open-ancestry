@@ -35,7 +35,7 @@ export type JobState = 'queued' | 'running' | 'completed' | 'failed';
 
 export interface JobView {
   id: string;
-  kind: 'import';
+  kind: 'import' | 'reimport';
   tree: string;
   fileName: string;
   /** The server created `tree` for this upload (and removes it if the import fails). */
@@ -99,7 +99,7 @@ export class JobManager {
    * the returned job's `progress`; `cleanup` always runs once the job ends.
    */
   enqueue(
-    meta: { tree: string; fileName: string; createdTree?: boolean },
+    meta: { tree: string; fileName: string; createdTree?: boolean; kind?: JobView['kind'] },
     run: (signal: AbortSignal, progress: (p: ImportProgress) => void) => Promise<unknown>,
     cleanup: () => Promise<void> = async () => {},
   ): JobView {
@@ -108,9 +108,10 @@ export class JobManager {
     const id = randomUUID();
     const job: Job = {
       id,
-      kind: 'import',
-      createdTree: false,
-      ...meta,
+      tree: meta.tree,
+      fileName: meta.fileName,
+      kind: meta.kind ?? 'import',
+      createdTree: meta.createdTree ?? false,
       state: 'queued',
       progress: null,
       result: null,

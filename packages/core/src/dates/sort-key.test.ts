@@ -9,6 +9,10 @@ import {
   pointText,
 } from './test-arbitraries';
 
+// Property tests run hundreds of cases; under coverage on a shared CI runner that can
+// pass Vitest's 5s default, so they get room. A hang still fails.
+const PROPERTY_TIMEOUT = 30_000;
+
 describe('sortKey', () => {
   it.each([
     ['5 SEP 1941', 19410905],
@@ -93,7 +97,7 @@ describe('sortKey', () => {
   });
 });
 
-describe('sortKey properties', () => {
+describe('sortKey properties', { timeout: PROPERTY_TIMEOUT }, () => {
   it('orders BEF X < X == ABT X < AFT X for any point', () => {
     fc.assert(
       fc.property(arbPoint, (point) => {

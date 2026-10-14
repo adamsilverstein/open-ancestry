@@ -1,9 +1,55 @@
-import { familyChildren, names, persons, tagLinks, tags, type Tx } from '@open-ancestry/db';
+import { closeSync, openSync, readSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  familyChildren,
+  names,
+  persons,
+  tagLinks,
+  tags,
+  treePaths,
+  type MediaRow,
+  type TreeStore,
+  type Tx,
+} from '@open-ancestry/db';
 import { nameRow, refreshLiving, requireRow } from './edits';
 import { conflict, notFound } from './errors';
+import { sniffMediaType } from './routes/media';
 import type { BatchOperation, NameBody } from './schemas';
 import type { Static } from 'typebox';
 import type { FamilyChildPatch, PersonPatch, TagBody } from './schemas';
+
+/** Image types whose signature we can check; others (TIFF, HEIC) are taken on trust. */
+const SNIFFABLE = /^image\/(jpeg|png|gif|webp)$|\.(jpe?g|png|gif|webp)$/i;
+
+/**
+ * Why a media cannot be a profile photo, or null if it can: it needs a file in
+ * the tree (not only an Ancestry URL, not missing), and a file that claims to
+ * be a common image type must really be one, or every avatar of it breaks.
+ */
+function profilePhotoProblem(store: TreeStore, media: MediaRow): string | null {
+  if (!media.local_path)
+    return 'This media has no file in this tree, so it cannot be the profile photo';
+  // In-memory trees (tests) have no media folder to check.
+  if (store.dir === null) return null;
+  const path = join(treePaths(store.dir).media, ...media.local_path.split('/'));
+  let head: Buffer;
+  try {
+    const fd = openSync(path, 'r');
+    try {
+      head = Buffer.alloc(16);
+      head = head.subarray(0, readSync(fd, head, 0, 16, 0));
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return 'This media has no file in this tree, so it cannot be the profile photo';
+  }
+  const claimsImage = SNIFFABLE.test(media.mime ?? '') || SNIFFABLE.test(media.local_path);
+  if (claimsImage && !sniffMediaType(head)?.startsWith('image/')) {
+    return 'This file is not a readable image, so it cannot be the profile photo';
+  }
+  return null;
+}
 
 /*
  * Edits shared by their single routes and POST /batch. Each runs inside the
@@ -12,8 +58,11 @@ import type { FamilyChildPatch, PersonPatch, TagBody } from './schemas';
 
 export function updatePerson(tx: Tx, id: string, patch: Static<typeof PersonPatch>) {
   requireRow(tx.store, 'person', id);
-  if (patch.primary_media_id && !tx.store.getRow('media', patch.primary_media_id)) {
-    throw notFound(`media ${patch.primary_media_id} not found`);
+  if (patch.primary_media_id) {
+    const media = tx.store.getRow('media', patch.primary_media_id);
+    if (!media) throw notFound(`media ${patch.primary_media_id} not found`);
+    const problem = profilePhotoProblem(tx.store, media);
+    if (problem) throw conflict(problem);
   }
   const person = persons.update(tx, id, patch);
   // `unknown` asks for the inferred status again.

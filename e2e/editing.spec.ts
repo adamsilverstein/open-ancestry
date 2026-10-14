@@ -114,6 +114,76 @@ test.describe('person', () => {
     await expect(h1(page)).toHaveText('Rowan James Ashdown');
   });
 
+  test('Cmd/Ctrl-Z does nothing while a menu is open', async ({ page }) => {
+    await openSeeded(page, seeded);
+    const dialog = await editPerson(page);
+    await dialog.getByRole('textbox', { name: 'Given names' }).first().fill('Rowan James');
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect(h1(page)).toHaveText('Rowan James Ashdown');
+
+    const menus = [
+      {
+        open: () => relationships(page).getByRole('button', { name: 'Add family member' }).click(),
+        item: 'Add sibling',
+      },
+      {
+        open: () => page.getByRole('banner').getByRole('button', { name: 'File' }).click(),
+        item: /Import GEDCOM/,
+      },
+    ];
+    for (const { open, item } of menus) {
+      await open();
+      const menu = page.getByRole('menu');
+      await expect(menu.getByRole('menuitem', { name: item })).toBeVisible();
+      await page.keyboard.press(`${mod}+z`);
+      // The menu keeps the keyboard and nothing is undone.
+      await expect(menu).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(menu).toHaveCount(0);
+      await expect(toasts(page).filter({ hasText: 'Undid' })).toHaveCount(0);
+      await expect(h1(page)).toHaveText('Rowan James Ashdown');
+    }
+
+    // With the menus closed, the same keys undo.
+    await page.keyboard.press(`${mod}+z`);
+    await expect(h1(page)).toHaveText('Rowan Ashdown');
+  });
+
+  test('Cmd/Ctrl-Z does nothing while a select list is open', async ({ page }) => {
+    await openSeeded(page, seeded);
+    const dialog = await editPerson(page);
+    await dialog.getByRole('textbox', { name: 'Given names' }).first().fill('Rowan James');
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect(h1(page)).toHaveText('Rowan James Ashdown');
+    /** State of the latest change batch, straight from the server. */
+    const latest = async () => {
+      const res = await page.request.get(
+        `/api/trees/${encodeURIComponent(seeded.tree)}/history?limit=1`,
+      );
+      const { items } = (await res.json()) as { items: { label: string; state: string }[] };
+      return `${items[0]!.label}: ${items[0]!.state}`;
+    };
+    expect(await latest()).toMatch(/^Edit person: .*applied$/);
+
+    // A select outside any dialog: the people list's Sex filter.
+    await page.getByRole('banner').getByRole('link', { name: 'People' }).click();
+    await page.getByRole('combobox', { name: 'Sex' }).click();
+    const listbox = page.getByRole('listbox');
+    await expect(listbox.getByRole('option', { name: 'Female' })).toBeVisible();
+    await page.keyboard.press(`${mod}+z`);
+    await expect(listbox).toBeVisible();
+    // An undo would have reached the server by now.
+    await page.waitForTimeout(500);
+    expect(await latest()).toMatch(/^Edit person: .*applied$/);
+    await page.keyboard.press('Escape');
+    await expect(listbox).toHaveCount(0);
+    await expect(page.getByRole('combobox', { name: 'Sex' })).toBeFocused();
+
+    // With no list open, the same keys undo.
+    await page.keyboard.press(`${mod}+z`);
+    await expect.poll(latest).toMatch(/^Edit person: .*undone$/);
+  });
+
   test('Cmd/Ctrl-Z inside a text field is left to the field', async ({ page }) => {
     await openSeeded(page, seeded);
     const dialog = await editPerson(page);

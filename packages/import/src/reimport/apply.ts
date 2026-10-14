@@ -35,9 +35,22 @@ export interface ApplyResult {
   blocked: string[];
 }
 
-/** The newest change batch, so apply can tell whether the tree moved since the review. */
-export const latestBatch = (store: TreeStore) =>
-  (store.db.prepare('SELECT max(id) FROM change_batch').pluck().get() as string | null) ?? null;
+/**
+ * A signature of the tree's history, so apply can tell whether the tree moved
+ * since the review. Undo and redo add no batch, so the signature also covers
+ * batch states and when they last changed.
+ */
+export const treeRevision = (store: TreeStore): string => {
+  const row = store.db
+    .prepare(
+      `SELECT max(id) AS id, count(*) AS n, sum(state != 'applied') AS off,
+              max(state_changed_at) AS changed
+         FROM change_batch`,
+    )
+    .get() as { id: string | null; n: number; off: number | null; changed: string | null };
+  const seq = store.db.prepare('SELECT max(seq) FROM change_log').pluck().get() as number | null;
+  return [row.id ?? '', row.n, row.off ?? 0, row.changed ?? '', seq ?? 0].join('|');
+};
 
 type Row<T extends TableName> = TableRows[T];
 type Writable = Record<string, unknown>;
@@ -56,7 +69,7 @@ export function applyReimport(
   accepted: ReadonlySet<string>,
   label: string,
 ): ApplyResult {
-  if (latestBatch(store) !== session.baseBatch) throw new ReimportStaleError();
+  if (treeRevision(store) !== session.baseRevision) throw new ReimportStaleError();
   const inc = session.incoming;
   const changes = session.diff.people.flatMap((p) => p.changes);
   const chosen = new Set(

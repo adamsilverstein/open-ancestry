@@ -1,7 +1,7 @@
 import { openMemoryTree, type TreeStore } from '@open-ancestry/db';
 import { importGedcom } from '../import';
 import type { ImportInput, ImportOptions, ImportReport } from '../types';
-import { latestBatch } from './apply';
+import { treeRevision } from './apply';
 import { diffTrees, locallyEdited, type ReimportDiff } from './diff';
 import { matchPeople, type PersonMatch } from './match';
 import { snapshot } from './snapshot';
@@ -13,8 +13,8 @@ export interface ReimportSession {
   report: ImportReport;
   matches: Map<string, PersonMatch>;
   diff: ReimportDiff;
-  /** The tree's newest change batch when compared; apply refuses if it moved. */
-  baseBatch: string | null;
+  /** The tree's revision when compared (see `treeRevision`); apply refuses if it moved. */
+  baseRevision: string;
   timings: { import: number; compare: number };
 }
 
@@ -41,7 +41,7 @@ export async function prepareReimport(
       report,
       matches,
       diff,
-      baseBatch: latestBatch(store),
+      baseRevision: treeRevision(store),
       timings: {
         import: Math.round(imported - started),
         compare: Math.round(performance.now() - imported),

@@ -178,7 +178,8 @@ describe('history from every released version stays usable (#101)', () => {
   });
 });
 
-// A stand-in for the next real migration: adds, renames and drops columns.
+// A stand-in for the next real migrations: adds, renames and drops columns,
+// and rewrites existing values (as a Unicode normalization pass would).
 const SIMULATED: Migration = {
   version: LATEST_SCHEMA_VERSION + 1,
   name: 'simulated',
@@ -186,12 +187,18 @@ const SIMULATED: Migration = {
     ALTER TABLE person ADD COLUMN future_col TEXT NOT NULL DEFAULT 'none';
     ALTER TABLE place RENAME COLUMN type TO kind;
     ALTER TABLE event DROP COLUMN cause;
+    UPDATE place SET name = upper(name);
   `,
   columns: {
     person: { added: { future_col: 'none' } },
     place: { renamed: { type: 'kind' } },
     event: { dropped: ['cause'] },
   },
+  // Without this, undoing "Rename town" would see the rewritten name as a later edit.
+  upgradeRow: (table, row) =>
+    table === 'place' && typeof row.name === 'string'
+      ? { ...row, name: row.name.toUpperCase() }
+      : row,
 };
 const UPGRADED = [...MIGRATIONS, SIMULATED];
 
@@ -252,7 +259,10 @@ describe('a future migration keeps older history working (simulated)', () => {
     });
     const store = openTree(build('actual', STEPS.length), { migrations: UPGRADED });
     expect(store.schemaVersion).toBe(SIMULATED.version);
-    expect(store.db.prepare('SELECT kind FROM place').get()).toEqual({ kind: 'town' });
+    expect(store.db.prepare('SELECT kind, name FROM place').get()).toEqual({
+      kind: 'town',
+      name: 'WEXMOOR',
+    });
     const full = snapshot(store);
     for (let i = STEPS.length - 1; i >= 0; i--) {
       expect(undoLast(store)?.label).toBe(STEPS[i]?.[0]);

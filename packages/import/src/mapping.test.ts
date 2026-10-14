@@ -744,3 +744,25 @@ describe('same-sex couples', () => {
     ]);
   });
 });
+
+describe('attachments an owner cannot take', () => {
+  it('leaves a SOUR under a SOUR record and an OBJE under an OBJE record unmapped', async () => {
+    const { store, report } = await importInto(
+      ged(
+        '0 @S1@ SOUR',
+        '1 TITL Register',
+        '1 SOUR @S1@',
+        '1 SOUR inline text',
+        '0 @O1@ OBJE',
+        '1 FILE https://example.com/a.jpg',
+        '1 OBJE @O1@',
+      ),
+    );
+    expect(value(store, 'SELECT count(*) FROM citation')).toBe(0);
+    expect(value(store, 'SELECT count(*) FROM media_link')).toBe(0);
+    expect(report.unmapped.map((u) => [u.path, u.count])).toEqual([
+      ['SOUR.SOUR', 2],
+      ['OBJE.OBJE', 1],
+    ]);
+  });
+});

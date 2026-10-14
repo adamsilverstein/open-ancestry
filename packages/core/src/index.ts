@@ -7,3 +7,4 @@ export * from './dates';
 export * from './names';
 export * from './living';
 export * from './layout';
+export * from './relationship';

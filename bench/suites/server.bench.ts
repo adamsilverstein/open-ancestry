@@ -67,6 +67,16 @@ export default [
     budgetMs: 50,
   },
   {
+    // Given name, sounds-alike surname and a year: all three tiers run.
+    name: 'server: GET search, three tiers (10k tree)',
+    setup: loaded,
+    fn: () =>
+      get(
+        `/api/trees/${TREE}/search?q=${encodeURIComponent(['alder ashgrof 1850', 'hazel corren 1900', 'ellis dunmoor'][i++ % 3]!)}`,
+      ),
+    budgetMs: 50,
+  },
+  {
     name: 'server: GET people list page of 100 (10k tree)',
     setup: loaded,
     fn: () => get(`/api/trees/${TREE}/people?sort=birth&limit=100&offset=${(i++ % 50) * 100}`),

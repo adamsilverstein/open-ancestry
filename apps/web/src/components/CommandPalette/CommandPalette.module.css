@@ -69,3 +69,40 @@
   color: var(--oa-text-muted);
   text-align: center;
 }
+
+.itemText {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.itemTitle {
+  font-weight: var(--oa-weight-medium);
+}
+
+.itemDescription {
+  overflow: hidden;
+  color: var(--oa-text-muted);
+  font: var(--oa-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oa-space-1) var(--oa-space-4);
+  padding: var(--oa-space-2) var(--oa-space-4);
+  border-top: 1px solid var(--oa-border);
+  color: var(--oa-text-muted);
+  font: var(--oa-text-xs);
+}
+
+.footer kbd {
+  font: inherit;
+  font-weight: var(--oa-weight-semibold);
+}
+
+.list [cmdk-item][data-disabled='true'] {
+  opacity: 0.5;
+}

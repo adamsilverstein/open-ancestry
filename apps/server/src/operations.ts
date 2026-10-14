@@ -15,7 +15,7 @@ import { conflict, notFound } from './errors';
 import { resolveMediaPathSync, sniffMediaType } from './routes/media';
 import type { BatchOperation, NameBody } from './schemas';
 import type { Static } from 'typebox';
-import type { FamilyChildPatch, PersonPatch, TagBody } from './schemas';
+import type { FamilyChildPatch, PersonPatch, TagBody, TagPatch } from './schemas';
 
 /** Image types whose signature we can check; others (TIFF, HEIC) are taken on trust. */
 const SNIFFABLE = /^image\/(jpeg|png|gif|webp)$|\.(jpe?g|png|gif|webp)$/i;
@@ -115,6 +115,16 @@ export function untagPerson(tx: Tx, personId: string, tagId: string) {
   tagLinks.delete(tx, link.id);
 }
 
+export function updateTag(tx: Tx, id: string, patch: Static<typeof TagPatch>) {
+  requireRow(tx.store, 'tag', id);
+  return tags.update(tx, id, patch);
+}
+
+export function deleteTag(tx: Tx, id: string) {
+  requireRow(tx.store, 'tag', id);
+  tags.delete(tx, id);
+}
+
 /** Runs one batch operation; the result is what the single route would return. */
 export function runOperation(tx: Tx, operation: BatchOperation): unknown {
   switch (operation.op) {
@@ -134,5 +144,9 @@ export function runOperation(tx: Tx, operation: BatchOperation): unknown {
       return tagPerson(tx, operation.personId, operation.tagId);
     case 'person.untag':
       return untagPerson(tx, operation.personId, operation.tagId) ?? null;
+    case 'tag.update':
+      return updateTag(tx, operation.id, operation.patch);
+    case 'tag.delete':
+      return deleteTag(tx, operation.id) ?? null;
   }
 }

@@ -251,6 +251,8 @@ export const BatchOperation = Type.Union([
   op('tag.create', { tag: TagBody, attachTo: Type.Optional(Id) }),
   op('person.tag', { personId: Id, tagId: Id }),
   op('person.untag', { personId: Id, tagId: Id }),
+  op('tag.update', { id: Id, patch: TagPatch }),
+  op('tag.delete', { id: Id }),
 ]);
 export type BatchOperation = Static<typeof BatchOperation>;
 

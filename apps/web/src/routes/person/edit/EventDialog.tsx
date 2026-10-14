@@ -90,6 +90,7 @@ export function EventDialog({
   const label = eventLabel(type, customType);
 
   function save() {
+    if (edit.isPending) return;
     const valueField = VALUE_LABELS[type] ? 'value' : 'description';
     const body = {
       type,
@@ -98,7 +99,6 @@ export function EventDialog({
       place: place.trim() || null,
       [valueField]: detail.trim() || null,
     };
-    if (edit.isPending) return;
     edit.mutate(
       event
         ? {

@@ -120,6 +120,10 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
     );
 
   function save() {
+    // First: while a save is in flight the optimistic update makes the page match the
+    // draft, so the "nothing changed" check below would close the dialog and lose the
+    // edits if that save then fails.
+    if (edit.isPending) return;
     const removed = detail.names.filter((row) => !names.some((n) => n.id === row.id));
     const operations: Record<string, unknown>[] = names.flatMap((draft) => {
       const row = detail.names.find((n) => n.id === draft.id);
@@ -152,7 +156,6 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
     }
 
     if (operations.length === 0) return onOpenChange(false);
-    if (edit.isPending) return;
     const label = `Edit person: ${name}`;
     edit.mutate({
       label,

@@ -103,12 +103,8 @@ export function peopleRoutes(app: Api, { library }: Deps): void {
     { schema: { params: TreeParams, querystring: SearchQuery } },
     async (request) => {
       const { q, limit = 20 } = request.query;
-      const words = q.match(/[\p{L}\p{N}]+/gu) ?? [];
-      // Treat the last word as the surname for sounds-like matches.
-      const last = words.at(-1);
-      const keys = last && words.length > 0 && /\p{L}{2,}/u.test(last) ? phoneticKeys(last) : [];
       return {
-        items: searchPeople(library.open(request.params.tree), q, { limit, phoneticKeys: keys }),
+        items: searchPeople(library.open(request.params.tree), q, { limit, phoneticKeys }),
       };
     },
   );

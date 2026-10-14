@@ -539,7 +539,13 @@ Property tests (fast-check) apply random edit scripts and assert that undoing ev
 
 ## Search index
 
-`person_search` is maintained by the unit of work: writes to `person`, `person_name`, `event_role`, `event` and `place` mark the affected people, whose documents are rewritten at commit. Bulk loads rebuild the whole index once at the end. `searchPeople` requires every query word to prefix-match a name, place or year (FTS5 syntax in the query is ignored), optionally ORs in caller-supplied phonetic keys, and ranks by BM25 with names weighted 10, phonetic keys 5, places and years 1.
+`person_search` is maintained by the unit of work: writes to `person`, `person_name`, `event_role`, `event` and `place` mark the affected people, whose documents are rewritten at commit. Bulk loads rebuild the whole index once at the end. `searchPeople` requires every query word to match a name (any variant: birth, married, aka...), a place or an event year; FTS5 syntax in the query is ignored. It runs up to three indexed queries and returns them as tiers, each person once:
+
+1. **exact**: every word equals an indexed word;
+2. **prefix**: every word is a prefix, and four-digit years match within two years (`YEAR_SLACK`);
+3. **phonetic**: as prefix, but a word may instead match a surname by sound through caller-supplied phonetic keys (the server uses `phoneticKeys` from packages/core per word, the same keys stored in `person_name.surname_key`).
+
+Each result reports its `match` tier. Within a tier, BM25 ranks names 10, phonetic keys 5, places and years 1.
 
 ## JSON interchange
 

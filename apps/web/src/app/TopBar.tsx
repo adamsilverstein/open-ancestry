@@ -1,7 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { ChevronDown, Moon, Search, Sun, TreeDeciduous } from 'lucide-react';
+import { ChevronDown, Moon, Search, Sun, TreeDeciduous, Users } from 'lucide-react';
 import { Button } from '../components/Button/Button';
 import buttonStyles from '../components/Button/Button.module.css';
 import { IconButtonBase } from '../components/IconButton/IconButtonBase';
@@ -50,6 +50,14 @@ export function TopBar({ onFind }: { onFind: () => void }) {
       <span className={styles.treeName}>{treeName}</span>
 
       <div className={styles.actions}>
+        <Link
+          to="/people"
+          className={cx(buttonStyles.button, buttonStyles.ghost, buttonStyles.sm, styles.find)}
+          activeProps={{ 'aria-current': 'page' }}
+        >
+          <Users size={16} aria-hidden />
+          People
+        </Link>
         <Button
           size="sm"
           variant="ghost"

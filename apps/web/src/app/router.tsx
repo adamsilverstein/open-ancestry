@@ -14,6 +14,7 @@ import { queryClient } from './queryClient';
 import { AppShell } from './AppShell';
 import { HomePage } from '../routes/HomePage';
 import { NotFoundPage } from '../routes/NotFoundPage';
+import { validatePeopleSearch } from '../routes/people/search';
 
 const rootRoute = createRootRoute({
   component: AppShell,
@@ -62,7 +63,20 @@ const personRoute = createRoute({
   component: lazyRouteComponent(() => import('../routes/person/PersonPage'), 'PersonPage'),
 });
 
-const routeTree = rootRoute.addChildren([homeRoute, designRoute, treeRoute, personRoute]);
+const peopleRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/people',
+  validateSearch: validatePeopleSearch,
+  component: lazyRouteComponent(() => import('../routes/people/PeoplePage'), 'PeoplePage'),
+});
+
+const routeTree = rootRoute.addChildren([
+  homeRoute,
+  designRoute,
+  treeRoute,
+  personRoute,
+  peopleRoute,
+]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });
 

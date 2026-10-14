@@ -1,0 +1,142 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-4);
+  height: calc(100dvh - var(--oa-topbar-height));
+  padding: var(--oa-space-5) var(--oa-space-5) 0;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--oa-space-3) var(--oa-space-5);
+}
+
+.heading {
+  display: flex;
+  align-items: baseline;
+  gap: var(--oa-space-3);
+  margin-inline-end: auto;
+}
+
+.title {
+  margin: 0;
+  font: var(--oa-text-display);
+}
+
+.count {
+  color: var(--oa-text-muted);
+  font: var(--oa-text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oa-space-3);
+}
+
+.filters > * {
+  min-width: 140px;
+}
+
+.table {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--oa-border);
+  border-bottom: 0;
+  border-radius: var(--oa-radius-md) var(--oa-radius-md) 0 0;
+  background: var(--oa-surface);
+}
+
+.table[hidden] {
+  display: none;
+}
+
+.scroller {
+  height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid var(--oa-border);
+  background: var(--oa-surface-sunken);
+  color: var(--oa-text-muted);
+  font: var(--oa-text-xs);
+  font-weight: var(--oa-weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.body {
+  position: relative;
+}
+
+.row {
+  display: grid;
+  grid-template-columns:
+    minmax(180px, 1.4fr) minmax(120px, 1fr) minmax(110px, 0.8fr) minmax(110px, 0.8fr)
+    minmax(160px, 1.6fr);
+  align-items: center;
+  min-width: 720px;
+  height: 40px;
+}
+
+.body .row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  border-bottom: 1px solid var(--oa-border);
+  font: var(--oa-text-sm);
+}
+
+.body .row:hover {
+  background: var(--oa-surface-hover);
+}
+
+.cell {
+  display: flex;
+  align-items: center;
+  gap: var(--oa-space-2);
+  min-width: 0;
+  padding: 0 var(--oa-space-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sortButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oa-space-1);
+  padding: var(--oa-space-1) 0;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.sortButton:hover {
+  color: var(--oa-text);
+}
+
+.sortIdle {
+  opacity: 0.5;
+}
+
+.name {
+  overflow: hidden;
+  color: var(--oa-text);
+  font-weight: var(--oa-weight-medium);
+  text-overflow: ellipsis;
+}

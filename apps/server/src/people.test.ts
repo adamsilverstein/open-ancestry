@@ -183,6 +183,22 @@ describe('GET search', () => {
     expect(found).toEqual(['Ada', 'Bram', 'Cora']);
   });
 
+  it('combines given names, sounds-alike surnames and approximate years', async () => {
+    const search = async (q: string) =>
+      (await api.get(`${s.base}/search?q=${encodeURIComponent(q)}`)).json().items as {
+        person: { given: string };
+        match: string;
+      }[];
+    expect((await search('ada vail')).map((i) => [i.person.given, i.match])).toEqual([
+      ['Ada', 'phonetic'],
+    ]);
+    expect((await search('vale 1942')).map((i) => [i.person.given, i.match])).toEqual([
+      ['Ada', 'prefix'],
+    ]);
+    const ranked = await search('vale');
+    expect(ranked.every((i) => i.match === 'exact')).toBe(true);
+  });
+
   it('limits results and requires q', async () => {
     expect((await api.get(`${s.base}/search?q=vale&limit=1`)).json().items).toHaveLength(1);
     expect((await api.get(`${s.base}/search`)).statusCode).toBe(400);

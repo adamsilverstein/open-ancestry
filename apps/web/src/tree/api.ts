@@ -11,7 +11,8 @@ export interface NeighborhoodRequest {
   focus: string;
   up: number;
   down: number;
-  siblings?: boolean;
+  /** 0 none, 1 the focus person's siblings, 2 also aunts and uncles (and their spouses). */
+  siblingsDepth?: number;
 }
 
 export const treePath = (tree: string) => `/api/trees/${seg(tree)}`;
@@ -21,14 +22,14 @@ export const fetchHome = (tree: string, signal?: AbortSignal) =>
 
 export function fetchNeighborhood(
   tree: string,
-  { focus, up, down, siblings = true }: NeighborhoodRequest,
+  { focus, up, down, siblingsDepth = 1 }: NeighborhoodRequest,
   signal?: AbortSignal,
 ): Promise<ApiNeighborhood> {
   const query = new URLSearchParams({
     focus,
     up: String(up),
     down: String(down),
-    siblings: String(siblings),
+    siblingsDepth: String(siblingsDepth),
   });
   return apiGet(`/trees/${seg(tree)}/neighborhood?${query}`, signal);
 }
@@ -43,6 +44,6 @@ export const searchPeople = (tree: string, q: string, signal?: AbortSignal) =>
 export const treeKeys = {
   home: (tree: string) => ['tree', tree, 'home'] as const,
   neighborhood: (tree: string, r: NeighborhoodRequest) =>
-    ['tree', tree, 'neighborhood', r.focus, r.up, r.down, r.siblings ?? true] as const,
+    ['tree', tree, 'neighborhood', r.focus, r.up, r.down, r.siblingsDepth ?? 1] as const,
   search: (tree: string, q: string) => ['tree', tree, 'search', q] as const,
 };

@@ -224,23 +224,36 @@ test.describe('family view', () => {
     await expect(card(page, 'Nico Vale')).toHaveCount(0);
   });
 
-  test('a failed side branch still shows the tree, with a retry', async ({ page }) => {
+  test('the family view loads in one request, siblings and aunts included', async ({ page }) => {
+    const requests: string[] = [];
+    page.on('request', (r) => {
+      if (r.url().includes('/neighborhood')) requests.push(r.url());
+    });
+    await open(page);
+    await expect(card(page, 'Fenn Vale')).toBeAttached();
+    await expect(card(page, 'Mae Orr')).toBeAttached();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toContain('siblingsDepth=2');
+  });
+
+  test('a failed chevron load keeps the tree, with a retry', async ({ page }) => {
     const blocked = (url: URL) =>
-      url.pathname.endsWith('/neighborhood') &&
-      [ids.otto, ids.greta].includes(url.searchParams.get('focus') ?? '');
+      url.pathname.endsWith('/neighborhood') && url.searchParams.get('focus') === ids.hugo;
     await page.route(blocked, (route) =>
       route.fulfill({ status: 500, json: { error: { code: 'internal_error', message: 'x' } } }),
     );
     await open(page);
+    await fit(page);
+    await canvas(page).getByRole('button', { name: 'Show children of Hugo Vale' }).click();
     const notice = page
       .getByRole('status')
       .filter({ hasText: 'Some relatives could not be loaded' });
     await expect(notice).toBeVisible();
-    await expect(card(page, 'Bram Vale')).toBeAttached();
-    await expect(card(page, 'Fenn Vale')).toHaveCount(0);
+    await expect(card(page, 'Ada Vale')).toBeAttached();
+    await expect(card(page, 'Nico Vale')).toHaveCount(0);
     await page.unroute(blocked);
     await notice.getByRole('button', { name: 'Retry' }).click();
-    await expect(card(page, 'Fenn Vale')).toBeAttached();
+    await expect(card(page, 'Nico Vale')).toBeAttached();
     await expect(notice).toHaveCount(0);
   });
 

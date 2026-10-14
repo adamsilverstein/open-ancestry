@@ -165,7 +165,7 @@ export function TreeView({
   const [failure, setFailure] = useState<{ focus: string; notFound: boolean } | null>(null);
   /** Bumped by "Try again" to re-run loading and layout. */
   const [attempt, setAttempt] = useState(0);
-  /** Side-branch requests that failed for this focus; the rest of the tree still shows. */
+  /** Chevron loads that failed for this focus; the rest of the tree still shows. */
   const [missing, setMissing] = useState<{ focus: string; requests: NeighborhoodRequest[] } | null>(
     null,
   );
@@ -210,28 +210,13 @@ export function TreeView({
       // One generation past what is shown, so the next chevron needs no request.
       up: kind === 'descendants' ? 0 : up + 1,
       down: kind === 'pedigree' || kind === 'fan' ? 0 : down + 1,
+      // The family view shows siblings, aunts and uncles (with their spouses).
+      siblingsDepth: kind === 'family' ? 2 : 0,
     }),
     [kind, up, down],
   );
 
-  /**
-   * The endpoint walks straight up and down from the focus, so the family
-   * view's side branches (aunts and uncles, and the children behind the
-   * sibling, aunt and uncle chevrons) come from each grandparent walking
-   * down; a parent without known parents walks down from themself.
-   */
-  const sideBranches = useCallback(
-    (focus: string): NeighborhoodRequest[] =>
-      cache.parentsOf(focus).flatMap((parent) => {
-        const grandparents = cache.parentsOf(parent);
-        return grandparents.length > 0
-          ? grandparents.map((g) => ({ focus: g, up: 0, down: 3 }))
-          : [{ focus: parent, up: 0, down: 2 }];
-      }),
-    [cache],
-  );
-
-  // Load the focus person's neighborhood and, for the family view, its side branches.
+  // Load the focus person's neighborhood.
   useEffect(() => {
     let cancelled = false;
     if (!refocusPending.current) {
@@ -241,11 +226,7 @@ export function TreeView({
     (async () => {
       try {
         await ensure(requestFor(personId));
-        const branches = kind === 'family' ? sideBranches(personId) : [];
-        const settled = await Promise.allSettled(branches.map(ensure));
         if (!cancelled) {
-          const failed = branches.filter((_, i) => settled[i]!.status === 'rejected');
-          setMissing(failed.length > 0 ? { focus: personId, requests: failed } : null);
           setFailure(null);
           setLoaded({ focus: personId, kind });
         }
@@ -260,7 +241,7 @@ export function TreeView({
     return () => {
       cancelled = true;
     };
-  }, [client, cache, personId, kind, ensure, requestFor, sideBranches, attempt]);
+  }, [client, cache, personId, kind, ensure, requestFor, attempt]);
 
   const retryMissing = useCallback(async () => {
     if (!missing) return;
@@ -380,12 +361,16 @@ export function TreeView({
             ? { focus: id, up: 0, down: 3 }
             : null;
       if (more) {
+        // On failure the rest of the tree stays, with a Retry notice.
         ensure(more).catch(() =>
-          toast({ title: 'Could not load more of the tree', variant: 'error' }),
+          setMissing((m) => ({
+            focus: personId,
+            requests: [...(m?.focus === personId ? m.requests : []), more],
+          })),
         );
       }
     },
-    [viewKey, cache, ensure, toast],
+    [viewKey, cache, ensure, personId],
   );
 
   const onSwitchParents = useCallback(

@@ -20,7 +20,8 @@ const rawCoverageDir = join(import.meta.dirname, '..', 'coverage', 'e2e', 'raw')
 export const test = base.extend<{ collectCoverage: void; currentTree: void; cspGuard: void }>({
   // Issue #106: any Content Security Policy violation in any test fails it. Each
   // violation is sent to Node as it happens, so ones on pages the test navigated or
-  // reloaded away from (and in other pages of the context) still count.
+  // reloaded away from (and in other pages of the context) still count. It covers
+  // pages only: the tree layout worker has no document to report from.
   cspGuard: [
     async ({ context }, use) => {
       const seen: string[] = [];
@@ -35,6 +36,10 @@ export const test = base.extend<{ collectCoverage: void; currentTree: void; cspG
         });
       });
       await use();
+      // A round trip per open page delivers any report still on its way to Node.
+      await Promise.all(
+        context.pages().map((page) => page.evaluate(() => 0).catch(() => undefined)),
+      );
       expect(seen, 'Content Security Policy violations').toEqual([]);
     },
     { auto: true },

@@ -1,3 +1,4 @@
+import type { Page } from '@playwright/test';
 import { openTree, seedTree } from './edit-seed';
 import { expect, test } from './fixtures';
 
@@ -46,7 +47,7 @@ test('the tree view and a person page load without CSP violations', async ({
 
 test.describe('the CSP guard itself', () => {
   /** Adds an un-nonced <style> and waits until the browser reports it. */
-  const violate = (page: import('@playwright/test').Page) =>
+  const violate = (page: Page) =>
     page.evaluate(
       () =>
         new Promise<void>((resolve) => {

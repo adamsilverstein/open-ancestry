@@ -62,7 +62,6 @@ async function imageSource(treeDir: string, localPath: string | null): Promise<s
   }
 }
 
-/** Writes all sizes for one image; false when the file cannot be decoded. */
 /** True when `dir` (after following symlinks) is inside the tree folder. */
 export async function insideTree(treeDir: string, dir: string): Promise<boolean> {
   try {
@@ -73,6 +72,7 @@ export async function insideTree(treeDir: string, dir: string): Promise<boolean>
   }
 }
 
+/** Writes all sizes for one image; false when the file cannot be decoded. */
 async function render(source: string, treeDir: string, mediaId: string): Promise<boolean> {
   const thumbs = treePaths(treeDir).thumbs;
   await mkdir(thumbs, { recursive: true });

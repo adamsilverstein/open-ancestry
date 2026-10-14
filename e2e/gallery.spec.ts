@@ -1,7 +1,10 @@
 import type { Page } from '@playwright/test';
 import sharp from 'sharp';
 import { HOSTILE_URLS, MEDIA_IDS, MEDIA_TREE, PHOTO_TITLES, REMOTE_HOST } from './media-fixture';
+import { openSeeded, seedTree } from './edit-seed';
 import { expect, test } from './fixtures';
+
+const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
 
 /*
  * Person Gallery tab (issue #17): thumbnails, Ancestry placeholders that are
@@ -177,4 +180,63 @@ test('never turns hostile imported URLs into links', async ({ page }) => {
     .evaluateAll((links) => links.map((a) => a.getAttribute('href') ?? ''));
   for (const href of hrefs) expect(href).not.toMatch(/^(javascript|data|file):|evil\.example/i);
   expect(dialogs).toEqual([]);
+});
+
+test('setting a profile photo is one undoable edit (Cmd/Ctrl-Z restores the previous one)', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  // Undo is per tree, so this test gets a tree of its own.
+  const seeded = await seedTree(request, baseURL!, `gallery undo ${testInfo.project.name}`);
+  const { token } = (await (await request.get('/api/session')).json()) as { token: string };
+  const headers = { origin: new URL(baseURL!).origin, 'x-oa-token': token };
+  const attachPhoto = async (name: string, color: string) => {
+    const buffer = await sharp({
+      create: { width: 200, height: 200, channels: 3, background: color },
+    })
+      .png()
+      .toBuffer();
+    const res = await request.post(`/api/trees/${encodeURIComponent(seeded.tree)}/media`, {
+      headers,
+      multipart: {
+        owner_type: 'person',
+        owner_id: seeded.rowan,
+        file: { name, mimeType: 'image/png', buffer },
+      },
+    });
+    expect(res.status()).toBe(201);
+    return ((await res.json()) as { media: { id: string } }).media.id;
+  };
+  const first = await attachPhoto('First portrait.png', '#335577');
+  const second = await attachPhoto('Second portrait.png', '#775533');
+  const patched = await request.patch(
+    `/api/trees/${encodeURIComponent(seeded.tree)}/people/${seeded.rowan}`,
+    { headers, data: { primary_media_id: first } },
+  );
+  expect(patched.ok()).toBe(true);
+
+  await openSeeded(page, seeded);
+  await page.getByRole('tab', { name: 'Gallery' }).click();
+  const header = page.getByTestId('person-header');
+  const avatar = header.locator('img').first();
+  await expect(avatar).toHaveAttribute('src', new RegExp(`/media/${first}`));
+  const gallery = page.getByRole('region', { name: 'Gallery' });
+  await gallery.getByRole('button', { name: /Second portrait/ }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Set as profile photo' }).click();
+  await expect(page.getByRole('dialog').getByText('Profile photo')).toBeVisible();
+  await expect(avatar).toHaveAttribute('src', new RegExp(`/media/${second}`));
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toBeHidden();
+
+  await page.keyboard.press(`${mod}+z`);
+  await expect(
+    page
+      .getByRole('region', { name: /Notifications/ })
+      .getByRole('listitem')
+      .filter({ hasText: 'Undid' }),
+  ).toBeVisible();
+  await expect(avatar).toHaveAttribute('src', new RegExp(`/media/${first}`));
+  await page.keyboard.press(`${mod}+Shift+z`);
+  await expect(avatar).toHaveAttribute('src', new RegExp(`/media/${second}`));
 });

@@ -12,7 +12,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import type { MediaRow } from '@open-ancestry/db';
-import { personQuery } from '../../../api/queries';
+import { invalidateTree, useEdit } from '../../../api/edits';
 import type { PersonDetail } from '../../../api/types';
 import { Button } from '../../../components/Button/Button';
 import { Dialog } from '../../../components/Dialog/Dialog';
@@ -133,11 +133,10 @@ function Lightbox({
   primaryId: string | null;
   onIndexChange: (index: number) => void;
   onClose: () => void;
-  onSetPrimary: (mediaId: string) => Promise<void>;
+  onSetPrimary: (mediaId: string) => void;
 }) {
   const item = items[index]!;
   const { media } = item;
-  const [saving, setSaving] = useState(false);
   const step = (delta: number) => onIndexChange((index + delta + items.length) % items.length);
   // Arrow keys page through the gallery wherever focus is in the dialog (WebKit
   // leaves it on the dialog itself, since links are not focusable there).
@@ -233,14 +232,7 @@ function Lightbox({
                 Profile photo
               </span>
             ) : (
-              <Button
-                variant="primary"
-                disabled={saving}
-                onClick={() => {
-                  setSaving(true);
-                  void onSetPrimary(media.id).finally(() => setSaving(false));
-                }}
-              >
+              <Button variant="primary" onClick={() => onSetPrimary(media.id)}>
                 Set as profile photo
               </Button>
             ))}
@@ -352,11 +344,8 @@ export function GalleryTab({ tree, detail }: { tree: string; detail: PersonDetai
     [items, filter],
   );
 
-  const refresh = () =>
-    Promise.all([
-      queryClient.invalidateQueries({ queryKey: personMediaQuery(tree, personId).queryKey }),
-      queryClient.invalidateQueries({ queryKey: personQuery(tree, personId).queryKey }),
-    ]).then(() => undefined);
+  const edit = useEdit(tree);
+  const refresh = () => invalidateTree(queryClient, tree);
 
   function close() {
     const current = open === null ? undefined : shown[open];
@@ -430,10 +419,22 @@ export function GalleryTab({ tree, detail }: { tree: string; detail: PersonDetai
           primaryId={detail.person.primary_media_id}
           onIndexChange={setOpen}
           onClose={close}
-          onSetPrimary={async (mediaId) => {
-            await setProfilePhoto(tree, personId, mediaId);
-            await refresh();
-          }}
+          onSetPrimary={(mediaId) =>
+            // Through the shared edit hook: optimistic, rolled back on error, and one
+            // undoable change like every other edit.
+            edit.mutate({
+              label: 'Set profile photo',
+              send: () => setProfilePhoto(tree, personId, mediaId),
+              optimistic: {
+                personId,
+                update: (d) => ({
+                  ...d,
+                  person: { ...d.person, primary_media_id: mediaId },
+                  summary: { ...d.summary, primaryMediaId: mediaId },
+                }),
+              },
+            })
+          }
         />
       )}
       {attaching && (

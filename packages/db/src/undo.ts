@@ -1,4 +1,7 @@
 import { TransactionInProgressError, Tx, type TreeStore } from './store';
+import { deriveDateSort, hasConvertedDate } from './derived';
+import { upgradeRow } from './migrations/index';
+import { MERGED_IDS_KEY } from './nfc';
 import { DATA_TABLES } from './tables';
 import type { ChangeBatchRow, ChangeLogRow } from './types';
 
@@ -9,48 +12,147 @@ export class UndoConflictError extends Error {
   }
 }
 
+/** Place and tag ids the NFC upgrade (migration 3) merged away. */
+function mergedAway(store: TreeStore): string[] {
+  const value = store.stmt('SELECT value FROM meta WHERE key = ?').pluck().get(MERGED_IDS_KEY);
+  try {
+    const ids: unknown = JSON.parse(typeof value === 'string' ? value : '[]');
+    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Whether a batch's log names a place or tag the NFC upgrade merged away.
+ * Its images point at a row that no longer exists, so it can never be
+ * undone or redone; undo explains that instead of a generic conflict.
+ */
+export function touchesMergedRows(
+  store: TreeStore,
+  batchId: string,
+  merged = mergedAway(store),
+): boolean {
+  if (merged.length === 0) return false;
+  const log = store
+    .stmt('SELECT entity_id, before_json, after_json FROM change_log WHERE batch_id = ?')
+    .all(batchId) as Pick<ChangeLogRow, 'entity_id' | 'before_json' | 'after_json'>[];
+  return log.some((entry) =>
+    merged.some(
+      (id) =>
+        entry.entity_id === id ||
+        !!entry.before_json?.includes(`"${id}"`) ||
+        !!entry.after_json?.includes(`"${id}"`),
+    ),
+  );
+}
+
+/**
+ * Tables that point at a row by `owner_type` + `owner_id`. SQLite cannot
+ * enforce these references, so undo checks them before removing a row.
+ */
+const OWNER_LINK_TABLES = [
+  'citation_link',
+  'media_link',
+  'note_link',
+  'tag_link',
+  'raw_record',
+  'unmapped_line',
+] as const;
+
+/** The first table that still links to a row by owner, or null. */
+function linkedByOwner(store: TreeStore, table: string, id: string): string | null {
+  for (const links of OWNER_LINK_TABLES) {
+    const found = store
+      .stmt(`SELECT 1 FROM ${links} WHERE owner_type = ? AND owner_id = ? LIMIT 1`)
+      .get(table, id);
+    if (found) return links;
+  }
+  return null;
+}
+
 /** Tables whose rows the change log may touch. Anything else in `entity` is refused. */
 export const REPLAYABLE_TABLES: ReadonlySet<string> = new Set<string>(DATA_TABLES);
 
 /**
- * Parses and checks one before/after image from change_log, which may come
- * from an imported (untrusted) file: it must be a flat object with exactly the
- * table's columns, scalar values, and the key of the row it is logged for.
- * Column names from the data are never used to build SQL.
+ * Parses, upgrades and checks one before/after image from change_log, which
+ * may come from an imported (untrusted) file or from an older schema version.
+ *
+ * - The image is upgraded from `version` (the version it was written under)
+ *   through the column maps of every later migration.
+ * - It is then shaped to the table's current columns: unknown keys are
+ *   ignored (they never reach SQL), missing columns take their DEFAULT, and a
+ *   missing NOT NULL column without a default is an error.
+ * - Values must be scalars and the key must equal `entityId`.
+ *
+ * The result has exactly the table's columns in table order, so it can be
+ * compared with `JSON.stringify` of the live row.
  */
 export function parseLogImage(
   store: TreeStore,
   entity: string,
   entityId: string,
   json: string | null,
+  version: number = store.schemaVersion,
 ): Record<string, unknown> | null {
   if (!REPLAYABLE_TABLES.has(entity)) throw new Error(`Cannot replay ${entity} rows`);
-  if (json === null) return null;
   const invalid = (why: string) =>
     new Error(`Invalid change_log image for ${entity} ${entityId}: ${why}`);
-  let image: unknown;
+  if (!Number.isInteger(version) || version < 1) throw invalid(`bad schema version ${version}`);
+  if (version > store.schemaVersion) {
+    throw invalid(`written by schema version ${version}, newer than ${store.schemaVersion}`);
+  }
+  if (json === null) return null;
+  let parsed: unknown;
   try {
-    image = JSON.parse(json);
+    parsed = JSON.parse(json);
   } catch {
     throw invalid('not JSON');
   }
-  if (typeof image !== 'object' || image === null || Array.isArray(image))
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
     throw invalid('not an object');
-  const { key, columns } = store.plan(entity);
-  const keys = Object.keys(image);
-  if (keys.length !== columns.length || keys.some((k, i) => k !== columns[i])) {
-    throw invalid('columns do not match the table');
-  }
-  for (const value of Object.values(image)) {
+  const image = upgradeRow(store.migrations, version, entity, parsed as Record<string, unknown>);
+  const { key, columns, defaults, required } = store.plan(entity);
+  const row: Record<string, unknown> = {};
+  for (const column of columns) {
+    if (!Object.hasOwn(image, column)) {
+      if (required.has(column)) throw invalid(`missing ${column}`);
+      row[column] = defaults[column];
+      continue;
+    }
+    const value = image[column];
     const ok =
       value === null ||
       typeof value === 'string' ||
       (typeof value === 'number' && Number.isFinite(value));
     if (!ok) throw invalid('values must be strings, finite numbers or null');
+    row[column] = value;
   }
-  if ((image as Record<string, unknown>)[key] !== entityId)
-    throw invalid('key does not match entity_id');
-  return image as Record<string, unknown>;
+  if (row[key] !== entityId) throw invalid('key does not match entity_id');
+  return row;
+}
+
+/**
+ * A row as compared by the undo conflict check. Derived sort keys of
+ * calendar-converted dates are left out: they may have been recomputed since
+ * the image was logged (derived.ts), which is not a later edit.
+ */
+function comparable(entity: string, row: unknown): string | null {
+  if (row === undefined || row === null) return null;
+  const record = row as Record<string, unknown>;
+  if (entity === 'event' && hasConvertedDate(record)) {
+    return JSON.stringify({ ...record, date_sort: null, date_sort_end: null });
+  }
+  return JSON.stringify(record);
+}
+
+/** Restored rows get sort keys from the current date parser, like a fresh write. */
+function rederive(
+  entity: string,
+  row: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (entity !== 'event' || row === null || !hasConvertedDate(row)) return row;
+  return { ...row, ...deriveDateSort(row.date_text) };
 }
 
 function getBatch(store: TreeStore, batchId: string): ChangeBatchRow {
@@ -81,25 +183,43 @@ function replay(
   const now = store.clock();
   const tx = new Tx(store, batch.id, now, false);
   const run = store.db.transaction(() => {
+    const removed: { table: string; id: string }[] = [];
     for (const entry of log) {
       const [from, to] =
         direction === 'undo'
           ? [entry.after_json, entry.before_json]
           : [entry.before_json, entry.after_json];
-      // Validates the entity against the allowlist and both images before any SQL is built.
-      parseLogImage(store, entry.entity, entry.entity_id, from);
-      const target = parseLogImage(store, entry.entity, entry.entity_id, to);
+      // Validates the entity against the allowlist and both images before any SQL is
+      // built, upgrading images written under an older schema version.
+      const expected = parseLogImage(
+        store,
+        entry.entity,
+        entry.entity_id,
+        from,
+        entry.schema_version,
+      );
+      const target = parseLogImage(store, entry.entity, entry.entity_id, to, entry.schema_version);
       const { key } = store.plan(entry.entity);
       const current = store
         .stmt(`SELECT * FROM ${entry.entity} WHERE ${key} = ?`)
         .get(entry.entity_id);
-      const currentJson = current === undefined ? null : JSON.stringify(current);
-      if (currentJson !== from) {
+      if (comparable(entry.entity, current) !== comparable(entry.entity, expected)) {
         throw new UndoConflictError(
           `Cannot ${direction} "${batch.label}": ${entry.entity} ${entry.entity_id} was changed by a later edit`,
         );
       }
-      tx.restore(entry.entity, entry.entity_id, target);
+      tx.restore(entry.entity, entry.entity_id, rederive(entry.entity, target));
+      if (target === null) removed.push({ table: entry.entity, id: entry.entity_id });
+    }
+    // Foreign keys catch rows a later change still needs, but owner links cannot:
+    // removing a person a later note still links to would leave the link dangling.
+    for (const { table, id } of removed) {
+      const links = linkedByOwner(store, table, id);
+      if (links) {
+        throw new UndoConflictError(
+          `Cannot ${direction} "${batch.label}": a later change still links to the ${table.replaceAll('_', ' ')} it would remove (${links.replaceAll('_', ' ')}). Undo that change first.`,
+        );
+      }
     }
     tx.flush();
     store
@@ -111,6 +231,14 @@ function replay(
   } catch (error) {
     // A deferred foreign key failure at COMMIT leaves the transaction open.
     if (store.db.inTransaction) store.db.exec('ROLLBACK');
+    const conflict =
+      error instanceof UndoConflictError ||
+      (error as { code?: string }).code === 'SQLITE_CONSTRAINT_FOREIGNKEY';
+    if (conflict && touchesMergedRows(store, batch.id)) {
+      throw new UndoConflictError(
+        `Cannot ${direction} "${batch.label}": this change touched a place or tag that was merged during an upgrade, so it can't be ${direction === 'undo' ? 'undone' : 'redone'}. Older changes stay in History.`,
+      );
+    }
     // Rows created by this batch are still referenced by later edits (or rows
     // it deleted are needed by them): the same situation as a row conflict.
     if ((error as { code?: string }).code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
@@ -139,18 +267,45 @@ export function redo(store: TreeStore, batchId: string): ChangeBatchRow {
   return replay(store, batch, 'redo');
 }
 
-/** Undoes the most recent applied batch (Cmd/Ctrl-Z). Returns null when there is nothing to undo. */
+/**
+ * Undoes the most recent applied batch (Cmd/Ctrl-Z), stepping over batches the
+ * NFC upgrade made un-undoable. Returns null when there is nothing to undo.
+ */
 export function undoLast(store: TreeStore): ChangeBatchRow | null {
-  const row = store
-    .stmt("SELECT id FROM change_batch WHERE state = 'applied' ORDER BY id DESC LIMIT 1")
-    .get() as { id: string } | undefined;
-  return row ? undo(store, row.id) : null;
+  return undoLatest(store).batch;
+}
+
+/**
+ * `undoLast`, also returning the newer batches it stepped over because the
+ * NFC upgrade made them un-undoable, so the UI can say so.
+ */
+export function undoLatest(store: TreeStore): {
+  batch: ChangeBatchRow | null;
+  skipped: ChangeBatchRow[];
+} {
+  const merged = mergedAway(store);
+  const batches = store
+    .stmt(
+      `SELECT * FROM change_batch WHERE state = 'applied' ORDER BY seq DESC${merged.length ? '' : ' LIMIT 1'}`,
+    )
+    .all() as ChangeBatchRow[];
+  // A batch the NFC upgrade made permanently un-undoable is stepped over, so Cmd-Z
+  // still reaches the older ones (each is still checked for conflicts by undo).
+  const skipped: ChangeBatchRow[] = [];
+  for (const batch of batches) {
+    if (touchesMergedRows(store, batch.id, merged)) {
+      skipped.push(batch);
+      continue;
+    }
+    return { batch: undo(store, batch.id), skipped };
+  }
+  return { batch: null, skipped };
 }
 
 /** Redoes the oldest undone batch, i.e. the last one undone. Returns null when there is nothing to redo. */
 export function redoLast(store: TreeStore): ChangeBatchRow | null {
   const row = store
-    .stmt("SELECT id FROM change_batch WHERE state = 'undone' ORDER BY id ASC LIMIT 1")
+    .stmt("SELECT id FROM change_batch WHERE state = 'undone' ORDER BY seq ASC LIMIT 1")
     .get() as { id: string } | undefined;
   return row ? redo(store, row.id) : null;
 }
@@ -161,6 +316,6 @@ export function listBatches(
   { limit = 50 }: { limit?: number } = {},
 ): ChangeBatchRow[] {
   return store
-    .stmt('SELECT * FROM change_batch ORDER BY id DESC LIMIT ?')
+    .stmt('SELECT * FROM change_batch ORDER BY seq DESC LIMIT ?')
     .all(limit) as ChangeBatchRow[];
 }

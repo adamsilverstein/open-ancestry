@@ -119,7 +119,7 @@ const sameLine = (a: GedcomNode, b: GedcomNode) =>
 export function mergeUnmapped(
   ctx: MergeContext,
   record: GedcomNode,
-  raw: RawRecordRow | undefined,
+  raws: readonly RawRecordRow[],
   rows: UnmappedLineRow[] | undefined,
   label: string,
 ): void {
@@ -135,27 +135,30 @@ export function mergeUnmapped(
   }
   const lines = rows.filter((r) => !r.path.includes('('));
   if (!lines.length) return;
-  const source = raw ? parseGedcom(raw.raw_text).records[0] : undefined;
-  if (!source) {
+  const sources = raws.flatMap((raw) => parseGedcom(raw.raw_text).records.slice(0, 1));
+  if (!sources.length) {
     // No imported text to say where nested lines belong; only top-level extension lines can be placed.
     fallback(ctx, record, lines, label);
     setLevels(record);
     return;
   }
-  const text = serializeNode(source).split('\n');
   const pending = new Map<string, number>();
   for (const r of lines) {
     const key = `${r.path}\u0000${r.line}`;
     pending.set(key, (pending.get(key) ?? 0) + 1);
   }
-  const isUnmapped = (node: GedcomNode, path: string) => {
-    const key = `${path}\u0000${text[node.line - source.line] ?? ''}`;
-    const n = pending.get(key);
-    if (!n) return false;
-    pending.set(key, n - 1);
-    return true;
-  };
-  new Merger(ctx, label, isUnmapped).walk(source, record, source.tag);
+  // Each imported record says where its own lines belong (a merged person has several).
+  for (const source of sources) {
+    const text = serializeNode(source).split('\n');
+    const isUnmapped = (node: GedcomNode, path: string) => {
+      const key = `${path}\u0000${text[node.line - source.line] ?? ''}`;
+      const n = pending.get(key);
+      if (!n) return false;
+      pending.set(key, n - 1);
+      return true;
+    };
+    new Merger(ctx, label, isUnmapped).walk(source, record, source.tag);
+  }
   setLevels(record);
 }
 

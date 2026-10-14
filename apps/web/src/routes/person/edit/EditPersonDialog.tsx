@@ -17,6 +17,7 @@ import { Select } from '../../../components/Select/Select';
 import { useToast } from '../../../components/Toast/Toast';
 import { fullName, isLivingStatus } from '../../../lib/person';
 import { applyNames, applyPerson, nameChanges, toDraft, type NameDraft } from './optimistic';
+import { SaveError, useSaveState } from './SaveError';
 import styles from './Edit.module.css';
 
 export const NAME_TYPES: { value: NameType; label: string }[] = [
@@ -105,6 +106,8 @@ export function EditPersonDialog({
   const id = detail.person.id;
   const base = `/trees/${seg(tree)}`;
   const edit = useEdit(tree);
+  // Stays open until the save succeeds, so a failure keeps the edits.
+  const saveState = useSaveState(() => onOpenChange(false));
   const toast = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -125,6 +128,10 @@ export function EditPersonDialog({
     );
 
   function save() {
+    // First: while a save is in flight the optimistic update makes the page match the
+    // draft, so the "nothing changed" check below would close the dialog and lose the
+    // edits if that save then fails.
+    if (edit.isPending) return;
     const removed = detail.names.filter((row) => !names.some((n) => n.id === row.id));
     const operations: Record<string, unknown>[] = names.flatMap((draft) => {
       const row = detail.names.find((n) => n.id === draft.id);
@@ -164,8 +171,7 @@ export function EditPersonDialog({
       });
     });
 
-    onOpenChange(false);
-    if (operations.length === 0) return;
+    if (operations.length === 0) return onOpenChange(false);
     const label = `Edit person: ${name}`;
     edit.mutate({
       label,
@@ -175,6 +181,7 @@ export function EditPersonDialog({
       },
       // One request, one change batch: the whole save is a single undo step.
       send: () => apiSend('POST', `${base}/batch`, { label, operations }),
+      ...saveState.handlers(),
     });
   }
 
@@ -216,8 +223,8 @@ export function EditPersonDialog({
             <DialogClose asChild>
               <Button variant="ghost">Cancel</Button>
             </DialogClose>
-            <Button variant="primary" onClick={save}>
-              Save
+            <Button variant="primary" onClick={save} loading={edit.isPending}>
+              {saveState.submitLabel('Save')}
             </Button>
           </div>
         }
@@ -344,6 +351,7 @@ export function EditPersonDialog({
             </fieldset>
           )}
           {/* Lets Enter in a field submit the form. */}
+          <SaveError error={saveState.error} />
           <button type="submit" hidden />
         </form>
       </Dialog>

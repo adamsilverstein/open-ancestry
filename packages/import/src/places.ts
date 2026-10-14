@@ -15,11 +15,11 @@ export function placeParts(text: string): string[] {
  * degrees, or undefined when unparseable or out of range.
  */
 export function coordinate(value: string | undefined, axis: 'lat' | 'long'): number | undefined {
-  // Capped and trimmed first, then at most one space after the hemisphere:
-  // no backtracking over long runs of whitespace in hostile input.
+  // Trimmed and capped first, so the whitespace run after the hemisphere is
+  // short and the regex cannot backtrack far on hostile input.
   const trimmed = (value ?? '').trim();
   if (trimmed.length > 64) return undefined;
-  const match = /^([NSEW])? ?([+-]?\d+(?:\.\d+)?)$/i.exec(trimmed);
+  const match = /^([NSEW])?\s*([+-]?\d+(?:\.\d+)?)$/i.exec(trimmed);
   if (!match) return undefined;
   const hemisphere = match[1]?.toUpperCase();
   if (hemisphere && (axis === 'lat') !== (hemisphere === 'N' || hemisphere === 'S'))

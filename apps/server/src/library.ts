@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
   TREE_EXTENSION,
   createTree,
+  ensurePrivateDir,
   meta,
   openTree,
   treePaths,
@@ -93,8 +94,9 @@ export class Library {
     this.root = resolve(root);
   }
 
+  /** The library folder, private to the owner (tightened if it already exists). */
   private ensureRoot(): void {
-    mkdirSync(this.root, { recursive: true });
+    ensurePrivateDir(this.root);
   }
 
   dirOf(id: string): string {
@@ -225,7 +227,7 @@ export class Library {
     this.assertIdle(id);
     this.close(id);
     const trash = join(this.root, TRASH_DIR);
-    mkdirSync(trash, { recursive: true });
+    ensurePrivateDir(trash);
     const stamp = new Date().toISOString().replaceAll(':', '-');
     renameSync(this.dirOf(id), join(trash, `${id} ${stamp}${TREE_EXTENSION}`));
   }

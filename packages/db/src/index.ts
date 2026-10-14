@@ -14,8 +14,11 @@ export {
 } from './migrations/index';
 export { NotFoundError, TreeStore, Tx, type StoreOptions } from './store';
 export {
+  PRIVATE_DIR_MODE,
+  PRIVATE_FILE_MODE,
   TREE_EXTENSION,
   createTree,
+  ensurePrivateDir,
   openMemoryTree,
   openTree,
   treePaths,

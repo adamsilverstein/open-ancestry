@@ -127,6 +127,13 @@ export function CheckerPage() {
           const total = data?.counts[id] ?? 0;
           return (
             <TabsContent key={id} value={id}>
+              {id === 'duplicates' && (
+                <p className={styles.note}>
+                  People match when any of their names share a first given name and a sound-alike
+                  surname, and their birth or death dates agree within a few years. Spelling
+                  variants of a given name, such as Wm and William, are not matched.
+                </p>
+              )}
               {!data ? (
                 <CheckerSkeleton />
               ) : list.length === 0 ? (

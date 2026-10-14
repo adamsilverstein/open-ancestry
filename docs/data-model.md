@@ -85,7 +85,7 @@ Key/value settings for the tree.
 
 | Column | Type | Null | Meaning |
 |---|---|---|---|
-| `key` | TEXT | no | Primary key. Known keys: `schema_version` (written only by migrations; `meta.set` and `meta.delete` refuse it), `tree_name`, `created_at`, `home_person_id` (the person relationships are described from), `settings` (JSON object of UI preferences), `import_pending` (set only on a tree the server created for an import upload, holding that import's marker until it succeeds; an empty tree that still has it after a failure or restart is removed by the server), and `check.dismissed:<issue key>` (one row per tree checker issue the user dismissed; the value is when; written and removed in undoable batches, and carried by the JSON interchange like every meta row). |
+| `key` | TEXT | no | Primary key. Known keys: `schema_version` (written only by migrations; `meta.set` and `meta.delete` refuse it), `tree_name`, `created_at`, `home_person_id` (the person relationships are described from), `settings` (JSON object of UI preferences), `import_pending` (set only on a tree the server created for an import upload, holding that import's marker until it succeeds; an empty tree that still has it after a failure or restart is removed by the server), and `check.dismissed:<issue key>` (one row per tree checker issue the user dismissed; the value is when; written and removed in undoable batches, and carried by the JSON interchange like every meta row; a row outlives its issue on purpose, so an issue that comes back after an edit is undone stays dismissed). |
 | `value` | TEXT | no | Value as text. |
 
 ### `import_batch`

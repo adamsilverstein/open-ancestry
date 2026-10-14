@@ -8,6 +8,7 @@ const base: ApiPersonSummary = {
   living: 'dead',
   privacy: 'public',
   primaryMediaId: null,
+  primaryPhotoLocal: false,
   given: 'Ada',
   surname: 'Vale',
   surnamePrefix: null,

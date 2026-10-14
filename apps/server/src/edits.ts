@@ -1,4 +1,4 @@
-import { inferLiving } from '@open-ancestry/core';
+import { inferLiving, replaceNickname } from '@open-ancestry/core';
 import {
   events,
   names,
@@ -58,9 +58,6 @@ export function gedcomName(name: Partial<NameParts>): string | null {
 }
 
 /**
- * TODO(#16, F14 export): names edited after an import must export from these
- * columns (and this full_text), not from the stale raw_record NAME line.
- *
  * Name body to row. `existing` is the stored row on an edit, so derived
  * columns are computed from the name as it will be after the patch.
  */
@@ -75,6 +72,10 @@ export function nameRow(
   const parts = ['given', 'surname', 'surname_prefix', 'prefix', 'suffix'] as const;
   if (!existing || parts.some((p) => p in body)) {
     row.full_text = gedcomName({ ...existing, ...fields });
+  } else if ('nickname' in body && existing.full_text && body.nickname !== existing.nickname) {
+    // A nickname-only edit keeps the text as written, with the nickname in it swapped.
+    const text = replaceNickname(existing.full_text, existing.nickname, body.nickname);
+    if (text !== existing.full_text) row.full_text = text;
   }
   return row;
 }

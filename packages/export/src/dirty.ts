@@ -115,15 +115,23 @@ export function dirtyRecords(store: TreeStore, data: TreeData): Set<string> {
   return dirty;
 }
 
-const NAME_PARTS = ['given', 'surname', 'surname_prefix', 'prefix', 'suffix', 'nickname'];
+/** Not nickname: full_text writes it in its own style (`"Nan"`), so a nickname edit alone keeps the text. */
+const NAME_PARTS = ['given', 'surname', 'surname_prefix', 'prefix', 'suffix'];
+
+/** How a name's imported `full_text` relates to its columns after edits. */
+export type NameTextState =
+  | { kind: 'stale' }
+  /** `previous` is the nickname the text was written with. */
+  | { kind: 'nickname'; previous: string | null };
 
 /**
- * Names whose parts were edited after `full_text` was last set (the edit API
- * changes given/surname columns and may leave the imported text alone). Their
- * NAME line must be built from the columns, or the export would bring back
- * the old name.
+ * Names edited after `full_text` was last set (the edit API changes the
+ * columns and may leave the imported text alone): `stale` when a part the
+ * text spells out (given, surname, prefixes, suffix) changed, so the NAME
+ * line must be built from the columns; `nickname` when only the nickname
+ * changed, so the text is kept with that nickname swapped for the new one.
  */
-export function staleNameTexts(store: TreeStore): Set<string> {
+export function nameTextStates(store: TreeStore): Map<string, NameTextState> {
   const rows = store.db
     .prepare(
       `SELECT l.entity_id, l.before_json, l.after_json FROM change_log l
@@ -131,12 +139,19 @@ export function staleNameTexts(store: TreeStore): Set<string> {
        WHERE b.state = 'applied' AND l.entity = 'person_name' AND l.op = 'update' ORDER BY l.seq`,
     )
     .all() as { entity_id: string; before_json: string; after_json: string }[];
-  const stale = new Set<string>();
+  const states = new Map<string, NameTextState>();
   for (const row of rows) {
     const before = JSON.parse(row.before_json) as Record<string, unknown>;
     const after = JSON.parse(row.after_json) as Record<string, unknown>;
-    if (before.full_text !== after.full_text) stale.delete(row.entity_id);
-    else if (NAME_PARTS.some((c) => before[c] !== after[c])) stale.add(row.entity_id);
+    if (before.full_text !== after.full_text) states.delete(row.entity_id);
+    else if (NAME_PARTS.some((c) => before[c] !== after[c])) {
+      states.set(row.entity_id, { kind: 'stale' });
+    } else if (before.nickname !== after.nickname && !states.has(row.entity_id)) {
+      states.set(row.entity_id, {
+        kind: 'nickname',
+        previous: (before.nickname as string | null) ?? null,
+      });
+    }
   }
-  return stale;
+  return states;
 }

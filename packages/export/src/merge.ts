@@ -1,6 +1,6 @@
 import type { RawRecordRow, UnmappedLineRow } from '@open-ancestry/db';
 import { parseGedcom, serializeNode, type GedcomNode } from '@open-ancestry/gedcom';
-import { canonicalize, setLevels } from './canonical';
+import { canonicalize, n, setLevels } from './canonical';
 
 /** What merging needs from the export. */
 export interface MergeContext {
@@ -32,6 +32,15 @@ const GENERATED_TAGS = new Set([
   '_HOME',
 ]);
 
+/**
+ * Standard tags a structure holds at most once. Repeatable ones (ASSO, NOTE,
+ * SOUR, and EMAIL, PHON, FAX, WWW, which 5.5.1 allows three of) may be added.
+ */
+const SINGLE_VALUED = new Set(
+  `ABBR ADDR AGE AUTH CALN CAUS DATA DATE FILE FORM GIVN LATI LONG MAP NICK NPFX NSFX PAGE
+  PEDI PLAC PUBL QUAY RESN ROLE SEX SPFX SURN TEXT TIME TITL TYPE VERS`.split(/\s+/),
+);
+
 /** Every GEDCOM 7.0 standard tag; anything else must be an `_` extension in a 7 file. */
 export const GEDCOM7_TAGS = new Set(
   `ABBR ADDR ADOP ADR1 ADR2 ADR3 AGE AGNC ALIA ANCI ANUL ASSO AUTH BAPL BAPM BARM BASM BIRT BLES
@@ -43,6 +52,43 @@ export const GEDCOM7_TAGS = new Set(
   SDATE SEX SLGC SLGS SNOTE SOUR SPFX SSN STAE STAT SUBM SURN TAG TEMP TEXT TIME TITL TOP TRAN
   TRLR TYPE UID VERS WIDTH WIFE WILL WWW`.split(/\s+/),
 );
+
+/** GEDCOM 7 ROLE values and the 5.5.1 RELA words that mean them. */
+const ROLES: [string, string[]][] = [
+  ['CHIL', ['child']],
+  ['CLERGY', ['clergy']],
+  ['FATH', ['father']],
+  ['FRIEND', ['friend']],
+  ['GODP', ['godparent', 'godfather', 'godmother']],
+  ['HUSB', ['husband']],
+  ['MOTH', ['mother']],
+  ['MULTIPLE', ['multiple']],
+  ['NGHBR', ['neighbor', 'neighbour']],
+  ['OFFICIATOR', ['officiator']],
+  ['PARENT', ['parent']],
+  ['SPOU', ['spouse']],
+  ['WIFE', ['wife']],
+  ['WITN', ['witness']],
+];
+
+/**
+ * 5.5.1 `ASSO.RELA` (free text) as GEDCOM 7 `ROLE`: the matching enumeration
+ * value, else OTHER, with the text kept as PHRASE so it reads back exactly.
+ */
+function relaToRole(text: string | undefined): GedcomNode {
+  const value = text?.trim();
+  if (!value) return n('ROLE', 'OTHER');
+  const role = ROLES.find(([, words]) => words.includes(value.toLowerCase()))?.[0] ?? 'OTHER';
+  return n('ROLE', role, [n('PHRASE', value)]);
+}
+
+/** GEDCOM 7 `ASSO.ROLE` as 5.5.1 `RELA`: the PHRASE, else the role as a word; nothing for a bare OTHER. */
+function roleToRela(role: GedcomNode): GedcomNode | undefined {
+  const phrase = role.children.find((c) => c.tag === 'PHRASE')?.value?.trim();
+  if (phrase) return n('RELA', phrase);
+  const word = ROLES.find(([code]) => code === role.value?.trim().toUpperCase())?.[1][0];
+  return word ? n('RELA', word[0]!.toUpperCase() + word.slice(1)) : undefined;
+}
 
 const sameLine = (a: GedcomNode, b: GedcomNode) =>
   a.tag === b.tag && a.value === b.value && a.pointer === b.pointer;
@@ -102,6 +148,8 @@ class Merger {
   private readonly ctx: MergeContext;
   private readonly label: string;
   private readonly isUnmapped: (node: GedcomNode, path: string) => boolean;
+  /** Lines this merge inserted, as opposed to lines the generator wrote. */
+  private readonly merged = new WeakSet<GedcomNode>();
 
   constructor(
     ctx: MergeContext,
@@ -169,17 +217,30 @@ class Merger {
       this.walk(node, existing, path);
       return existing;
     }
-    if (existing && (!node.tag.startsWith('_') || GENERATED_TAGS.has(node.tag))) {
-      if (!sameLine(existing, node)) this.lost(node, path, 'it conflicts with the current value');
-      return undefined;
+    if (existing) {
+      // The generator already wrote this very line (only lines it wrote count: a repeated
+      // imported line is kept, as it was in the file); a second value of a one-value tag
+      // would contradict the current one.
+      const written = (c: GedcomNode) =>
+        !this.merged.has(c) && sameLine(c, node) && c.children.length === 0;
+      if (target.children.some(written)) return undefined;
+      if (SINGLE_VALUED.has(node.tag) || GENERATED_TAGS.has(node.tag)) {
+        this.lost(node, path, 'it conflicts with the current value');
+        return undefined;
+      }
     }
     const copy = this.prepare(node, path);
-    if (copy) target.children.splice(at, 0, copy);
+    if (copy) {
+      this.merged.add(copy);
+      target.children.splice(at, 0, copy);
+    }
     return copy;
   }
 
   /** The subtree as it will be written, minus lines that cannot be (reported). */
   private prepare(node: GedcomNode, path: string): GedcomNode | undefined {
+    if (path.endsWith('ASSO.RELA') && this.ctx.v7) return relaToRole(node.value);
+    if (path.endsWith('ASSO.ROLE') && !this.ctx.v7) return roleToRela(node);
     if (this.ctx.v7 && !node.tag.startsWith('_') && !GEDCOM7_TAGS.has(node.tag)) {
       this.lost(node, path, `${node.tag} is not a GEDCOM 7 tag`);
       return undefined;
@@ -197,6 +258,10 @@ class Merger {
     for (const c of node.children) {
       const child = this.prepare(c, `${path}.${c.tag}`);
       if (child) copy.children.push(child);
+    }
+    // GEDCOM 7 requires a ROLE on every association.
+    if (node.tag === 'ASSO' && this.ctx.v7 && !copy.children.some((c) => c.tag === 'ROLE')) {
+      copy.children.push(n('ROLE', 'OTHER'));
     }
     return copy;
   }

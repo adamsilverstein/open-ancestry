@@ -122,6 +122,57 @@ describe('unit of work', () => {
   });
 });
 
+describe('write allowlists', () => {
+  // Untyped (JS or JSON-driven) callers can pass any string; only schema
+  // tables and columns may ever reach dynamically built SQL.
+  const evil = "sex = 'M' WHERE 1 = 1; DROP TABLE person; --";
+
+  it('refuses tables outside the data model', () => {
+    const store = memoryTree();
+    const { result: p } = store.transact('add', (tx) => persons.create(tx, {}));
+    for (const table of [
+      'sqlite_schema',
+      'change_log',
+      'change_batch',
+      'search_doc',
+      `person; ${evil}`,
+    ]) {
+      expect(() => store.transact('x', (tx) => tx.insert(table as 'person', {}))).toThrow(
+        /not allowed/,
+      );
+      expect(() => store.transact('x', (tx) => tx.update(table as 'person', p.id, {}))).toThrow(
+        /not allowed/,
+      );
+      expect(() => store.transact('x', (tx) => tx.delete(table as 'person', p.id))).toThrow(
+        /not allowed/,
+      );
+      expect(() => store.getRow(table as 'person', p.id)).toThrow(/not allowed/);
+    }
+    expect(count(store, 'person')).toBe(1);
+    store.close();
+  });
+
+  it('refuses unknown columns and key changes', () => {
+    const store = memoryTree();
+    const { result: p } = store.transact('add', (tx) => persons.create(tx, {}));
+    const { result: q } = store.transact('add', (tx) => persons.create(tx, {}));
+    const before = store.db.prepare('SELECT * FROM person ORDER BY id').all();
+    expect(() =>
+      store.transact('x', (tx) => tx.insert('person', { [evil]: 'M' } as never)),
+    ).toThrow(/Unknown column/);
+    expect(() =>
+      store.transact('x', (tx) => tx.update('person', p.id, { [evil]: 'M' } as never)),
+    ).toThrow(/Unknown column/);
+    // Re-keying would redirect the write onto another row.
+    expect(() =>
+      store.transact('x', (tx) => tx.update('person', p.id, { id: q.id } as never)),
+    ).toThrow(/key/);
+    expect(store.db.prepare('SELECT * FROM person ORDER BY id').all()).toEqual(before);
+    expect(count(store, 'change_log')).toBe(2);
+    store.close();
+  });
+});
+
 describe('persons and names', () => {
   it('makes the first name primary and orders names', () => {
     const store = memoryTree();

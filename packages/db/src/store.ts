@@ -1,6 +1,7 @@
 import type { Database, Statement } from 'better-sqlite3';
 import { migrate } from './migrations/index';
 import { markSearchDirty, refreshSearch } from './search';
+import { assertDataTable } from './tables';
 import type { InsertRow, PatchRow, TableName, TableRows } from './types';
 import { ulid } from './ulid';
 
@@ -94,6 +95,7 @@ export class TreeStore {
   }
 
   getRow<T extends TableName>(table: T, id: string): TableRows[T] | undefined {
+    assertDataTable(table);
     const { key } = this.plan(table);
     return this.stmt(`SELECT * FROM ${table} WHERE ${key} = ?`).get(id) as TableRows[T] | undefined;
   }
@@ -101,6 +103,8 @@ export class TreeStore {
   /** A complete row for `table` from a partial input: ids, timestamps and DDL defaults filled in. */
   completeRow(table: string, input: Record<string, unknown>, now: string): Record<string, unknown> {
     const plan = this.plan(table);
+    const unknown = Object.keys(input).find((column) => !plan.columns.includes(column));
+    if (unknown !== undefined) throw new Error(`Unknown column ${table}.${unknown}`);
     const row: Record<string, unknown> = {};
     for (const column of plan.columns) {
       const value = input[column];
@@ -180,6 +184,7 @@ export class Tx {
   }
 
   insert<T extends TableName>(table: T, input: InsertRow<T>): TableRows[T] {
+    assertDataTable(table);
     const row = this.store.completeRow(table, input as Record<string, unknown>, this.now);
     this.store.insertStatement(table).run(Object.values(row));
     this.record(table, null, row);
@@ -187,6 +192,12 @@ export class Tx {
   }
 
   update<T extends TableName>(table: T, id: string, patch: PatchRow<T>): TableRows[T] {
+    assertDataTable(table);
+    const plan = this.store.plan(table);
+    for (const column of Object.keys(patch)) {
+      if (!plan.columns.includes(column)) throw new Error(`Unknown column ${table}.${column}`);
+      if (column === plan.key) throw new Error(`Cannot change the key of ${table} rows`);
+    }
     const before = this.store.getRow(table, id) as Record<string, unknown> | undefined;
     if (!before) throw new NotFoundError(table, id);
     const changed = Object.entries(patch).filter(
@@ -195,7 +206,6 @@ export class Tx {
     if (changed.length === 0) return before as unknown as TableRows[T];
     const patchValues = Object.fromEntries(changed);
     const after: Record<string, unknown> = { ...before, ...patchValues };
-    const plan = this.store.plan(table);
     if (plan.hasUpdatedAt && !('updated_at' in patchValues)) after.updated_at = this.now;
     this.writeRow(table, after);
     this.record(table, before, after);
@@ -203,6 +213,7 @@ export class Tx {
   }
 
   delete<T extends TableName>(table: T, id: string): TableRows[T] {
+    assertDataTable(table);
     const before = this.store.getRow(table, id);
     if (!before) throw new NotFoundError(table, id);
     const { key } = this.store.plan(table);

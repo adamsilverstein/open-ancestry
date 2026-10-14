@@ -76,6 +76,18 @@ describe('bulk insert', () => {
     store.close();
   });
 
+  it('only writes data tables and known columns', () => {
+    const store = memoryTree();
+    const writer = new BulkWriter(store);
+    expect(() => writer.insert('change_log' as 'person', {})).toThrow(/not allowed/);
+    expect(() => writer.insertAny('sqlite_schema', {})).toThrow(/not allowed/);
+    expect(() => writer.insert('person', { 'id) VALUES (1); --': 'x' } as never)).toThrow(
+      /Unknown column/,
+    );
+    writer.rollback();
+    store.close();
+  });
+
   it('refuses to run inside another transaction', () => {
     const store = memoryTree();
     expect(() => store.transact('x', () => new BulkWriter(store))).toThrow(/transaction/);

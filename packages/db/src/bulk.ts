@@ -1,5 +1,6 @@
 import { rebuildSearchIndex } from './search';
 import type { TreeStore } from './store';
+import { DATA_TABLES, HISTORY_TABLES, assertDataTable } from './tables';
 import type { InsertRow, TableName } from './types';
 
 /** Rows to load, by table. */
@@ -8,29 +9,7 @@ export type BulkData = { [T in TableName]?: InsertRow<T>[] };
 export type BulkCounts = Partial<Record<string, number>>;
 
 /** Load order (parents first); deferred foreign keys make it a nicety, not a requirement. */
-export const BULK_TABLE_ORDER: readonly TableName[] = [
-  'meta',
-  'import_batch',
-  'media',
-  'person',
-  'person_name',
-  'place',
-  'event',
-  'family',
-  'family_child',
-  'event_role',
-  'repository',
-  'source',
-  'citation',
-  'citation_link',
-  'media_link',
-  'note',
-  'note_link',
-  'tag',
-  'tag_link',
-  'raw_record',
-  'unmapped_line',
-];
+export const BULK_TABLE_ORDER = DATA_TABLES;
 
 /**
  * Fast loader for the importer: one open transaction, cached prepared
@@ -58,12 +37,14 @@ export class BulkWriter {
 
   /** Inserts a row (defaults filled like `Tx.insert`) and returns its key. */
   insert<T extends TableName>(table: T, row: InsertRow<T>): string {
+    assertDataTable(table);
     return this.insertAny(table, row as Record<string, unknown>);
   }
 
   /** Untyped insert, also used for change history tables by the JSON importer. */
   insertAny(table: string, input: Record<string, unknown>): string {
     if (!this.open) throw new Error('BulkWriter already finished');
+    if (!HISTORY_TABLES.includes(table)) assertDataTable(table);
     const row = this.store.completeRow(table, input, this.now);
     this.store.insertStatement(table).run(Object.values(row));
     this.counts[table] = (this.counts[table] ?? 0) + 1;

@@ -22,6 +22,8 @@ export default defineConfig({
       // e2e, so they are gated on merged coverage in scripts/coverage-merge.ts.
       thresholds: {
         'packages/**': { lines: 80 },
+        // The database package holds every user's data; keep it near-fully tested.
+        'packages/db/**': { lines: 90 },
       },
     },
   },

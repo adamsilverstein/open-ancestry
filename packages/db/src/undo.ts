@@ -1,5 +1,5 @@
-import { BULK_TABLE_ORDER } from './bulk';
 import { Tx, type TreeStore } from './store';
+import { DATA_TABLES } from './tables';
 import type { ChangeBatchRow, ChangeLogRow } from './types';
 
 export class UndoConflictError extends Error {
@@ -10,7 +10,7 @@ export class UndoConflictError extends Error {
 }
 
 /** Tables whose rows the change log may touch. Anything else in `entity` is refused. */
-export const REPLAYABLE_TABLES: ReadonlySet<string> = new Set<string>(BULK_TABLE_ORDER);
+export const REPLAYABLE_TABLES: ReadonlySet<string> = new Set<string>(DATA_TABLES);
 
 /**
  * Parses and checks one before/after image from change_log, which may come

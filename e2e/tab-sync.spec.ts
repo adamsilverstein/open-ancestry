@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { openSeeded, seedTree, type SeededTree } from './edit-seed';
+import { openSeeded, seedTree, send, session, type SeededTree } from './edit-seed';
 import { expect, test } from './fixtures';
 
 /*
@@ -44,4 +44,30 @@ test('an edit, undo or redo in one tab shows up in the other within a second', a
 
   await b.keyboard.press(`Shift+${mod}+z`);
   await expect(h1(a)).toHaveText('Roland Ashdown', { timeout: 1000 });
+});
+
+test('a save made from stale data is refused, not mixed in', async ({ page, request, baseURL }) => {
+  await openSeeded(page, seeded);
+  await expect(h1(page)).toHaveText('Rowan Ashdown');
+  await page.getByRole('button', { name: 'Edit person' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit person' });
+  await dialog.getByRole('textbox', { name: 'Surname' }).first().fill('Ashby');
+
+  // Meanwhile something this tab never hears about renames Rowan (a script, another device).
+  const s = await session(request, baseURL!);
+  const base = `/api/trees/${encodeURIComponent(seeded.tree)}`;
+  const detail = await (await request.get(`${base}/people/${seeded.rowan}`)).json();
+  await send(request, s, 'post', `${base}/batch`, {
+    label: 'Elsewhere',
+    operations: [{ op: 'name.update', id: detail.names[0].id, name: { given: 'Roland' } }],
+  });
+
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(
+    page.getByText(/changed in another window \(or by undo\) after you opened it/),
+  ).toBeVisible();
+  // The page shows what the server has, never "Rowan Ashby" or "Roland Ashby".
+  await expect(h1(page)).toHaveText('Roland Ashdown');
+  const after = await (await request.get(`${base}/people/${seeded.rowan}`)).json();
+  expect(after.names[0]).toMatchObject({ given: 'Roland', surname: 'Ashdown' });
 });

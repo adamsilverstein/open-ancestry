@@ -1,6 +1,6 @@
 import type { MediaRow } from '@open-ancestry/db';
 import { describe, expect, it } from 'vitest';
-import { ancestryLink, hasThumbnail, mediaGroup, thumbUrl } from './api';
+import { ancestryLink, hasThumbnail, mediaGroup, thumbUrl, learnedSize, tileImage } from './api';
 
 const media = (fields: Partial<MediaRow>) =>
   ({ kind: 'photo', local_path: null, ...fields }) as MediaRow;
@@ -48,5 +48,45 @@ describe('ancestryLink', () => {
     ]) {
       expect(ancestryLink(hostile)).toBeNull();
     }
+  });
+});
+
+describe('tileImage', () => {
+  it('gives a plain src for an original no bigger than the small thumbnail', () => {
+    expect(tileImage('t', 'M', { width: 40, height: 40 })).toEqual({
+      src: '/api/trees/t/media/M/thumb/sm',
+    });
+  });
+
+  it('uses the thumbnails real widths as descriptors', () => {
+    expect(tileImage('t', 'M', { width: 300, height: 300 }).srcSet).toBe(
+      '/api/trees/t/media/M/thumb/sm 160w, /api/trees/t/media/M/thumb/md 300w',
+    );
+    // A portrait: thumbnails fit inside the square edge.
+    expect(tileImage('t', 'M', { width: 600, height: 800 }).srcSet).toBe(
+      '/api/trees/t/media/M/thumb/sm 120w, /api/trees/t/media/M/thumb/md 360w',
+    );
+  });
+
+  it('assumes full-size thumbnails when the size is unknown', () => {
+    expect(tileImage('t', 'M', null)).toMatchObject({
+      srcSet: '/api/trees/t/media/M/thumb/sm 160w, /api/trees/t/media/M/thumb/md 480w',
+      sizes: '190px',
+    });
+  });
+});
+
+describe('learnedSize', () => {
+  const md = '/api/trees/t/media/M/thumb/md';
+  it('reads a small original from the md thumbnail it got', () => {
+    // A 300px file under a 480w descriptor in a 190px tile reads as about 119 CSS px.
+    expect(learnedSize({ currentSrc: md, naturalWidth: 118.75, naturalHeight: 118.75 })).toEqual({
+      width: 300,
+      height: 300,
+    });
+  });
+
+  it('says nothing about a big original', () => {
+    expect(learnedSize({ currentSrc: md, naturalWidth: 190, naturalHeight: 142.5 })).toBeNull();
   });
 });

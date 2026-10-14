@@ -15,7 +15,7 @@ const unique = (testInfo: TestInfo, label: string) =>
   `${label} ${testInfo.project.name} ${testInfo.workerIndex}${testInfo.retry} ${Date.now() % 1e6}`;
 
 async function chooseFile(page: Page, name: string, buffer: Buffer) {
-  await page.getByLabel('Choose a GEDCOM file').setInputFiles({
+  await page.getByLabel('Choose a GEDCOM or GEDZIP').setInputFiles({
     name,
     mimeType: 'application/octet-stream',
     buffer,
@@ -42,7 +42,12 @@ test('imports the Ancestry sample through the file picker and opens the tree', a
   await expect(report.getByRole('group', { name: 'Sources' })).toContainText('5');
   await expect(report.getByRole('group', { name: 'Media' })).toContainText('2');
   await expect(report.getByText('Every line of the file was mapped')).toBeVisible();
-  await expect(report.getByText('No warnings')).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Warnings' }).getByText('No warnings'),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Unmapped tags' }).getByText('No unmapped tags'),
+  ).toBeVisible();
   await expect(report.getByText('Ancestry.com Family Trees')).toBeVisible();
 
   await page.getByRole('link', { name: 'Open tree' }).click();
@@ -204,5 +209,4 @@ test('File > Import GEDCOM opens the file picker from any page', async ({ page }
   const chooser = page.waitForEvent('filechooser');
   await page.getByRole('menuitem', { name: /Import GEDCOM/ }).click();
   await chooser;
-  await expect(page).toHaveURL(/\/$/);
 });

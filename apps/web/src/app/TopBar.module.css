@@ -34,11 +34,20 @@
 }
 
 .treeName {
-  overflow: hidden;
+  min-width: 0;
+  max-width: min(320px, 40vw);
   color: var(--oa-text-muted);
-  font: var(--oa-text-sm);
+}
+
+.treeName > span {
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.dialogError {
+  color: var(--oa-danger);
+  font: var(--oa-text-sm);
 }
 
 .actions {

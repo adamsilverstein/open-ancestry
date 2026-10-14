@@ -156,10 +156,11 @@ describe('undo / redo', () => {
         /key does not match/,
       ],
       [
-        `UPDATE change_log SET after_json = json_set(after_json, '$."sex = ''F'' --"', 1) WHERE batch_id = ?`,
+        "UPDATE change_log SET after_json = json_remove(after_json, '$.created_at') WHERE batch_id = ?",
         [],
-        /columns/,
+        /missing created_at/,
       ],
+      ['UPDATE change_log SET schema_version = 99 WHERE batch_id = ?', [], /newer/],
       [
         "UPDATE change_log SET after_json = json_set(after_json, '$.sex', json('{}')) WHERE batch_id = ?",
         [],
@@ -174,6 +175,19 @@ describe('undo / redo', () => {
       expect(listBatches(store).find((b) => b.id === batchId)?.state).toBe('applied');
       store.close();
     }
+  });
+
+  it('ignores unknown keys in a logged image, so they never reach SQL', () => {
+    const store = memoryTree();
+    const { batchId, result: p } = store.transact('add', (tx) => persons.create(tx, { sex: 'M' }));
+    store.db
+      .prepare(
+        `UPDATE change_log SET after_json = json_set(after_json, '$."sex = ''F'' --"', 1) WHERE batch_id = ?`,
+      )
+      .run(batchId);
+    undo(store, batchId);
+    expect(persons.get(store, p.id)).toBeUndefined();
+    store.close();
   });
 
   it('restores a cascading person delete exactly', () => {

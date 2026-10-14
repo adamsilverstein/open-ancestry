@@ -216,9 +216,22 @@ describe('JSON interchange', () => {
       const doc = baseDoc();
       const entry = doc.tables.change_log?.[0] as { after_json: string };
       const image = JSON.parse(entry.after_json) as Record<string, unknown>;
-      rejects(tamper({ after_json: JSON.stringify({ ...image, 'x = 1; --': 1 }) }), /columns/);
+      const { created_at: _created, ...missingRequired } = image;
+      rejects(tamper({ after_json: JSON.stringify(missingRequired) }), /missing created_at/);
+      rejects(tamper({ schema_version: 99 }), /newer/);
       rejects(tamper({ after_json: JSON.stringify({ ...image, id: 'OTHER' }) }), /key/);
       rejects(tamper({ after_json: '[1]' }), /object/);
+    });
+
+    it('ignores unknown keys in change_log images; they never reach SQL', () => {
+      const doc = baseDoc();
+      const entry = doc.tables.change_log?.[0] as { after_json: string };
+      const image = JSON.parse(entry.after_json) as Record<string, unknown>;
+      entry.after_json = JSON.stringify({ ...image, 'x = 1; DROP TABLE person; --': 1 });
+      const target = memoryTree();
+      importJson(target, doc);
+      expect(persons.list(target).length).toBeGreaterThan(0);
+      target.close();
     });
 
     it('caps rows and bytes', () => {

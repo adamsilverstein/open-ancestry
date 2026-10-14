@@ -15,6 +15,7 @@ import { Mapper, type Sink } from './mapper';
 import { MediaSource } from './media';
 import {
   ImportError,
+  type ImportPhase,
   type ImportInput,
   type ImportOptions,
   type ImportReport,
@@ -333,4 +334,25 @@ export async function importGedcom(
     cleanup({ files: mapper?.copiedMedia ?? [], folders: mapper?.createdMediaFolders ?? [] });
     throw error;
   }
+}
+
+/**
+ * `importGedcom` shaped for the server's injected `Importer` (apps/server
+ * jobs.ts): reads the uploaded file at `path` into the empty `store` and
+ * reports progress as `{ phase, done, total }` objects. Media come from a
+ * GEDZIP upload; a plain GEDCOM upload has no media folder to read from.
+ */
+export function importFile(
+  path: string,
+  store: TreeStore,
+  options: {
+    onProgress?: (progress: { phase: ImportPhase; done: number; total: number }) => void;
+    signal?: AbortSignal;
+  } = {},
+): Promise<ImportReport> {
+  const { onProgress, signal } = options;
+  return importGedcom({ path }, store, {
+    ...(signal && { signal }),
+    ...(onProgress && { onProgress: (phase, done, total) => onProgress({ phase, done, total }) }),
+  });
 }

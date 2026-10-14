@@ -16,3 +16,12 @@
   border-radius: var(--oa-radius-sm);
   font-weight: var(--oa-weight-medium);
 }
+
+/* Top aligned so content that loads later (the tree list) never moves what is above it. */
+.home {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  min-height: calc(100dvh - var(--oa-topbar-height));
+  padding: clamp(var(--oa-space-6), 10vh, 120px) var(--oa-space-4) var(--oa-space-6);
+}

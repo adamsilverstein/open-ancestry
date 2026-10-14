@@ -19,7 +19,13 @@ npm install
 npm run build && npm start      # http://127.0.0.1:4317
 ```
 
-To import, export your tree from Ancestry (below) and load the `.ged` file. Import lands with [#6](https://github.com/adamsilverstein/open-ancestry/issues/6) (engine) and [#12](https://github.com/adamsilverstein/open-ancestry/issues/12) (UI and `open-ancestry import`); until then the app shell runs empty. The server binds to `127.0.0.1` only.
+To import, export your tree from Ancestry (below), open the app and drop the `.ged` file (or a GEDZIP `.zip`/`.gdz`) on the home page. The import report lists counts, warnings by line number and any tags that could not be mapped; nothing is dropped. Or use the command line:
+
+```sh
+node apps/cli/dist/cli.js import ~/Downloads/family.ged --name "Vale family" [--media ~/Downloads/family-media]
+```
+
+Trees are folders in your library (`~/OpenAncestry`, or `--library` / `$OA_LIBRARY`); switch, create, rename and delete them from the tree menu in the top bar. The server binds to `127.0.0.1` only.
 
 ## Development
 
@@ -43,7 +49,7 @@ npm run fixtures      # regenerate synthetic GEDCOM in fixtures/generated
 | `packages/import` | GEDCOM/GEDZIP import into a tree (Ancestry adapter) |
 | `apps/server` | Fastify API and static SPA hosting |
 | `apps/web` | Vite + React 19 SPA |
-| `apps/cli` | `open-ancestry serve`, bundled with the web build |
+| `apps/cli` | `open-ancestry serve` and `open-ancestry import`, bundled with the web build |
 | `e2e/` | Playwright tests; import `test` from `e2e/fixtures.ts` so coverage is collected |
 | `bench/` | tinybench harness; add `bench/suites/<area>.bench.ts` |
 | `fixtures/` | Synthetic Ancestry-style GEDCOM; see [fixtures/README.md](fixtures/README.md) |

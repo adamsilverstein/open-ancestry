@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, renameSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
@@ -18,6 +18,13 @@ import { ApiError, conflict, notFound } from './errors';
  */
 
 export const TRASH_DIR = '.trash';
+/**
+ * meta key set on a tree the server created for one import upload. It holds
+ * that import's random marker until the import succeeds; a tree that still has
+ * it (and no people) after a failure or restart is the leftover of that
+ * import, and only then may the server remove it.
+ */
+export const IMPORT_PENDING_KEY = 'import_pending';
 export const MAX_TREE_NAME_LENGTH = 100;
 
 /** `~/OpenAncestry`, or OA_LIBRARY when set. */
@@ -43,6 +50,26 @@ export function treeNameProblem(name: string): string | null {
   if (FORBIDDEN.test(name)) return 'Tree name contains a path separator or reserved character';
   if (WINDOWS_DEVICE.test(name)) return 'Tree name is reserved on Windows';
   return null;
+}
+
+/**
+ * A tree name from an uploaded file name: the base name with characters the
+ * library refuses replaced, trimmed to leave room for a " 2" suffix.
+ */
+export function treeNameFromFile(fileName: string): string {
+  const base = fileName
+    .replaceAll('\\', '/')
+    .split('/')
+    .pop()!
+    .replace(/\.[^.]*$/, '');
+  const name = base
+    // eslint-disable-next-line no-control-regex
+    .replace(/[/\\:*?"<>|%\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s.]+|[\s.]+$/g, '')
+    .slice(0, MAX_TREE_NAME_LENGTH - 10)
+    .trim();
+  return !name || WINDOWS_DEVICE.test(name) ? `Imported ${name}`.trim() : name;
 }
 
 function assertTreeName(name: string): void {
@@ -104,6 +131,67 @@ export class Library {
     const store = createTree(this.dirOf(name), { name });
     this.stores.set(name, store);
     return store;
+  }
+
+  /**
+   * Creates a tree for one import upload, named after the file (" 2", " 3", ...
+   * when taken), and tags it with `marker` (see IMPORT_PENDING_KEY).
+   */
+  createForImport(fileName: string, marker: string): string {
+    const base = treeNameFromFile(fileName);
+    for (let n = 1; n <= 1000; n++) {
+      const id = n === 1 ? base : `${base} ${n}`;
+      if (existsSync(this.dirOf(id))) continue;
+      const store = this.create(id);
+      store.db
+        .prepare('INSERT INTO meta (key, value) VALUES (?, ?)')
+        .run(IMPORT_PENDING_KEY, marker);
+      return id;
+    }
+    throw conflict(`No free tree name for "${base}"`);
+  }
+
+  /** The import tagged `marker` succeeded: the tree is the user's now. */
+  clearImportPending(id: string, marker: string): void {
+    this.open(id)
+      .db.prepare('DELETE FROM meta WHERE key = ? AND value = ?')
+      .run(IMPORT_PENDING_KEY, marker);
+  }
+
+  /**
+   * Removes a tree only if it is the one created for the import tagged
+   * `marker` (same folder, marker still set) and it has no people. Anything
+   * else, including a tree since re-created under the same name, is left alone.
+   */
+  discardFailedImport(id: string, marker: string): boolean {
+    if (!this.exists(id) || !this.isPendingImport(id, marker)) return false;
+    this.close(id);
+    rmSync(this.dirOf(id), { recursive: true, force: true });
+    return true;
+  }
+
+  /**
+   * Startup: removes empty trees left by imports a crash or restart
+   * interrupted. Only trees created over `minAgeMs` ago are touched, so an
+   * import another server process is running on the same library is safe.
+   */
+  sweepInterruptedImports(minAgeMs = 60 * 60 * 1000, now = Date.now()): string[] {
+    const removed: string[] = [];
+    if (!existsSync(this.root)) return removed;
+    for (const { id } of this.list()) {
+      const marker = meta.get(this.open(id), IMPORT_PENDING_KEY);
+      const created = statSync(this.dirOf(id)).birthtimeMs || statSync(this.dirOf(id)).mtimeMs;
+      if (!marker || this.busy.has(id) || now - created < minAgeMs) continue;
+      if (this.discardFailedImport(id, marker)) removed.push(id);
+    }
+    return removed;
+  }
+
+  private isPendingImport(id: string, marker: string): boolean {
+    const store = this.open(id);
+    if (meta.get(store, IMPORT_PENDING_KEY) !== marker) return false;
+    const { n } = store.stmt('SELECT count(*) AS n FROM person').get() as { n: number };
+    return n === 0;
   }
 
   /** The open store for a tree, opening (and caching) it on first use. */

@@ -29,6 +29,26 @@ for (const colorScheme of ['light', 'dark'] as const) {
       });
     }
 
+    test('import report and tree switcher menu have no violations', async ({ page }, testInfo) => {
+      await page.goto('/');
+      const ged = '0 HEAD\n0 @I1@ INDI\n1 NAME A /B/\n1 FAMC @F9@\n1 _X y\n0 TRLR\n';
+      await page.getByLabel('Choose a GEDCOM or GEDZIP').setInputFiles({
+        name: `a11y ${colorScheme} ${testInfo.project.name} ${Date.now() % 1e6}.ged`,
+        mimeType: 'application/octet-stream',
+        buffer: Buffer.from(ged),
+      });
+      await expect(page.getByRole('heading', { level: 1, name: 'Import complete' })).toBeVisible({
+        timeout: 30_000,
+      });
+      expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+      await page.getByRole('banner').getByRole('button', { name: /Tree:/ }).click();
+      await expect(page.getByRole('menu')).toBeVisible();
+      // A modal menu hides the page behind it, so check the menu itself.
+      expect(
+        (await new AxeBuilder({ page }).include('[role="menu"]').analyze()).violations,
+      ).toEqual([]);
+    });
+
     test('open command palette has no violations', async ({ page }) => {
       await page.goto('/');
       await page.getByRole('banner').getByRole('button', { name: /^Find/ }).click();

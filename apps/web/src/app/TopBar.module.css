@@ -34,11 +34,20 @@
 }
 
 .treeName {
-  overflow: hidden;
+  min-width: 0;
+  max-width: min(320px, 40vw);
   color: var(--oa-text-muted);
-  font: var(--oa-text-sm);
+}
+
+.treeName > span {
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.dialogError {
+  color: var(--oa-danger);
+  font: var(--oa-text-sm);
 }
 
 .actions {
@@ -67,4 +76,10 @@
   .kbd {
     display: none;
   }
+}
+
+/* A large library scrolls inside the menu instead of running off screen. */
+.treeMenu {
+  max-height: min(480px, var(--radix-dropdown-menu-content-available-height, 60dvh));
+  overflow-y: auto;
 }

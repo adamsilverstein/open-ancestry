@@ -14,7 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { importGedcom } from './import';
+import { importFile, importGedcom } from './import';
 import { FIXTURES, TODAY, ged, importInto, row, rows, value } from './test-helpers';
 import { ImportError } from './types';
 
@@ -385,5 +385,18 @@ describe('media', () => {
     });
     expect(value(store, "SELECT count(*) FROM note_link WHERE owner_type = 'media'")).toBe(1);
     expect(value(store, "SELECT count(*) FROM citation_link WHERE owner_type = 'media'")).toBe(1);
+  });
+});
+
+describe('importFile (server adapter)', () => {
+  it('imports a path into an open store and reports progress objects', async () => {
+    const file = join(tmp, 'upload.ged');
+    writeFileSync(file, sample());
+    const progress: unknown[] = [];
+    const store = openMemoryTree();
+    const report = await importFile(file, store, { onProgress: (p) => progress.push(p) });
+    expect(report.records.INDI).toBe(26);
+    expect(progress.at(-1)).toEqual({ phase: 'done', done: 1, total: 1 });
+    expect(await importFile(file, openMemoryTree()).then((r) => r.records.FAM)).toBe(10);
   });
 });

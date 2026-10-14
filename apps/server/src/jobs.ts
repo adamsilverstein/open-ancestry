@@ -38,6 +38,8 @@ export interface JobView {
   kind: 'import';
   tree: string;
   fileName: string;
+  /** The server created `tree` for this upload (and removes it if the import fails). */
+  createdTree: boolean;
   state: JobState;
   progress: ImportProgress | null;
   /** The importer's report once completed. */
@@ -95,7 +97,7 @@ export class JobManager {
    * the returned job's `progress`; `cleanup` always runs once the job ends.
    */
   enqueue(
-    meta: { tree: string; fileName: string },
+    meta: { tree: string; fileName: string; createdTree?: boolean },
     run: (signal: AbortSignal, progress: (p: ImportProgress) => void) => Promise<unknown>,
     cleanup: () => Promise<void> = async () => {},
   ): JobView {
@@ -105,6 +107,7 @@ export class JobManager {
     const job: Job = {
       id,
       kind: 'import',
+      createdTree: false,
       ...meta,
       state: 'queued',
       progress: null,
@@ -208,6 +211,7 @@ function view(job: Job): JobView {
     kind: job.kind,
     tree: job.tree,
     fileName: job.fileName,
+    createdTree: job.createdTree,
     state: job.state,
     progress: job.progress,
     result: job.result,

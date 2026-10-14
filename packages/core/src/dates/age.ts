@@ -21,12 +21,17 @@ interface Reference {
 function reference(date: ParsedDate): Reference | undefined {
   const { start, end, calendar, qualifier } = date;
   if (!start) return undefined;
-  if (end || calendar === 'hebrew' || calendar === 'french_r') {
-    // Ranges and approximate calendars only resolve to a year.
-    const year = end
-      ? Math.floor((yearOf(start) + yearOf(end)) / 2)
-      : astronomical(Math.floor(date.sortKey / 10000));
+  // The Gregorian year a sort key falls in.
+  const keyYear = (key: number) => astronomical(Math.floor(key / 10000));
+  if (end) {
+    // A range resolves to its middle year, from its Gregorian bounds, so mixed
+    // and non-Gregorian calendars work.
+    const year = Math.floor((keyYear(date.sortKey) + keyYear(date.sortKeyEnd!)) / 2);
     return { year, approximate: true };
+  }
+  if ((calendar === 'hebrew' || calendar === 'french_r') && start.day === undefined) {
+    // A Hebrew or French month or year straddles two Gregorian years.
+    return { year: keyYear(date.sortKey), approximate: true };
   }
   const approximate = qualifier !== 'exact' && qualifier !== 'interpreted';
   const year = start.dualYear ?? start.year;
@@ -36,8 +41,6 @@ function reference(date: ParsedDate): Reference | undefined {
   }
   return { year: astronomical(year), month: start.month, approximate };
 }
-
-const yearOf = (p: { year: number; dualYear?: number }) => astronomical(p.dualYear ?? p.year);
 
 /** Age in whole years at an event, or undefined when unknown or negative. */
 export function ageAt(birth: DateInput, event: DateInput): Age | undefined {

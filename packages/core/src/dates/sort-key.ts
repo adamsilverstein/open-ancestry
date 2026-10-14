@@ -41,7 +41,8 @@ export function pointKey(point: DatePoint, calendar: Calendar, bound: Bound): nu
           ? exactMonthDays(calendar, year, m)
           : month === undefined
             ? 1
-            : 15);
+            : // Mid-month; the five or six COMP days have a nearer middle.
+              Math.min(15, Math.ceil(exactMonthDays(calendar, year, m) / 2)));
     const g = toGregorian(calendar, year, m, d);
     return encode(g.year, g.month, g.day);
   }

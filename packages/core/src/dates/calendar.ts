@@ -151,6 +151,9 @@ function hebrewElapsedDays(year: number): number {
   return (3 * (day + 1)) % 7 < 3 ? day + 1 : day;
 }
 
+/** Hebrew leap years have a second Adar (ADS). */
+export const isHebrewLeap = (year: number) => (7 * year + 1) % 19 < 7;
+
 function hebrewNewYear(year: number): number {
   const ny0 = hebrewElapsedDays(year - 1);
   const ny1 = hebrewElapsedDays(year);
@@ -163,7 +166,7 @@ function hebrewNewYear(year: number): number {
 function hebrewToJdn(year: number, month: number, day: number): number {
   const newYear = hebrewNewYear(year);
   const length = hebrewNewYear(year + 1) - newYear;
-  const leap = (7 * year + 1) % 19 < 7;
+  const leap = isHebrewLeap(year);
   // TSH CSH KSL TVT SHV ADR ADS NSN IYR SVN TMZ AAV ELL; ADS only exists in leap years.
   const lengths = [
     30,
@@ -188,7 +191,9 @@ function hebrewToJdn(year: number, month: number, day: number): number {
 }
 
 // French Republican calendar: year I began on 22 Sep 1792 and years III, VII
-// and XI were sextile (366 days). Later years follow the Romme rule.
+// and XI were sextile (366 days). Later years follow the Romme rule (sextile
+// when divisible by 4, from XVI), not the equinox rule; the two differ by a
+// day in some years, such as the Paris Commune's an LXXIX (1871).
 const FRENCH_EPOCH_JDN = gregorianToJdn(1792, 9, 22);
 const romme = (n: number) => Math.floor(n / 4) - Math.floor(n / 100) + Math.floor(n / 400);
 
@@ -210,7 +215,7 @@ export function exactMonthDays(
   if (calendar === 'french_r') {
     return month < 13 ? 30 : frenchToJdn(year + 1, 1, 1) - frenchToJdn(year, 13, 1);
   }
-  const leap = (7 * year + 1) % 19 < 7;
+  const leap = isHebrewLeap(year);
   const m = !leap && month === 7 ? 6 : month;
   const next =
     m === 13 ? hebrewNewYear(year + 1) : hebrewToJdn(year, !leap && m === 6 ? 8 : m + 1, 1);

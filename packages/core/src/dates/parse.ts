@@ -1,4 +1,4 @@
-import { daysInMonth, monthNumber, monthsInYear } from './calendar';
+import { daysInMonth, isHebrewLeap, monthNumber, monthsInYear } from './calendar';
 import { pointKey, UNDATED_SORT_KEY } from './sort-key';
 import type { Calendar, DatePoint, DateQualifier, ParsedDate } from './types';
 
@@ -298,7 +298,8 @@ function validPoint(
   const point: DatePoint = { year: bc ? -year : year };
   if (month !== undefined) {
     if (!(month >= 1 && month <= monthsInYear(calendar))) return undefined;
-    point.month = month;
+    // Adar II (ADS) only exists in leap years; elsewhere it can only mean Adar.
+    point.month = calendar === 'hebrew' && month === 7 && !isHebrewLeap(year) ? 6 : month;
   }
   if (day !== undefined) {
     if (month === undefined || !(day >= 1 && day <= daysInMonth(calendar, point.year, month)))

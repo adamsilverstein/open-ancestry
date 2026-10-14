@@ -1,7 +1,13 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { compareDates, parseDate, UNDATED_SORT_KEY, yearOf } from './index';
-import { arbDateText, arbPoint, pointText } from './test-arbitraries';
+import {
+  arbCalendarText,
+  arbDateText,
+  arbMixedRange,
+  arbPoint,
+  pointText,
+} from './test-arbitraries';
 
 describe('sortKey', () => {
   it.each([
@@ -134,6 +140,38 @@ describe('sortKey properties', () => {
         const da = Date.UTC(a.getUTCFullYear(), a.getUTCMonth(), a.getUTCDate());
         const db = Date.UTC(b.getUTCFullYear(), b.getUTCMonth(), b.getUTCDate());
         expect(Math.sign(compareDates(text(a), text(b)))).toBe(Math.sign(da - db));
+      }),
+    );
+  });
+
+  it('orders BEF X < X < AFT X for Hebrew and French dates, inside their month and year', () => {
+    fc.assert(
+      fc.property(arbCalendarText, (text) => {
+        const exact = parseDate(text);
+        expect(exact.valid).toBe(true);
+        expect(parseDate(`BEF ${text}`).sortKey).toBeLessThan(exact.sortKey);
+        expect(parseDate(`AFT ${text}`).sortKey).toBeGreaterThan(exact.sortKey);
+        // A day sorts within its month's and year's range.
+        const day = /^(@#D[A-Z ]+@) \d+ (\S+) (\d+)$/.exec(text);
+        if (day) {
+          const [, escape, month, year] = day;
+          for (const outer of [`${escape} ${month} ${year}`, `${escape} ${year}`]) {
+            const range = parseDate(`BET ${outer} AND ${outer}`);
+            expect(exact.sortKey).toBeGreaterThanOrEqual(range.sortKey);
+            expect(exact.sortKey).toBeLessThanOrEqual(range.sortKeyEnd!);
+          }
+        }
+      }),
+    );
+  });
+
+  it('keeps mixed-calendar ranges valid and ordered', () => {
+    fc.assert(
+      fc.property(arbMixedRange, (text) => {
+        const parsed = parseDate(text);
+        expect(parsed.valid).toBe(true);
+        expect(parsed.endCalendar).toBeDefined();
+        expect(parsed.sortKey).toBeLessThanOrEqual(parsed.sortKeyEnd!);
       }),
     );
   });

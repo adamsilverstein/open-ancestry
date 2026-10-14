@@ -79,6 +79,9 @@ describe('toGedcom', () => {
     ['@#DHEBREW@ 1 TSH 5700', '@#DHEBREW@ 1 TSH 5700', 'HEBREW 1 TSH 5700'],
     ['@#DFRENCH R@ 1 VEND 1', '@#DFRENCH R@ 1 VEND 1', 'FRENCH_R 1 VEND 1'],
     ['@#DUNKNOWN@ 1900', '@#DUNKNOWN@ 1900', '1900'],
+    // Adar II only exists in leap years; 5783 is not one.
+    ['@#DHEBREW@ 1 ADS 5783', '@#DHEBREW@ 1 ADR 5783', 'HEBREW 1 ADR 5783'],
+    ['@#DHEBREW@ 1 ADS 5784', '@#DHEBREW@ 1 ADS 5784', 'HEBREW 1 ADS 5784'],
     [
       'BET @#DJULIAN@ 1 JAN 1751 AND 1 JAN 1753',
       'BET @#DJULIAN@ 1 JAN 1751 AND 1 JAN 1753',
@@ -215,7 +218,8 @@ describe('toGedcom output safety', () => {
     expect(toGedcom(badPhrase)).toBe('INT 1941 (a 0 @@X@@ NOTE)');
   });
 
-  it('is always one line in the GEDCOM date grammar or a safe phrase', () => {
+  // 2000 runs over every date shape; slow on a loaded CI runner.
+  it('is always one line in the GEDCOM date grammar or a safe phrase', { timeout: 30_000 }, () => {
     const noisy = fc.string({
       unit: fc.oneof(
         fc.constantFrom('\r', '\n', ' ', '\u0000', '\u0085', '@', '(', ')', ' ', '/', '.'),

@@ -75,27 +75,31 @@ export function importRoutes(app: Api, deps: Deps): void {
    * (including a cancel before it ran) removes it if it is still empty.
    */
   function start(tree: string, upload: Awaited<ReturnType<typeof receive>>, marker: string | null) {
+    // Busy from queueing to the end of cleanup: no writes may share (or be
+    // undone with) the import's transaction (issue #96).
+    const release = library.markBusy(tree);
     try {
       return jobs.enqueue(
         { tree, fileName: upload.fileName, createdTree: marker !== null },
-        (signal, onProgress) =>
-          library.whileBusy(tree, async () => {
-            const store = library.open(tree);
-            const result = await importer!(upload.path, store, {
-              mediaDir: treePaths(library.dirOf(tree)).media,
-              onProgress,
-              signal,
-            });
-            if (marker) library.clearImportPending(tree, marker);
-            thumbnails.enqueueTree(store, library.dirOf(tree));
-            return result;
-          }),
+        async (signal, onProgress) => {
+          const store = library.open(tree);
+          const result = await importer!(upload.path, store, {
+            mediaDir: treePaths(library.dirOf(tree)).media,
+            onProgress,
+            signal,
+          });
+          if (marker) library.clearImportPending(tree, marker);
+          thumbnails.enqueueTree(store, library.dirOf(tree));
+          return result;
+        },
         async () => {
           await upload.cleanup();
           if (marker) library.discardFailedImport(tree, marker);
+          release();
         },
       );
     } catch (error) {
+      release();
       void upload.cleanup();
       if (marker) library.discardFailedImport(tree, marker);
       if (error instanceof TooManyJobsError)

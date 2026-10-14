@@ -165,6 +165,13 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
 
   app.register(async (api) => {
     const typed = api.withTypeProvider<TypeBoxTypeProvider>();
+    // No write may reach a tree while it imports: it would run inside the
+    // import's transaction and share its fate (issue #96). Reads still work.
+    typed.addHook('preHandler', async (request) => {
+      if (request.method === 'GET' || request.method === 'HEAD') return;
+      const tree = (request.params as { tree?: unknown } | undefined)?.tree;
+      if (typeof tree === 'string') library.assertIdle(tree);
+    });
     typed.get('/api/health', async () => ({ ok: true }));
     treeRoutes(typed, deps);
     peopleRoutes(typed, deps);

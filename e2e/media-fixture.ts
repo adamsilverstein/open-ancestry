@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { createTree, createUlidFactory, type InsertRow } from '@open-ancestry/db';
@@ -35,6 +35,10 @@ export const MEDIA_IDS = {
   corrupt: fixedId(),
   missing: fixedId(),
   evilRemote: fixedId(),
+  smallUnknown: fixedId(),
+  medium: fixedId(),
+  mediumUnknown: fixedId(),
+  outside: fixedId(),
   /** People whose primary photo is local, only on Ancestry, or a missing file. */
   pia: fixedId(),
   rhoda: fixedId(),
@@ -65,10 +69,15 @@ export async function buildMediaTree(library: string): Promise<void> {
     ['christening.png', await photo('#4a6fa5', 500, 500)],
     ['baptism.pdf', Buffer.from('%PDF-1.4\n% synthetic baptism record\n')],
     ['tiny.png', await photo('#7a5c99', 40, 40)],
+    // Between the sm (160px) and md (480px) thumbnails.
+    ['medium.png', await photo('#3d7a6b', 300, 300)],
     // Named like a photo but not an image: its thumbnail fails.
     ['notanimage.jpg', Buffer.from('these bytes are not a JPEG')],
   ];
   for (const [name, bytes] of files) writeFileSync(join(media, name), bytes);
+  // A real image outside the tree, reachable only through a symlink in its media folder.
+  writeFileSync(join(library, 'outside-the-tree.png'), await photo('#123456', 300, 300));
+  symlinkSync(join(library, 'outside-the-tree.png'), join(media, 'link-out.png'));
 
   const id = MEDIA_IDS;
   store.transact('media fixture', (tx) => {
@@ -156,7 +165,64 @@ export async function buildMediaTree(library: string): Promise<void> {
       id.imogenBirth,
       'event',
     );
-    local('tiny', 'tiny.png', 'Tiny scrap', 5);
+    add(
+      {
+        id: id.tiny,
+        kind: 'photo',
+        mime: 'image/png',
+        local_path: 'photos/tiny.png',
+        title: 'Tiny scrap',
+        width: 40,
+        height: 40,
+      },
+      id.imogen,
+      'person',
+      5,
+    );
+    // Same small file, size unknown (as most imports are).
+    add(
+      {
+        id: id.smallUnknown,
+        kind: 'photo',
+        mime: 'image/png',
+        local_path: 'photos/tiny.png',
+        title: 'Small, size unknown',
+      },
+      id.imogen,
+      'person',
+      9,
+    );
+    for (const [key, title, width] of [
+      ['medium', 'Medium scan', 300],
+      ['mediumUnknown', 'Medium, size unknown', null],
+    ] as const) {
+      add(
+        {
+          id: id[key],
+          kind: 'photo',
+          mime: 'image/png',
+          local_path: 'photos/medium.png',
+          title,
+          width,
+          height: width,
+        },
+        id.imogen,
+        'person',
+        10,
+      );
+    }
+    add(
+      {
+        id: id.outside,
+        kind: 'photo',
+        mime: 'image/png',
+        local_path: 'photos/link-out.png',
+        title: 'Linked out',
+      },
+      id.hostile,
+      'person',
+      99,
+    );
     local('corrupt', 'notanimage.jpg', 'Corrupt scan', 6);
     // An imported FILE that was not found: neither a local file nor a URL.
     add({ id: id.missing, kind: 'photo', title: 'Missing wedding photo' }, id.imogen, 'person', 7);

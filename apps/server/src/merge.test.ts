@@ -26,7 +26,7 @@ async function person(given: string, surname: string, sex: string, events: Ev[] 
 }
 
 interface Detail {
-  person: { id: string; sex: string; primary_media_id: string | null };
+  person: { id: string; sex: string; privacy: string; primary_media_id: string | null };
   names: { given: string | null; surname: string | null; is_primary: number; type: string }[];
   events: { event: { type: string; date_text: string | null }; role: { is_preferred: number } }[];
   citations: { citation: { page: string | null } }[];
@@ -207,6 +207,28 @@ describe('merge people', () => {
     // Nothing was written.
     expect((await api.get(`${base}/history?limit=1`)).json().items[0].label).toMatch(/^Add child/);
     expect(await status(son)).toBe(200);
+  });
+
+  it('keeps the more restrictive privacy, so a privatized export still withholds it', async () => {
+    const keep = await person('Rowan', 'Ashdown', 'M', [['DEAT', '1950']]);
+    const other = await person('Rowan', 'Ashdown', 'M', [
+      ['DEAT', '1950'],
+      ['RESI', '1930', 'Hollowmere Lane'],
+    ]);
+    await api.patch(`${base}/people/${other}`, { privacy: 'confidential' });
+    await api.post(`${base}/notes`, {
+      text: 'Kept in confidence',
+      owner_type: 'person',
+      owner_id: other,
+    });
+    await api.post(`${base}/people/${keep}/merge`, { otherId: other });
+    expect((await detail(keep)).person).toMatchObject({ privacy: 'confidential' });
+    const privatized = (await api.get(`${base}/export.ged?privatize=true`)).body as string;
+    expect(privatized).not.toContain('Hollowmere Lane');
+    expect(privatized).not.toContain('Kept in confidence');
+    expect(privatized).not.toContain('Ashdown');
+    await api.post(`${base}/undo`);
+    expect((await detail(keep)).person).toMatchObject({ privacy: 'public' });
   });
 
   it('drops checker dismissals that name the merged-away person', async () => {

@@ -4,14 +4,17 @@ import { layoutDescendants, layoutFamily, layoutFan, layoutPedigree } from './in
 import { arbGraph, syntheticTree } from './test-graphs';
 import type { ExpandKey, LayoutNode, Point, TreeLayout } from './types';
 
+const keysOf = (id: string): ExpandKey[] => [`${id}:up`, `${id}:down`, `${id}:siblings`];
+
 const arbCase = arbGraph.chain((graph) =>
   fc.record({
     graph: fc.constant(graph),
     focus: fc.constantFrom(...graph.ids),
     ancestorsDepth: fc.integer({ min: 0, max: 5 }),
     descendantsDepth: fc.integer({ min: 0, max: 5 }),
-    expanded: fc.subarray(graph.ids.flatMap((id): ExpandKey[] => [`${id}:up`, `${id}:down`])),
-    collapsed: fc.subarray(graph.ids.flatMap((id): ExpandKey[] => [`${id}:up`, `${id}:down`])),
+    siblingsDepth: fc.integer({ min: 0, max: 4 }),
+    expanded: fc.subarray(graph.ids.flatMap(keysOf)),
+    collapsed: fc.subarray(graph.ids.flatMap(keysOf)),
   }),
 );
 
@@ -58,7 +61,14 @@ function assertVerticalEdges(layout: TreeLayout) {
       }
     }
     if (!drop) {
-      expect(childDrops).toEqual([]);
+      // Siblings shown without parents: a bar joining two or more children.
+      if (childDrops.length === 0) continue;
+      expect(childDrops.length).toBeGreaterThan(1);
+      for (const e of childDrops) {
+        const c = byKey.get(e.child!)!;
+        expect(e.points.at(-1)).toEqual([c.x + c.width / 2, c.y]);
+        expect(onSegment(e.points[0]!, bar!.points[0]!, bar!.points[1]!)).toBe(true);
+      }
       continue;
     }
     const parents = drop.parents!.map((k) => byKey.get(k)!);
@@ -178,10 +188,15 @@ describe('layout properties', () => {
     expect(layout.nodes.map((n) => n.key)).toEqual(['a', 'a~1', 'a~2']);
   });
 
-  it('lays out a 5,000 person tree', () => {
-    const { graph, focusId } = syntheticTree(8, 7, 3);
-    const layout = layoutFamily(graph, focusId, { ancestorsDepth: 8, descendantsDepth: 7 });
-    expect(layout.nodes.length).toBeGreaterThan(4800);
+  it('lays out a 5,000 person tree with siblings at every generation', () => {
+    const { graph, focusId } = syntheticTree(8, 7, 3, 1);
+    const layout = layoutFamily(graph, focusId, {
+      ancestorsDepth: 8,
+      descendantsDepth: 7,
+      siblingsDepth: 9,
+    });
+    expect(layout.nodes.length).toBeGreaterThan(5300);
     assertNoOverlap(layout.nodes);
+    assertVerticalEdges(layout);
   });
 });

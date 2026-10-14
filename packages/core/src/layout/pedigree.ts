@@ -19,7 +19,11 @@ import {
 import { tidyLayout } from './tidy';
 import type { LayoutEdge, LayoutOptions, TreeGraph, TreeLayout } from './types';
 
-const CHEVRONS = { up: new Set<Role>(['focus', 'ancestor']), down: new Set<Role>() };
+const CHEVRONS = {
+  up: new Set<Role>(['focus', 'ancestor']),
+  down: new Set<Role>(),
+  siblings: new Set<Role>(),
+};
 
 export function layoutPedigree(
   graph: TreeGraph,
@@ -36,7 +40,7 @@ export function layoutPedigree(
   const focus = b.card(focusId, 'focus', 0);
   const root = b.unit([focus], 0);
   const queue = b.addParents(root, 0, b.budget(focusId, 'up', s.ancestorsDepth), gaps.couple);
-  const units = [root, ...b.growAncestors(queue, gaps.couple)];
+  const units = [root, ...b.growAncestors(queue, gaps.couple, false)];
   tidyLayout(units, { card: size.height, couple: gaps.couple, sibling: gaps.sibling });
 
   const column = size.width + gaps.generation;

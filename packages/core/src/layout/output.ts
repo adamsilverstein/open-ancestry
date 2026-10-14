@@ -57,6 +57,7 @@ export function emptyLayout(): TreeLayout {
 export interface Chevrons {
   up: ReadonlySet<Role>;
   down: ReadonlySet<Role>;
+  siblings: ReadonlySet<Role>;
 }
 
 export function nodesFrom(b: Builder, size: CardSize, chevrons: Chevrons): LayoutNode[] {
@@ -66,6 +67,9 @@ export function nodesFrom(b: Builder, size: CardSize, chevrons: Chevrons): Layou
     const dup = card.dupOf !== undefined;
     const up = chevrons.up.has(card.role) && !dup;
     const down = chevrons.down.has(card.role) && !dup;
+    const sibs = chevrons.siblings.has(card.role) && !dup;
+    const hasSiblings =
+      sibs && (b.siblingCandidates(card.personId).length > 1 || person.hasMoreSiblings === true);
     const families = index.partnerFamilies(card.personId);
     // The focus person's spouses are always shown, so only children are left to reveal.
     const hasDown =
@@ -89,6 +93,9 @@ export function nodesFrom(b: Builder, size: CardSize, chevrons: Chevrons): Layou
       canExpandDown: down && hasDown && !card.childrenShown,
       canCollapseUp: up && card.parentsShown,
       canCollapseDown: down && card.childrenShown,
+      canExpandSiblings: hasSiblings && !card.siblingsShown,
+      canCollapseSiblings: sibs && card.siblingsShown,
+      isHalfSibling: card.half === true,
     };
     if (dup) node.duplicateOf = card.dupOf;
     return node;

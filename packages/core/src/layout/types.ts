@@ -21,6 +21,10 @@ export interface TreePerson {
   hasMoreParents?: boolean;
   /** The slice stops here but the database has spouses or children to lazy-load. */
   hasMoreChildren?: boolean;
+  /** The slice lacks this person's siblings; expanding them lazy-loads. */
+  hasMoreSiblings?: boolean;
+  /** Orders siblings by birth (`ParsedDate.sortKey`); undated siblings keep family order. */
+  birthSortKey?: number;
 }
 
 export interface TreeFamilyChild {
@@ -43,9 +47,9 @@ export interface TreeGraph {
   families: readonly TreeFamily[];
 }
 
-export type ExpandDirection = 'up' | 'down';
+export type ExpandDirection = 'up' | 'down' | 'siblings';
 
-/** `${personId}:up` or `${personId}:down`; build with `expandKey`. */
+/** `${personId}:up`, `:down` or `:siblings`; build with `expandKey`. */
 export type ExpandKey = `${string}:${ExpandDirection}`;
 
 export interface CardSize {
@@ -67,6 +71,12 @@ export interface LayoutOptions {
   ancestorsDepth?: number;
   /** Generations shown below the focus person. Default 2. */
   descendantsDepth?: number;
+  /**
+   * Generations, counting the focus row, whose siblings (with spouses) are
+   * shown beside the direct line: 0 none, 1 the focus person's siblings, 2
+   * also the parents' siblings (aunts and uncles). Default 2. Family view only.
+   */
+  siblingsDepth?: number;
   /** Extra generations an `expanded` chevron reveals. Default 2. */
   expandGenerations?: number;
   expanded?: Iterable<ExpandKey>;
@@ -98,6 +108,11 @@ export interface LayoutNode {
   canExpandDown: boolean;
   canCollapseUp: boolean;
   canCollapseDown: boolean;
+  /** Chevrons for this direct-line person's sibling group (`${id}:siblings`). */
+  canExpandSiblings: boolean;
+  canCollapseSiblings: boolean;
+  /** A sibling or aunt/uncle who shares only one parent with the direct line. */
+  isHalfSibling: boolean;
 }
 
 export type Point = [number, number];
@@ -115,6 +130,8 @@ export interface LayoutEdge {
   /** Child key of the drop into a child card. */
   child?: string;
   rel?: ChildRelation;
+  /** The child drop goes to a half sibling: draw it differently. */
+  half?: boolean;
 }
 
 export interface GenerationLabel {

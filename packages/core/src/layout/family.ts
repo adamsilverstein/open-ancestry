@@ -34,8 +34,13 @@ import type {
 const FAMILY_CHEVRONS: Chevrons = {
   up: new Set<Role>(['focus', 'spouse', 'ancestor']),
   down: new Set<Role>(['focus', 'descendant']),
+  siblings: new Set<Role>(['focus', 'ancestor']),
 };
-const DESCENDANT_CHEVRONS: Chevrons = { up: new Set(), down: FAMILY_CHEVRONS.down };
+const DESCENDANT_CHEVRONS: Chevrons = {
+  up: new Set(),
+  down: FAMILY_CHEVRONS.down,
+  siblings: new Set(),
+};
 
 /** Focus person and spouses in the middle row, ancestors above, descendants below. */
 export function layoutFamily(
@@ -79,12 +84,14 @@ function layoutVertical(
 
   let ancUnits: Unit[] = [];
   if (withAncestors) {
+    b.addSiblings(descRoot, 'center');
     const ancRoot = b.unit(descRoot.cards, 0);
     const queue = descRoot.cards.flatMap((card, i) => {
+      if (card.role !== 'focus' && card.role !== 'spouse') return [];
       const base = card === focus ? s.ancestorsDepth : 0;
       return b.addParents(ancRoot, i, b.budget(card.personId, 'up', base), gaps.couple);
     });
-    ancUnits = [ancRoot, ...b.growAncestors(queue, gaps.couple)];
+    ancUnits = [ancRoot, ...b.growAncestors(queue, gaps.couple, true)];
   }
   const descUnits = [descRoot, ...b.growDescendants(descQueue, gaps.sibling)];
 
@@ -168,7 +175,7 @@ function verticalEdges(
     const { familyId } = link;
     const group = `${familyId}#${n}`;
     const parents = [...link.parents].sort((p, q) => p.x - q.x);
-    let drop: Point;
+    let drop: Point | undefined;
     if (parents.length === 2) {
       const [l, r] = parents as [Card, Card];
       const lanes = cardsBetween(l.y, l.x, r.x);
@@ -194,7 +201,7 @@ function verticalEdges(
         drop = [(lx + rx) / 2, laneY];
       }
       edges.push({ kind: 'couple', familyId, group, points, parents: [l.key, r.key] });
-    } else {
+    } else if (parents.length === 1) {
       const p = parents[0]!;
       drop = [p.x + w / 2, p.y + h];
     }
@@ -202,16 +209,21 @@ function verticalEdges(
 
     const childY = link.children[0]!.card.y;
     const barY = childY - gaps.generation / 2;
-    edges.push({
-      kind: 'parent-child',
-      familyId,
-      group,
-      points: [drop, [drop[0], barY]],
-      parents: parents.map((p) => p.key),
-    });
     const xs = link.children.map((c) => c.card.x + w / 2);
-    const minX = Math.min(drop[0], ...xs);
-    const maxX = Math.max(drop[0], ...xs);
+    let minX = Math.min(...xs);
+    let maxX = Math.max(...xs);
+    // Siblings shown without their parents still share a bar, just no drop.
+    if (drop) {
+      edges.push({
+        kind: 'parent-child',
+        familyId,
+        group,
+        points: [drop, [drop[0], barY]],
+        parents: parents.map((p) => p.key),
+      });
+      minX = Math.min(minX, drop[0]);
+      maxX = Math.max(maxX, drop[0]);
+    }
     if (minX < maxX) {
       edges.push({
         kind: 'sibling-bar',
@@ -223,8 +235,8 @@ function verticalEdges(
         ],
       });
     }
-    link.children.forEach(({ card, rel }, i) => {
-      edges.push({
+    link.children.forEach(({ card, rel, half }, i) => {
+      const edge: LayoutEdge = {
         kind: 'parent-child',
         familyId,
         group,
@@ -234,7 +246,9 @@ function verticalEdges(
         ],
         child: card.key,
         rel,
-      });
+      };
+      if (half) edge.half = true;
+      edges.push(edge);
     });
   });
   return edges;

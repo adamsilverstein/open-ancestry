@@ -109,6 +109,52 @@ export const halfSiblings = makeGraph(
   ],
 );
 
+/**
+ * Focus `me` (born 1985) with an older brother (married), a younger sister,
+ * a younger half brother from the father's second marriage, a husband and a
+ * child. The father has a married sister; the mother a married brother.
+ */
+export const siblings = (() => {
+  const g = makeGraph(
+    {
+      gpa: 'M',
+      gma: 'F',
+      aunt: 'F',
+      auntH: 'M',
+      dad: 'M',
+      mgpa: 'M',
+      mgma: 'F',
+      mom: 'F',
+      uncle: 'M',
+      uncleW: 'F',
+      stepmom: 'F',
+      older: 'M',
+      olderW: 'F',
+      me: 'F',
+      sp: 'M',
+      younger: 'F',
+      half: 'M',
+      kid: 'F',
+    },
+    [
+      ['F_dad', 'gpa', 'gma', ['aunt', 'dad']],
+      ['F_aunt', 'auntH', 'aunt', []],
+      ['F_mom', 'mgpa', 'mgma', ['mom', 'uncle']],
+      ['F_uncle', 'uncle', 'uncleW', []],
+      ['F_me', 'dad', 'mom', ['older', 'me', 'younger']],
+      ['F_step', 'dad', 'stepmom', ['half']],
+      ['F_older', 'older', 'olderW', []],
+      ['F_sp', 'sp', 'me', ['kid']],
+    ],
+  );
+  const people = g.people as Record<string, TreePerson>;
+  const born = { older: 1980, me: 1985, younger: 1988, half: 1990 };
+  for (const [id, year] of Object.entries(born)) {
+    people[id] = { ...people[id]!, birthSortKey: year * 10000 };
+  }
+  return g;
+})();
+
 export interface SyntheticTree {
   graph: TreeGraph;
   focusId: string;
@@ -117,9 +163,15 @@ export interface SyntheticTree {
 /**
  * A full binary ancestry of `ancestors` generations above the focus plus a
  * descendant tree where every person has a spouse and `children` children,
- * `descendants` generations deep. Deterministic.
+ * `descendants` generations deep. Every ancestor gets `siblingsPerAncestor`
+ * married siblings. Deterministic.
  */
-export function syntheticTree(ancestors: number, descendants: number, children: number) {
+export function syntheticTree(
+  ancestors: number,
+  descendants: number,
+  children: number,
+  siblingsPerAncestor = 0,
+) {
   const people: Record<string, TreePerson> = {};
   const families: TreeFamily[] = [];
   const add = (id: string, sex: Sex) => {
@@ -130,10 +182,16 @@ export function syntheticTree(ancestors: number, descendants: number, children: 
   for (let n = 1; n < 2 ** (ancestors + 1) / 2; n++) {
     add(`a${2 * n}`, 'M');
     add(`a${2 * n + 1}`, 'F');
+    const sibs = Array.from({ length: siblingsPerAncestor }, (_, i) => `a${n}x${i}`);
+    for (const sib of sibs) {
+      add(sib, 'M');
+      add(`${sib}s`, 'F');
+      families.push({ id: `fs${sib}`, partners: [sib, `${sib}s`], children: [] });
+    }
     families.push({
       id: `fa${n}`,
       partners: [`a${2 * n}`, `a${2 * n + 1}`],
-      children: [{ id: `a${n}` }],
+      children: [{ id: `a${n}` }, ...sibs.map((id) => ({ id }))],
     });
   }
   let generation = ['a1'];
@@ -218,6 +276,9 @@ export function describeLayout(layout: TreeLayout): string {
       n.canCollapseUp ? '-up' : '',
       n.canExpandDown ? '+down' : '',
       n.canCollapseDown ? '-down' : '',
+      n.canExpandSiblings ? '+sibs' : '',
+      n.canCollapseSiblings ? '-sibs' : '',
+      n.isHalfSibling ? 'half' : '',
     ].filter(Boolean);
     const row = rows.get(n.y) ?? [];
     row.push(`${n.key}@${round(n.x)},${round(n.y)}${flags.length ? `[${flags.join(' ')}]` : ''}`);
@@ -226,7 +287,9 @@ export function describeLayout(layout: TreeLayout): string {
   const lines = [...rows.values()].map((r) => r.join('  '));
   for (const e of layout.edges) {
     const pts = e.points.map(([x, y]) => `${round(x)},${round(y)}`).join(' ');
-    const ends = [e.parents?.join('+'), e.child, e.rel].filter(Boolean).join(' ');
+    const ends = [e.parents?.join('+'), e.child, e.rel, e.half ? 'half' : '']
+      .filter(Boolean)
+      .join(' ');
     lines.push(`${e.kind} ${e.familyId} ${ends} : ${pts}`);
   }
   for (const l of layout.labels)

@@ -97,9 +97,10 @@ export function tidyLayout(units: readonly TidyUnit[], m: TidyMetrics): void {
         last = center;
       }
       groupCenters += (first + last) / 2;
-      let anchors = 0;
-      for (const a of group.anchors) anchors += a * step + m.card / 2;
-      anchorCenters += anchors / group.anchors.length;
+      // Middle of the outermost anchors: a couple's midpoint, or a sibling run's center.
+      const lo = Math.min(...group.anchors);
+      const hi = Math.max(...group.anchors);
+      anchorCenters += ((lo + hi) / 2) * step + m.card / 2;
       groupCount++;
     }
 

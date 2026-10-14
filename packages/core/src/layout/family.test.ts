@@ -8,6 +8,7 @@ import {
   makeGraph,
   multipleSpouses,
   nuclear,
+  siblings,
   threeGenerations,
 } from './test-graphs';
 import type { LayoutNode, TreeLayout, TreePerson } from './types';
@@ -247,5 +248,80 @@ describe('layoutDescendants', () => {
   it('ignores ancestors entirely', () => {
     const layout = layoutDescendants(nuclear, 'me');
     expect(layout.nodes.some((n) => n.generation < 0)).toBe(false);
+  });
+});
+
+describe('siblings in the family view', () => {
+  const row = (layout: TreeLayout, generation: number) =>
+    layout.nodes
+      .filter((n) => n.generation === generation)
+      .sort((a, b) => a.x - b.x)
+      .map((n) => n.key);
+
+  it('shows aunts and uncles beside the parents and siblings beside the focus couple', () => {
+    const layout = layoutFamily(siblings, 'me');
+    expect(describeLayout(layout)).toMatchSnapshot();
+    expect(row(layout, -1)).toEqual(['auntH', 'aunt', 'dad', 'mom', 'uncle', 'uncleW']);
+    expect(row(layout, 0)).toEqual(['older', 'olderW', 'sp', 'me', 'younger', 'half']);
+    expect([node(layout, 'me').x, node(layout, 'me').y]).toEqual([0, 0]);
+    // Grandparents sit over their own children: the aunt and the father.
+    const gp = (centerX(node(layout, 'gpa')) + centerX(node(layout, 'gma'))) / 2;
+    expect(gp).toBe((centerX(node(layout, 'aunt')) + centerX(node(layout, 'dad'))) / 2);
+    // One sibling bar under the parents spans every sibling.
+    const bar = layout.edges.find((e) => e.kind === 'sibling-bar' && e.familyId === 'F_me')!;
+    expect(bar.points[0]![0]).toBe(centerX(node(layout, 'older')));
+    expect(bar.points[1]![0]).toBe(centerX(node(layout, 'half')));
+    expect(layout.edges.find((e) => e.kind === 'couple' && e.familyId === 'F_uncle')).toBeDefined();
+  });
+
+  it('marks half siblings on the node and the edge', () => {
+    const layout = layoutFamily(siblings, 'me');
+    expect(node(layout, 'half').isHalfSibling).toBe(true);
+    expect(node(layout, 'younger').isHalfSibling).toBe(false);
+    expect(layout.edges.find((e) => e.child === 'half')?.half).toBe(true);
+    expect(layout.edges.find((e) => e.child === 'younger')?.half).toBeUndefined();
+  });
+
+  it('limits siblings with siblingsDepth and offers chevrons per sibling group', () => {
+    const one = layoutFamily(siblings, 'me', { siblingsDepth: 1 });
+    expect(row(one, -1)).toEqual(['dad', 'mom']);
+    expect(node(one, 'dad').canExpandSiblings).toBe(true);
+    expect(node(one, 'me').canCollapseSiblings).toBe(true);
+    const none = layoutFamily(siblings, 'me', { siblingsDepth: 0 });
+    expect(row(none, 0)).toEqual(['sp', 'me']);
+    expect(node(none, 'me').canExpandSiblings).toBe(true);
+    const expanded = layoutFamily(siblings, 'me', {
+      siblingsDepth: 0,
+      expanded: [expandKey('me', 'siblings')],
+    });
+    expect(row(expanded, 0)).toHaveLength(6);
+    const collapsed = layoutFamily(siblings, 'me', { collapsed: ['dad:siblings'] });
+    expect(row(collapsed, -1)).toEqual(['dad', 'mom', 'uncle', 'uncleW']);
+    expect(node(collapsed, 'dad').canCollapseSiblings).toBe(false);
+    for (const l of [one, none, expanded, collapsed]) {
+      expect([node(l, 'me').x, node(l, 'me').y]).toEqual([0, 0]);
+    }
+    // Siblings get no chevrons of their own; neither does someone without siblings.
+    expect(node(one, 'older').canExpandSiblings || node(one, 'older').canExpandUp).toBe(false);
+    expect(node(one, 'gpa').canExpandSiblings).toBe(false);
+  });
+
+  it('joins siblings with a bar even when their parents are hidden', () => {
+    const layout = layoutFamily(siblings, 'me', { ancestorsDepth: 0 });
+    expect(row(layout, 0)).toHaveLength(6);
+    const edges = layout.edges.filter((e) => e.familyId === 'F_me');
+    expect(edges.some((e) => e.parents)).toBe(false);
+    expect(edges.filter((e) => e.kind === 'sibling-bar')).toHaveLength(1);
+    expect(edges.filter((e) => e.child)).toHaveLength(4);
+  });
+
+  it('orders undated siblings after dated ones, keeping family order', () => {
+    const g = makeGraph({ p: 'M', a: 'F', b: 'M', c: 'F', me: 'M' }, [
+      ['F', 'p', null, ['a', 'me', 'b', 'c']],
+    ]);
+    const people = g.people as Record<string, TreePerson>;
+    people['c'] = { ...people['c']!, birthSortKey: 1 };
+    people['me'] = { ...people['me']!, birthSortKey: 2 };
+    expect(row(layoutFamily(g, 'me'), 0)).toEqual(['c', 'me', 'a', 'b']);
   });
 });

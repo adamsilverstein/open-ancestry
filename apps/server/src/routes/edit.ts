@@ -3,11 +3,9 @@ import {
   familyChildren,
   getPersonSummary,
   events,
-  names,
   noteLinks,
   notes,
   persons,
-  tagLinks,
   tags,
   type FamilyRow,
   type TableName,
@@ -21,17 +19,28 @@ import {
   edit,
   eventPeople,
   eventRow,
-  nameRow,
   refreshLiving,
   requireRow,
   resolveRelative,
 } from '../edits';
 import { badRequest, conflict, notFound } from '../errors';
 import {
+  addName,
+  createTag,
+  deleteName,
+  runOperation,
+  tagPerson,
+  untagPerson,
+  updateFamilyChild,
+  updateName,
+  updatePerson,
+} from '../operations';
+import {
   AddChildBody,
   AddParentBody,
   AddSiblingBody,
   AddSpouseBody,
+  BatchBody,
   EventBody,
   EventPatch,
   FamilyChildPatch,
@@ -126,13 +135,7 @@ export function editRoutes(app: Api, { library }: Deps): void {
       const store = open(request.params.tree);
       const { id } = request.params;
       requireRow(store, 'person', id);
-      const { primary_media_id } = request.body;
-      if (primary_media_id) ownerExists(store, 'media', primary_media_id);
-      const { batchId } = edit(store, 'Edit person', (tx) => {
-        persons.update(tx, id, request.body);
-        // `unknown` asks for the inferred status again.
-        if (request.body.living !== undefined) refreshLiving(tx, [id], { relatives: false });
-      });
+      const { batchId } = edit(store, 'Edit person', (tx) => updatePerson(tx, id, request.body));
       return { batchId, person: summary(store, id) };
     },
   );
@@ -152,9 +155,7 @@ export function editRoutes(app: Api, { library }: Deps): void {
       const store = open(request.params.tree);
       const { id } = request.params;
       requireRow(store, 'person', id);
-      const { batchId, result } = edit(store, 'Add name', (tx) =>
-        names.add(tx, id, nameRow(request.body)),
-      );
+      const { batchId, result } = edit(store, 'Add name', (tx) => addName(tx, id, request.body));
       return reply.code(201).send({ batchId, name: result });
     },
   );
@@ -165,9 +166,9 @@ export function editRoutes(app: Api, { library }: Deps): void {
     async (request) => {
       const store = open(request.params.tree);
       const { id } = request.params;
-      const existing = requireRow(store, 'person_name', id);
+      requireRow(store, 'person_name', id);
       const { batchId, result } = edit(store, 'Edit name', (tx) =>
-        names.update(tx, id, nameRow(request.body, existing)),
+        updateName(tx, id, request.body),
       );
       return { batchId, name: result };
     },
@@ -175,16 +176,8 @@ export function editRoutes(app: Api, { library }: Deps): void {
 
   app.delete('/api/trees/:tree/names/:id', ids, async (request) => {
     const store = open(request.params.tree);
-    const name = requireRow(store, 'person_name', request.params.id);
-    const count = (
-      store
-        .stmt('SELECT count(*) AS n FROM person_name WHERE person_id = ?')
-        .get(name.person_id) as {
-        n: number;
-      }
-    ).n;
-    if (count === 1) throw conflict('Cannot delete the only name of a person');
-    const { batchId } = edit(store, 'Delete name', (tx) => names.delete(tx, name.id));
+    requireRow(store, 'person_name', request.params.id);
+    const { batchId } = edit(store, 'Delete name', (tx) => deleteName(tx, request.params.id));
     return { batchId };
   });
 
@@ -384,11 +377,9 @@ export function editRoutes(app: Api, { library }: Deps): void {
       const store = open(request.params.tree);
       const { id } = request.params;
       requireRow(store, 'family_child', id);
-      const { is_preferred, ...rest } = request.body;
-      const { batchId, result } = edit(store, 'Edit child relationship', (tx) => {
-        if (is_preferred) familyChildren.setPreferred(tx, id);
-        return familyChildren.update(tx, id, rest);
-      });
+      const { batchId, result } = edit(store, 'Edit child relationship', (tx) =>
+        updateFamilyChild(tx, id, request.body),
+      );
       return { batchId, link: result };
     },
   );
@@ -447,9 +438,7 @@ export function editRoutes(app: Api, { library }: Deps): void {
     { schema: { params: TreeParams, body: TagBody } },
     async (request, reply) => {
       const store = open(request.params.tree);
-      const { batchId, result } = edit(store, 'Add tag', (tx) =>
-        tags.create(tx, { ...request.body, category: request.body.category ?? '' }),
-      );
+      const { batchId, result } = edit(store, 'Add tag', (tx) => createTag(tx, request.body));
       return reply.code(201).send({ batchId, tag: result });
     },
   );
@@ -483,7 +472,7 @@ export function editRoutes(app: Api, { library }: Deps): void {
       requireRow(store, 'person', id);
       requireRow(store, 'tag', request.body.tagId);
       const { batchId, result } = edit(store, 'Tag person', (tx) =>
-        tagLinks.create(tx, { tag_id: request.body.tagId, owner_type: 'person', owner_id: id }),
+        tagPerson(tx, id, request.body.tagId),
       );
       return reply.code(201).send({ batchId, link: result });
     },
@@ -495,10 +484,24 @@ export function editRoutes(app: Api, { library }: Deps): void {
     async (request) => {
       const store = open(request.params.tree);
       const { id, tagId } = request.params;
-      const link = tagLinks.listFor(store, 'person', id).find((l) => l.tag_id === tagId);
-      if (!link) throw notFound(`Person ${id} does not have tag ${tagId}`);
-      const { batchId } = edit(store, 'Untag person', (tx) => tagLinks.delete(tx, link.id));
+      const { batchId } = edit(store, 'Untag person', (tx) => untagPerson(tx, id, tagId));
       return { batchId };
+    },
+  );
+
+  // ------------------------------------------------------------ batch
+
+  /** Several edits as one change batch, so a dialog save is one undo step. */
+  app.post(
+    '/api/trees/:tree/batch',
+    { schema: { params: TreeParams, body: BatchBody } },
+    async (request) => {
+      const store = open(request.params.tree);
+      const { label, operations } = request.body;
+      const { batchId, result } = edit(store, label, (tx) =>
+        operations.map((operation) => runOperation(tx, operation)),
+      );
+      return { batchId, results: result };
     },
   );
 }

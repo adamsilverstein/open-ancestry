@@ -74,6 +74,7 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 | `POST /api/trees/:tree/notes` `{ text, owner_type, owner_id }`; `PATCH`, `DELETE /api/trees/:tree/notes/:id` | Notes. |
 | `POST /api/trees/:tree/tags`; `PATCH`, `DELETE /api/trees/:tree/tags/:id` | Tags. |
 | `POST /api/trees/:tree/people/:id/tags` `{ tagId }`; `DELETE /api/trees/:tree/people/:id/tags/:tagId` | Tag or untag a person. |
+| `POST /api/trees/:tree/batch` `{ label, operations }` | Several edits as one change batch (one undo step, labelled `label`), all or nothing. Operations: `person.update` `{ id, patch }`, `name.add` `{ personId, name }`, `name.update` `{ id, name }`, `name.delete` `{ id }`, `familyChild.update` `{ id, patch }`, `tag.create` `{ tag, attachTo? }`, `person.tag` / `person.untag` `{ personId, tagId }`, each with the body of its single route. Returns `{ batchId, results }`. |
 
 ## Import jobs
 

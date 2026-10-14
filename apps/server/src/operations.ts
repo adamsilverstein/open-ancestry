@@ -125,6 +125,25 @@ export function deleteTag(tx: Tx, id: string) {
   tags.delete(tx, id);
 }
 
+const categoryTags = (tx: Tx, category: string) =>
+  tx.store
+    .stmt('SELECT id FROM tag WHERE category = ? ORDER BY id')
+    .pluck()
+    .all(category) as string[];
+
+export function renameCategory(tx: Tx, from: string, to: string) {
+  const ids = categoryTags(tx, from);
+  for (const id of ids) tags.update(tx, id, { category: to });
+  return { updated: ids.length };
+}
+
+/** Deletes every tag in the category, with its links. */
+export function deleteCategory(tx: Tx, category: string) {
+  const ids = categoryTags(tx, category);
+  for (const id of ids) tags.delete(tx, id);
+  return { deleted: ids.length };
+}
+
 /** Runs one batch operation; the result is what the single route would return. */
 export function runOperation(tx: Tx, operation: BatchOperation): unknown {
   switch (operation.op) {
@@ -148,5 +167,9 @@ export function runOperation(tx: Tx, operation: BatchOperation): unknown {
       return updateTag(tx, operation.id, operation.patch);
     case 'tag.delete':
       return deleteTag(tx, operation.id) ?? null;
+    case 'tag.renameCategory':
+      return renameCategory(tx, operation.from, operation.to);
+    case 'tag.deleteCategory':
+      return deleteCategory(tx, operation.category);
   }
 }

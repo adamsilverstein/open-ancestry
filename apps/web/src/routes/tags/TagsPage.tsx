@@ -320,14 +320,9 @@ export function TagsPage() {
           category={dialog.category}
           onClose={() => setDialog(null)}
           onSave={(name) =>
-            batch(
-              `Rename category: ${dialog.category}`,
-              (groups.get(dialog.category) ?? []).map((t) => ({
-                op: 'tag.update',
-                id: t.id,
-                patch: { category: name },
-              })),
-            )
+            batch(`Rename category: ${dialog.category}`, [
+              { op: 'tag.renameCategory', from: dialog.category, to: name },
+            ])
           }
         />
       )}
@@ -346,10 +341,9 @@ export function TagsPage() {
           if (confirm.kind === 'tag') {
             batch(`Delete tag: ${confirm.tag.name}`, [{ op: 'tag.delete', id: confirm.tag.id }]);
           } else {
-            batch(
-              `Delete category: ${confirm.category}`,
-              confirm.tags.map((t) => ({ op: 'tag.delete', id: t.id })),
-            );
+            batch(`Delete category: ${confirm.category}`, [
+              { op: 'tag.deleteCategory', category: confirm.category },
+            ]);
           }
         }}
       />

@@ -253,6 +253,9 @@ export const BatchOperation = Type.Union([
   op('person.untag', { personId: Id, tagId: Id }),
   op('tag.update', { id: Id, patch: TagPatch }),
   op('tag.delete', { id: Id }),
+  /** Every tag in a category at once, so a big category is still one operation. */
+  op('tag.renameCategory', { from: Type.String({ minLength: 1, maxLength: 100 }), to: text(100) }),
+  op('tag.deleteCategory', { category: Type.String({ minLength: 1, maxLength: 100 }) }),
 ]);
 export type BatchOperation = Static<typeof BatchOperation>;
 

@@ -1484,6 +1484,42 @@
                 }
               },
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["op", "from", "to"],
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "const": "tag.renameCategory"
+                },
+                "from": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                },
+                "to": {
+                  "type": "string",
+                  "maxLength": 100
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["op", "category"],
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "const": "tag.deleteCategory"
+                },
+                "category": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                }
+              },
+              "additionalProperties": false
             }
           ]
         },
@@ -1969,6 +2005,42 @@
             "minLength": 1,
             "maxLength": 64,
             "pattern": "^[0-9A-Za-z_-]+$"
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": ["op", "from", "to"],
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "tag.renameCategory"
+          },
+          "from": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "to": {
+            "type": "string",
+            "maxLength": 100
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": ["op", "category"],
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "tag.deleteCategory"
+          },
+          "category": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
           }
         },
         "additionalProperties": false

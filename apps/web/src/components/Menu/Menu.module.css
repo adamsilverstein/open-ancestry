@@ -1,0 +1,18 @@
+.content {
+  min-width: 200px;
+  padding: var(--oa-space-1);
+}
+
+.item {
+  justify-content: flex-start;
+}
+
+.item > :last-child:not(:first-child) {
+  margin-left: auto;
+}
+
+.separator {
+  height: 1px;
+  margin: var(--oa-space-1) 0;
+  background: var(--oa-border);
+}

@@ -1,0 +1,62 @@
+.trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oa-space-2);
+  text-align: start;
+  cursor: pointer;
+}
+
+.trigger[data-placeholder] {
+  color: var(--oa-text-muted);
+}
+
+.chevron {
+  display: grid;
+  color: var(--oa-text-muted);
+}
+
+.content {
+  min-width: var(--radix-select-trigger-width);
+  max-height: var(--radix-select-content-available-height);
+  overflow: hidden;
+  border: 1px solid var(--oa-elevated-border);
+  border-radius: var(--oa-radius-md);
+  background: var(--oa-surface);
+  box-shadow: var(--oa-shadow-2);
+  z-index: 50;
+}
+
+.viewport {
+  padding: var(--oa-space-1);
+}
+
+/* Shared by Select, Combobox, menus and the command palette. */
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oa-space-2);
+  min-height: 32px;
+  padding: var(--oa-space-1) var(--oa-space-2);
+  border-radius: var(--oa-radius-sm);
+  font: var(--oa-text-md);
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+}
+
+.item[data-highlighted],
+.item[data-selected='true'] {
+  background: var(--oa-surface-selected);
+}
+
+.item[data-disabled] {
+  color: var(--oa-text-muted);
+  cursor: not-allowed;
+}
+
+.indicator {
+  display: grid;
+  color: var(--oa-accent);
+}

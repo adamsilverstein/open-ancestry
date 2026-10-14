@@ -1,0 +1,19 @@
+.content {
+  min-width: var(--radix-popover-trigger-width);
+}
+
+.input {
+  width: 100%;
+  height: 36px;
+  padding: 0 var(--oa-space-3);
+  border: 0;
+  border-bottom: 1px solid var(--oa-border);
+  background: transparent;
+  outline: none;
+}
+
+.empty {
+  padding: var(--oa-space-3);
+  color: var(--oa-text-muted);
+  font: var(--oa-text-sm);
+}

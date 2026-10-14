@@ -38,6 +38,12 @@ export default defineConfig({
     [ci ? 'github' : 'list'],
     ['html', { outputFolder: '../playwright-report', open: 'never' }],
   ],
+  // Visual baselines are Chromium on Linux only (see design.spec.ts), so the
+  // path drops the default project and platform suffixes.
+  snapshotPathTemplate: '{testDir}/__screenshots__/{testFilePath}/{arg}{ext}',
+  expect: {
+    toHaveScreenshot: { maxDiffPixelRatio: 0.002 },
+  },
   use: {
     baseURL,
     trace: 'on-first-retry',

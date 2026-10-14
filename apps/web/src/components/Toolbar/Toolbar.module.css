@@ -1,0 +1,17 @@
+.toolbar {
+  display: inline-flex;
+  gap: var(--oa-space-1);
+  padding: var(--oa-space-1);
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-md);
+  background: var(--oa-surface);
+}
+
+.horizontal {
+  flex-direction: row;
+  align-items: center;
+}
+
+.vertical {
+  flex-direction: column;
+}

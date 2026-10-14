@@ -1,0 +1,43 @@
+.list {
+  display: flex;
+  gap: var(--oa-space-1);
+  border-bottom: 1px solid var(--oa-border);
+}
+
+.trigger {
+  position: relative;
+  padding: var(--oa-space-2) var(--oa-space-3);
+  border: 0;
+  background: transparent;
+  color: var(--oa-text-muted);
+  font: var(--oa-text-md);
+  font-weight: var(--oa-weight-medium);
+  cursor: pointer;
+}
+
+.trigger:hover {
+  color: var(--oa-text);
+}
+
+.trigger[data-state='active'] {
+  color: var(--oa-text);
+  font-weight: var(--oa-weight-semibold);
+}
+
+/* Selected tab is marked by weight and an underline, not color alone. */
+.trigger[data-state='active']::after {
+  content: '';
+  position: absolute;
+  inset: auto var(--oa-space-2) -1px;
+  height: 2px;
+  background: var(--oa-accent);
+}
+
+.trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.content {
+  padding-block: var(--oa-space-4);
+}

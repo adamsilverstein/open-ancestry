@@ -1,0 +1,89 @@
+.item {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  gap: var(--oa-space-3);
+  padding: var(--oa-space-3);
+  border-bottom: 1px solid var(--oa-border);
+  list-style: none;
+}
+
+.family {
+  background: var(--oa-surface-sunken);
+}
+
+/* Alternate facts sit indented under the preferred one. */
+.alternate {
+  margin-left: var(--oa-space-6);
+  border-left: 2px dotted var(--oa-border-strong);
+}
+
+.when {
+  display: flex;
+  flex-direction: column;
+  font-variant-numeric: tabular-nums;
+}
+
+.year {
+  font-weight: var(--oa-weight-semibold);
+}
+
+.age {
+  color: var(--oa-text-muted);
+  font: var(--oa-text-xs);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: var(--oa-space-2);
+  font-weight: var(--oa-weight-semibold);
+}
+
+.family .title {
+  font-weight: var(--oa-weight-medium);
+}
+
+.familyIcon {
+  color: var(--oa-text-muted);
+}
+
+.chip {
+  padding: 0 var(--oa-space-2);
+  border: 1px solid var(--oa-border-strong);
+  border-radius: var(--oa-radius-full);
+  color: var(--oa-text-muted);
+  font: var(--oa-text-xs);
+  font-weight: var(--oa-weight-medium);
+}
+
+.detail {
+  color: var(--oa-text-muted);
+  font: var(--oa-text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.sources {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oa-space-1);
+  color: var(--oa-info);
+  font: var(--oa-text-xs);
+}
+
+/* Unsourced facts are muted and italic: uncertainty is visible. */
+.unsourced {
+  color: var(--oa-text-muted);
+  font-style: italic;
+}
+
+.actions {
+  display: flex;
+  align-items: flex-start;
+}

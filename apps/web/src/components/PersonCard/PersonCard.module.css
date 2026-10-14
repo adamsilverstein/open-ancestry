@@ -1,0 +1,166 @@
+.card {
+  --oa-sex-color: var(--oa-person-unknown);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--oa-space-1);
+  padding: var(--oa-space-3) var(--oa-space-2) var(--oa-space-2);
+  overflow: hidden;
+  border: 1px solid var(--oa-border);
+  border-top: 4px solid var(--oa-sex-color);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-surface);
+  box-shadow: var(--oa-shadow-1);
+  color: var(--oa-text);
+  text-align: center;
+  cursor: pointer;
+  transition:
+    box-shadow var(--oa-duration-fast) var(--oa-ease),
+    transform var(--oa-duration-fast) var(--oa-ease);
+}
+
+.regular {
+  width: 120px;
+  height: 150px;
+}
+
+.compact {
+  width: 96px;
+  height: 120px;
+  padding-top: var(--oa-space-2);
+}
+
+.sexM {
+  --oa-sex-color: var(--oa-person-male);
+}
+
+.sexF {
+  --oa-sex-color: var(--oa-person-female);
+}
+
+.card:is(:hover, [data-demo-hover]) {
+  box-shadow: var(--oa-shadow-2);
+  background: var(--oa-surface-hover);
+}
+
+/*
+ * Three states, three shapes, so they read apart without relying on color:
+ * keyboard focus is a detached outer ring, the focus person an attached outer
+ * ring, selection an inset ring plus tint and a check badge.
+ */
+.card:focus-visible,
+.card[data-demo-focus] {
+  outline: var(--oa-focus-width) solid var(--oa-focus);
+  outline-offset: 4px;
+}
+
+.selected {
+  border-color: var(--oa-accent);
+  border-top-color: var(--oa-sex-color);
+  background: var(--oa-surface-selected);
+  box-shadow: inset 0 0 0 2px var(--oa-accent);
+}
+
+.focusPerson {
+  box-shadow:
+    0 0 0 2px var(--oa-canvas-text),
+    var(--oa-shadow-2);
+  transform: translateY(-2px);
+}
+
+.selected.focusPerson {
+  box-shadow:
+    inset 0 0 0 2px var(--oa-accent),
+    0 0 0 2px var(--oa-canvas-text),
+    var(--oa-shadow-2);
+}
+
+.selectedBadge {
+  color: var(--oa-accent);
+}
+
+.focusPerson .name {
+  font-weight: var(--oa-weight-bold);
+}
+
+/* Duplicate (pedigree collapse): dashed border plus link icon. */
+.duplicate {
+  border-style: dashed;
+  border-color: var(--oa-border-strong);
+  border-top-color: var(--oa-sex-color);
+  border-top-style: solid;
+  box-shadow: none;
+}
+
+.avatarWrap {
+  position: relative;
+  display: flex;
+  flex: none;
+}
+
+.sexBadge {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--oa-surface);
+  border-radius: 50%;
+  background: var(--oa-sex-color);
+  color: light-dark(#ffffff, #14171c);
+}
+
+.privateAvatar {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--oa-surface-sunken);
+  color: var(--oa-text-muted);
+}
+
+.compact .privateAvatar {
+  width: 40px;
+  height: 40px;
+}
+
+.name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  font: var(--oa-text-sm);
+  font-weight: var(--oa-weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.compact .name {
+  font: var(--oa-text-xs);
+  font-weight: var(--oa-weight-semibold);
+}
+
+.lifespan {
+  color: var(--oa-text-muted);
+  font: var(--oa-text-xs);
+}
+
+.badges {
+  position: absolute;
+  top: var(--oa-space-1);
+  right: var(--oa-space-1);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--oa-text-muted);
+}
+
+.tagDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}

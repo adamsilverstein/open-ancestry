@@ -3,8 +3,8 @@
  * marks, embeddings, overrides, isolates and line separators that can
  * rewrite or reorder what a terminal shows.
  */
-// eslint-disable-next-line no-control-regex
 const CONTROLS =
+  // eslint-disable-next-line no-control-regex
   /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g;
 
 /**

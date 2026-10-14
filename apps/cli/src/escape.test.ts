@@ -11,7 +11,9 @@ import { run } from './main';
  */
 
 // Anything but tab and newline in C0, DEL, C1, and bidi controls.
-const RAW_CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/;
+const RAW_CONTROL =
+  // eslint-disable-next-line no-control-regex
+  /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
 
 describe('escapeControls', () => {
   it('makes control characters visible and keeps ordinary text, tabs and newlines', () => {

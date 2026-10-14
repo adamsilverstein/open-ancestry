@@ -1270,8 +1270,9 @@ export class Mapper {
     this.writeFamilies();
     this.writeChildLinks();
     this.typeLaterNames();
-    this.inferLiving();
-    this.checkCycles();
+    const relatives = this.relatives();
+    this.inferLiving(relatives);
+    this.checkCycles(relatives.parents);
     this.writePersons();
     for (const place of this.places.rows()) this.sink.insert('place', place);
     this.chooseHomePerson();
@@ -1492,8 +1493,7 @@ export class Mapper {
     return { parents, children, spouses };
   }
 
-  private inferLiving(): void {
-    const { parents, children, spouses } = this.relatives();
+  private inferLiving({ parents, children, spouses }: ReturnType<Mapper['relatives']>): void {
     const births = (ids: string[] | undefined) =>
       (ids ?? []).flatMap((id) => {
         const p = this.persons.get(id)!;
@@ -1519,8 +1519,7 @@ export class Mapper {
   }
 
   /** Warns (without changing anything) when someone is their own ancestor. */
-  private checkCycles(): void {
-    const { parents } = this.relatives();
+  private checkCycles(parents: Map<string, string[]>): void {
     const state = new Map<string, 1 | 2>();
     let reported = 0;
     for (const start of this.persons.keys()) {

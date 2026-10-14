@@ -1,0 +1,55 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`layoutFan > assigns each ancestor an Ahnentafel slot in its ring 1`] = `
+"me g0 #1 180..360deg r0..60
+dad g1 #2 180..270deg r60..130
+mom g1 #3 270..360deg r60..130
+pgf g2 #4 180..225deg r130..200
+pgm g2 #5 225..270deg r130..200
+mgf g2 #6 270..315deg r130..200
+mgm g2 #7 315..360deg r130..200
+pgf_f g3 #8 180..202deg r200..270
+pgf_m g3 #9 202..225deg r200..270
+pgm_f g3 #10 225..247deg r200..270
+pgm_m g3 #11 247..270deg r200..270
+mgf_f g3 #12 270..293deg r200..270
+mgf_m g3 #13 293..315deg r200..270
+mgm_f g3 #14 315..337deg r200..270
+mgm_m g3 #15 337..360deg r200..270"
+`;
+
+exports[`layoutPedigree > lays ancestors out to the right, father above mother 1`] = `
+"pgf_f@552,-593
+pgf@368,-510[-up]
+pgf_m@552,-427
+dad@184,-340[-up]
+pgm_f@552,-253
+pgm@368,-170[-up]
+pgm_m@552,-87
+me@0,0[focus -up]
+mgf_f@552,87
+mgf@368,170[-up]
+mgf_m@552,253
+mom@184,340[-up]
+mgm_f@552,427
+mgm@368,510[-up]
+mgm_m@552,593
+parent-child F_me dad me unknown : 120,75 152,75 152,-265 184,-265
+parent-child F_me mom me unknown : 120,75 152,75 152,415 184,415
+parent-child F_dad pgf dad unknown : 304,-265 336,-265 336,-435 368,-435
+parent-child F_dad pgm dad unknown : 304,-265 336,-265 336,-95 368,-95
+parent-child F_mom mgf mom unknown : 304,415 336,415 336,245 368,245
+parent-child F_mom mgm mom unknown : 304,415 336,415 336,585 368,585
+parent-child F_pgf pgf_f pgf unknown : 488,-435 520,-435 520,-518 552,-518
+parent-child F_pgf pgf_m pgf unknown : 488,-435 520,-435 520,-352 552,-352
+parent-child F_pgm pgm_f pgm unknown : 488,-95 520,-95 520,-178 552,-178
+parent-child F_pgm pgm_m pgm unknown : 488,-95 520,-95 520,-12 552,-12
+parent-child F_mgf mgf_f mgf unknown : 488,245 520,245 520,162 552,162
+parent-child F_mgf mgf_m mgf unknown : 488,245 520,245 520,328 552,328
+parent-child F_mgm mgm_f mgm unknown : 488,585 520,585 520,502 552,502
+parent-child F_mgm mgm_m mgm unknown : 488,585 520,585 520,668 552,668
+label -3 "Great-grandparents" @552,-593
+label -2 "Grandparents" @368,-593
+label -1 "Parents" @184,-593
+bounds 0,-593 672x1336"
+`;

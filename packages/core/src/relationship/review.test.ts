@@ -290,7 +290,8 @@ describe('review: bounded output', () => {
     expect(r.complete).toBe(false);
     expect(r.name).toMatch(/ and \d+ more$/);
     // Fast even here: the walk keeps a few lines per ancestor, not all of them.
-    // CPU time, not wall time, which swings with whatever else the machine is running.
+    // CPU time of this test process (Vitest's forks pool), not wall time, which swings
+    // with whatever else the machine is running.
     const started = process.cpuUsage();
     for (const [a, c] of [
       ['g14_10', 'g13_50'],

@@ -173,7 +173,7 @@ for (const tree of trees) {
   const url = (person: string, extra: string) =>
     `/tree/${person}?tree=${encodeURIComponent(tree.tree)}${extra}`;
 
-  test.describe(`${people}-person tree`, () => {
+  test.describe(`${people}-person tree`, { tag: '@perf' }, () => {
     test('first paint', async ({ browser }) => {
       const times: number[] = [];
       // Fresh contexts: nothing cached, as on opening the app at the home person.

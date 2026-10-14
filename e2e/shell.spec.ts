@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { budget, perfOnly } from './budget';
+import { perfOnly } from './budget';
 import { expect, test } from './fixtures';
 import { FIXTURE_TREE } from './tree-fixture';
 import { readSeed } from './tree-view-fixtures';
@@ -277,7 +277,9 @@ test.describe('performance', () => {
         }),
     );
     expect(lcp).toBeGreaterThan(0);
-    expect(lcp).toBeLessThan(budget(1000));
+    // Not scaled by OA_BENCH_FACTOR: an uninstrumented single-worker run measures about
+    // 120-180ms even on a loaded machine, so 1s holds as written.
+    expect(lcp).toBeLessThan(1000);
     expect(cls).toBeLessThan(0.01);
   });
 });

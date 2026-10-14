@@ -210,6 +210,8 @@ test.describe('tree switcher', () => {
     await expect(lastItem).toBeInViewport();
     // So axe's Safari-only scrollable-region rule, which does not know the ARIA menu
     // pattern (items out of the tab order, arrow keys move focus), does not apply.
+    // Rule: https://dequeuniversity.com/rules/axe/4.13/scrollable-region-focusable
+    // Decision: https://github.com/adamsilverstein/open-ancestry/pull/94 (narrowed to this menu).
     const axe = await new AxeBuilder({ page })
       .include('[role="menu"]')
       .disableRules(['scrollable-region-focusable'])

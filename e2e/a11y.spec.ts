@@ -61,6 +61,8 @@ for (const colorScheme of ['light', 'dark'] as const) {
       // keys, scrolling each item into view (import.spec.ts checks End reaches the last
       // tree). axe's Safari-only scrollable-region rule does not know that pattern, and the
       // menu only scrolls when parallel specs have filled the shared library with trees.
+      // Rule: https://dequeuniversity.com/rules/axe/4.13/scrollable-region-focusable
+      // Decision: https://github.com/adamsilverstein/open-ancestry/pull/94 (narrowed to this menu).
       const menu = await new AxeBuilder({ page })
         .include('[role="menu"]')
         .disableRules(['scrollable-region-focusable'])

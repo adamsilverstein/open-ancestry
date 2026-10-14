@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import sharp from 'sharp';
-import { MEDIA_IDS, MEDIA_TREE, PHOTO_TITLES, REMOTE_HOST } from './media-fixture';
+import { HOSTILE_URLS, MEDIA_IDS, MEDIA_TREE, PHOTO_TITLES, REMOTE_HOST } from './media-fixture';
 import { expect, test } from './fixtures';
 
 /*
@@ -156,4 +156,25 @@ test('virtualizes a large gallery', async ({ page }) => {
   await expect(gallery.getByRole('button', { name: /Placeholder 400\b/ })).toBeVisible();
   expect(await gallery.getByRole('button').count()).toBeLessThan(120);
   await expect(gallery).toContainText('400 items');
+});
+
+test('never turns hostile imported URLs into links', async ({ page }) => {
+  const dialogs: string[] = [];
+  page.on('dialog', (dialog) => {
+    dialogs.push(dialog.message());
+    void dialog.dismiss();
+  });
+  const gallery = await openGallery(page, MEDIA_IDS.hostile);
+  for (let i = 1; i <= HOSTILE_URLS.length; i++) {
+    await gallery.getByRole('button', { name: new RegExp(`Hostile link ${i}\\b`) }).click();
+    const lightbox = page.getByRole('dialog');
+    await expect(lightbox).toContainText(`Hostile link ${i}`);
+    await expect(lightbox.getByRole('link', { name: 'View on Ancestry' })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+  }
+  const hrefs = await page
+    .locator('a[href]')
+    .evaluateAll((links) => links.map((a) => a.getAttribute('href') ?? ''));
+  for (const href of hrefs) expect(href).not.toMatch(/^(javascript|data|file):|evil\.example/i);
+  expect(dialogs).toEqual([]);
 });

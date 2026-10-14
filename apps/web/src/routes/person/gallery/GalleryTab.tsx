@@ -22,6 +22,7 @@ import { Select } from '../../../components/Select/Select';
 import { Skeleton } from '../../../components/Skeleton/Skeleton';
 import { eventLabel } from '../../../lib/timeline';
 import {
+  ancestryLink,
   attachMedia,
   hasThumbnail,
   mediaGroup,
@@ -152,6 +153,7 @@ function Lightbox({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [index, items.length, onIndexChange]);
   const where = attachedTo(item);
+  const remoteLink = ancestryLink(media.remote_url);
   return (
     <Dialog
       open
@@ -216,9 +218,9 @@ function Lightbox({
             <a href={originalUrl(tree, media.id)} target="_blank" rel="noreferrer noopener">
               Open original <ExternalLink size={14} aria-hidden />
             </a>
-          ) : media.remote_url ? (
+          ) : remoteLink ? (
             // Opening it is the user's choice; the app never loads it.
-            <a href={media.remote_url} target="_blank" rel="noreferrer noopener">
+            <a href={remoteLink} target="_blank" rel="noreferrer noopener">
               View on Ancestry <ExternalLink size={14} aria-hidden />
             </a>
           ) : (

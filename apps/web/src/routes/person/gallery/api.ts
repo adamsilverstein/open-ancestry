@@ -65,3 +65,27 @@ export function mediaGroup(media: MediaRow): Exclude<MediaFilter, 'all'> {
 
 /** True when the server can make a thumbnail (a local photo). */
 export const hasThumbnail = (media: MediaRow) => !!media.local_path && media.kind === 'photo';
+
+/** Ancestry's own sites and its media CDN; imported links to anything else are not shown. */
+const ANCESTRY_HOST =
+  /(^|\.)(ancestry\.(com|ca|de|fr|it|se|ie|mx|nl|no|dk|fi|be|at|ch|pl|es|pt|co\.uk|com\.au|co\.nz|com\.mx)|ancestrycdn\.com|ancestrylibrary\.com)$/i;
+
+/**
+ * The imported media URL when it is an https link to Ancestry, else null.
+ * GEDCOM is untrusted, so `javascript:`, `data:`, `file:` and other sites are
+ * never rendered as links.
+ */
+export function ancestryLink(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' &&
+      !parsed.username &&
+      !parsed.password &&
+      ANCESTRY_HOST.test(parsed.hostname)
+      ? parsed.href
+      : null;
+  } catch {
+    return null;
+  }
+}

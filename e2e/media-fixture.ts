@@ -10,12 +10,20 @@ import { createTree, createUlidFactory, type InsertRow } from '@open-ancestry/db
  */
 
 export const MEDIA_TREE = 'media-fixture';
-export const REMOTE_HOST = 'mediasvc.ancestry.example';
+export const REMOTE_HOST = 'mediasvc.ancestry.com';
+/** Links a hostile GEDCOM could carry; none may become a link. */
+export const HOSTILE_URLS = [
+  'javascript:alert(document.domain)',
+  'https://evil.example/ancestry.com/x.jpg',
+  'data:text/html,<script>alert(1)</script>',
+  'file:///etc/passwd',
+];
 
 const fixedId = createUlidFactory({ now: () => 1_760_000_000_000, random: () => 3 });
 export const MEDIA_IDS = {
   imogen: fixedId(),
   many: fixedId(),
+  hostile: fixedId(),
   imogenBirth: fixedId(),
   mill: fixedId(),
   wedding: fixedId(),
@@ -62,6 +70,7 @@ export async function buildMediaTree(library: string): Promise<void> {
     };
     person(id.imogen, 'Imogen', 'Larch');
     person(id.many, 'Marta', 'Plenty');
+    person(id.hostile, 'Hal', 'Hostile');
     tx.insert('event', {
       id: id.imogenBirth,
       type: 'BIRT',
@@ -129,6 +138,14 @@ export async function buildMediaTree(library: string): Promise<void> {
       },
       id.imogenBirth,
       'event',
+    );
+    HOSTILE_URLS.forEach((url, i) =>
+      add(
+        { id: fixedId(), kind: 'photo', remote_url: url, title: `Hostile link ${i + 1}` },
+        id.hostile,
+        'person',
+        i,
+      ),
     );
     for (let i = 0; i < 400; i++) {
       add(

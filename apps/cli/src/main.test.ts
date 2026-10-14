@@ -5,11 +5,11 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { generateGedcom } from '../../../fixtures/generate';
-import { exposureWarning, parseCliArgs, progressReporter, run } from './main';
+import { exposureWarning, main, parseCliArgs, progressReporter, run } from './main';
 
 describe('parseCliArgs', () => {
   it('parses serve with defaults', () => {
-    expect(parseCliArgs(['serve'], {})).toEqual({
+    expect(parseCliArgs(['serve'], {}, { tty: false })).toEqual({
       command: 'serve',
       host: '127.0.0.1',
       port: 4317,
@@ -62,6 +62,21 @@ describe('parseCliArgs', () => {
 
   it('rejects an invalid port', () => {
     expect(() => parseCliArgs(['serve', '--port', 'abc'])).toThrow(/port/);
+  });
+
+  it('opens the browser by default on a terminal, unless --no-open (issue #122)', () => {
+    expect(parseCliArgs(['serve'], {}, { tty: true })).toMatchObject({ open: true });
+    // Piped or scripted output (CI, e2e) gets no browser unless asked.
+    expect(parseCliArgs(['serve'], {}, { tty: false })).toMatchObject({ open: false });
+    expect(parseCliArgs(['serve', '--no-open'], {}, { tty: true })).toMatchObject({ open: false });
+    expect(parseCliArgs(['serve', '--open'], {}, { tty: false })).toMatchObject({ open: true });
+  });
+
+  it('reads -h and --help, for the CLI and for each command (issue #119)', () => {
+    expect(parseCliArgs(['--help'])).toEqual({ command: 'help' });
+    expect(parseCliArgs(['-h'])).toEqual({ command: 'help' });
+    expect(parseCliArgs(['serve', '--help'])).toEqual({ command: 'help', topic: 'serve' });
+    expect(parseCliArgs(['import', '-h'])).toEqual({ command: 'help', topic: 'import' });
   });
 
   it('returns help for no command', () => {
@@ -117,6 +132,41 @@ describe('run', () => {
 
   it('warns loudly when the host is not loopback', () => {
     expect(exposureWarning('0.0.0.0')).toMatch(/WARNING: listening on 0\.0\.0\.0/);
+  });
+
+  it('exits 0 with usage for --help, per command too', async () => {
+    const logs: string[] = [];
+    expect(await main(['--help'], { log: (line) => logs.push(line) })).toBe(0);
+    expect(logs.join('\n')).toMatch(/^Usage: open-ancestry <command>/);
+    logs.length = 0;
+    expect(await main(['serve', '--help'], { log: (line) => logs.push(line) })).toBe(0);
+    expect(logs.join('\n')).toMatch(/^Usage: open-ancestry serve/);
+    expect(logs.join('\n')).toContain('--no-open');
+    expect(logs.join('\n')).not.toContain('--media');
+    logs.length = 0;
+    expect(await main(['import', '--help'], { log: (line) => logs.push(line) })).toBe(0);
+    expect(logs.join('\n')).toMatch(/^Usage: open-ancestry import <file>/);
+    expect(logs.join('\n')).not.toContain('--port');
+  });
+
+  it('exits 2 with a one-line message and usage for unknown commands and options', async () => {
+    for (const [argv, message] of [
+      [['bogus'], 'Unknown command: bogus'],
+      [['serve', '--bogus'], 'Unknown option: --bogus'],
+      [['import', 'a.ged', '-x'], 'Unknown option: -x'],
+    ] as const) {
+      const errors: string[] = [];
+      const logs: string[] = [];
+      const code = await main([...argv], {
+        error: (line) => errors.push(line),
+        log: (line) => logs.push(line),
+      });
+      expect(code).toBe(2);
+      const [first, ...rest] = errors.join('\n').split('\n');
+      expect(first).toBe(message);
+      expect(rest.join('\n')).toContain('Usage: open-ancestry');
+      expect(logs).toEqual([]);
+    }
   });
 
   it('prints usage for help', async () => {

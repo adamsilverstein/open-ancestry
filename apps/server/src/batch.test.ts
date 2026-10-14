@@ -12,8 +12,15 @@ beforeEach(async () => {
 afterEach(() => api.close());
 
 type Detail = {
-  person: { sex: string };
-  names: { id: string; given: string | null; type: string; full_text: string | null }[];
+  person: { sex: string; updated_at: string };
+  names: {
+    id: string;
+    given: string | null;
+    surname: string | null;
+    type: string;
+    full_text: string | null;
+    updated_at: string;
+  }[];
   tags: { name: string }[];
   parentFamilies: { link: { id: string; partner1_rel: string } }[];
 };
@@ -93,6 +100,83 @@ describe('batch', () => {
       operations: [{ op: 'name.update', id: 'NOPE', name: { given: 'x' } }],
     });
     expect(res.statusCode).toBe(404);
+  });
+
+  it('refuses operations made from stale data with 409 stale, changing nothing', async () => {
+    const seen = await detail(s.ada);
+    const name = seen.names[0]!;
+    // Timestamps have millisecond resolution; make sure the next edit gets a new one.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    // Another window renames Ada after this one loaded her.
+    let res = await api.post(`${s.base}/batch`, {
+      label: 'Other window',
+      operations: [{ op: 'name.update', id: name.id, name: { given: 'Adeline' } }],
+    });
+    expect(res.statusCode).toBe(200);
+
+    for (const operation of [
+      { op: 'name.update', id: name.id, name: { surname: 'Ashby' }, expect: name.updated_at },
+      { op: 'name.delete', id: name.id, expect: name.updated_at },
+    ]) {
+      res = await api.post(`${s.base}/batch`, {
+        label: 'Stale',
+        operations: [
+          { op: 'person.update', id: s.ada, patch: { sex: 'X' }, expect: seen.person.updated_at },
+          operation,
+        ],
+      });
+      expect(res.statusCode, operation.op).toBe(409);
+      expect(res.json().error.code).toBe('stale');
+    }
+    const after = await detail(s.ada);
+    expect(after.person.sex).toBe(seen.person.sex);
+    expect(after.names[0]).toMatchObject({ given: 'Adeline', surname: name.surname });
+    expect((await history()).items[0].label).toBe('Other window');
+
+    // Undo puts the row back as this window saw it, so its save goes through again.
+    await api.post(`${s.base}/undo`);
+    res = await api.post(`${s.base}/batch`, {
+      label: 'Fresh',
+      operations: [
+        { op: 'name.update', id: name.id, name: { surname: 'Ashby' }, expect: name.updated_at },
+        { op: 'person.update', id: s.ada, patch: { sex: 'X' }, expect: seen.person.updated_at },
+      ],
+    });
+    expect(res.statusCode).toBe(200);
+    expect((await detail(s.ada)).names[0]).toMatchObject({ given: 'Ada', surname: 'Ashby' });
+  });
+
+  it('checks family links (no timestamp) against the values the client saw', async () => {
+    const { link } = (await detail(s.ada)).parentFamilies[0]!;
+    await api.post(`${s.base}/batch`, {
+      label: 'Other window',
+      operations: [{ op: 'familyChild.update', id: link.id, patch: { partner1_rel: 'step' } }],
+    });
+    let res = await api.post(`${s.base}/batch`, {
+      label: 'Stale link',
+      operations: [
+        {
+          op: 'familyChild.update',
+          id: link.id,
+          patch: { partner1_rel: 'adopted' },
+          expect: { partner1_rel: link.partner1_rel },
+        },
+      ],
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.code).toBe('stale');
+    res = await api.post(`${s.base}/batch`, {
+      label: 'Fresh link',
+      operations: [
+        {
+          op: 'familyChild.update',
+          id: link.id,
+          patch: { partner1_rel: 'adopted' },
+          expect: { partner1_rel: 'step' },
+        },
+      ],
+    });
+    expect(res.statusCode).toBe(200);
   });
 
   it('validates operations', async () => {

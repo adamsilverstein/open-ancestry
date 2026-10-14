@@ -150,8 +150,8 @@ export function lifeStory(detail: PersonDetail): string[] {
     if (parts.length > 0) paragraphs.push(parts.join(' '));
   }
 
-  // Losses during their life.
-  const losses: string[] = [];
+  // Losses during their life, in date order.
+  const losses: { when: number; text: string }[] = [];
   const end = summary.death?.dateSort ?? Infinity;
   const died = (event: EventBrief | null) => !!event?.dateSort && event.dateSort <= end;
   const year = (event: EventBrief) => formatDate(event.dateText ?? '', 'year');
@@ -160,22 +160,32 @@ export function lifeStory(detail: PersonDetail): string[] {
     if (!died(parent.death)) continue;
     const role = parent.sex === 'M' ? 'father' : parent.sex === 'F' ? 'mother' : 'parent';
     const age = ageText(parent.death!.dateText);
-    losses.push(
-      `${possessive} ${role}, ${fullName(parent)}, died in ${year(parent.death!)}${age ? `, when ${given(summary)} was ${age}` : ''}.`,
-    );
+    losses.push({
+      when: parent.death!.dateSort!,
+      text: `${possessive} ${role}, ${fullName(parent)}, died in ${year(parent.death!)}${age ? `, when ${given(summary)} was ${age}` : ''}.`,
+    });
   }
   for (const { partner, children } of detail.partnerFamilies) {
     if (partner && died(partner.death)) {
       const role = partner.sex === 'M' ? 'husband' : partner.sex === 'F' ? 'wife' : 'partner';
-      losses.push(`${possessive} ${role}, ${fullName(partner)}, died in ${year(partner.death!)}.`);
+      losses.push({
+        when: partner.death!.dateSort!,
+        text: `${possessive} ${role}, ${fullName(partner)}, died in ${year(partner.death!)}.`,
+      });
     }
     for (const { person } of children) {
       if (!died(person.death)) continue;
       const role = person.sex === 'M' ? 'son' : person.sex === 'F' ? 'daughter' : 'child';
-      losses.push(`${possessive} ${role} ${given(person)} died in ${year(person.death!)}.`);
+      losses.push({
+        when: person.death!.dateSort!,
+        text: `${possessive} ${role} ${given(person)} died in ${year(person.death!)}.`,
+      });
     }
   }
-  if (losses.length > 0) paragraphs.push(losses.join(' '));
+  if (losses.length > 0) {
+    losses.sort((a, b) => a.when - b.when);
+    paragraphs.push(losses.map((l) => l.text).join(' '));
+  }
 
   // Death and burial.
   const death = firstOwn(events, ['DEAT']);

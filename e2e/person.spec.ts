@@ -48,6 +48,13 @@ test.describe('header', () => {
     });
   }
 
+  test('shows Living for a living person', async ({ page }) => {
+    await openPerson(page, people.lena);
+    const header = page.getByTestId('person-header');
+    await expect(header.getByText('Death', { exact: true })).toBeVisible();
+    await expect(header.getByText('Living', { exact: true })).toBeVisible();
+  });
+
   test('links to the person in the tree', async ({ page }) => {
     await openPerson(page, people.rowan);
     await expect(page.getByRole('link', { name: 'View in tree' })).toHaveAttribute(
@@ -108,6 +115,7 @@ test.describe('facts', () => {
       'Birth of brother Tobias Ashdown',
       'Residence',
       'Death of father Edmund Ashdown',
+      'Birth of half sister Nell Marsh',
       'Marriage to Iris Vale',
       'Birth of daughter Lena Ashdown',
       'Birth of son Arthur Ashdown',
@@ -123,6 +131,8 @@ test.describe('facts', () => {
     await expect(items.nth(1)).toContainText('alternate');
     await expect(items.nth(1)).toContainText('abt. 1879');
     await expect(items.filter({ hasText: 'Marriage to Iris Vale' })).toContainText('Age 25');
+    // Year-only dates give an approximate age.
+    await expect(items.filter({ hasText: 'Census' })).toContainText('Age about 31');
     await expect(items.filter({ hasText: 'Birth of brother' })).toContainText('Family event');
   });
 
@@ -167,6 +177,10 @@ test.describe('facts', () => {
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await expect(family.getByRole('link', { name: /Tobias Ashdown/ })).toBeHidden();
 
+    const half = family.getByRole('button', { name: /Half siblings/ });
+    await expect(half).toHaveText('Half siblings (1)');
+    await expect(family.getByRole('link', { name: /Nell Marsh/ })).toBeVisible();
+
     const spouse = family.getByRole('region', { name: 'Spouse and children' });
     await expect(spouse.getByRole('link')).toHaveText([
       /Iris Vale/,
@@ -177,6 +191,17 @@ test.describe('facts', () => {
     await parents.getByRole('link', { name: /Edmund Ashdown/ }).click();
     await expect(page).toHaveURL(new RegExp(`/person/${people.edmund}$`));
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Edmund Ashdown');
+  });
+
+  test('all five tabs fit at phone width', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 800 });
+    await openPerson(page, people.rowan);
+    const list = page.getByRole('tablist', { name: 'Person sections' });
+    // The tab bar around the list is the horizontal scroller.
+    const overflow = await list.evaluate(
+      (el) => el.parentElement!.scrollWidth - el.parentElement!.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
   });
 
   test('three columns on wide screens, one column on narrow', async ({ page }) => {
@@ -228,12 +253,15 @@ test('shows a sized skeleton while loading', async ({ page }) => {
 test.describe('performance', () => {
   test.skip(({ browserName }) => browserName !== 'chromium', 'Timing budget measured in Chromium');
 
-  test('person page renders in under 100ms from click on a 10k tree', async ({ page }) => {
+  test('person page renders in under 100ms from click on a 10k tree (median of 5)', async ({
+    page,
+  }) => {
     const { synthetic } = readManifest();
     await openPerson(page, synthetic);
     const timings: number[] = [];
     for (let i = 0; i < 5; i++) {
-      const link = page.getByRole('region', { name: 'Relationships' }).getByRole('link').first();
+      // The last row (a child or spouse) is not prefetched; parents are, for half siblings.
+      const link = page.getByRole('region', { name: 'Relationships' }).getByRole('link').last();
       const target = (await link.getAttribute('href'))!;
       const name = (await link.getAttribute('data-name'))!;
       const ms = await link.evaluate(

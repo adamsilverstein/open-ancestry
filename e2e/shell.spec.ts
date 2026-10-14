@@ -34,10 +34,10 @@ test.describe('navigation', () => {
     ).toBeVisible();
   });
 
-  test('top bar links home and shows the tree name placeholder', async ({ page }) => {
+  test('top bar links home and shows the open tree name', async ({ page }) => {
     await page.goto('/design');
     const banner = page.getByRole('banner');
-    await expect(banner.getByText('No tree open')).toBeVisible();
+    await expect(banner.getByText('Ashdown family')).toBeVisible();
     await banner.getByRole('link', { name: 'open-ancestry home' }).click();
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Import your Ancestry GEDCOM');

@@ -104,6 +104,11 @@
   .tabBar {
     padding-inline: var(--oa-space-4);
   }
+
+  /* Tighter tabs so all five fit at phone width instead of scrolling. */
+  .tabList > button {
+    padding-inline: var(--oa-space-2);
+  }
 }
 
 /* Facts: 3 columns at lg, 2 at md (timeline spans both rows), 1 below. */

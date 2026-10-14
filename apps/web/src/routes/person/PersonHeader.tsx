@@ -7,7 +7,7 @@ import { Avatar } from '../../components/Avatar/Avatar';
 import buttonStyles from '../../components/Button/Button.module.css';
 import { TagBadge } from '../../components/TagBadge/TagBadge';
 import { cx } from '../../lib/cx';
-import { fullName } from '../../lib/person';
+import { fullName, isLivingStatus } from '../../lib/person';
 import type { TagColor } from '../../lib/person';
 import { describeRelationship } from '../../lib/relationship';
 import { formatDate } from '@open-ancestry/core';
@@ -21,8 +21,24 @@ function tagColor(id: string): TagColor {
   return ((hash % 8) + 1) as TagColor;
 }
 
-function Vital({ label, event }: { label: string; event: EventBrief | null }) {
-  if (!event) return null;
+function Vital({
+  label,
+  event,
+  fallback,
+}: {
+  label: string;
+  event: EventBrief | null;
+  /** Shown when there is no event, e.g. `Living`. */
+  fallback?: string | undefined;
+}) {
+  if (!event) {
+    return fallback ? (
+      <p className={styles.vital}>
+        <span className={styles.vitalLabel}>{label}</span>
+        <span>{fallback}</span>
+      </p>
+    ) : null;
+  }
   const date = event.dateText ? formatDate(event.dateText) : null;
   return (
     <p className={styles.vital}>
@@ -73,7 +89,11 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
         <h1 className={styles.name}>{name}</h1>
         <div className={styles.vitals}>
           <Vital label="Birth" event={summary.birth} />
-          <Vital label="Death" event={summary.death} />
+          <Vital
+            label="Death"
+            event={summary.death}
+            fallback={isLivingStatus(summary.living) ? 'Living' : undefined}
+          />
         </div>
         {/* Reserved line: filled when the relationship resolves, so nothing shifts. */}
         <p className={styles.relationship} data-testid="relationship">

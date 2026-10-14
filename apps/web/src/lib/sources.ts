@@ -4,7 +4,7 @@ import { eventLabel } from './timeline';
 
 export interface CitedSource {
   detail: CitationDetail;
-  /** What the citation supports: `Person`, `Birth`, `Census`... */
+  /** What the citation supports: `General` (the person record), `Birth`, `Census`... */
   citedFor: string[];
   /** Safe external link: an http(s) citation URL, else the Ancestry record. */
   link: { href: string; label: string } | null;
@@ -29,7 +29,7 @@ export function collectCitations(detail: PersonDetail): CitedSource[] {
     }
     byId.set(item.citation.id, { detail: item, citedFor: [what], link: externalLink(item) });
   };
-  for (const item of detail.citations) add(item, 'Person');
+  for (const item of detail.citations) add(item, 'General');
   for (const { event, citations } of detail.events) {
     for (const item of citations) add(item, eventLabel(event.type, event.custom_type));
   }

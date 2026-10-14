@@ -7,7 +7,7 @@ describe('collectCitations', () => {
 
   it('lists person and event citations once, with what they support', () => {
     expect(cited.map((c) => [c.detail.source.title, c.citedFor])).toEqual([
-      ['Ashdown Family Bible', ['Person']],
+      ['Ashdown Family Bible', ['General']],
       ['Brackenford Parish Register', ['Birth']],
       ['1911 Northvale Census', ['Census']],
     ]);

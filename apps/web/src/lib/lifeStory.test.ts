@@ -32,3 +32,15 @@ describe('lifeStory', () => {
     );
   });
 });
+
+describe('lifeStory losses', () => {
+  it('tells deaths in date order, not family order', () => {
+    const detail = fixtureDetail('rowan');
+    const [family] = detail.parentFamilies;
+    const swapped = {
+      ...detail,
+      parentFamilies: [{ ...family!, partner1: family!.partner2, partner2: family!.partner1 }],
+    };
+    expect(lifeStory(swapped)[3]).toMatch(/^His father, Edmund Ashdown, died in 1901/);
+  });
+});

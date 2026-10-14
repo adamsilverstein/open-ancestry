@@ -92,3 +92,31 @@ export function initials(name: PersonName | string): string {
   const words = n.surname ? [...given.slice(0, 1), n.surname] : given.slice(0, 2);
   return words.map((w) => Array.from(w)[0]!.toUpperCase()).join('');
 }
+
+const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * A name as written (`Ann "Nan" /Ash/`) with its nickname changed from
+ * `previous` to `next`, keeping the marks it was written with: straight or
+ * curly quotes, or parentheses around exactly the previous nickname. A
+ * cleared nickname takes its marks and space with it. Text that does not
+ * spell the nickname out is returned unchanged.
+ */
+export function replaceNickname(
+  text: string,
+  previous: string | null | undefined,
+  next: string | null | undefined,
+): string {
+  const quoted = /(\s*)(["“])[^"“”]*(["”])/;
+  const parens = previous?.trim()
+    ? new RegExp(`(\\s*)(\\()\\s*${escape(previous.trim())}\\s*(\\))`)
+    : undefined;
+  const pattern = quoted.test(text) ? quoted : parens?.test(text) ? parens : undefined;
+  if (!pattern) return text;
+  const value = next?.trim();
+  return text
+    .replace(pattern, (_, space: string, open: string, close: string) =>
+      value ? `${space}${open}${value}${close}` : '',
+    )
+    .trim();
+}

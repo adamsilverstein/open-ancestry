@@ -293,6 +293,8 @@ function validPoint(
   dual: string | undefined,
 ): Point | undefined {
   if (year === undefined || year === 0 || Number.isNaN(year)) return undefined;
+  // B.C./BCE only exists for Gregorian and Julian years.
+  if (bc && (calendar === 'hebrew' || calendar === 'french_r')) return undefined;
   const point: DatePoint = { year: bc ? -year : year };
   if (month !== undefined) {
     if (!(month >= 1 && month <= monthsInYear(calendar))) return undefined;
@@ -368,6 +370,7 @@ function build(
     sortKeyEnd,
     valid: true,
   };
+  if (end.calendar !== start.calendar) date.endCalendar = end.calendar;
   if (start.ambiguous || end.ambiguous) date.ambiguous = true;
   return date;
 }

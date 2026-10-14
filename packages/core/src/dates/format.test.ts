@@ -31,6 +31,7 @@ describe('formatDate', () => {
     ['@#DHEBREW@ 1 TSH 5700', 'Hebrew 1 Tsh 5700'],
     ['@#DFRENCH R@ 1 VEND 1', 'French Republican 1 Vend 1'],
     ['@#DUNKNOWN@ 1900', '1900'],
+    ['BET @#DJULIAN@ 1 JAN 1751 AND 1 JAN 1753', 'bet. Julian 1 Jan 1751 and 1 Jan 1753'],
     ['  some free text  ', 'some free text'],
     ['', ''],
   ])('%j -> %j', (input, output) => {
@@ -78,6 +79,12 @@ describe('toGedcom', () => {
     ['@#DHEBREW@ 1 TSH 5700', '@#DHEBREW@ 1 TSH 5700', 'HEBREW 1 TSH 5700'],
     ['@#DFRENCH R@ 1 VEND 1', '@#DFRENCH R@ 1 VEND 1', 'FRENCH_R 1 VEND 1'],
     ['@#DUNKNOWN@ 1900', '@#DUNKNOWN@ 1900', '1900'],
+    [
+      'BET @#DJULIAN@ 1 JAN 1751 AND 1 JAN 1753',
+      'BET @#DJULIAN@ 1 JAN 1751 AND 1 JAN 1753',
+      'BET JULIAN 1 JAN 1751 AND 1 JAN 1753',
+    ],
+    ['FROM 1700 TO @#DJULIAN@ 1710', 'FROM 1700 TO @#DJULIAN@ 1710', 'FROM 1700 TO JULIAN 1710'],
     ['INT 5 SEP 1941 (fifth)', 'INT 5 SEP 1941 (fifth)', '5 SEP 1941'],
     ['INT 1941', 'INT 1941', '1941'],
     ['unknown', '(unknown)', ''],
@@ -200,6 +207,8 @@ describe('toGedcom output safety', () => {
     expect(toGedcom(badEnd)).toBe('(BET 1890 AND 1895)');
     const noMonth = { ...parseDate('5 SEP 1941'), start: { year: 1941, day: 5 } };
     expect(toGedcom(noMonth)).toBe('(5 SEP 1941)');
+    const bcHebrew = { ...parseDate('@#DHEBREW@ 5700'), start: { year: -5700 } };
+    expect(toGedcom(bcHebrew, '7')).toBe('');
     const badCalendar = { ...parseDate('1941'), calendar: 'x\n' as unknown as 'gregorian' };
     expect(toGedcom(badCalendar)).toBe('1941');
     const badPhrase = { ...parseDate('INT 1941'), phrase: 'a)\r\n0 @X@ NOTE' };

@@ -39,21 +39,22 @@ export function formatDate(date: DateInput, style: DateStyle = 'long'): string {
   const parsed = asParsed(date);
   const { start, end, calendar } = parsed;
   if (!start) return parsed.text.trim();
-  const point = (p: DatePoint): string => {
+  const point = (p: DatePoint, cal: Calendar = calendar): string => {
     const year = yearText(p, 'B.C.');
     if (style === 'year') return year;
-    const parts = [DISPLAY_CALENDAR[calendar] ?? ''];
+    const parts = [DISPLAY_CALENDAR[cal] ?? ''];
     if (p.day !== undefined) parts.push(`${p.day} `);
     if (p.month !== undefined) {
-      const code = monthCode(p.month, calendar);
+      const code = monthCode(p.month, cal);
       parts.push(`${code[0]}${code.slice(1).toLowerCase()} `);
     }
     return parts.join('') + year;
   };
   if (end) {
+    const last = point(end, parsed.endCalendar);
     return parsed.qualifier === 'between'
-      ? `bet. ${point(start)} and ${point(end)}`
-      : `from ${point(start)} to ${point(end)}`;
+      ? `bet. ${point(start)} and ${last}`
+      : `from ${point(start)} to ${last}`;
   }
   const text = (DISPLAY_PREFIX[parsed.qualifier] ?? '') + point(start);
   return parsed.phrase ? `${text} (${parsed.phrase})` : text;
@@ -89,6 +90,7 @@ const CALENDARS = new Set<Calendar>(['gregorian', 'julian', 'hebrew', 'french_r'
 /** Guards against hand-built ParsedDate objects carrying non-numeric parts into an export. */
 function isSafePoint(p: DatePoint | undefined, calendar: Calendar): boolean {
   if (!p || !Number.isSafeInteger(p.year) || p.year === 0 || Math.abs(p.year) > 9999) return false;
+  if (p.year < 0 && (calendar === 'hebrew' || calendar === 'french_r')) return false;
   if (p.month !== undefined) {
     if (!Number.isSafeInteger(p.month) || p.month < 1 || p.month > monthsInYear(calendar))
       return false;
@@ -121,24 +123,26 @@ export function gedcomPhrase(text: unknown): string {
 export function toGedcom(date: DateInput, version: GedcomVersion = '5.5.1'): string {
   const parsed = asParsed(date);
   const { start, end } = parsed;
-  const calendar = CALENDARS.has(parsed.calendar) ? parsed.calendar : 'gregorian';
+  const known = (cal: Calendar | undefined) => (cal && CALENDARS.has(cal) ? cal : undefined);
+  const calendar = known(parsed.calendar) ?? 'gregorian';
+  const endCalendar = known(parsed.endCalendar) ?? calendar;
   const v7 = version === '7';
-  if (!isSafePoint(start, calendar) || (end !== undefined && !isSafePoint(end, calendar))) {
+  if (!isSafePoint(start, calendar) || (end !== undefined && !isSafePoint(end, endCalendar))) {
     if (v7) return '';
     const phrase = gedcomPhrase(parsed.phrase ?? parsed.text);
     return phrase && `(${phrase})`;
   }
-  const point = (p: DatePoint): string => {
-    const parts = [(v7 ? GEDCOM7_CALENDAR : GEDCOM551_CALENDAR)[calendar]];
+  const point = (p: DatePoint, cal: Calendar = calendar): string => {
+    const parts = [(v7 ? GEDCOM7_CALENDAR : GEDCOM551_CALENDAR)[cal]];
     if (p.day !== undefined) parts.push(`${p.day} `);
-    if (p.month !== undefined) parts.push(`${monthCode(p.month, calendar)} `);
+    if (p.month !== undefined) parts.push(`${monthCode(p.month, cal)} `);
     parts.push(v7 ? (p.year < 0 ? `${-p.year} BCE` : String(p.year)) : yearText(p, 'B.C.'));
     return parts.join('');
   };
   if (end) {
     return parsed.qualifier === 'from_to'
-      ? `FROM ${point(start!)} TO ${point(end)}`
-      : `BET ${point(start!)} AND ${point(end)}`;
+      ? `FROM ${point(start!)} TO ${point(end, endCalendar)}`
+      : `BET ${point(start!)} AND ${point(end, endCalendar)}`;
   }
   if (parsed.qualifier === 'interpreted' && !v7) {
     const phrase = gedcomPhrase(parsed.phrase);

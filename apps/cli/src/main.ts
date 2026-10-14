@@ -139,6 +139,44 @@ export interface RunDeps {
   progress?: (text: string) => void;
   warn?: (line: string) => void;
   openUrl?: (url: string) => void;
+  /** Where SIGINT/SIGTERM arrive (default: the process). */
+  signals?: Pick<NodeJS.Process, 'on' | 'off'>;
+  /** Ends the process after a signal-triggered shutdown (default: process.exit). */
+  exit?: (code: number) => void;
+}
+
+const STOP_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
+
+/**
+ * Stops the server gracefully on Ctrl-C or SIGTERM: running imports abort and
+ * clean up (their upload and any empty tree they created) before the process
+ * ends. A second signal exits at once.
+ */
+function stopOnSignals(
+  server: RunningServer,
+  signals: Pick<NodeJS.Process, 'on' | 'off'>,
+  exit: (code: number) => void,
+  log: (line: string) => void,
+): RunningServer {
+  let stopping = false;
+  const onSignal = (signal: NodeJS.Signals) => {
+    if (stopping) return exit(1);
+    stopping = true;
+    log(`Stopping (${signal})...`);
+    server.close().then(
+      () => exit(0),
+      () => exit(1),
+    );
+  };
+  for (const signal of STOP_SIGNALS) signals.on(signal, onSignal);
+  const close = server.close;
+  return {
+    ...server,
+    close: async () => {
+      for (const signal of STOP_SIGNALS) signals.off(signal, onSignal);
+      await close();
+    },
+  };
 }
 
 const row = (label: string, value: string | number) => `${label.padEnd(15)}${value}`;
@@ -277,6 +315,8 @@ export async function run(
     warn = console.warn,
     openUrl = openInBrowser,
     progress = stderrProgress,
+    signals = process,
+    exit = (code: number) => process.exit(code),
   }: RunDeps = {},
 ): Promise<RunningServer | undefined> {
   const cli = parseCliArgs(argv);
@@ -299,5 +339,5 @@ export async function run(
   log(`open-ancestry running at ${server.url}`);
   log(`Library: ${cli.library}`);
   if (cli.open) openUrl(server.url);
-  return server;
+  return stopOnSignals(server, signals, exit, log);
 }

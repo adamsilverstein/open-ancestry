@@ -1,8 +1,10 @@
+import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { generateGedcom } from '../../../fixtures/generate';
 import { exposureWarning, parseCliArgs, progressReporter, run } from './main';
 
 describe('parseCliArgs', () => {
@@ -256,5 +258,69 @@ describe('serve with import', () => {
     } finally {
       await server.close();
     }
+  });
+});
+
+describe('serve on SIGINT/SIGTERM', () => {
+  it('aborts a running import, cleans up its new tree and upload, then exits 0', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'oa-cli-'));
+    await writeFile(join(dir, 'index.html'), '<!doctype html>');
+    const library = await mkdtemp(join(tmpdir(), 'oa-cli-lib-'));
+    const signals = new EventEmitter();
+    const exits: number[] = [];
+    const logs: string[] = [];
+    const server = await run(['serve', '--port', '0', '--static-dir', dir, '--library', library], {
+      log: (line) => logs.push(line),
+      signals: signals as unknown as Pick<NodeJS.Process, 'on' | 'off'>,
+      exit: (code) => exits.push(code),
+    });
+    if (!server) throw new Error('expected a server');
+    const { token } = (await (await fetch(`${server.url}/api/session`)).json()) as {
+      token: string;
+    };
+    // Big enough that the import is still running when the signal arrives.
+    const form = new FormData();
+    form.append('file', new Blob([generateGedcom({ people: 40_000, seed: 4 })]), 'Big Family.ged');
+    const started = await fetch(`${server.url}/api/import`, {
+      method: 'POST',
+      headers: { origin: server.url, 'x-oa-token': token },
+      body: form,
+    });
+    const { jobId, job } = (await started.json()) as { jobId: string; job: { tree: string } };
+    let state = 'queued';
+    while (state === 'queued') {
+      await new Promise((r) => setTimeout(r, 10));
+      state = ((await (await fetch(`${server.url}/api/jobs/${jobId}`)).json()) as { state: string })
+        .state;
+    }
+    expect(state).toBe('running');
+    expect(existsSync(join(library, `${job.tree}.oatree`))).toBe(true);
+
+    signals.emit('SIGTERM', 'SIGTERM');
+    await vi.waitFor(() => expect(exits).toEqual([0]), { timeout: 10_000 });
+    expect(logs).toContain('Stopping (SIGTERM)...');
+    expect(existsSync(join(library, `${job.tree}.oatree`))).toBe(false);
+    await expect(fetch(`${server.url}/api/health`)).rejects.toThrow();
+    expect(signals.listenerCount('SIGTERM')).toBe(1);
+    await server.close();
+    expect(signals.listenerCount('SIGTERM')).toBe(0);
+  }, 30_000);
+
+  it('exits at once on a second signal', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'oa-cli-'));
+    await writeFile(join(dir, 'index.html'), '<!doctype html>');
+    const library = await mkdtemp(join(tmpdir(), 'oa-cli-lib-'));
+    const signals = new EventEmitter();
+    const exits: number[] = [];
+    const server = await run(['serve', '--port', '0', '--static-dir', dir, '--library', library], {
+      log: () => {},
+      signals: signals as unknown as Pick<NodeJS.Process, 'on' | 'off'>,
+      exit: (code) => exits.push(code),
+    });
+    signals.emit('SIGINT', 'SIGINT');
+    signals.emit('SIGINT', 'SIGINT');
+    expect(exits).toEqual([1]);
+    await vi.waitFor(() => expect(exits).toEqual([1, 0]));
+    await server?.close();
   });
 });

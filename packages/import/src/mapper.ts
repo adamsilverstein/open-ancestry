@@ -183,6 +183,8 @@ export class Mapper {
   private readonly doc: ParseResult;
   /** Each record's original text, captured before its values are normalized. */
   private readonly rawText: string[];
+  /** FILE lines of inline OBJE structures, by the media row they became. */
+  private readonly inlineFiles = new Map<GedcomNode, string>();
   private readonly sink: Sink;
   private readonly options: MapperOptions;
 
@@ -952,9 +954,13 @@ export class Mapper {
       mediaId = this.resolve(node, 'OBJE');
       if (!mediaId) return undefined;
     } else {
-      if (!this.child(node, 'FILE')) return undefined;
+      const file = this.child(node, 'FILE');
+      if (!file) return undefined;
       mediaId = this.options.newId();
       this.mapMedia(node, mediaId, undefined);
+      // An unresolved FILE line is kept with its media, not the record it sits in, so an
+      // export that writes the media as its own record still has the original path.
+      this.inlineFiles.set(file, mediaId);
     }
     this.use(node);
     this.link('media_link', 'media_id', mediaId, owner);
@@ -1777,9 +1783,11 @@ export class Mapper {
       };
       const visit = (node: GedcomNode, path: string) => {
         if (!this.mapped[node.line]) {
-          add(owner, path, node.tag, node.line, lineText(node.line));
+          const media = this.inlineFiles.get(node);
+          const lineOwner = media ? { type: 'media', id: media } : owner;
+          add(lineOwner, path, node.tag, node.line, lineText(node.line));
           for (const c of node.continuations ?? []) {
-            add(owner, `${path}.${c.tag}`, c.tag, c.line, lineText(c.line));
+            add(lineOwner, `${path}.${c.tag}`, c.tag, c.line, lineText(c.line));
           }
         }
         for (const e of node.extra ?? []) {

@@ -3,7 +3,7 @@ import { existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { makeTempDir, removeTempDirs } from './temp-dir';
+import { makeTempDir, ownedE2eLibrary, removeTempDirs } from './temp-dir';
 
 /*
  * Test temp folders piled up (over 100 GB of oa-* folders on a dev machine):
@@ -60,4 +60,37 @@ describe('on Ctrl-C or SIGTERM', () => {
     },
     20_000,
   );
+});
+
+describe('makeTempDir prefixes', () => {
+  it('refuses a prefix that would put the folder somewhere else', () => {
+    for (const prefix of ['../oa-', 'a/b-', 'a\\b-', '/abs-']) {
+      expect(() => makeTempDir(prefix)).toThrow(/path separator/);
+    }
+  });
+});
+
+describe('ownedE2eLibrary', () => {
+  const library = join(tmpdir(), 'oa-e2e-library-4400');
+  const owned = { OA_E2E_LIBRARY: library, OA_E2E_LIBRARY_OWNER: String(process.pid) };
+
+  it('names the library only to the run that made it', () => {
+    expect(ownedE2eLibrary(owned)).toBe(library);
+    // A nested run inherits the variables, but is another process.
+    expect(ownedE2eLibrary(owned, process.pid + 1)).toBeNull();
+    // Passed in by hand: never removed.
+    expect(ownedE2eLibrary({ OA_E2E_LIBRARY: library })).toBeNull();
+  });
+
+  it('only ever names an oa-e2e-library- folder directly in the OS temp dir', () => {
+    for (const path of [
+      join(tmpdir(), 'oa-e2e-library-4400', '..'),
+      join(tmpdir(), 'something-else'),
+      join(tmpdir(), 'nested', 'oa-e2e-library-1'),
+      '/oa-e2e-library-1',
+      join(process.cwd(), 'oa-e2e-library-1'),
+    ]) {
+      expect(ownedE2eLibrary({ ...owned, OA_E2E_LIBRARY: path })).toBeNull();
+    }
+  });
 });

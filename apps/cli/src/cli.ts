@@ -1,10 +1,4 @@
-import { escapeControls } from './escape';
-import { run } from './main';
+import { main } from './main';
 
-try {
-  await run(process.argv.slice(2));
-} catch (error) {
-  // Messages can quote a file name or tree name, so escape them like the report.
-  console.error(escapeControls(error instanceof Error ? error.message : String(error)));
-  process.exit(1);
-}
+const code = await main(process.argv.slice(2));
+if (code !== 0) process.exit(code);

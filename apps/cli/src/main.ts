@@ -125,7 +125,7 @@ export function exposureWarning(host: string): string {
   return [
     '',
     '!'.repeat(72),
-    `WARNING: listening on ${host}, which is not a loopback address.`,
+    `WARNING: listening on ${escapeControls(host)}, which is not a loopback address.`,
     'Anyone who can reach this machine on the network can read and change',
     'your family trees, including details of living people.',
     `Use the default --host ${DEFAULT_HOST} unless you are sure.`,
@@ -183,19 +183,23 @@ function stopOnSignals(
 const row = (label: string, value: string | number) => `${label.padEnd(15)}${value}`;
 const MAX_LISTED = 50;
 
-/** The import report as plain text for the terminal, control characters escaped. */
+/**
+ * The import report as plain text for the terminal. Every value from the file
+ * (or its name) is escaped on its own, so none can add lines or controls.
+ */
 export function formatReport(
   report: ImportReport,
   tree: { name: string; dir: string; homePerson: string | null },
 ): string {
+  const e = escapeControls;
   const rows = report.rows as Record<string, number | undefined>;
   const source = report.source;
   const lines = [
-    `Imported ${report.file.name ?? 'file'} into "${tree.name}" (${tree.dir}) in ${(report.timings.total / 1000).toFixed(1)}s`,
+    `Imported ${e(report.file.name ?? 'file')} into "${e(tree.name)}" (${e(tree.dir)}) in ${(report.timings.total / 1000).toFixed(1)}s`,
     '',
     row(
       'Source',
-      `${[source.system, source.version].filter(Boolean).join(' ') || 'unknown'} (${report.format}, ${report.encoding})`,
+      `${e([source.system, source.version].filter(Boolean).join(' ') || 'unknown')} (${report.format}, ${report.encoding})`,
     ),
     row('People', rows.person ?? 0),
     row('Families', rows.family ?? 0),
@@ -213,11 +217,11 @@ export function formatReport(
       `${report.lines.total} (${report.lines.mapped} mapped, ${report.lines.preserved} preserved)`,
     ),
     row('Living', `${report.living.living} living, ${report.living.deceased} deceased`),
-    row('Home person', tree.homePerson ?? 'none'),
+    row('Home person', e(tree.homePerson ?? 'none')),
     row('Warnings', report.warningCount || 'none'),
   ];
   for (const w of report.warnings.slice(0, MAX_LISTED)) {
-    lines.push(`  ${`line ${w.line}`.padEnd(11)}${w.code.padEnd(22)}${w.message}`);
+    lines.push(`  ${`line ${w.line}`.padEnd(11)}${e(w.code).padEnd(22)}${e(w.message)}`);
   }
   if (report.warningCount > MAX_LISTED) {
     lines.push(`  ... and ${report.warningCount - MAX_LISTED} more`);
@@ -225,16 +229,16 @@ export function formatReport(
   lines.push(row('Unmapped tags', report.unmapped.length ? report.unmapped.length : 'none'));
   for (const u of report.unmapped.slice(0, MAX_LISTED)) {
     lines.push(
-      `  ${u.path.padEnd(28)}${String(u.count).padEnd(7)}line ${u.example.line}: ${u.example.text}`,
+      `  ${e(u.path).padEnd(28)}${String(u.count).padEnd(7)}line ${u.example.line}: ${e(u.example.text)}`,
     );
   }
   if (report.unmapped.length > MAX_LISTED) {
     lines.push(`  ... and ${report.unmapped.length - MAX_LISTED} more`);
   }
   for (const m of report.media.missing.slice(0, MAX_LISTED)) {
-    lines.push(`  missing media: ${m.path} (line ${m.line})`);
+    lines.push(`  missing media: ${e(m.path)} (line ${m.line})`);
   }
-  return escapeControls(lines.join('\n'));
+  return lines.join('\n');
 }
 
 const PHASE_LABELS: Record<ImportPhase, string> = {
@@ -289,7 +293,7 @@ async function importCommand(
       `A tree named "${name}" already exists in ${library.root}; choose another with --name.`,
     );
   }
-  log(escapeControls(`Importing ${cli.file} ...`));
+  log(`Importing ${escapeControls(cli.file)} ...`);
   const report = await importGedcom(
     { path: cli.file },
     { dir, name },
@@ -307,6 +311,28 @@ async function importCommand(
     store.close();
   }
   log(formatReport(report, { name, dir, homePerson }));
+}
+
+export interface MainDeps extends RunDeps {
+  /** Where a failure's message goes (default console.error). */
+  error?: (line: string) => void;
+}
+
+/**
+ * The CLI entry: runs a command and returns the exit code. Failures print
+ * their message escaped, since messages quote file, folder and tree names.
+ */
+export async function main(
+  argv: string[],
+  { error = console.error, ...deps }: MainDeps = {},
+): Promise<number> {
+  try {
+    await run(argv, deps);
+    return 0;
+  } catch (failure) {
+    error(escapeControls(failure instanceof Error ? failure.message : String(failure)));
+    return 1;
+  }
 }
 
 export async function run(
@@ -337,8 +363,8 @@ export async function run(
     staticDir: cli.staticDir ?? bundledStaticDir(),
     importer: importFile,
   });
-  log(`open-ancestry running at ${server.url}`);
-  log(`Library: ${cli.library}`);
+  log(`open-ancestry running at ${escapeControls(server.url)}`);
+  log(`Library: ${escapeControls(cli.library)}`);
   if (cli.open) openUrl(server.url);
   return stopOnSignals(server, signals, exit, log);
 }

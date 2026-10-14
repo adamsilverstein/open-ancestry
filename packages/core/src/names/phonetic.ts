@@ -1,4 +1,4 @@
-import { doubleMetaphone as metaphone } from 'double-metaphone';
+import { doubleMetaphone as metaphone } from './double-metaphone';
 
 // Letters NFD does not decompose into a base letter plus a mark.
 const SPECIAL: Record<string, string> = {

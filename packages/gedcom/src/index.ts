@@ -8,8 +8,14 @@ export { GedzipError, readGedzip, safeEntryPath } from './gedzip';
 export type { GedzipLimits, GedzipOptions, GedzipResult } from './gedzip';
 export { analyzeHeader } from './header';
 export { decodeEscapes, isPointer, parseGedcom, parseGedcomStream, subtreeLines } from './parser';
-export { encodeValue, serializeGedcom, serializeNode } from './serialize';
-export type { SerializeOptions } from './serialize';
+export {
+  GedcomSerializeError,
+  encodeValue,
+  serializeGedcom,
+  serializeNode,
+  valueLines,
+} from './serialize';
+export type { GedcomSerializeErrorCode, SerializeOptions } from './serialize';
 export { LineSplitter, splitLines, tokenizeLine } from './tokenizer';
 export type { Token } from './tokenizer';
 export type * from './types';

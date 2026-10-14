@@ -51,7 +51,7 @@ Every physical line is counted once: `nodes + continuations + blank + skipped ==
 
 Unedited, `serializeGedcom(parseGedcom(file))` reproduces the decoded file exactly (fuzz tested), apart from the BOM, the line terminator (`eol`, default `\n`) and a terminator added to an unterminated last line. `serializeNode(record)` is the exact source text of that record, including indentation, tabs, `01` levels, trailing spaces and blank lines inside it, so it is safe for `raw_record`. Non-canonical lines keep their `source` text, which is used only while the node still says the same thing.
 
-Values edited after parsing are re-encoded: `\n` becomes CONT, `@` is escaped for `version` (default 5, `serializeGedcom` uses the header's), and `maxLineLength` splits long lines with CONC away from spaces.
+Values edited after parsing are re-encoded: every line break (CR, LF, CRLF, U+2028, U+2029, NEL) becomes a CONT line, other C0 controls except tab are dropped, `@` is escaped for `version` (default 5, `serializeGedcom` uses the header's), and `maxLineLength` splits long lines with CONC away from spaces, never inside a surrogate pair or before an `@`. So an edited value can never start a new GEDCOM line. The level (0-99), tag, xref and pointer must match the grammar the tokenizer accepts, otherwise `serializeNode` throws `GedcomSerializeError` (`invalid-level`, `invalid-tag`, `invalid-xref`, `invalid-pointer`, `invalid-eol`, or `line-break-in-source` for hand-built extra or preamble lines containing CR or LF).
 
 ## GEDZIP
 

@@ -115,7 +115,8 @@ export function dirtyRecords(store: TreeStore, data: TreeData): Set<string> {
   return dirty;
 }
 
-const NAME_PARTS = ['given', 'surname', 'surname_prefix', 'prefix', 'suffix', 'nickname'];
+/** Not nickname: full_text writes it in its own style (`"Nan"`), so a nickname edit alone keeps the text. */
+const NAME_PARTS = ['given', 'surname', 'surname_prefix', 'prefix', 'suffix'];
 
 /**
  * Names whose parts were edited after `full_text` was last set (the edit API

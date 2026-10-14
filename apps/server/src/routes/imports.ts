@@ -1,9 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { treePaths } from '@open-ancestry/db';
+import type { FastifyRequest } from 'fastify';
 import type { Api, Deps } from '../context';
 import { ApiError, badRequest, notFound } from '../errors';
 import { TooManyJobsError, type JobEvent } from '../jobs';
@@ -11,62 +13,120 @@ import { JobParams, TreeParams } from '../schemas';
 
 export const IMPORT_EXTENSIONS = new Set(['.ged', '.gedcom', '.zip', '.gdz']);
 
+export const UPLOAD_PREFIX = 'oa-upload-';
+/** Upload folders older than this are left over from a crash and swept on startup. */
+export const STALE_UPLOAD_MS = 6 * 60 * 60 * 1000;
+
+/** Startup: removes upload temp folders an earlier, interrupted server left behind. */
+export async function sweepStaleUploads(now = Date.now(), dir = tmpdir()): Promise<number> {
+  let removed = 0;
+  for (const name of await readdir(dir).catch(() => [] as string[])) {
+    if (!name.startsWith(UPLOAD_PREFIX)) continue;
+    const path = join(dir, name);
+    const info = await stat(path).catch(() => null);
+    if (!info?.isDirectory() || now - info.mtimeMs < STALE_UPLOAD_MS) continue;
+    await rm(path, { recursive: true, force: true });
+    removed++;
+  }
+  return removed;
+}
+
 /** Import uploads (multipart, streamed to a temp file) and job status over JSON and SSE. */
-export function importRoutes(app: Api, { library, jobs, importer, uploadLimit }: Deps): void {
+export function importRoutes(app: Api, deps: Deps): void {
+  const { library, jobs, importer, uploadLimit } = deps;
+
+  /** Streams the one uploaded file to a private temp folder. */
+  async function receive(request: FastifyRequest) {
+    if (!importer) throw new ApiError(501, 'not_implemented', 'GEDCOM import is not available');
+    if (!request.isMultipart()) {
+      throw new ApiError(415, 'unsupported_media_type', 'Upload the file as multipart/form-data');
+    }
+    const file = await request.file({ limits: { fileSize: uploadLimit, files: 1, fields: 0 } });
+    if (!file) throw badRequest('Attach a GEDCOM or GEDZIP file');
+    const extension = extname(file.filename).toLowerCase();
+    if (!IMPORT_EXTENSIONS.has(extension)) {
+      file.file.resume();
+      throw new ApiError(
+        415,
+        'unsupported_media_type',
+        `Expected a ${[...IMPORT_EXTENSIONS].join(', ')} file`,
+      );
+    }
+    // The upload is untrusted: only its extension is used in the temp path.
+    const dir = await mkdtemp(join(tmpdir(), UPLOAD_PREFIX));
+    const cleanup = () => rm(dir, { recursive: true, force: true });
+    const path = join(dir, `upload${extension}`);
+    try {
+      await pipeline(file.file, createWriteStream(path, { flags: 'wx' }));
+      if (file.file.truncated) {
+        throw new ApiError(413, 'payload_too_large', `Uploads are limited to ${uploadLimit} bytes`);
+      }
+    } catch (error) {
+      await cleanup();
+      throw error;
+    }
+    return { path, fileName: basename(file.filename).slice(0, 255), cleanup };
+  }
+
+  /**
+   * Queues the import of `upload` into `tree`. With a `marker`, the tree was
+   * created for this upload: success hands it to the user, and any failure
+   * (including a cancel before it ran) removes it if it is still empty.
+   */
+  function start(tree: string, upload: Awaited<ReturnType<typeof receive>>, marker: string | null) {
+    try {
+      return jobs.enqueue(
+        { tree, fileName: upload.fileName, createdTree: marker !== null },
+        (signal, onProgress) =>
+          library.whileBusy(tree, async () => {
+            const result = await importer!(upload.path, library.open(tree), {
+              mediaDir: treePaths(library.dirOf(tree)).media,
+              onProgress,
+              signal,
+            });
+            if (marker) library.clearImportPending(tree, marker);
+            return result;
+          }),
+        async () => {
+          await upload.cleanup();
+          if (marker) library.discardFailedImport(tree, marker);
+        },
+      );
+    } catch (error) {
+      void upload.cleanup();
+      if (marker) library.discardFailedImport(tree, marker);
+      if (error instanceof TooManyJobsError)
+        throw new ApiError(429, 'too_many_jobs', error.message);
+      throw error;
+    }
+  }
+
+  // Import into a new tree named after the file. The server owns the tree's
+  // lifecycle: the client never deletes anything when an import fails.
+  app.post('/api/import', async (request, reply) => {
+    const upload = await receive(request);
+    const marker = randomUUID();
+    let tree: string;
+    try {
+      tree = library.createForImport(upload.fileName, marker);
+    } catch (error) {
+      await upload.cleanup();
+      throw error;
+    }
+    const job = start(tree, upload, marker);
+    return reply.code(202).send({ jobId: job.id, job });
+  });
+
+  // Import into an existing, empty tree (never removed by the server).
   app.post(
     '/api/trees/:tree/import',
     { schema: { params: TreeParams } },
     async (request, reply) => {
       const { tree } = request.params;
       library.open(tree);
-      if (!importer) throw new ApiError(501, 'not_implemented', 'GEDCOM import is not available');
-      if (!request.isMultipart()) {
-        throw new ApiError(415, 'unsupported_media_type', 'Upload the file as multipart/form-data');
-      }
-      const file = await request.file({ limits: { fileSize: uploadLimit, files: 1, fields: 0 } });
-      if (!file) throw badRequest('Attach a GEDCOM or GEDZIP file');
-      const extension = extname(file.filename).toLowerCase();
-      if (!IMPORT_EXTENSIONS.has(extension)) {
-        file.file.resume();
-        throw new ApiError(
-          415,
-          'unsupported_media_type',
-          `Expected a ${[...IMPORT_EXTENSIONS].join(', ')} file`,
-        );
-      }
-
-      // The upload is untrusted: only its extension is used in the temp path.
-      const dir = await mkdtemp(join(tmpdir(), 'oa-upload-'));
-      const cleanup = () => rm(dir, { recursive: true, force: true });
-      const path = join(dir, `upload${extension}`);
-      try {
-        await pipeline(file.file, createWriteStream(path, { flags: 'wx' }));
-        if (file.file.truncated) {
-          throw new ApiError(
-            413,
-            'payload_too_large',
-            `Uploads are limited to ${uploadLimit} bytes`,
-          );
-        }
-        const job = jobs.enqueue(
-          { tree, fileName: basename(file.filename).slice(0, 255) },
-          (signal, onProgress) =>
-            library.whileBusy(tree, () =>
-              importer(path, library.open(tree), {
-                mediaDir: treePaths(library.dirOf(tree)).media,
-                onProgress,
-                signal,
-              }),
-            ),
-          cleanup,
-        );
-        return reply.code(202).send({ jobId: job.id, job });
-      } catch (error) {
-        await cleanup();
-        if (error instanceof TooManyJobsError)
-          throw new ApiError(429, 'too_many_jobs', error.message);
-        throw error;
-      }
+      const upload = await receive(request);
+      const job = start(tree, upload, null);
+      return reply.code(202).send({ jobId: job.id, job });
     },
   );
 

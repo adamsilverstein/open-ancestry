@@ -50,6 +50,13 @@ export {
   type RelationshipGroup,
   type RelationshipListProps,
 } from './RelationshipList/RelationshipList';
+export {
+  RelationshipChart,
+  type RelationshipChartCell,
+  type RelationshipChartPath,
+  type RelationshipChartProps,
+  type RelationshipChartRole,
+} from './RelationshipChart/RelationshipChart';
 export { Select, type SelectOption, type SelectProps } from './Select/Select';
 export { Skeleton, type SkeletonProps } from './Skeleton/Skeleton';
 export { SourceItem, type SourceItemProps, type SourceQuality } from './SourceItem/SourceItem';

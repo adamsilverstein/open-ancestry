@@ -1,15 +1,20 @@
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { Network } from 'lucide-react';
 import { ancestorsQuery, mediaUrl, treeQuery } from '../../api/queries';
 import type { PersonDetail } from '../../api/types';
 import { Avatar } from '../../components/Avatar/Avatar';
+import { Button } from '../../components/Button/Button';
+import { Popover, PopoverContent, PopoverTrigger } from '../../components/Popover/Popover';
+import { RelationshipChart } from '../../components/RelationshipChart/RelationshipChart';
+import type { RelationshipChartCell } from '../../components/RelationshipChart/RelationshipChart';
 import buttonStyles from '../../components/Button/Button.module.css';
 import { TagBadge } from '../../components/TagBadge/TagBadge';
 import { cx } from '../../lib/cx';
-import { fullName, isLivingStatus } from '../../lib/person';
+import { fullName, isLivingStatus, toPersonSummary } from '../../lib/person';
 import type { TagColor } from '../../lib/person';
-import { describeRelationship } from '../../lib/relationship';
+import { relationshipPath } from '../../lib/relationship';
 import { formatDate } from '@open-ancestry/core';
 import type { EventBrief } from '../../api/types';
 import styles from './PersonPage.module.css';
@@ -48,8 +53,14 @@ function Vital({
   );
 }
 
-/** `father of Rowan Ashdown`, `Home person`, or null while loading or unrelated. */
-function useRelationshipText(tree: string, detail: PersonDetail): string | null {
+interface RelationshipToHome {
+  /** `father of Rowan Ashdown`, `Home person`; null while loading or unrelated. */
+  text: string | null;
+  /** One mini chart per connecting path, for blood relatives (several with pedigree collapse). */
+  charts: { label: string; cells: RelationshipChartCell[] }[];
+}
+
+function useRelationshipToHome(tree: string, detail: PersonDetail): RelationshipToHome {
   const id = detail.person.id;
   const { data: info } = useQuery(treeQuery(tree));
   const home = info?.homePersonId ?? null;
@@ -57,24 +68,43 @@ function useRelationshipText(tree: string, detail: PersonDetail): string | null 
   const needsAncestors = !!home && home !== id && !spouseOfHome;
   const homeAncestors = useQuery({ ...ancestorsQuery(tree, home ?? ''), enabled: needsAncestors });
   const personAncestors = useQuery({ ...ancestorsQuery(tree, id), enabled: needsAncestors });
+  const found = useMemo(
+    () =>
+      homeAncestors.data && personAncestors.data
+        ? relationshipPath(homeAncestors.data, personAncestors.data)
+        : null,
+    [homeAncestors.data, personAncestors.data],
+  );
 
-  if (!home) return null;
-  if (home === id) return 'Home person';
+  if (!home) return { text: null, charts: [] };
+  if (home === id) return { text: 'Home person', charts: [] };
   if (spouseOfHome) {
     const role =
       detail.summary.sex === 'M' ? 'husband' : detail.summary.sex === 'F' ? 'wife' : 'spouse';
-    return `${role} of ${fullName(spouseOfHome)}`;
+    return { text: `${role} of ${fullName(spouseOfHome)}`, charts: [] };
   }
-  if (!homeAncestors.data || !personAncestors.data) return null;
-  const relationship = describeRelationship(homeAncestors.data, personAncestors.data);
-  const homePerson = homeAncestors.data.people.find((p) => p.id === home);
-  return relationship && homePerson ? `${relationship} of ${fullName(homePerson)}` : null;
+  const people = new Map(
+    [...(homeAncestors.data?.people ?? []), ...(personAncestors.data?.people ?? [])].map((p) => [
+      p.id,
+      p,
+    ]),
+  );
+  const homePerson = people.get(home);
+  if (!found || !homePerson) return { text: null, charts: [] };
+  const charts = found.paths.map(({ label, cells }) => ({
+    label,
+    cells: cells.map((cell): RelationshipChartCell => {
+      const person = people.get(cell.id);
+      return { ...cell, person: person ? toPersonSummary(person) : null };
+    }),
+  }));
+  return { text: `${found.name} of ${fullName(homePerson)}`, charts };
 }
 
 export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDetail }) {
   const { summary } = detail;
   const name = fullName(summary);
-  const relationship = useRelationshipText(tree, detail);
+  const relationship = useRelationshipToHome(tree, detail);
   const sex = summary.sex === 'M' || summary.sex === 'F' ? summary.sex : 'U';
   return (
     <header className={styles.header} data-surface="canvas" data-testid="person-header">
@@ -96,9 +126,23 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
           />
         </div>
         {/* Reserved line: filled when the relationship resolves, so nothing shifts. */}
-        <p className={styles.relationship} data-testid="relationship">
-          {relationship}
-        </p>
+        <div className={styles.relationshipRow}>
+          <p className={styles.relationship} data-testid="relationship">
+            {relationship.text}
+          </p>
+          {relationship.charts.length > 0 && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="sm">
+                  Show path
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent label="Relationship path" className={styles.pathPopover}>
+                <RelationshipChart paths={relationship.charts} />
+              </PopoverContent>
+            </Popover>
+          )}
+        </div>
         {detail.tags.length > 0 && (
           <ul className={styles.tags} aria-label="Tags">
             {detail.tags.map((tag) => (

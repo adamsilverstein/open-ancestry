@@ -714,12 +714,20 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
+    // Next frame, so re-rendering never resizes inside the observer's own callback.
+    let raf = 0;
     const observer = new ResizeObserver(() => {
-      measure();
-      updateVisible(true);
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        measure();
+        updateVisible(true);
+      });
     });
     observer.observe(el);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(raf);
+    };
   }, [measure, updateVisible]);
 
   // Mouse wheel and pinch zoom around the pointer; trackpad two-finger scrolling pans.

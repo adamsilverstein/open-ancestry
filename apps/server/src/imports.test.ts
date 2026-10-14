@@ -1,8 +1,12 @@
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, utimes } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { startServer } from './index';
 import type { Importer, ImporterOptions } from './jobs';
+import { Library } from './library';
+import { STALE_UPLOAD_MS, UPLOAD_PREFIX, sweepStaleUploads } from './routes/imports';
 import {
   HOST,
   MUTATION_HEADERS,
@@ -247,5 +251,117 @@ describe('GET jobs', () => {
     expect((await api.get(`/api/jobs/${id}`)).statusCode).toBe(404);
     expect((await api.get(`/api/jobs/${id}/events`)).statusCode).toBe(404);
     expect((await api.get('/api/jobs/not-a-uuid')).statusCode).toBe(400);
+  });
+});
+
+describe('POST /api/import (new tree owned by the server)', () => {
+  const importNew = (fileName = 'Vale Family.ged', content = '0 HEAD\n0 TRLR\n') =>
+    api.inject({ method: 'POST', url: '/api/import', ...multipart(fileName, content) });
+
+  /** An importer that adds a person, like a real import. */
+  const addsPerson: Importer = async (_path, store) => {
+    store.transact('import', (tx) => tx.insert('person', {}));
+    return { people: 1 };
+  };
+
+  it('creates a tree named after the file and hands it over on success', async () => {
+    api = await testApi({ importer: addsPerson });
+    const res = await importNew('../x/Vale Family.ged');
+    expect(res.statusCode).toBe(202);
+    const { jobId, job } = res.json();
+    expect(job).toMatchObject({ tree: 'Vale Family', createdTree: true });
+    await waitForJob(api, jobId, 'completed');
+    const tree = (await api.get('/api/trees/Vale%20Family')).json().tree;
+    expect(tree.peopleCount).toBe(1);
+    const second = (await importNew()).json();
+    expect(second.job.tree).toBe('Vale Family 2');
+    await waitForJob(api, second.jobId, 'completed');
+    // Once handed over, nothing marks the trees as removable.
+    const library = new Library(api.root);
+    expect(library.sweepInterruptedImports(0)).toEqual([]);
+  });
+
+  it('removes the tree it created when the import fails', async () => {
+    const fake = controllableImporter();
+    api = await testApi({ importer: fake.importer });
+    const { jobId, job } = (await importNew('Redo.ged')).json();
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(1));
+    fake.fail(new Error('The file does not look like GEDCOM'));
+    expect(await waitForJob(api, jobId, 'failed')).toMatchObject({ createdTree: true });
+    expect(existsSync(`${api.root}/${job.tree}.oatree`)).toBe(false);
+    expect((await api.get('/api/trees')).json().trees).toEqual([]);
+  });
+
+  it('never removes a tree re-created under the same name, or one it did not create', async () => {
+    api = await testApi();
+    const library = new Library(api.root);
+    const marker = 'marker-of-a-failed-import';
+    const id = library.createForImport('Redo.ged', marker);
+    expect(library.discardFailedImport(id, marker)).toBe(true);
+    // Re-created by a later import with its own marker, and filled.
+    const again = library.createForImport('Redo.ged', 'another-import');
+    expect(again).toBe(id);
+    library.open(again).transact('add', (tx) => tx.insert('person', {}));
+    expect(library.discardFailedImport(again, marker)).toBe(false);
+    expect(library.discardFailedImport(again, 'another-import')).toBe(false);
+    expect(library.exists(again)).toBe(true);
+    // A tree the user made has no marker at all.
+    library.create('Mine');
+    expect(library.discardFailedImport('Mine', marker)).toBe(false);
+    library.closeAll();
+  });
+
+  it('keeps an existing tree when importing into it fails', async () => {
+    api = await testApi({
+      importer: async () => {
+        throw new Error('Imports go into a new, empty tree');
+      },
+    });
+    const base = await createTestTree(api, 'Populated');
+    const { jobId, job } = (await upload(api, base)).json();
+    expect(job.createdTree).toBe(false);
+    await waitForJob(api, jobId, 'failed');
+    expect((await api.get(base)).statusCode).toBe(200);
+  });
+
+  it('removes the tree when the import is cancelled before it runs', async () => {
+    const fake = controllableImporter();
+    api = await testApi({ importer: fake.importer });
+    await importNew('First.ged');
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(1));
+    const queued = (await importNew('Second.ged')).json();
+    expect(existsSync(`${api.root}/Second.oatree`)).toBe(true);
+    await api.app.close();
+    expect(existsSync(`${api.root}/First.oatree`)).toBe(false);
+    expect(existsSync(`${api.root}/Second.oatree`)).toBe(false);
+    expect(queued.job.state).toBe('queued');
+  });
+});
+
+describe('startup sweeps', () => {
+  it('removes old, empty trees of interrupted imports and nothing else', async () => {
+    api = await testApi();
+    const library = new Library(api.root);
+    library.createForImport('Interrupted.ged', 'm1');
+    const kept = library.createForImport('Filled.ged', 'm2');
+    library.open(kept).transact('add', (tx) => tx.insert('person', {}));
+    library.create('Users own');
+    expect(library.sweepInterruptedImports(60_000)).toEqual([]);
+    expect(library.sweepInterruptedImports(0, Date.now() + 1000)).toEqual(['Interrupted']);
+    expect(library.list().map((t) => t.id)).toEqual(['Filled', 'Users own']);
+    library.closeAll();
+  });
+
+  it('removes stale upload folders only', async () => {
+    api = await testApi();
+    const dir = await mkdtemp(join(tmpdir(), 'oa-sweep-'));
+    await mkdir(join(dir, `${UPLOAD_PREFIX}old`));
+    await mkdir(join(dir, `${UPLOAD_PREFIX}fresh`));
+    await mkdir(join(dir, 'unrelated-old'));
+    const past = new Date(Date.now() - STALE_UPLOAD_MS - 60_000);
+    await utimes(join(dir, `${UPLOAD_PREFIX}old`), past, past);
+    await utimes(join(dir, 'unrelated-old'), past, past);
+    expect(await sweepStaleUploads(Date.now(), dir)).toBe(1);
+    expect((await readdir(dir)).sort()).toEqual([`${UPLOAD_PREFIX}fresh`, 'unrelated-old']);
   });
 });

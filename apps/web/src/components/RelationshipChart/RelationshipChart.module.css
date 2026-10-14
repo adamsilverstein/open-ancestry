@@ -1,0 +1,79 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-3);
+}
+
+.chart {
+  position: relative;
+  max-width: none;
+}
+
+.lines {
+  position: absolute;
+  inset: 0;
+  fill: none;
+  stroke: var(--oa-border-strong);
+  stroke-width: 1.5;
+}
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cell {
+  position: absolute;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: var(--oa-space-1) var(--oa-space-2);
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-md);
+  background: var(--oa-surface);
+  color: var(--oa-text);
+  text-decoration: none;
+}
+
+a.card:hover {
+  background: var(--oa-surface-hover);
+}
+
+a.card:hover .name {
+  text-decoration: underline;
+}
+
+a.card:focus-visible {
+  outline: var(--oa-focus-width) solid var(--oa-focus);
+  outline-offset: var(--oa-focus-offset);
+}
+
+.cell[data-role='person'] .card,
+.cell[data-role='home'] .card {
+  border-color: var(--oa-accent);
+}
+
+.cell[data-role='common-ancestor'] .card {
+  background: var(--oa-surface-sunken);
+}
+
+.name {
+  overflow: hidden;
+  font: var(--oa-text-sm);
+  font-weight: var(--oa-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  color: var(--oa-text-muted);
+  font: var(--oa-text-xs);
+}

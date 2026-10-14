@@ -1,16 +1,16 @@
 import { lazy, Suspense } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { ChevronDown, Moon, Search, Sun, TreeDeciduous, Users } from 'lucide-react';
 import { Button } from '../components/Button/Button';
 import buttonStyles from '../components/Button/Button.module.css';
 import { IconButtonBase } from '../components/IconButton/IconButtonBase';
-import { currentTreeQuery, treeQuery } from '../api/queries';
 import { cx } from '../lib/cx';
 import { useTheme } from '../lib/useTheme';
 import styles from './TopBar.module.css';
+import { treeSwitcherClass } from './treeSwitcherClass';
 
 const FileMenu = lazy(() => import('./FileMenu'));
+const TreeSwitcher = lazy(() => import('./TreeSwitcher'));
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
 
@@ -28,16 +28,22 @@ function FileMenuPlaceholder() {
   );
 }
 
-/** The open tree's name, or a placeholder until there is one. */
-function useTreeName(): string {
-  const { data: tree } = useQuery(currentTreeQuery);
-  const { data: info } = useQuery({ ...treeQuery(tree ?? ''), enabled: !!tree });
-  return info?.name ?? (tree === null ? 'No tree open' : '');
+function TreeSwitcherPlaceholder() {
+  return (
+    <button
+      type="button"
+      className={treeSwitcherClass}
+      aria-disabled="true"
+      aria-label="Tree: loading"
+    >
+      <span>Trees</span>
+      <ChevronDown size={14} aria-hidden />
+    </button>
+  );
 }
 
 export function TopBar({ onFind }: { onFind: () => void }) {
   const { theme, toggle } = useTheme();
-  const treeName = useTreeName();
   const next = theme === 'dark' ? 'light' : 'dark';
 
   return (
@@ -47,7 +53,9 @@ export function TopBar({ onFind }: { onFind: () => void }) {
         <span aria-hidden>open-ancestry</span>
       </Link>
       <span className={styles.divider} aria-hidden />
-      <span className={styles.treeName}>{treeName}</span>
+      <Suspense fallback={<TreeSwitcherPlaceholder />}>
+        <TreeSwitcher />
+      </Suspense>
 
       <div className={styles.actions}>
         <Link

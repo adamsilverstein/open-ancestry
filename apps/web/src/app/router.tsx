@@ -96,12 +96,19 @@ const peopleRoute = createRoute({
   component: lazyRouteComponent(() => import('../routes/people/PeoplePage'), 'PeoplePage'),
 });
 
+const importRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/import/$jobId',
+  component: lazyRouteComponent(() => import('../routes/import/ImportPage'), 'ImportPage'),
+});
+
 const routeTree = rootRoute.addChildren([
   homeRoute,
   designRoute,
   treeRoute,
   personRoute,
   peopleRoute,
+  importRoute,
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });

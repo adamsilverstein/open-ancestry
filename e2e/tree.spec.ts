@@ -547,6 +547,19 @@ test.describe('family view', () => {
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.ada}\\?`));
   });
 
+  test('switching trees from the top bar opens the new tree at its home person', async ({
+    page,
+  }) => {
+    await open(page);
+    const switcher = page.getByRole('banner').getByRole('button', { name: /Tree:/ });
+    await expect(switcher).toContainText(tree);
+    await switcher.click();
+    await page.getByRole('menuitemradio', { name: seed.perf.tree }).click();
+    await expect(page).toHaveURL(new RegExp(`/tree/${seed.perf.focusId}\\?`));
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    await expect(card(page, 'Ada Vale')).toHaveCount(0);
+  });
+
   test('/tree/home opens the home person', async ({ page }) => {
     await page.goto(`/tree/home?tree=${encodeURIComponent(tree)}`);
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.ada}\\?`));

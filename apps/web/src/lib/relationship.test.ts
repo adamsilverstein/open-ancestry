@@ -1,57 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Neighborhood } from '../api/types';
-import { describeRelationship, relationshipName } from './relationship';
-
-describe('relationshipName', () => {
-  it('names direct ancestors', () => {
-    expect(relationshipName(1, 0, 'M')).toBe('father');
-    expect(relationshipName(1, 0, 'F')).toBe('mother');
-    expect(relationshipName(1, 0, 'U')).toBe('parent');
-    expect(relationshipName(2, 0, 'M')).toBe('grandfather');
-    expect(relationshipName(3, 0, 'F')).toBe('great-grandmother');
-    expect(relationshipName(4, 0, 'M')).toBe('2nd great-grandfather');
-    expect(relationshipName(5, 0, 'M')).toBe('3rd great-grandfather');
-    expect(relationshipName(13, 0, 'M')).toBe('11th great-grandfather');
-    expect(relationshipName(24, 0, 'M')).toBe('22nd great-grandfather');
-  });
-
-  it('names direct descendants', () => {
-    expect(relationshipName(0, 1, 'M')).toBe('son');
-    expect(relationshipName(0, 1, 'F')).toBe('daughter');
-    expect(relationshipName(0, 1, 'X')).toBe('child');
-    expect(relationshipName(0, 2, 'M')).toBe('grandson');
-    expect(relationshipName(0, 3, 'F')).toBe('great-granddaughter');
-    expect(relationshipName(0, 4, 'U')).toBe('2nd great-grandchild');
-  });
-
-  it('names siblings, half siblings, nephews and uncles', () => {
-    expect(relationshipName(1, 1, 'M')).toBe('brother');
-    expect(relationshipName(1, 1, 'F', true)).toBe('half sister');
-    expect(relationshipName(1, 1, 'U')).toBe('sibling');
-    expect(relationshipName(1, 2, 'M')).toBe('nephew');
-    expect(relationshipName(1, 2, 'F')).toBe('niece');
-    expect(relationshipName(1, 3, 'M')).toBe('grandnephew');
-    expect(relationshipName(1, 4, 'F')).toBe('great-grandniece');
-    expect(relationshipName(2, 1, 'M')).toBe('uncle');
-    expect(relationshipName(2, 1, 'F')).toBe('aunt');
-    expect(relationshipName(3, 1, 'M')).toBe('granduncle');
-    expect(relationshipName(4, 1, 'M')).toBe('great-granduncle');
-    expect(relationshipName(5, 1, 'F')).toBe('2nd great-grandaunt');
-    expect(relationshipName(2, 1, 'U')).toBe('parent’s sibling');
-  });
-
-  it('names cousins with degree and removal', () => {
-    expect(relationshipName(2, 2, 'M')).toBe('1st cousin');
-    expect(relationshipName(3, 3, 'F')).toBe('2nd cousin');
-    expect(relationshipName(2, 3, 'M')).toBe('1st cousin 1x removed');
-    expect(relationshipName(5, 3, 'M')).toBe('2nd cousin 2x removed');
-    expect(relationshipName(2, 2, 'M', true)).toBe('half 1st cousin');
-  });
-
-  it('names the home person', () => {
-    expect(relationshipName(0, 0, 'M')).toBe('self');
-  });
-});
+import { describeRelationship, relationshipPath } from './relationship';
 
 /** Builds an ancestors-only neighborhood from child -> [parents] pairs. */
 function slice(focusId: string, parents: Record<string, string[]>, sexes: Record<string, string>) {
@@ -132,5 +81,55 @@ describe('describeRelationship', () => {
 
   it('returns null when no blood relationship is found', () => {
     expect(describeRelationship(slice('x', {}, {}), slice('y', {}, {}))).toBeNull();
+  });
+});
+
+describe('relationshipPath', () => {
+  const sexes = { gpa: 'M', dad: 'M', uncle: 'M', me: 'M', cousin: 'F' };
+  const both = (id: string, parents: Record<string, string[]>) => slice(id, parents, sexes);
+
+  it('returns chart cells from the person to home, marking the common ancestor', () => {
+    const r = relationshipPath(
+      both('me', { me: ['dad'], dad: ['gpa'] }),
+      both('cousin', { cousin: ['uncle'], uncle: ['gpa'] }),
+    );
+    expect(r?.name).toBe('1st cousin');
+    expect(r?.paths).toHaveLength(1);
+    expect(r?.paths[0]!.cells).toEqual([
+      { id: 'cousin', row: 2, col: 0, role: 'person' },
+      { id: 'uncle', row: 1, col: 0, role: 'between', step: 'parent' },
+      { id: 'gpa', row: 0, col: 0, role: 'common-ancestor', step: 'parent' },
+      { id: 'dad', row: 1, col: 1, role: 'between', step: 'child' },
+      { id: 'me', row: 2, col: 1, role: 'home', step: 'child' },
+    ]);
+  });
+
+  it('lists every relationship and line with pedigree collapse', () => {
+    // Brothers b1 and b2 married sisters s1 and s2: double first cousins.
+    const tree = {
+      me: ['b1', 's1'],
+      b1: ['pf'],
+      s1: ['mf'],
+      cousin: ['b2', 's2'],
+      b2: ['pf'],
+      s2: ['mf'],
+    };
+    const pick = (id: string, keys: string[]) =>
+      slice(id, Object.fromEntries(keys.map((k) => [k, tree[k as keyof typeof tree]])), sexes);
+    const r = relationshipPath(
+      pick('me', ['me', 'b1', 's1']),
+      pick('cousin', ['cousin', 'b2', 's2']),
+    );
+    expect(r?.name).toBe('double 1st cousin');
+    expect(r?.paths.map((p) => p.label)).toEqual([
+      'double 1st cousin through Unknown name (line 1)',
+      'double 1st cousin through Unknown name (line 2)',
+    ]);
+    expect(r?.paths.map((p) => p.cells[2]!.id)).toEqual(['pf', 'mf']);
+  });
+
+  it('is null for the home person and for strangers', () => {
+    expect(relationshipPath(both('me', {}), both('me', {}))).toBeNull();
+    expect(relationshipPath(both('me', {}), both('x', {}))).toBeNull();
   });
 });

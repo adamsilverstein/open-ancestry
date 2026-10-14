@@ -1,8 +1,9 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { exposureWarning, parseCliArgs, run } from './main';
+import { exposureWarning, parseCliArgs, progressReporter, run } from './main';
 
 describe('parseCliArgs', () => {
   it('parses serve with defaults', () => {
@@ -94,5 +95,166 @@ describe('run', () => {
     const logs: string[] = [];
     expect(await run(['help'], { log: (line) => logs.push(line) })).toBeUndefined();
     expect(logs.join('\n')).toMatch(/--library/);
+  });
+});
+
+const fixture = join(import.meta.dirname, '../../../fixtures/ancestry-sample.ged');
+
+describe('import', () => {
+  async function importCli(args: string[]) {
+    const library = await mkdtemp(join(tmpdir(), 'oa-cli-import-'));
+    const logs: string[] = [];
+    const errors: string[] = [];
+    await run(['import', ...args, '--library', library], {
+      log: (line) => logs.push(line),
+      warn: (line) => errors.push(line),
+    });
+    return { library, out: logs.join('\n'), err: errors.join('\n') };
+  }
+
+  it('parses import options', () => {
+    expect(
+      parseCliArgs(['import', 'a.ged', '--media', 'pics', '--name', 'Vale', '--library', '/l'], {}),
+    ).toEqual({ command: 'import', file: 'a.ged', media: 'pics', name: 'Vale', library: '/l' });
+    expect(() => parseCliArgs(['import'], {})).toThrow(/file/);
+  });
+
+  it('creates a tree named after the file and prints the report', async () => {
+    const { library, out } = await importCli([fixture]);
+    expect(existsSync(join(library, 'ancestry-sample.oatree', 'tree.sqlite'))).toBe(true);
+    expect(out).toMatch(/Imported ancestry-sample\.ged into "ancestry-sample"/);
+    expect(out).toMatch(/People\s+26/);
+    expect(out).toMatch(/Families\s+10/);
+    expect(out).toMatch(/Lines\s+475 \(458 mapped, 17 preserved\)/);
+    expect(out).toMatch(/Warnings\s+none/);
+    expect(out).toMatch(/Home person\s+Thaddeus Ashgrove/);
+    expect(out).toContain('Ancestry.com Family Trees 2024.12');
+  });
+
+  it('uses --name and --media, and lists warnings and unmapped tags', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'oa-cli-ged-'));
+    const ged = join(dir, 'family.ged');
+    await writeFile(
+      ged,
+      [
+        '0 HEAD',
+        '0 @I1@ INDI',
+        '1 FAMC @F9@',
+        '1 _ODD x',
+        '1 OBJE',
+        '2 FILE p/a.jpg',
+        '0 TRLR',
+        '',
+      ].join('\n'),
+    );
+    await mkdir(join(dir, 'media', 'p'), { recursive: true });
+    await writeFile(join(dir, 'media', 'p', 'a.jpg'), 'jpeg');
+    const { library, out } = await importCli([
+      ged,
+      '--name',
+      'Vale',
+      '--media',
+      join(dir, 'media'),
+    ]);
+    expect(existsSync(join(library, 'Vale.oatree', 'media', 'p', 'a.jpg'))).toBe(true);
+    expect(out).toMatch(/Media\s+1 linked/);
+    expect(out).toMatch(/line 3\s+bad-pointer/);
+    expect(out).toMatch(/INDI\._ODD\s+1\s+line 4: 1 _ODD x/);
+  });
+
+  it('refuses an existing tree name and a bad name without touching the library', async () => {
+    const { library } = await importCli([fixture, '--name', 'Twice']);
+    await expect(
+      run(['import', fixture, '--name', 'Twice', '--library', library], { log: () => {} }),
+    ).rejects.toThrow(/already exists/);
+    await expect(
+      run(['import', fixture, '--name', 'a/b', '--library', library], { log: () => {} }),
+    ).rejects.toThrow(/path separator/);
+  });
+
+  it('refuses a --media folder that does not exist', async () => {
+    const library = await mkdtemp(join(tmpdir(), 'oa-cli-media-'));
+    await expect(
+      run(['import', fixture, '--media', join(library, 'nope'), '--library', library], {
+        log: () => {},
+      }),
+    ).rejects.toThrow(/--media folder not found/);
+    await expect(
+      run(['import', fixture, '--media', fixture, '--library', library], { log: () => {} }),
+    ).rejects.toThrow(/--media folder not found/);
+    expect(existsSync(join(library, 'ancestry-sample.oatree'))).toBe(false);
+  });
+
+  it('writes progress lines when asked (stderr on a terminal)', async () => {
+    const library = await mkdtemp(join(tmpdir(), 'oa-cli-progress-'));
+    const chunks: string[] = [];
+    await run(['import', fixture, '--library', library], {
+      log: () => {},
+      progress: (text) => chunks.push(text),
+    });
+    const text = chunks.join('');
+    expect(text).toContain('Parsing');
+    expect(text).toContain('Mapping records 100%');
+    expect(text.endsWith('\n')).toBe(true);
+    const lines: string[] = [];
+    const report = progressReporter((t) => lines.push(t.trim()));
+    for (let done = 0; done <= 1000; done += 50) report('map', done, 1000);
+    report('map', 1000, 1000);
+    expect(lines).toEqual(Array.from({ length: 11 }, (_, i) => `Mapping records ${i * 10}%`));
+  });
+
+  it('fails cleanly on a missing or non-GEDCOM file', async () => {
+    const library = await mkdtemp(join(tmpdir(), 'oa-cli-bad-'));
+    await expect(
+      run(['import', join(library, 'nope.ged'), '--library', library], { log: () => {} }),
+    ).rejects.toThrow(/Cannot read/);
+    const junk = join(library, 'junk.ged');
+    await writeFile(junk, 'not a gedcom\n');
+    await expect(run(['import', junk, '--library', library], { log: () => {} })).rejects.toThrow(
+      /does not look like GEDCOM/,
+    );
+    expect(existsSync(join(library, 'junk.oatree'))).toBe(false);
+  });
+});
+
+describe('serve with import', () => {
+  it('wires the real importer into the server', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'oa-cli-'));
+    await writeFile(join(dir, 'index.html'), '<!doctype html>');
+    const library = await mkdtemp(join(tmpdir(), 'oa-cli-lib-'));
+    const server = await run(['serve', '--port', '0', '--static-dir', dir, '--library', library], {
+      log: () => {},
+    });
+    if (!server) throw new Error('expected a server');
+    try {
+      const { token } = (await (await fetch(`${server.url}/api/session`)).json()) as {
+        token: string;
+      };
+      const headers = { origin: server.url, 'x-oa-token': token };
+      await fetch(`${server.url}/api/trees`, {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Served' }),
+      });
+      const form = new FormData();
+      form.append('file', new Blob([await readFile(fixture)]), 'ancestry-sample.ged');
+      const started = await fetch(`${server.url}/api/trees/Served/import`, {
+        method: 'POST',
+        headers,
+        body: form,
+      });
+      expect(started.status).toBe(202);
+      const { jobId } = (await started.json()) as { jobId: string };
+      let job: { state: string; result: { records: { INDI: number } }; progress: unknown };
+      do {
+        await new Promise((r) => setTimeout(r, 20));
+        job = (await (await fetch(`${server.url}/api/jobs/${jobId}`)).json()) as typeof job;
+      } while (job.state === 'queued' || job.state === 'running');
+      expect(job.state).toBe('completed');
+      expect(job.result.records.INDI).toBe(26);
+      expect(job.progress).toMatchObject({ phase: 'done' });
+    } finally {
+      await server.close();
+    }
   });
 });

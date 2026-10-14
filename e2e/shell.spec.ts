@@ -24,21 +24,17 @@ test.describe('navigation', () => {
     await expect(page.getByRole('button', { name: 'Import GEDCOM' })).toBeVisible();
   });
 
-  test('import CTA announces that import is not available yet', async ({ page }) => {
+  test('import CTA opens the file picker', async ({ page }) => {
     await page.goto('/');
+    const chooser = page.waitForEvent('filechooser');
     await page.getByRole('button', { name: 'Import GEDCOM' }).click();
-    await expect(
-      page
-        .getByRole('region', { name: /Notifications/ })
-        .getByRole('listitem')
-        .filter({ hasText: 'Import is coming soon' }),
-    ).toBeVisible();
+    expect((await chooser).isMultiple()).toBe(false);
   });
 
-  test('top bar links home and shows the open tree name', async ({ page }) => {
+  test('top bar links home and shows the open tree in the tree switcher', async ({ page }) => {
     await page.goto('/design');
     const banner = page.getByRole('banner');
-    await expect(banner.getByText('Ashdown family')).toBeVisible();
+    await expect(banner.getByRole('button', { name: /Tree:/ })).toContainText('Ashdown family');
     await banner.getByRole('link', { name: 'open-ancestry home' }).click();
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Import your Ancestry GEDCOM');
@@ -48,7 +44,7 @@ test.describe('navigation', () => {
     await page.goto('/');
     await page.getByRole('button', { name: 'File' }).click();
     const menu = page.getByRole('menu');
-    await expect(menu.getByRole('menuitem', { name: /Import GEDCOM/ })).toBeVisible();
+    await expect(menu.getByRole('menuitem', { name: /Import GEDCOM/ })).toBeEnabled();
     await expect(menu.getByRole('menuitem', { name: /Export GEDCOM/ })).toBeDisabled();
     await page.keyboard.press('Escape');
     await expect(menu).toBeHidden();

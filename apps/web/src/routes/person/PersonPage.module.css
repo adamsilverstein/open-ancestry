@@ -55,6 +55,21 @@
 }
 
 /* One line reserved even while the relationship loads. */
+.relationshipRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oa-space-2);
+  min-height: 28px;
+}
+
+/* The mini chart can be wider than a regular popover. */
+.pathPopover {
+  max-width: min(640px, calc(100vw - 16px));
+  max-height: min(480px, calc(100vh - 16px));
+  overflow: auto;
+}
+
 .relationship {
   min-height: 22px;
   color: var(--oa-canvas-text-muted);

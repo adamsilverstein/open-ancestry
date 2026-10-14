@@ -84,7 +84,7 @@ Key/value settings for the tree.
 
 | Column | Type | Null | Meaning |
 |---|---|---|---|
-| `key` | TEXT | no | Primary key. Known keys: `schema_version` (written only by migrations; `meta.set` and `meta.delete` refuse it), `tree_name`, `created_at`, `home_person_id` (the person relationships are described from), `settings` (JSON object of UI preferences). |
+| `key` | TEXT | no | Primary key. Known keys: `schema_version` (written only by migrations; `meta.set` and `meta.delete` refuse it), `tree_name`, `created_at`, `home_person_id` (the person relationships are described from), `settings` (JSON object of UI preferences), `import_pending` (set only on a tree the server created for an import upload, holding that import's marker until it succeeds; an empty tree that still has it after a failure or restart is removed by the server). |
 | `value` | TEXT | no | Value as text. |
 
 ### `import_batch`

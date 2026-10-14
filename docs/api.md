@@ -22,7 +22,8 @@ POST/PUT/PATCH/DELETE /api/...    needs  Origin: <this server>  and  x-oa-token:
 | Binds `127.0.0.1` unless `--host` is given (the CLI warns loudly otherwise) | Private data never reaches the network by default. |
 | `Host` must be `localhost`, `127.0.0.1` or `[::1]` (any port), else 403 `forbidden_host` | Defeats DNS rebinding. |
 | Every method except GET, HEAD and OPTIONS needs the per-process token and an `Origin` that exactly equals this server's serialized origin (no `null`, userinfo, path, case or duplicate variations), else 403 `forbidden` | Defeats CSRF; other origins cannot read the token because there is no CORS. |
-| `Sec-Fetch-Site: cross-site` is refused on `/api` | Defense in depth. |
+| `Sec-Fetch-Site: cross-site` is refused for everything except a top-level GET navigation | Defense in depth; links to the app from elsewhere still open it. |
+| Paths with percent-encoded unreserved characters, `/`, `\` or `%`, malformed escapes, dot segments or empty segments get 400 before routing; the mutation guard applies to every non-safe method whatever the path | The router decodes paths, so `/%61pi/...` must never dodge the guard. |
 | No CORS headers, ever | |
 | CSP `default-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'`, `nosniff`, `Referrer-Policy: no-referrer`, COOP `same-origin` on every response | |
 | JSON bodies up to 1 MiB; import uploads up to 1 GiB (streamed to a temp file); one import at a time, four queued | Bounded memory and disk. |
@@ -39,7 +40,7 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 | `GET /api/health` | Liveness. |
 | `GET /api/session` | Mutation token. |
 | `GET /api/trees` | `{ trees: [{ id, name, modifiedAt }] }` |
-| `POST /api/trees` `{ name }` | Create a tree (201). Names cannot contain path separators or start with a dot. |
+| `POST /api/trees` `{ name }` | Create a tree (201). Names cannot contain path separators or `%`, start or end with a dot, or be a Windows device name (`CON`, `NUL`, `COM1`, ...). |
 | `GET /api/trees/:tree` | Tree info with `peopleCount`, `homePersonId`, `schemaVersion`. |
 | `PATCH /api/trees/:tree` `{ name }` | Rename (folder and display name). |
 | `DELETE /api/trees/:tree` | Move to `<library>/.trash/` (204). |

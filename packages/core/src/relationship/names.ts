@@ -1,10 +1,19 @@
-/** English kinship terms, gendered by the sex of the person being named. */
+/**
+ * English kinship terms, gendered by the sex of the person being named.
+ *
+ * Two styles. `ancestry` (the default) matches Ancestry.com, which users
+ * compare against: "grand" for one generation past aunts and nieces
+ * ("granduncle", "great-grandniece") and "1x removed" for cousins.
+ * `formal` uses "great-aunt", "great-nephew" and "once removed".
+ */
 import type { PartnerRelationship, Sex } from '../layout/types';
 
 /** A non-biological link on the path that changes the name. */
 export type Modifier = 'step' | 'adopted' | 'foster' | undefined;
 
 export const APOSTROPHE = '’s ';
+
+export type NameStyle = 'ancestry' | 'formal';
 
 const pick = (sex: Sex | undefined, male: string, female: string, neutral: string) =>
   sex === 'M' ? male : sex === 'F' ? female : neutral;
@@ -18,7 +27,8 @@ export function ordinal(n: number): string {
 /** 0 "", 1 "great-", 2 "2nd great-"... */
 const greats = (n: number) => (n === 0 ? '' : n === 1 ? 'great-' : `${ordinal(n)} great-`);
 
-const times = (n: number) => (n === 1 ? 'once' : n === 2 ? 'twice' : `${n} times`);
+const removed = (n: number, style: NameStyle) =>
+  style === 'ancestry' ? `${n}x` : n === 1 ? 'once' : n === 2 ? 'twice' : `${n} times`;
 
 /** Generations from the common ancestor: `up` from A, `down` to B. */
 export type Shape = { up: number; down: number };
@@ -40,19 +50,22 @@ export function descendantWord(generations: number, sex: Sex | undefined): strin
   return greats(generations - 2) + pick(sex, 'grandson', 'granddaughter', 'grandchild');
 }
 
-/** 2 aunt, 3 great-aunt, 4 great-grandaunt, 5 2nd great-grandaunt. */
-function collateral(levels: number, word: string): string {
+/**
+ * Levels past aunt or niece: 0 aunt, 1 grandaunt (ancestry) or great-aunt
+ * (formal), 2 great-grandaunt, 3 2nd great-grandaunt.
+ */
+function collateral(levels: number, word: string, style: NameStyle): string {
   if (levels === 0) return word;
-  if (levels === 1) return `great-${word}`;
+  if (levels === 1) return style === 'ancestry' ? `grand${word}` : `great-${word}`;
   return `${greats(levels - 1)}grand${word}`;
 }
 
-export function auntWord(down: number, sex: Sex | undefined): string {
-  return collateral(down - 2, pick(sex, 'uncle', 'aunt', 'aunt or uncle'));
+export function auntWord(down: number, sex: Sex | undefined, style: NameStyle): string {
+  return collateral(down - 2, pick(sex, 'uncle', 'aunt', 'aunt or uncle'), style);
 }
 
-export function nieceWord(up: number, sex: Sex | undefined): string {
-  return collateral(up - 2, pick(sex, 'nephew', 'niece', 'niece or nephew'));
+export function nieceWord(up: number, sex: Sex | undefined, style: NameStyle): string {
+  return collateral(up - 2, pick(sex, 'nephew', 'niece', 'niece or nephew'), style);
 }
 
 /** What A is to B for a blood shape, with "half", step, adoptive or foster wording. */
@@ -61,6 +74,7 @@ export function bloodName(
   sex: Sex | undefined,
   half = false,
   modifier: Modifier = undefined,
+  style: NameStyle = 'ancestry',
 ): string {
   const { up, down } = shape;
   if (up === 0 && down === 0) return 'self';
@@ -68,12 +82,12 @@ export function bloodName(
   if (isAncestor(shape)) word = ancestorWord(down, sex);
   else if (isDescendant(shape)) word = descendantWord(up, sex);
   else if (isSibling(shape)) word = pick(sex, 'brother', 'sister', 'sibling');
-  else if (isAuntOrUncle(shape)) word = auntWord(down, sex);
-  else if (isNieceOrNephew(shape)) word = nieceWord(up, sex);
+  else if (isAuntOrUncle(shape)) word = auntWord(down, sex, style);
+  else if (isNieceOrNephew(shape)) word = nieceWord(up, sex, style);
   else {
-    const removed = Math.abs(up - down);
+    const gap = Math.abs(up - down);
     word = `${ordinal(Math.min(up, down) - 1)} cousin`;
-    if (removed) word += ` ${times(removed)} removed`;
+    if (gap) word += ` ${removed(gap, style)} removed`;
   }
   if (modifier === 'step') {
     // stepfather, stepson, stepbrother; step-grandmother, step-aunt.
@@ -82,7 +96,7 @@ export function bloodName(
   }
   if (modifier === 'adopted') return `${isDescendant(shape) ? 'adopted' : 'adoptive'} ${word}`;
   if (modifier === 'foster') return `foster ${word}`;
-  if (half) return isCousin(shape) ? `half ${word}` : `half-${word}`;
+  if (half) return style === 'ancestry' || isCousin(shape) ? `half ${word}` : `half-${word}`;
   return word;
 }
 
@@ -96,7 +110,8 @@ export function spouseOfRelative(
   shape: Shape,
   relativeName: string,
   sex: Sex | undefined,
-  relationship?: PartnerRelationship,
+  relationship: PartnerRelationship | undefined,
+  style: NameStyle,
 ): string {
   if (isAncestor(shape)) {
     return shape.down === 1
@@ -105,8 +120,8 @@ export function spouseOfRelative(
   }
   if (isDescendant(shape)) return `${descendantWord(shape.up, sex)}-in-law`;
   if (isSibling(shape)) return `${pick(sex, 'brother', 'sister', 'sibling')}-in-law`;
-  if (isAuntOrUncle(shape)) return `${auntWord(shape.down, sex)} by marriage`;
-  if (isNieceOrNephew(shape)) return `${nieceWord(shape.up, sex)} by marriage`;
+  if (isAuntOrUncle(shape)) return `${auntWord(shape.down, sex, style)} by marriage`;
+  if (isNieceOrNephew(shape)) return `${nieceWord(shape.up, sex, style)} by marriage`;
   return relativeName + APOSTROPHE + spouseWord(sex, relationship);
 }
 

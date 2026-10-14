@@ -16,7 +16,8 @@ const family = kinshipGraph(bigFamily());
 const name = (g: KinshipGraph, a: string, b: string) => relationship(g, a, b).name;
 
 describe('relationship names (A is B’s ...)', () => {
-  it.each<[string, string, string]>([
+  // [A, B, Ancestry-style name, formal name when it differs]
+  it.each<[string, string, string, string?]>([
     // Self and unrelated
     ['me', 'me', 'self'],
     ['stranger', 'me', 'unrelated'],
@@ -43,41 +44,41 @@ describe('relationship names (A is B’s ...)', () => {
     ['bro', 'me', 'brother'],
     ['sis', 'me', 'sister'],
     ['me', 'bro', 'sister'],
-    ['halfbro', 'me', 'half-brother'],
-    ['me', 'halfbro', 'half-sister'],
-    ['halfsis', 'me', 'half-sister'],
-    ['dadStep', 'me', 'half-brother'],
+    ['halfbro', 'me', 'half brother', 'half-brother'],
+    ['me', 'halfbro', 'half sister', 'half-sister'],
+    ['halfsis', 'me', 'half sister', 'half-sister'],
+    ['dadStep', 'me', 'half brother', 'half-brother'],
     // Aunts, uncles, nieces, nephews
     ['uncle', 'me', 'uncle'],
     ['aunt', 'me', 'aunt'],
     ['me', 'uncle', 'niece'],
     ['bro', 'aunt', 'nephew'],
-    ['gaunt', 'me', 'great-aunt'],
+    ['gaunt', 'me', 'grandaunt', 'great-aunt'],
     ['gaunt', 'dad', 'aunt'],
     ['ggUncle', 'me', 'great-granduncle'],
     ['nephew', 'me', 'nephew'],
     ['niece', 'me', 'niece'],
-    ['gnephew', 'me', 'great-niece'],
-    ['me', 'gnephew', 'great-aunt'],
-    ['halfnephew', 'me', 'half-nephew'],
+    ['gnephew', 'me', 'grandniece', 'great-niece'],
+    ['me', 'gnephew', 'grandaunt', 'great-aunt'],
+    ['halfnephew', 'me', 'half nephew', 'half-nephew'],
     ['kidU', 'me', 'niece or nephew'],
     ['me', 'kidU', 'aunt'],
     // Cousins
     ['cousin1', 'me', '1st cousin'],
     ['cousin2', 'me', '1st cousin'],
     ['cousin3', 'me', '1st cousin'],
-    ['gcousin', 'me', '1st cousin once removed'],
-    ['me', 'gcousin', '1st cousin once removed'],
+    ['gcousin', 'me', '1st cousin 1x removed', '1st cousin once removed'],
+    ['me', 'gcousin', '1st cousin 1x removed', '1st cousin once removed'],
     ['gc2', 'me', '2nd cousin'],
-    ['gc3', 'me', '2nd cousin once removed'],
-    ['c1kid', 'me', '1st cousin once removed'],
-    ['c1gkid', 'me', '1st cousin twice removed'],
-    ['ggUcousin', 'me', '1st cousin twice removed'],
-    ['cousin1', 'son', '1st cousin once removed'],
+    ['gc3', 'me', '2nd cousin 1x removed', '2nd cousin once removed'],
+    ['c1kid', 'me', '1st cousin 1x removed', '1st cousin once removed'],
+    ['c1gkid', 'me', '1st cousin 2x removed', '1st cousin twice removed'],
+    ['ggUcousin', 'me', '1st cousin 2x removed', '1st cousin twice removed'],
+    ['cousin1', 'son', '1st cousin 1x removed', '1st cousin once removed'],
     ['gc3', 'son', '3rd cousin'],
-    ['gc3', 'gson', '3rd cousin once removed'],
-    ['gc2', 'son', '2nd cousin once removed'],
-    ['ggUcousin', 'son', '1st cousin 3 times removed'],
+    ['gc3', 'gson', '3rd cousin 1x removed', '3rd cousin once removed'],
+    ['gc2', 'son', '2nd cousin 1x removed', '2nd cousin once removed'],
+    ['ggUcousin', 'son', '1st cousin 3x removed', '1st cousin 3 times removed'],
     // Adoption, foster and step edges
     ['adoptee', 'me', 'adopted son'],
     ['me', 'adoptee', 'adoptive mother'],
@@ -117,8 +118,13 @@ describe('relationship names (A is B’s ...)', () => {
     ['dadStep', 'gf', 'step-grandson'],
     ['fosterkid', 'cousin1', 'foster sister'],
     ['halfnephew', 'nephew', 'half 1st cousin'],
-  ])('%s is %s’s %s', (a, b, expected) => {
-    expect(name(family, a, b)).toBe(expected);
+    ['gaunt', 'son', 'great-grandaunt'],
+    ['ggUncle', 'son', '2nd great-granduncle'],
+    ['son', 'gaunt', 'great-grandnephew'],
+    ['gson', 'gaunt', '2nd great-grandnephew'],
+  ])('%s is %s’s %s', (a, b, ancestry, formal = ancestry) => {
+    expect(name(family, a, b)).toBe(ancestry);
+    expect(relationship(family, a, b, { style: 'formal' }).name).toBe(formal);
   });
 });
 
@@ -161,12 +167,14 @@ describe('paths and pedigree collapse', () => {
   it('names both relationships when pedigree collapse gives two', () => {
     const g = kinshipGraph(collapse());
     const r = relationship(g, 'A', 'B');
-    expect(r.name).toBe('2nd cousin and also 3rd cousin once removed');
+    expect(r.name).toBe('2nd cousin and also 3rd cousin 1x removed');
     expect(r.relationships.map((x) => x.commonAncestors)).toEqual([
       ['p1', 'p2'],
       ['q1', 'q2'],
     ]);
-    expect(relationship(g, 'B', 'A').name).toBe('2nd cousin and also 3rd cousin once removed');
+    expect(relationship(g, 'B', 'A', { style: 'formal' }).name).toBe(
+      '2nd cousin and also 3rd cousin once removed',
+    );
   });
 
   it('collects every path for one name when parents are cousins', () => {
@@ -290,9 +298,17 @@ describe('marriage chains', () => {
 
 describe('relationshipName and neighborhood input', () => {
   it('names a shape directly for callers with their own walk', () => {
-    expect(relationshipName({ up: 2, down: 3 }, 'M')).toBe('1st cousin once removed');
+    expect(relationshipName({ up: 2, down: 3 }, 'M')).toBe('1st cousin 1x removed');
     expect(relationshipName({ up: 0, down: 5 }, 'F')).toBe('3rd great-grandmother');
-    expect(relationshipName({ up: 1, down: 1 }, 'F', true)).toBe('half-sister');
+    expect(relationshipName({ up: 1, down: 1 }, 'F', true)).toBe('half sister');
+    expect(relationshipName({ up: 1, down: 3 }, 'M')).toBe('granduncle');
+    const formal = (up: number, down: number, half = false) =>
+      relationshipName({ up, down }, 'F', half, undefined, 'formal');
+    expect([formal(2, 3), formal(1, 1, true), formal(1, 3)]).toEqual([
+      '1st cousin once removed',
+      'half-sister',
+      'great-aunt',
+    ]);
   });
 
   it('runs over a db neighborhood DTO', () => {

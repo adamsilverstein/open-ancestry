@@ -31,7 +31,7 @@ import {
   spouseWord,
   stepSiblingWord,
 } from './names';
-import type { Modifier, Shape } from './names';
+import type { Modifier, NameStyle, Shape } from './names';
 import type {
   KinshipGraph,
   PathStep,
@@ -110,6 +110,7 @@ function bloodRelationships(
   b: string,
   maxGenerations: number,
   maxNodes: number,
+  style: NameStyle,
 ): Relationship[] {
   const fromA = ancestors(g, a, maxGenerations, maxNodes);
   const fromB = ancestors(g, b, maxGenerations, maxNodes);
@@ -148,7 +149,7 @@ function bloodRelationships(
       lines,
       shape,
       half,
-      name: bloodName(shape, g.sex(a), half, modifier),
+      name: bloodName(shape, g.sex(a), half, modifier, style),
       path: joinPath(main.a, main.b),
     };
   });
@@ -317,7 +318,7 @@ function peaks(segment: Segment): Segment[] {
 }
 
 /** A single up-then-down run named as what its first person is to its last. */
-function runName(g: KinshipGraph, run: Segment): { shape: Shape; name: string } {
+function runName(g: KinshipGraph, run: Segment, style: NameStyle): { shape: Shape; name: string } {
   const up = run.steps.filter((s) => s.kind === 'parent').length;
   const shape: Shape = { up, down: run.steps.length - up };
   let half = false;
@@ -327,10 +328,10 @@ function runName(g: KinshipGraph, run: Segment): { shape: Shape; name: string } 
     half = familyInto(run.ids[up - 1]!) !== familyInto(run.ids[up + 1]!);
   }
   const modifier = modifierOf(run.steps.find((s) => s.rel && !BIO.has(s.rel))?.rel);
-  return { shape, name: bloodName(shape, g.sex(run.ids[0]!), half, modifier) };
+  return { shape, name: bloodName(shape, g.sex(run.ids[0]!), half, modifier, style) };
 }
 
-function marriageName(g: KinshipGraph, path: RelationshipPath): string {
+function marriageName(g: KinshipGraph, path: RelationshipPath, style: NameStyle): string {
   const { blood, spouses } = segments(path);
   const partner = (i: number) =>
     g.partners(path.ids[i]!).find((p) => p.id === path.ids[i + 1])?.relationship;
@@ -344,19 +345,19 @@ function marriageName(g: KinshipGraph, path: RelationshipPath): string {
     const farRun = single(far);
     // A is the spouse of B's relative.
     if (empty(near) && farRun) {
-      const { shape, name } = runName(g, farRun);
-      return spouseOfRelative(shape, name, g.sex(path.ids[0]!), partner(at));
+      const { shape, name } = runName(g, farRun, style);
+      return spouseOfRelative(shape, name, g.sex(path.ids[0]!), partner(at), style);
     }
     // A is a relative of B's spouse.
     if (empty(far) && nearRun) {
-      const { shape, name } = runName(g, nearRun);
+      const { shape, name } = runName(g, nearRun, style);
       const spouse = spouseWord(g.sex(path.ids[at]!), partner(at));
       return relativeOfSpouse(shape, name, g.sex(path.ids[0]!), spouse);
     }
     // A's parent married B's parent.
     if (nearRun && farRun) {
-      const x = runName(g, nearRun).shape;
-      const y = runName(g, farRun).shape;
+      const x = runName(g, nearRun, style).shape;
+      const y = runName(g, farRun, style).shape;
       if (isDescendant(x) && x.up === 1 && isAncestor(y) && y.down === 1) {
         return stepSiblingWord(g.sex(path.ids[0]!));
       }
@@ -367,7 +368,7 @@ function marriageName(g: KinshipGraph, path: RelationshipPath): string {
   const words: string[] = [];
   for (let k = blood.length - 1; k >= 0; k--) {
     for (const run of [...blood[k]!].reverse()) {
-      if (run.steps.length) words.push(runName(g, run).name);
+      if (run.steps.length) words.push(runName(g, run, style).name);
     }
     if (k > 0) {
       const at = spouses[k - 1]!;
@@ -387,6 +388,7 @@ export function relationship(
   const maxGenerations = options.maxGenerations ?? 20;
   const maxNodes = options.maxNodes ?? 50_000;
   const maxMarriages = options.maxMarriages ?? 2;
+  const style = options.style ?? 'ancestry';
   const result = (relationships: Relationship[]): RelationshipResult => ({
     a,
     b,
@@ -404,10 +406,10 @@ export function relationship(
       paths: [{ ids: [a, b], steps: [{ kind: 'spouse' }] }],
     });
   }
-  found.push(...bloodRelationships(g, a, b, maxGenerations, maxNodes));
+  found.push(...bloodRelationships(g, a, b, maxGenerations, maxNodes, style));
   if (found.length) return result(found);
 
   const path = marriagePath(g, a, b, maxMarriages, 2 * maxGenerations + maxMarriages, maxNodes);
   if (!path) return result([]);
-  return result([{ name: marriageName(g, path), kind: 'marriage', paths: [path] }]);
+  return result([{ name: marriageName(g, path, style), kind: 'marriage', paths: [path] }]);
 }

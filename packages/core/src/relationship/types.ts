@@ -70,4 +70,10 @@ export interface RelationshipOptions {
   maxNodes?: number;
   /** Marriages allowed on a non-blood path. Default 2 ("wife's brother's wife"). */
   maxMarriages?: number;
+  /**
+   * `ancestry` (default) matches Ancestry.com: "granduncle", "grandniece",
+   * "1st cousin 1x removed", "half sister". `formal`: "great-uncle",
+   * "great-niece", "1st cousin once removed", "half-sister".
+   */
+  style?: 'ancestry' | 'formal';
 }

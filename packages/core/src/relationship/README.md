@@ -28,6 +28,24 @@ TODO(server): a helper that loads the whole tree's family and family_child rows 
 `relationships`, each with a `name`, `kind` (`self`, `blood` or `marriage`), the `paths` that give
 it, and for blood the `commonAncestors`, `generations` `[up from A, down to B]` and `half`.
 
+## Naming styles
+
+`style: 'ancestry'` (the default) follows Ancestry.com, which users compare against; Ancestry's
+help on family relationship terms says it uses "grand" rather than "great" for a grandparent's
+sibling. `style: 'formal'` keeps the textbook forms.
+
+| Generations (up, down) | `ancestry`                      | `formal`                  |
+| ---------------------- | ------------------------------- | ------------------------- |
+| (1, 3)                 | granduncle / grandaunt          | great-uncle / great-aunt  |
+| (1, 4), (1, 5)         | great-granduncle, 2nd great-... | same                      |
+| (3, 1)                 | grandnephew / grandniece        | great-nephew / great-niece |
+| (2, 3)                 | 1st cousin 1x removed           | 1st cousin once removed   |
+| (2, 5)                 | 1st cousin 3x removed           | 1st cousin 3 times removed |
+| half sibling           | half sister                     | half-sister               |
+
+Everything else (`3rd great-grandfather`, `2nd cousin`, `stepmother`, `sister-in-law`) is the same
+in both. `relationshipName({ up, down }, sex, half?, modifier?, style?)` names a shape directly.
+
 ## Algorithm
 
 ```
@@ -47,7 +65,7 @@ it, and for blood the `commonAncestors`, `generations` `[up from A, down to B]` 
    parents).
 2. **Names.** From the generations up from A (`u`) and down to B (`d`): ancestors and descendants
    (`2nd great-grandfather`), siblings, aunts and uncles (`great-grandaunt`), nieces and nephews,
-   and cousins (`min(u, d) - 1`, removed `|u - d|`). Words are gendered by A's sex with neutral
+   and cousins (`min(u, d) - 1`, removed `|u - d|`), in the chosen style. Words are gendered by A's sex with neutral
    fallbacks (`parent`, `sibling`, `niece or nephew`). Step, adopted and foster links on the path
    give `stepfather`, `adoptive mother`, `adopted son`, `foster daughter` unless a biological path
    exists.

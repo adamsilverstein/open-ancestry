@@ -117,6 +117,26 @@ function addParent(tx: Tx, childId: string, body: AddParentBody) {
   return { family, parentId };
 }
 
+/** History label for a family patch: a removed partner or a type change, named as such. */
+function familyPatchLabel(
+  store: TreeStore,
+  family: FamilyRow,
+  body: { partner1_id?: string | null; partner2_id?: string | null },
+): string {
+  const slots = ['partner1_id', 'partner2_id'] as const;
+  const removed = slots.find((slot) => body[slot] === null && family[slot]);
+  if (removed) {
+    const other = family[removed === 'partner1_id' ? 'partner2_id' : 'partner1_id'];
+    const from = other ? ` from ${personLabel(store, other)}` : '';
+    return `Remove partner: ${personLabel(store, family[removed])}${from}`;
+  }
+  const keys = Object.keys(body);
+  if (keys.length === 1 && keys[0] === 'relationship_type') {
+    return `Edit relationship type: ${familyLabel(store, family.id)}`;
+  }
+  return `Edit relationship: ${familyLabel(store, family.id)}`;
+}
+
 function ownerExists(store: TreeStore, table: string, id: string): void {
   if (!store.getRow(table as TableName, id)) throw notFound(`${table} ${id} not found`);
 }
@@ -385,7 +405,7 @@ export function editRoutes(app: Api, { library }: Deps): void {
       if (partner1_id && partner1_id === partner2_id) throw badRequest('Partners must differ');
       const { batchId, result } = edit(
         store,
-        `Edit relationship: ${familyLabel(store, id)}`,
+        familyPatchLabel(store, family, request.body),
         (tx) => {
           const before = familyMembers(tx.store, id);
           const updated = families.update(tx, id, request.body);
@@ -427,8 +447,8 @@ export function editRoutes(app: Api, { library }: Deps): void {
     const store = open(request.params.tree);
     const link = store.getRow('family_child', request.params.id);
     const label = link
-      ? `Remove from family: ${personLabel(store, link.child_id)}`
-      : 'Remove child';
+      ? `Remove child link: ${personLabel(store, link.child_id)} from ${familyLabel(store, link.family_id)}`
+      : 'Remove child link';
     const { batchId } = edit(store, label, (tx) => {
       const members = link ? familyMembers(tx.store, link.family_id) : [];
       familyChildren.delete(tx, request.params.id);

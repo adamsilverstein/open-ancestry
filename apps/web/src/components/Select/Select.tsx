@@ -22,6 +22,11 @@ export interface SelectProps {
   hint?: string | undefined;
   error?: string | undefined;
   disabled?: boolean;
+  /**
+   * Only for a form that really submits natively: it brings back Radix's hidden
+   * native <select>, which WebKit reports as a style-src-attr CSP violation. Our
+   * forms submit through the API, so leave it unset.
+   */
   name?: string;
 }
 

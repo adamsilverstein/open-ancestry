@@ -83,7 +83,14 @@ function useRelationshipToHome(tree: string, detail: PersonDetail): Relationship
   const homePerson = data?.people.find((p) => p.id === home);
   if (!data || !homePerson) return { text: null, charts: [] };
   const { name, charts } = relationshipCharts(data);
-  return name ? { text: `${name} of ${fullName(homePerson)}`, charts } : { text: null, charts: [] };
+  if (name) return { text: `${name} of ${fullName(homePerson)}`, charts };
+  // The search stopped at its limits: say so rather than look unrelated.
+  return data.complete
+    ? { text: null, charts: [] }
+    : {
+        text: `No relationship to ${fullName(homePerson)} found within the search limits`,
+        charts: [],
+      };
 }
 
 /** "Set as home person": an undoable edit that re-bases every relationship line. */

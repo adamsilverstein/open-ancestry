@@ -97,7 +97,9 @@ export function RelationshipCalculator({
             <p className={styles.calculatorName} data-testid="calculator-name">
               {found.name
                 ? `${fullName(from)} is the ${found.name} of ${fullName(to!)}.`
-                : `No relationship found between ${fullName(from)} and ${fullName(to!)}.`}
+                : data!.complete
+                  ? `No relationship found between ${fullName(from)} and ${fullName(to!)}.`
+                  : `No relationship found between ${fullName(from)} and ${fullName(to!)} within the search limits (40 generations).`}
             </p>
             {found.charts.length > 0 && (
               <RelationshipChart paths={found.charts} endCaption={null} />

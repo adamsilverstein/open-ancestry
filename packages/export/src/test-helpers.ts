@@ -1,6 +1,7 @@
 import { openMemoryTree, type TreeStore } from '@open-ancestry/db';
 import { parseGedcom, serializeGedcom, type GedcomNode } from '@open-ancestry/gedcom';
 import { importGedcom, type ImportOptions } from '@open-ancestry/import';
+import { GEDCOM7_TAGS } from './merge';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -124,6 +125,9 @@ export function gedcom7Problems(text: string): string[] {
     if (node.tag === 'CONC') problems.push(`CONC at ${at}`);
     if (node.continuations?.some((c) => c.tag === 'CONC')) problems.push(`CONC under ${at}`);
     if (node.tag.startsWith('_') && !schema[node.tag]) problems.push(`undeclared ${node.tag}`);
+    if (!node.tag.startsWith('_') && !GEDCOM7_TAGS.has(node.tag)) {
+      problems.push(`${node.tag} is not a GEDCOM 7 tag at ${at}`);
+    }
     if (node.pointer && node.pointer !== '@VOID@' && !xrefs.has(node.pointer)) {
       problems.push(`dangling pointer ${node.pointer} at ${at}`);
     }

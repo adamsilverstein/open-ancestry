@@ -19,6 +19,8 @@ import { buildGedcomExport, exportGedcom } from './index';
 import {
   FIXTURES,
   TODAY,
+  ged,
+  gedcom7Problems,
   domainSnapshot,
   importInto,
   importedSnapshot,
@@ -226,14 +228,95 @@ describe('edited records', () => {
     }
   });
 
-  it('surfaces serializer errors instead of writing broken GEDCOM', async () => {
+  it('puts nested unmapped lines back under the structure they came from', async () => {
     const store = await sample();
-    store.transact('Bad type', (tx) =>
-      events.create(tx, {
-        type: 'NOT A TAG',
-        roles: [{ person_id: pid(store, '@I1@') }],
+    store.transact('Renames', (tx) => {
+      names.update(tx, primaryName(store, '@I21@'), { given: 'Pete' });
+      names.update(tx, primaryName(store, '@I1@'), { given: 'Thad' });
+    });
+    for (const version of ['5.5.1', '7'] as const) {
+      const out = buildGedcomExport(store, { version, now: TODAY });
+      expect(out.warnings, version).toEqual([]);
+      expect(recordText(out.text, '@I21@')).toContain(
+        '1 ADOP\n2 DATE 1964\n2 FAMC @F8@\n3 ADOP BOTH',
+      );
+      expect(recordText(out.text, '@I1@')).toContain('1 OBJE @O1@\n2 _PRIM Y\n1 _PHOTO @O1@');
+      if (version === '7') expect(gedcom7Problems(out.text)).toEqual([]);
+    }
+  });
+
+  it('reports every imported line a regenerated record cannot carry over', async () => {
+    const store = await importInto(
+      ged(
+        '0 @I1@ INDI',
+        '1 NAME Odile /Fernsby/',
+        '1 BIRT',
+        '2 DATE 1801',
+        '2 _SRC parish copy',
+        '1 FAMS @F99@',
+        '1 _SKYPEID odile.f',
+        '1 OBJE @O1@',
+        '0 @O1@ OBJE',
+        '1 FILE photos/odile portrait.jpg',
+        '2 FORM jpg',
+      ),
+    );
+    // While the birth exists, its extension line goes back under it, in place.
+    store.transact('Rename', (tx) =>
+      names.update(tx, primaryName(store, '@I1@'), {
+        given: 'Odette',
+        full_text: 'Odette /Fernsby/',
       }),
     );
+    const renamed = buildGedcomExport(store, { now: TODAY });
+    expect(renamed.warnings).toEqual([
+      expect.stringMatching(/^@I1@: "FAMS @F99@" \(INDI\.FAMS\) .*@F99@ is not in the export/),
+    ]);
+    expect(recordText(renamed.text, '@I1@')).toContain(
+      '1 BIRT\n2 DATE 1801\n2 _SRC parish copy\n1 _SKYPEID odile.f',
+    );
+    const birth = value<string>(store, "SELECT id FROM event WHERE type = 'BIRT'");
+    store.transact('Delete birth', (tx) => events.delete(tx, birth));
+    const out = buildGedcomExport(store, { version: '7', now: TODAY });
+    expect(out.warnings).toEqual([
+      expect.stringMatching(/^@I1@: "_SRC parish copy" \(INDI\.BIRT\._SRC\) .*gone/),
+      expect.stringMatching(/^@I1@: "FAMS @F99@" \(INDI\.FAMS\) .*@F99@ is not in the export/),
+    ]);
+    expect(out.text).not.toContain('parish copy');
+    expect(recordText(out.text, '@I1@')).toContain('1 _SKYPEID odile.f');
+    // A media path that did not resolve stays in FILE (percent-encoded in GEDCOM 7).
+    expect(recordText(out.text, '@O1@')).toContain('1 FILE photos/odile%20portrait.jpg');
+    expect(gedcom7Problems(out.text)).toEqual([]);
+  });
+
+  it('warns instead of writing a 5.5.1-only tag into GEDCOM 7', async () => {
+    const store = await importInto(readFileSync(join(FIXTURES, 'gedcom/malformed.ged')));
+    const out = buildGedcomExport(store, { version: '7', now: TODAY });
+    expect(out.warnings).toContainEqual(expect.stringContaining('CONC is not a GEDCOM 7 tag'));
+    expect(gedcom7Problems(out.text)).toEqual([]);
+  });
+
+  it('writes an event type that is not a GEDCOM tag as EVEN with TYPE', async () => {
+    const store = await sample();
+    store.transact('Custom', (tx) => {
+      for (const type of ['Graduation', 'grad', '_DNA'])
+        events.create(tx, { type, date_text: '1990', roles: [{ person_id: pid(store, '@I1@') }] });
+    });
+    for (const version of ['5.5.1', '7'] as const) {
+      const thad = recordText(exportGedcom(store, { version, now: TODAY }), '@I1@')!;
+      expect(thad).toContain('1 EVEN\n2 TYPE Graduation\n2 DATE 1990');
+      expect(thad).toContain('1 GRAD\n2 DATE 1990');
+      expect(thad).toContain('1 _DNA\n2 DATE 1990');
+      expect(thad).not.toMatch(/^1 GRADUATION/m);
+    }
+  });
+
+  it('surfaces serializer errors instead of writing broken GEDCOM', async () => {
+    const store = await sample();
+    // An imported HEAD whose text closes the record early cannot take the GEDC lines an export adds.
+    store.db
+      .prepare("UPDATE raw_record SET raw_text = ? WHERE gedcom_tag = 'HEAD'")
+      .run('0 HEAD\n1 CHAR ANSEL\n0 @I2@');
     expect(() => exportGedcom(store, { now: TODAY })).toThrow(GedcomSerializeError);
   });
 });

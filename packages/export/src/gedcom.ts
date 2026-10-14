@@ -16,6 +16,7 @@ import {
   type WriterContext,
 } from './canonical';
 import { dirtyRecords } from './dirty';
+import { mergeUnmapped, type MergeContext } from './merge';
 import { TreeData, ownerKey } from './load';
 import type { GedcomExport, GedcomExportOptions } from './types';
 
@@ -90,7 +91,7 @@ export function exportGedcom(store: TreeStore, options: GedcomExportOptions = {}
   return buildGedcomExport(store, options).text;
 }
 
-class GedcomWriter implements WriterContext {
+class GedcomWriter implements WriterContext, MergeContext {
   readonly data: TreeData;
   readonly v7: boolean;
   readonly includeMedia: boolean;
@@ -106,6 +107,10 @@ class GedcomWriter implements WriterContext {
   private readonly planned = new Map<string, 'verbatim' | 'generate'>();
   private readonly queue: [RecordKind, string][] = [];
   private next = 0;
+  private readonly warnings: string[] = [];
+  /** Xrefs the output defines, once every record is planned. */
+  private written: Set<string> | undefined;
+  private importedXrefs: Map<string, { kind: RecordKind; id: string } | null> | undefined;
   private readonly generated = new Map<string, GedcomNode>();
   private readonly slots: Slot[] = [];
   private readonly slotByKey = new Map<string, Slot>();
@@ -177,6 +182,7 @@ class GedcomWriter implements WriterContext {
     this.drain();
     this.repairVerbatimPointers();
     this.drain();
+    this.written = this.writtenXrefs();
 
     const records: string[] = [];
     const placed = new Set<string>();
@@ -223,6 +229,7 @@ class GedcomWriter implements WriterContext {
       text,
       xrefs: this.xrefs,
       stats: { verbatim: verbatimCount, generated: this.generated.size },
+      warnings: this.warnings,
     };
   }
 
@@ -411,8 +418,51 @@ class GedcomWriter implements WriterContext {
           node = this.writer.tag(d.tag.get(id)!, xref);
           break;
       }
-      this.generated.set(ownerKey(kind, id), node);
+      const key = ownerKey(kind, id);
+      const hidden =
+        (kind === 'person' && this.isPrivatePerson(id)) ||
+        (kind === 'family' && this.isPrivateFamily(id));
+      // A privatized record leaves its unmapped lines out on purpose.
+      if (!hidden) {
+        mergeUnmapped(this, node, this.slotByKey.get(key)?.raw, this.data.unmapped.get(key), xref);
+      }
+      this.generated.set(key, node);
     }
+  }
+
+  // ------------------------------------------------------------ MergeContext
+
+  warn(message: string): void {
+    this.warnings.push(message);
+  }
+
+  pointer(raw: string): string | undefined {
+    if (!this.importedXrefs) {
+      this.importedXrefs = new Map();
+      for (const r of this.data.rawRecords) {
+        if (!r.xref || this.importedXrefs.has(r.xref)) continue;
+        const kind = r.owner_type as RecordKind | null;
+        this.importedXrefs.set(
+          r.xref,
+          kind && r.owner_id && KINDS.has(kind) && this.exists(kind, r.owner_id)
+            ? { kind, id: r.owner_id }
+            : null,
+        );
+      }
+    }
+    const target = this.importedXrefs.get(raw);
+    if (target) return this.ref(target.kind, target.id);
+    // A raw-only record (SUBM) keeps its xref when it is written.
+    const kept = this.slots.some(
+      (slot) => slot.raw.xref === raw && !slot.raw.owner_type && slot.mode !== 'canonical',
+    );
+    return kept ? raw : undefined;
+  }
+
+  fileValue(raw: string): string {
+    const value = raw.trim();
+    if (!this.v7 || /^[a-z][a-z0-9+.-]*:/i.test(value)) return value;
+    return value.split('/').map(encodeURIComponent).join('/');
   }
 
   /** Xrefs the output will define. */
@@ -462,7 +512,7 @@ class GedcomWriter implements WriterContext {
   private rawOnly(raw: RawRecordRow): string | undefined {
     const record = parseGedcom(raw.raw_text).records[0];
     if (!record) return undefined;
-    const written = this.writtenXrefs();
+    const written = this.written!;
     const prune = (node: GedcomNode): GedcomNode => ({
       ...node,
       children: node.children
@@ -479,7 +529,10 @@ class GedcomWriter implements WriterContext {
       ? analyzeHeader(parseGedcom(this.head.raw_text).records[0]).schema
       : {};
     const home =
-      this.data.homePersonId && this.data.person.has(this.data.homePersonId)
+      // A privatized home person (usually the user) is not singled out among the Private records.
+      this.data.homePersonId &&
+      this.data.person.has(this.data.homePersonId) &&
+      !this.isPrivatePerson(this.data.homePersonId)
         ? this.xrefOf('person', this.data.homePersonId)
         : undefined;
     const extensions = new Set<string>();
@@ -536,7 +589,7 @@ class GedcomWriter implements WriterContext {
       if (!node) parent.children.push(setLevels(n(tag, value), parent.level + 1));
       else if (node.value !== value) node.value = value;
     };
-    const written = this.writtenXrefs();
+    const written = this.written!;
     head.children = head.children.filter(
       (c) => c.pointer === undefined || c.pointer === '@VOID@' || written.has(c.pointer),
     );

@@ -65,7 +65,11 @@ export function buildGedzipExport(
   for (const { entry, bytes } of files.values()) {
     zip[entry] = [bytes, { level: STORED.test(entry) ? 0 : 6 }];
   }
-  return { ...result, bytes: zipSync(zip, { level: 6 }), warnings };
+  return {
+    ...result,
+    bytes: zipSync(zip, { level: 6 }),
+    warnings: [...result.warnings, ...warnings],
+  };
 }
 
 export function exportGedzip(store: TreeStore, options: GedzipExportOptions = {}): Uint8Array {

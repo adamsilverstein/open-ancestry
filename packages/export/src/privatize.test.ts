@@ -192,6 +192,8 @@ describe('privatize living people', { timeout: 30_000 }, () => {
         'FAMS @F2@',
       ]);
       expect(doc.index.get('@F2@')!.children.map((c) => c.tag)).toEqual(['HUSB', 'WIFE']);
+      // The home person (here the living first person) is not singled out.
+      expect(out).not.toContain('_HOME');
       // The deceased father keeps his details.
       expect(out).toContain('Obadiah kept bees');
       expect(out).toContain('1 NAME Obadiah /Quellwater/');

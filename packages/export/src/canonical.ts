@@ -16,7 +16,7 @@ import type {
   SourceRow,
   TagRow,
 } from '@open-ancestry/db';
-import { parseGedcom, type GedcomNode } from '@open-ancestry/gedcom';
+import type { GedcomNode } from '@open-ancestry/gedcom';
 import { ownerKey, type TreeData } from './load';
 
 /** Kinds of top-level record the writer can point at. */
@@ -80,34 +80,24 @@ export function canonicalize(node: GedcomNode): GedcomNode {
   };
 }
 
-const hasPointer = (node: GedcomNode): boolean =>
-  node.pointer !== undefined || node.children.some(hasPointer);
+const words = (list: string) => new Set(list.trim().split(/\s+/));
 
-/** Tags the writer produces from domain columns; unmapped copies of them are not merged back. */
-const GENERATED_TAGS = new Set([
-  '_PHOTO',
-  '_PRIM',
-  '_MTTAG',
-  '_MTCAT',
-  '_APID',
-  '_FREL',
-  '_MREL',
-  '_STAT',
-  '_OID',
-  '_DATE',
-  '_DSCR',
-  '_DESC',
-  '_TYPE',
-  '_MTYPE',
-  '_WDTH',
-  '_HGHT',
-  '_SIZE',
-  '_LINK',
-  '_MARNM',
-  '_AKA',
-  '_AKAN',
-  '_HOME',
-]);
+/** Standard individual events and attributes (GEDCOM 5.5.1 and 7, LDS ordinances); matches the importer. */
+export const INDI_EVENTS = words(`
+  ADOP BAPL BAPM BARM BASM BIRT BLES BURI CAST CENS CHR CHRA CONF CONL CREM DEAT DSCR EDUC
+  EMIG ENDL EVEN FACT FCOM GRAD IDNO IMMI INIL NATI NATU NCHI NMR OCCU ORDN PROB PROP RELI
+  RESI RETI SLGC SSN TITL WILL
+`);
+
+/** Standard family events and attributes. */
+export const FAM_EVENTS = words(`
+  ANUL CENS DIV DIVF ENGA EVEN FACT MARB MARC MARL MARR MARS NCHI RESI SLGS
+`);
+
+/** Either owner may carry either kind: Ancestry writes MARR on individuals too. */
+const STANDARD_EVENTS = new Set([...INDI_EVENTS, ...FAM_EVENTS]);
+
+const EXTENSION_TAG = /^_[A-Za-z0-9_]+$/;
 
 const SINGULAR_EVENTS = new Set(['BIRT', 'CHR', 'BAPM', 'DEAT', 'BURI', 'CREM']);
 
@@ -216,7 +206,9 @@ export class RecordWriter {
       names.forEach((name, i) => children.push(this.name(name, i === 0)));
       if (person.sex !== 'U') children.push(n('SEX', person.sex));
       children.push(...[this.resn(person.privacy)].filter((c) => c !== null));
-      children.push(...this.events(this.data.rolesByPerson.get(person.id) ?? []));
+      const events = this.events(this.data.rolesByPerson.get(person.id) ?? [], STANDARD_EVENTS);
+      this.adoptions(person.id, events);
+      children.push(...events);
     }
     for (const link of this.data.parentsByChild.get(person.id) ?? []) {
       children.push(this.famc(link, isPrivate));
@@ -227,12 +219,18 @@ export class RecordWriter {
     if (!isPrivate) {
       children.push(...this.citations('person', person.id));
       children.push(...this.notes('person', person.id));
-      children.push(...this.mediaLinks('person', person.id));
+      const links = this.mediaLinks('person', person.id);
+      // Ancestry marks the profile photo's link with _PRIM Y as well as _PHOTO.
+      const primary =
+        person.primary_media_id && this.ctx.includeMedia
+          ? this.ctx.ref('media', person.primary_media_id)
+          : undefined;
+      for (const link of links) if (link.pointer === primary) link.children.push(n('_PRIM', 'Y'));
+      children.push(...links);
       const photo = person.primary_media_id && this.data.media.get(person.primary_media_id);
       if (photo && this.ctx.includeMedia)
         children.push(p('_PHOTO', this.ctx.ref('media', photo.id)));
       children.push(...this.tagLinks('person', person.id));
-      children.push(...this.unmapped('person', person.id));
     }
     return setLevels(record);
   }
@@ -252,14 +250,13 @@ export class RecordWriter {
         children.push(n('_STAT', STATUS[family.relationship_type]));
       }
       children.push(...[this.resn(family.privacy)].filter((c) => c !== null));
-      children.push(...this.events(roles));
+      children.push(...this.events(roles, STANDARD_EVENTS));
     }
     for (const link of this.data.childrenByFamily.get(family.id) ?? []) {
       children.push(p('CHIL', this.ctx.ref('person', link.child_id)));
     }
     if (!isPrivate) {
       children.push(...this.attachments('family', family.id));
-      children.push(...this.unmapped('family', family.id));
     }
     return setLevels(record);
   }
@@ -277,7 +274,6 @@ export class RecordWriter {
       repo,
       v('_APID', source.apid),
       ...this.attachments('source', source.id),
-      ...this.unmapped('source', source.id),
     ]);
     record.xref = xref;
     return setLevels(record);
@@ -291,7 +287,6 @@ export class RecordWriter {
       v('EMAIL', repo.email),
       v('WWW', repo.url),
       ...this.notes('repository', repo.id),
-      ...this.unmapped('repository', repo.id),
     ]);
     record.xref = xref;
     return setLevels(record);
@@ -316,7 +311,6 @@ export class RecordWriter {
       media.height != null && n('_HGHT', String(media.height)),
       media.byte_size != null && n('_SIZE', String(media.byte_size)),
       ...this.attachments('media', media.id, { media: false }),
-      ...this.unmapped('media', media.id),
     ]);
     record.xref = xref;
     return setLevels(record);
@@ -378,7 +372,10 @@ export class RecordWriter {
   }
 
   /** Principal events in order, each alternate fact after the preferred one of its type. */
-  private events(roles: { event_id: string; role: string; is_preferred: number }[]): GedcomNode[] {
+  private events(
+    roles: { event_id: string; role: string; is_preferred: number }[],
+    standard: ReadonlySet<string>,
+  ): GedcomNode[] {
     const list = roles.filter((r) => r.role === 'principal' && this.data.event.has(r.event_id));
     const firstOfType = new Map<string, number>();
     list.forEach((r, i) => {
@@ -390,16 +387,46 @@ export class RecordWriter {
         [list[first], list[i]] = [list[i]!, list[first]!];
       }
     });
-    return list.map((r) => this.event(this.data.event.get(r.event_id)!));
+    return list.map((r) => this.event(this.data.event.get(r.event_id)!, standard));
   }
 
-  private event(event: EventRow): GedcomNode {
-    // The edit API accepts `birt`; GEDCOM tags without a leading underscore are upper case.
-    const tag = /^[A-Za-z0-9][A-Za-z0-9_]*$/.test(event.type)
-      ? event.type.toUpperCase()
-      : event.type;
+  /**
+   * `ADOP.FAMC` with `ADOP HUSB|WIFE|BOTH` under the person's first adoption
+   * event, for each parent family they are adopted into: the importer reads
+   * it into the child relationships, and other software reads it as the
+   * standard way to say who adopted.
+   */
+  private adoptions(personId: string, events: GedcomNode[]): void {
+    const adop = events.find((e) => e.tag === 'ADOP');
+    if (!adop) return;
+    for (const link of this.data.parentsByChild.get(personId) ?? []) {
+      const p1 = link.partner1_rel === 'adopted';
+      const p2 = link.partner2_rel === 'adopted';
+      if (!p1 && !p2) continue;
+      adop.children.push(
+        p('FAMC', this.ctx.ref('family', link.family_id), [
+          n('ADOP', p1 && p2 ? 'BOTH' : p1 ? 'HUSB' : 'WIFE'),
+        ]),
+      );
+    }
+  }
+
+  /**
+   * A standard event or attribute keeps its tag (upper-cased: the edit API
+   * accepts `grad`), an Ancestry/FTM fact keeps its `_` tag, and any other
+   * type becomes `EVEN` with the type as TYPE, rather than a made-up tag.
+   */
+  private event(event: EventRow, standard: ReadonlySet<string>): GedcomNode {
+    const upper = event.type.toUpperCase();
+    let tag = event.type;
+    let type = event.custom_type;
+    if (!event.type.startsWith('_') && standard.has(upper)) tag = upper;
+    else if (!EXTENSION_TAG.test(event.type)) {
+      tag = 'EVEN';
+      type = event.custom_type ?? event.type;
+    }
     return n(tag, event.value, [
-      v('TYPE', event.custom_type),
+      v('TYPE', type),
       this.date(event.date_text),
       this.place(event.place_id),
       v('ADDR', event.description),
@@ -520,40 +547,6 @@ export class RecordWriter {
     const links = this.data.tagLinks.get(ownerKey(type, id)) ?? [];
     return links.flatMap((l) =>
       this.data.tag.has(l.tag_id) ? [p('_MTTAG', this.ctx.ref('tag', l.tag_id))] : [],
-    );
-  }
-
-  /**
-   * Extension subtrees the importer kept in unmapped_line (`1 _LONG ...`,
-   * Ancestry's custom facts it does not know), re-parsed and written in the
-   * target version. Only top-level extension tags without pointers come back:
-   * anything nested in a mapped structure, or pointing at a record that may
-   * no longer exist, cannot be placed safely.
-   */
-  private unmapped(type: string, id: string): GedcomNode[] {
-    const lines = this.data.unmapped.get(ownerKey(type, id));
-    if (!lines) return [];
-    const kept: string[] = [];
-    let base: string | null = null;
-    for (const line of lines) {
-      if (line.path.includes('(')) {
-        base = null;
-        continue;
-      }
-      const parts = line.path.split('.');
-      if (parts.length === 2 && parts[1]!.startsWith('_') && !GENERATED_TAGS.has(parts[1]!)) {
-        base = line.path;
-        kept.push(line.line);
-      } else if (base && line.path.startsWith(base + '.')) {
-        kept.push(line.line);
-      } else {
-        base = null;
-      }
-    }
-    if (!kept.length) return [];
-    const doc = parseGedcom(`0 _UNMAPPED\n${kept.join('\n')}\n`);
-    return doc.records[0]!.children.filter((c) => c.level === 1 && !hasPointer(c)).map(
-      canonicalize,
     );
   }
 }

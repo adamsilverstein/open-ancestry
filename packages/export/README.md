@@ -18,7 +18,7 @@ const { text, xrefs, stats } = buildGedcomExport(store, { version: '7' });
 | `includeMedia`   | true    | Write `OBJE` records, links and `_PHOTO`.                                                                                                               |
 | `now`            | now     | `HEAD.DATE` of a generated header.                                                                                                                      |
 
-`buildGedzipExport` also returns `warnings` for media files it could not add. Both throw `GedcomSerializeError` if a row cannot be written as valid GEDCOM; the server answers that with a 409 naming the problem.
+Both `build*` functions return `warnings`: imported lines a regenerated record could not carry over, and (GEDZIP) media files that could not be added. The server sends them to the Export dialog, which lists them. Both throw `GedcomSerializeError` if a row cannot be written as valid GEDCOM; the server answers that with a 409 naming the problem.
 
 ## How records are written
 
@@ -35,10 +35,11 @@ flowchart LR
 ```
 
 - **Verbatim.** A record is copied from `raw_record` when the export is in the GEDCOM version it was imported from, nothing is privatized, and no applied change batch touched it or anything written inside it (names, events and their places, child links, citations, inline notes and media). Undone batches restored their rows, so they do not count. Changes to `living`, `surname_key` or timestamps alone do not count either: no GEDCOM line comes from them. This keeps every Ancestry tag, including those the importer never mapped.
-- **Generated.** Everything else (edited records, records created in the app, exports to the other version, privatized exports, GEDZIP) is written from the domain tables, with Ancestry's tags (`_APID`, `_PHOTO`, `_MTTAG`, `_FREL`/`_MREL`, `_OID`, custom facts) as Ancestry writes them. Top-level extension lines the importer kept in `unmapped_line` (`1 _SKYPEID ...`) are merged back; lines nested inside mapped structures, and any with a pointer, are not, because they cannot be placed safely.
+- **Generated.** Everything else (edited records, records created in the app, exports to the other version, privatized exports, GEDZIP) is written from the domain tables, with Ancestry's tags (`_APID`, `_PHOTO` and `_PRIM`, `_MTTAG`, `_FREL`/`_MREL`, `ADOP.FAMC`, `_OID`, custom facts) as Ancestry writes them. An event type that is neither a standard GEDCOM event nor an `_` extension tag (`Graduation` from the edit API) is written as `EVEN` with `TYPE Graduation`.
+- **Unmapped lines go back where they were.** The importer keeps every line it did not map in `unmapped_line`; the imported raw text says which structure each sat under. A regenerated record gets each one back under the matching structure (found by tag and content: pointer, value, DATE, PLAC, PAGE; or by position), so `2 _SRC parish copy` stays under its BIRT. A line that cannot be placed is listed in `warnings`, never dropped silently: its structure was deleted, it points at a record not in the export, it would contradict an edited value, or its tag is not GEDCOM 7 in a GEDCOM 7 export. Privatized people and families leave their unmapped lines out on purpose.
 - **Xrefs.** Imported xrefs are kept, so copied records still resolve. New records get the next free `@I<n>@`, `@F<n>@`, `@S<n>@`, `@R<n>@`, `@O<n>@`, `@N<n>@`, `@T<n>@`, assigned in a fixed order (people and families by row id, then records as they are first referenced), so repeated exports of the same tree give the same xrefs. A copied record that points at a record no longer written (deleted, or regenerated under another xref) is regenerated; pointers that were already broken in the imported file are left alone.
 - **Order.** Records come out in the order of the imported file, then new records by type.
-- **HEAD.** A verbatim export keeps the imported `HEAD`, changing only `CHAR` to `UTF-8` and `GEDC` to `5.5.1`/`LINEAGE-LINKED` (5.5.1), or adding `SCHMA` entries (7). Otherwise the header is generated (`SOUR open-ancestry`, the tree name in `SOUR.DATA`, `_HOME` for the home person, and a `SUBM` in 5.5.1).
+- **HEAD.** A verbatim export keeps the imported `HEAD`, changing only `CHAR` to `UTF-8` and `GEDC` to `5.5.1`/`LINEAGE-LINKED` (5.5.1), or adding `SCHMA` entries (7). Otherwise the header is generated (`SOUR open-ancestry`, the tree name in `SOUR.DATA`, `_HOME` for the home person unless they are privatized, and a `SUBM` in 5.5.1).
 - **Shared rows** are written as records: notes linked from more than one place or imported as `NOTE` records, every media item, every source. Records nothing points at (a source with no citations, a tag on no one) are still exported.
 
 ### GEDCOM 7 specifics
@@ -64,7 +65,7 @@ Tests (`src/roundtrip.test.ts`) run every fixture through:
 
 ## Privatize living
 
-Every record is generated (never copied, since raw text can mention anyone). A living person is `NAME Private`, `SEX`, `FAMC` and `FAMS`, nothing else: no events, notes, citations, media, tags, child relationship types or unmapped lines. A family with a living partner keeps only `HUSB`, `WIFE` and `CHIL`. Shared records (sources, notes, media, tags, repositories) are written only if something still written points at them, or nothing in the tree uses them at all, so a source cited only for a living person disappears with the citation. The submitter record (usually the user) is replaced by a generic one. Tests search the whole output for every word that appears only in living people's data.
+Every record is generated (never copied, since raw text can mention anyone). A living person is `NAME Private`, `SEX`, `FAMC` and `FAMS`, nothing else: no events, notes, citations, media, tags, child relationship types or unmapped lines. A family with a living partner keeps only `HUSB`, `WIFE` and `CHIL`. `HEAD` has no `_HOME` pointing at a privatized home person. Shared records (sources, notes, media, tags, repositories) are written only if something still written points at them, or nothing in the tree uses them at all, so a source cited only for a living person disappears with the citation. The submitter record (usually the user) is replaced by a generic one. Tests search the whole output for every word that appears only in living people's data.
 
 ## GEDZIP
 

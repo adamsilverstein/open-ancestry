@@ -17,12 +17,16 @@ export interface GedcomExport {
   xrefs: Map<string, string>;
   /** Records copied from raw_record and records generated from the domain tables. */
   stats: { verbatim: number; generated: number };
+  /**
+   * Imported lines a regenerated record could not carry over (their parent
+   * structure is gone, they point at a deleted record, or they are not valid
+   * in the target version). Nothing is dropped without a warning here.
+   */
+  warnings: string[];
 }
 
 export type GedzipExportOptions = Omit<GedcomExportOptions, 'version' | 'includeMedia'>;
 
 export interface GedzipExport extends GedcomExport {
   bytes: Uint8Array;
-  /** Media files that could not be added (missing, outside the media folder). */
-  warnings: string[];
 }

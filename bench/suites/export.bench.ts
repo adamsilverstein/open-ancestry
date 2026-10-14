@@ -16,6 +16,24 @@ async function tree(): Promise<TreeStore> {
   return store;
 }
 
+// 3,000 records the importer does not map are written once each (review of #46: this was
+// quadratic, 5.4s for a 5k-person tree).
+let rawOnly: TreeStore | undefined;
+async function rawOnlyTree(): Promise<TreeStore> {
+  if (!rawOnly) {
+    const extra = Array.from({ length: 3000 }, (_, i) => `0 @X${i}@ _FOO\n1 _BAR ${i}`).join('\n');
+    const gedcom = generateGedcom({ people: 5_000, seed: 2 }).replace(
+      /0 TRLR\s*$/,
+      `${extra}\n0 TRLR\n`,
+    );
+    rawOnly = openMemoryTree();
+    const report = await importGedcom({ bytes: gedcom }, rawOnly);
+    if (report.records._FOO !== 3000)
+      throw new Error(`imported ${report.records._FOO} _FOO records`);
+  }
+  return rawOnly;
+}
+
 const exportCase = (name: string, fn: (store: TreeStore) => unknown): BenchCase => ({
   name: `export: ${name}`,
   setup: tree,
@@ -34,4 +52,10 @@ export default [
     exportGedcom(s, { privatizeLiving: true }),
   ),
   exportCase('10k-person tree as GEDZIP', (s) => exportGedzip(s)),
+  {
+    ...exportCase('5k-person tree with 3k unmapped records as GEDCOM 7', () =>
+      exportGedcom(rawOnly!, { version: '7' }),
+    ),
+    setup: rawOnlyTree,
+  },
 ] satisfies BenchCase[];

@@ -161,3 +161,8 @@
 .treeButton {
   justify-content: flex-start;
 }
+
+.actions {
+  display: flex;
+  gap: var(--oa-space-3);
+}

@@ -953,6 +953,8 @@ for (const [width, height] of [
     test('stays on screen, below the top bar, off its card, with reachable actions', async ({
       page,
     }) => {
+      // Four cards, each opened, measured and closed.
+      test.slow();
       await open(page);
       await settled(page);
       const topBar = (await page.getByRole('banner').boundingBox())!;
@@ -960,30 +962,48 @@ for (const [width, height] of [
       const touchTargets = await page.evaluate(
         () => window.matchMedia('(pointer: coarse), (max-width: 640px)').matches,
       );
-      // The leftmost, rightmost, topmost and bottommost cards fully on screen.
-      const onScreen: { card: Locator; b: { x: number; y: number } }[] = [];
-      for (const c of await canvas(page).locator('[data-key]').all()) {
-        const b = await c.boundingBox();
-        if (b && b.x >= 0 && b.y >= top && b.x + b.width <= width && b.y + b.height <= height) {
-          onScreen.push({ card: c, b });
-        }
-      }
+      // The leftmost, rightmost, topmost and bottommost cards fully on screen and
+      // not under the toolbar or minimap.
+      const onScreen = await page.evaluate(
+        ({ top, width, height }) =>
+          [...document.querySelectorAll<HTMLElement>('[role="application"] [data-key]')]
+            .map((el) => ({ key: el.dataset.key!, b: el.getBoundingClientRect() }))
+            .filter(({ key, b }) => {
+              if (b.x < 0 || b.y < top || b.right > width || b.bottom > height) return false;
+              const hit = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+              return hit?.closest<HTMLElement>('[data-key]')?.dataset.key === key;
+            })
+            .map(({ key, b }) => ({ key, x: b.x, y: b.y })),
+        { top, width, height },
+      );
       expect(onScreen.length).toBeGreaterThanOrEqual(1);
       const by = (f: (o: (typeof onScreen)[number]) => number) =>
-        [...onScreen].sort((a, b) => f(a) - f(b));
-      const picks = new Set([
-        by((o) => o.b.x)[0]!.card,
-        by((o) => -o.b.x)[0]!.card,
-        by((o) => o.b.y)[0]!.card,
-        by((o) => -o.b.y)[0]!.card,
-      ]);
-      for (const target of picks) {
+        [...onScreen].sort((a, b) => f(a) - f(b))[0]!.key;
+      const picks = [
+        ...new Set([by((o) => o.x), by((o) => -o.x), by((o) => o.y), by((o) => -o.y)]),
+      ].map((key) => canvas(page).locator(`[data-key="${key}"]`));
+      for (const [i, target] of picks.entries()) {
+        // Each from a fresh view: closing with Escape returns keyboard focus to the
+        // card, which may scroll the view to show it.
+        if (i > 0) {
+          await open(page);
+          await settled(page);
+        }
         const name = (await target.getAttribute('aria-label'))!.split(',')[0]!;
         const cardBox = await box(target);
         await target.tap();
         const quick = page.getByRole('dialog', { name });
         await expect(quick).toBeVisible();
-        const b = await box(quick);
+        // Let the positioning settle (it can take a frame or two after opening).
+        let b = await box(quick);
+        await expect
+          .poll(async () => {
+            const now = await box(quick);
+            const same = now.x === b.x && now.y === b.y && now.height === b.height;
+            b = now;
+            return same;
+          })
+          .toBe(true);
         expect(b.x, name).toBeGreaterThanOrEqual(0);
         expect(b.y, name).toBeGreaterThanOrEqual(top);
         expect(b.x + b.width, name).toBeLessThanOrEqual(width);
@@ -994,7 +1014,10 @@ for (const [width, height] of [
           cardBox.x < b.x + b.width &&
           b.y < cardBox.y + cardBox.height &&
           cardBox.y < b.y + b.height;
-        expect(overlap, `${name} covered by its quick view`).toBe(false);
+        expect(
+          overlap,
+          `${name} covered by its quick view: ${JSON.stringify({ b, cardBox })}`,
+        ).toBe(false);
         const actions = [
           quick.getByRole('link', { name: 'Profile' }),
           quick.getByRole('button', { name: 'Make focus' }),
@@ -1019,6 +1042,38 @@ for (const [width, height] of [
     });
   });
 }
+
+test.describe('quick view above a bottom toolbar', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+  test('keeps clear of the phone layout bottom bar', async ({ page }) => {
+    await open(page);
+    await settled(page);
+    // Stand in for the phone toolbar: the layout publishes its height.
+    const bar = 120;
+    await page.evaluate((height) => {
+      document.documentElement.style.setProperty('--oa-tree-bottom-bar', `${height}px`);
+    }, bar);
+    // Pan so Ada's card ends where the popover fits below it on the bare screen
+    // but not above the bar.
+    const ada = await box(card(page, 'Ada Vale'));
+    const dy = 500 - (ada.y + ada.height);
+    await page.mouse.move(200, 400);
+    await page.mouse.down();
+    await page.mouse.move(200, 400 + dy, { steps: 5 });
+    await page.mouse.up();
+    const lowest = ids.ada;
+    expect(lowest).toBeTruthy();
+    const target = canvas(page).locator(`[data-key="${lowest}"]`);
+    const name = (await target.getAttribute('aria-label'))!.split(',')[0]!;
+    await target.tap();
+    const quick = page.getByRole('dialog', { name });
+    await expect(quick).toBeVisible();
+    await expect
+      .poll(async () => (await box(quick)).y + (await box(quick)).height)
+      .toBeLessThanOrEqual(844 - bar);
+  });
+});
 
 test.describe('visual snapshots', () => {
   // Baselines are Linux Chromium only, like design.spec.ts.

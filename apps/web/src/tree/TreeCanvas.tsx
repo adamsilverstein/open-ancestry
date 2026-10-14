@@ -74,7 +74,8 @@ export interface TreeCanvasHandle {
   centerOnPoint: (point: { x: number; y: number }) => void;
   /** Viewport-relative client rect of a card, for anchoring the quick view. */
   clientRect: (key: string) => DOMRect | null;
-  focusCard: (key: string) => void;
+  /** Moves keyboard focus to a card; `reveal: false` leaves the view where it is. */
+  focusCard: (key: string, options?: { reveal?: boolean }) => void;
 }
 
 export interface TreeCanvasProps {
@@ -681,10 +682,10 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   );
 
   const focusCard = useCallback(
-    (key: string) => {
+    (key: string, { reveal = true }: { reveal?: boolean } = {}) => {
       setActiveKey(key);
       pendingFocus.current = key;
-      ensureOnScreen(key);
+      if (reveal) ensureOnScreen(key);
       // Enter would re-focus here next: get its layout ready.
       const node = nodeByKey(key);
       if (node && !node.isDuplicate && !node.isFocus) latest.current.onPrefetch(node.personId);

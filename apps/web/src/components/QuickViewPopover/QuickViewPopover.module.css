@@ -3,6 +3,11 @@
   flex-direction: column;
   gap: var(--oa-space-3);
   width: min(300px, calc(100vw - 16px));
+  /* Short screens (a phone in landscape): never taller than the room Radix
+     reports beside the card; the details scroll and the actions stay put. */
+  max-height: var(--radix-popover-content-available-height);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .header {
@@ -36,17 +41,28 @@
 }
 
 .actions {
+  position: sticky;
+  bottom: calc(-1 * var(--oa-space-4));
   display: flex;
   flex-wrap: wrap;
   gap: var(--oa-space-2);
+  margin-bottom: calc(-1 * var(--oa-space-4));
+  padding-bottom: var(--oa-space-4);
+  background: var(--oa-surface);
 }
 
 .actions a {
   text-decoration: none;
 }
 
-/* Touch and phone widths: actions are 44px targets (WCAG 2.5.8 recommends 24, 2.5.5 asks 44). */
-@media (pointer: coarse), (max-width: 640px) {
+/* Phone layout (PHONE_LAYOUT_QUERY, set as data-phone) and touch screens:
+   actions are 44px targets (WCAG 2.5.5). */
+.content[data-phone] .actions :is(a, button) {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+@media (pointer: coarse) {
   .actions :is(a, button) {
     min-width: 44px;
     min-height: 44px;

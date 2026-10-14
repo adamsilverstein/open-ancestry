@@ -597,7 +597,8 @@ export function TreeView({
       popoverKey
         ? {
             getBoundingClientRect: () => canvas.current?.clientRect(popoverKey) ?? new DOMRect(),
-            focus: () => canvas.current?.focusCard(popoverKey),
+            // Closing the quick view returns focus to its card without moving the view.
+            focus: () => canvas.current?.focusCard(popoverKey, { reveal: false }),
             isConnected: true,
           }
         : null,

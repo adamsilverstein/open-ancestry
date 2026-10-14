@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { Link } from '@tanstack/react-router';
 import { Crosshair, Pencil, UserRound } from 'lucide-react';
 import { cx } from '../../lib/cx';
@@ -7,7 +7,7 @@ import { Avatar } from '../Avatar/Avatar';
 import { Button } from '../Button/Button';
 import buttonStyles from '../Button/Button.module.css';
 import { LifespanText } from '../LifespanText/LifespanText';
-import { useMediaQuery } from '../../lib/useMediaQuery';
+import { usePhoneLayout } from '../../lib/useMediaQuery';
 import { Popover, PopoverAnchor, PopoverContent } from '../Popover/Popover';
 import styles from './QuickViewPopover.module.css';
 
@@ -50,6 +50,31 @@ function eventLine(label: string, event: LifeEvent | undefined) {
   );
 }
 
+/** Space kept between the popover and the screen edges. */
+const EDGE = 8;
+/** `--oa-topbar-height`: the sticky top bar the popover must not open under. */
+const TOP_BAR_HEIGHT = 48;
+/** The popover's width (see the CSS) plus its offset from the card. */
+const NEEDED_BESIDE = 300 + 6 + EDGE;
+
+/** The tree's bottom toolbar in the phone layout (`--oa-tree-bottom-bar`), or 0. */
+function bottomBarHeight(): number {
+  const value = getComputedStyle(document.documentElement).getPropertyValue('--oa-tree-bottom-bar');
+  return Number.parseFloat(value) || 0;
+}
+
+/**
+ * Beside the card when there is room on the right (or the left); otherwise
+ * below it, where Radix slides it sideways to fit and flips it above the card
+ * when there is no room below. Decided from the space available, so it works
+ * at any screen width, not at a fixed breakpoint.
+ */
+function placeSide(card: DOMRect): 'right' | 'left' | 'bottom' {
+  if (window.innerWidth - card.right >= NEEDED_BESIDE) return 'right';
+  if (card.left >= NEEDED_BESIDE) return 'left';
+  return 'bottom';
+}
+
 /**
  * Card click summary: photo, name, birth and death, and the main actions.
  *
@@ -67,10 +92,10 @@ export function QuickViewPopover({
   onEdit,
 }: QuickViewPopoverProps) {
   const virtualRef = useMemo(() => ({ current: anchor as QuickViewAnchor }), [anchor]);
-  // On a phone there is no room beside a card: open below (or above) it, where
-  // the popover can slide sideways to stay on screen.
-  const narrow = useMediaQuery('(max-width: 640px)');
+  const firstAction = useRef<HTMLAnchorElement>(null);
+  const phone = usePhoneLayout();
   if (!person || !anchor) return null;
+  const side = open ? placeSide(anchor.getBoundingClientRect()) : 'right';
   const run = (action?: (p: PersonSummary) => void) => () => {
     onOpenChange(false);
     action?.(person);
@@ -81,8 +106,21 @@ export function QuickViewPopover({
       <PopoverContent
         label={person.name}
         className={styles.content}
-        side={narrow ? 'bottom' : 'right'}
-        align={narrow ? 'center' : 'start'}
+        side={side}
+        align={side === 'bottom' ? 'center' : 'start'}
+        // Keep clear of the sticky top bar as well as the screen edges.
+        collisionPadding={{
+          top: TOP_BAR_HEIGHT + EDGE,
+          right: EDGE,
+          bottom: (phone ? bottomBarHeight() : 0) + EDGE,
+          left: EDGE,
+        }}
+        data-phone={phone || undefined}
+        onOpenAutoFocus={(event) => {
+          // Start on the first action rather than the dialog itself.
+          event.preventDefault();
+          firstAction.current?.focus();
+        }}
         onCloseAutoFocus={(event) => {
           // No Radix trigger, so return focus to the card ourselves.
           if (!anchor.isConnected) return;
@@ -103,6 +141,7 @@ export function QuickViewPopover({
         </div>
         <div className={styles.actions}>
           <Link
+            ref={firstAction}
             to="/person/$personId"
             params={{ personId: person.id }}
             className={cx(buttonStyles.button, buttonStyles.primary, buttonStyles.sm)}

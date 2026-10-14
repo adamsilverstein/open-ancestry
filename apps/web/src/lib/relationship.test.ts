@@ -76,7 +76,7 @@ describe('describeRelationship', () => {
     const half = { a: ['p1', 'p2'], b: ['p1', 'p3'] };
     expect(
       describeRelationship(slice('a', { a: half.a }, {}), slice('b', { b: half.b }, { b: 'M' })),
-    ).toBe('half brother');
+    ).toBe('half-brother');
   });
 
   it('returns null when no blood relationship is found', () => {

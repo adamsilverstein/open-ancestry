@@ -94,7 +94,7 @@ describe('review: tricky names', () => {
     ['me', 'cousGK', '1st cousin 2x removed', '1st cousin twice removed'],
     ['halfCous', 'me', 'half 1st cousin'],
     ['me', 'halfCous', 'half 1st cousin'],
-    ['halfUncle', 'me', 'half uncle', 'half-uncle'],
+    ['halfUncle', 'me', 'half-uncle'],
     ['gUncle', 'me', 'granduncle', 'great-uncle'],
     ['me', 'gUncle', 'grandniece', 'great-niece'],
     ['gUncleKid', 'me', '1st cousin 1x removed', '1st cousin once removed'],

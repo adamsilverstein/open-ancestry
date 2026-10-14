@@ -60,13 +60,13 @@ sibling. `style: 'formal'` keeps the textbook forms.
 | (3, 1)                 | grandnephew / grandniece        | great-nephew / great-niece |
 | (2, 3)                 | 1st cousin 1x removed           | 1st cousin once removed   |
 | (2, 5)                 | 1st cousin 3x removed           | 1st cousin 3 times removed |
-| half sibling           | half sister                     | half-sister               |
 | uncle's wife           | wife of uncle                   | aunt by marriage          |
 | marriage chains        | sister of wife of brother       | brother’s wife’s sister   |
 
 Ancestry phrases relatives by marriage with "of" (`wife of 1st cousin`, `niece of husband`,
 `husband of sister-in-law`); formal uses possessives and "by marriage". Everything else
-(`3rd great-grandfather`, `2nd cousin`, `stepmother`, `sister-in-law`) is the same in both. `relationshipName({ up, down }, sex, half?, modifier?, style?)` names a shape directly.
+(`3rd great-grandfather`, `2nd cousin`, `stepmother`, `sister-in-law`, `half-sister`) is the same in
+both. `relationshipName({ up, down }, sex, half?, modifier?, style?)` names a shape directly.
 
 ## Algorithm
 
@@ -94,7 +94,8 @@ Ancestry phrases relatives by marriage with "of" (`wife of 1st cousin`, `niece o
    and cousins (`min(u, d) - 1`, removed `|u - d|`), in the chosen style. Words are gendered by A's sex with neutral
    fallbacks (`parent`, `sibling`, `niece or nephew`). Step, adopted and foster links on the path
    give `stepfather`, `adoptive mother`, `adopted son`, `foster daughter` unless a biological path
-   exists.
+   exists. Half relatives are hyphenated (`half-sister`, `half-uncle`) except cousins (`half 1st
+   cousin`).
 3. **Marriage.** Partners are named directly (`husband`, `wife`, `partner`) and listed alongside
    any blood relationship. Otherwise a bidirectional breadth-first search over parent, child and
    partner links finds the shortest path with one or two marriages. Common shapes get their own
@@ -103,6 +104,9 @@ Ancestry phrases relatives by marriage with "of" (`wife of 1st cousin`, `niece o
    "of" in the Ancestry style (`husband of stepmother`, `sister of wife of brother-in-law`) and
    possessives in the formal one (`stepmother’s husband`).
    Adoption reads `adopted` when A was adopted on the way and `adoptive` when B's side was.
+   When the graph has dates (`lifespan`, `union`), a parent's spouse is a step-parent, and their
+   children step-siblings, only if the union overlapped the child's life; otherwise the chain is
+   named as it is (`husband of mother`, `daughter of wife`). Missing dates count as overlapping.
 
 Bench (`npm run bench -- relationship`): any-to-any in a 10k-person tree, p99 about 1ms against a
 10ms budget.

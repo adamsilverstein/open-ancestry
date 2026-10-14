@@ -41,6 +41,7 @@ import type {
   RelationshipOptions,
   RelationshipPath,
   RelationshipResult,
+  Span,
 } from './types';
 import type { ChildRelation } from '../layout/types';
 import { isVirtualParent } from './graph';
@@ -370,10 +371,25 @@ const slice = (path: RelationshipPath, from: number): RelationshipPath => ({
   steps: path.steps.slice(from),
 });
 
+/** Whether a union and a life share any time; unknown dates count as overlapping. */
+function overlaps(union: Span | undefined, life: Span | undefined): boolean {
+  if (!union || !life) return true;
+  if (union.end !== undefined && life.start !== undefined && union.end < life.start) return false;
+  if (union.start !== undefined && life.end !== undefined && union.start > life.end) return false;
+  return true;
+}
+
 function marriageName(g: KinshipGraph, path: RelationshipPath, style: NameStyle): string {
   const { blood, spouses } = segments(path);
-  const partner = (i: number) =>
-    g.partners(path.ids[i]!).find((p) => p.id === path.ids[i + 1])?.relationship;
+  const edge = (i: number) => g.partners(path.ids[i]!).find((p) => p.id === path.ids[i + 1]);
+  const partner = (i: number) => edge(i)?.relationship;
+  /** Did the marriage at step `i` overlap the lives of all of `people`? */
+  const during = (i: number, ...people: string[]) => {
+    const familyId = edge(i)?.familyId;
+    const union = familyId ? g.union?.(familyId) : undefined;
+    return people.every((id) => overlaps(union, g.lifespan?.(id)));
+  };
+  const [first, last] = [path.ids[0]!, path.ids.at(-1)!];
   const single = (parts: Segment[]) => (parts.length === 1 ? parts[0]! : undefined);
   const empty = (parts: Segment[]) => parts.length === 1 && parts[0]!.steps.length === 0;
 
@@ -385,20 +401,28 @@ function marriageName(g: KinshipGraph, path: RelationshipPath, style: NameStyle)
     // A is the spouse of B's relative.
     if (empty(near) && farRun) {
       const { shape, name } = runName(g, farRun, style);
-      return spouseOfRelative(shape, name, g.sex(path.ids[0]!), partner(at), style);
+      const step = during(at, last);
+      return spouseOfRelative(shape, name, g.sex(path.ids[0]!), partner(at), style, step);
     }
     // A is a relative of B's spouse.
     if (empty(far) && nearRun) {
       const { shape, name } = runName(g, nearRun, style);
       const spouse = spouseWord(g.sex(path.ids[at]!), partner(at));
-      return relativeOfSpouse(shape, name, g.sex(path.ids[0]!), spouse, style);
+      const step = during(at, first);
+      return relativeOfSpouse(shape, name, g.sex(path.ids[0]!), spouse, style, step);
     }
     if (nearRun && farRun) {
       const x = runName(g, nearRun, style).shape;
       const y = runName(g, farRun, style).shape;
       const sex = g.sex(path.ids[0]!);
       // A's parent married B's parent.
-      if (isDescendant(x) && x.up === 1 && isAncestor(y) && y.down === 1) {
+      if (
+        isDescendant(x) &&
+        x.up === 1 &&
+        isAncestor(y) &&
+        y.down === 1 &&
+        during(at, first, last)
+      ) {
         return stepSiblingWord(sex);
       }
       // A is an ancestor of B's step-parent: step-grandmother.

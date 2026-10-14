@@ -17,6 +17,13 @@ describe('unsafeTextReason', () => {
     }
   });
 
+  it('refuses line and paragraph separators and the obsolete format controls', () => {
+    for (const char of ['\u2028', '\u2029', '\u206a', '\u206f']) {
+      expect(unsafeTextReason(`Ro${char}wan`), JSON.stringify(char)).not.toBeNull();
+    }
+    expect(displayText('Rowan\u2028Ashdown\u206a')).toBe('Rowan Ashdown');
+  });
+
   it('refuses bidi embeddings and overrides', () => {
     for (const char of ['‪', '‫', '‬', '‭', '‮']) {
       expect(unsafeTextReason(`Evil${char}`), JSON.stringify(char)).toMatch(/direction/);

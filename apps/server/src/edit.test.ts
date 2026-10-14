@@ -109,6 +109,13 @@ describe('unsafe text (#190)', () => {
     ).toEqual([]);
   });
 
+  it('refuses the same characters in tag and tree names', async () => {
+    const tag = await api.post(`${s.base}/tags`, { name: 'Smiths\u202e' });
+    expect(tag.statusCode).toBe(400);
+    const tree = await api.post('/api/trees', { name: 'Vale\u202e' });
+    expect(tree.statusCode).toBe(400);
+  });
+
   it('allows balanced isolates, and newlines in notes', async () => {
     const name = await api.post(`${s.base}/people/${s.ada}/names`, {
       given: '\u2067שרה\u2069',
@@ -121,6 +128,17 @@ describe('unsafe text (#190)', () => {
       owner_id: s.ada,
     });
     expect(note.statusCode).toBe(201);
+  });
+
+  it('finds a name with a direction mark by its plain spelling', async () => {
+    const created = await api.post(`${s.base}/people`, {
+      names: [{ given: 'Ro\u200ewan', surname: 'Ash\u2067down\u2069' }],
+    });
+    expect(created.statusCode).toBe(201);
+    const found = (await api.get(`${s.base}/search?q=rowan ashdown`)).json().items;
+    expect(found.map((i: { person: { id: string } }) => i.person.id)).toContain(
+      created.json().person.id,
+    );
   });
 
   it('finds a name with a zero-width character by its plain spelling', async () => {

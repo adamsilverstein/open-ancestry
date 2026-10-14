@@ -73,6 +73,41 @@ test('an imported name with a right-to-left override still reads in order', asyn
   await expect(page.locator('[data-person-name]').first()).toHaveCSS('unicode-bidi', 'isolate');
 });
 
+test('editing an imported name with an override removes it, and says so', async ({
+  page,
+  request,
+  baseURL,
+}) => {
+  const tree = await importGedcom(
+    request,
+    baseURL!,
+    [
+      '0 HEAD',
+      '1 GEDC',
+      '2 VERS 5.5.1',
+      '1 CHAR UTF-8',
+      '0 @I1@ INDI',
+      '1 NAME Evil\u202e /Ashdown/',
+      '0 TRLR',
+      '',
+    ].join('\n'),
+  );
+  const res = await request.get(`/api/trees/${encodeURIComponent(tree)}/search?q=ashdown`);
+  const id = ((await res.json()) as { items: { person: { id: string } }[] }).items[0]!.person.id;
+  await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+  await page.goto(`/person/${id}`);
+  await page.getByRole('button', { name: 'Edit person' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit person' });
+  await expect(dialog.getByRole('status')).toContainText('invisible');
+  await dialog.getByRole('textbox', { name: 'Given names' }).first().fill('Evelyn');
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(h1(page)).toHaveText('Evelyn Ashdown');
+  const detail = await request.get(`/api/trees/${encodeURIComponent(tree)}/people/${id}`);
+  const stored = ((await detail.json()) as { names: { given: string }[] }).names[0]!.given;
+  expect(stored).toBe('Evelyn');
+});
+
 test('saving a name with a text-direction override is refused', async ({
   page,
   request,

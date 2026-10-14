@@ -328,12 +328,13 @@ describe('cross-site navigation', () => {
 
   it('serves the API to same-origin requests, typed URLs and non-browser clients', async () => {
     const base = await createTestTree(api, 'Same-origin export');
-    for (const headers of [
+    const labels: Record<string, string>[] = [
       { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'navigate' },
       { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' },
       { 'sec-fetch-site': 'none', 'sec-fetch-mode': 'navigate' },
       {},
-    ]) {
+    ];
+    for (const headers of labels) {
       expect((await api.get(`${base}/export.json`, headers)).statusCode).toBe(200);
     }
   });

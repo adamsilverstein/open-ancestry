@@ -1,4 +1,4 @@
-import { Tx, type TreeStore } from './store';
+import { TransactionInProgressError, Tx, type TreeStore } from './store';
 import { DATA_TABLES } from './tables';
 import type { ChangeBatchRow, ChangeLogRow } from './types';
 
@@ -70,6 +70,9 @@ function replay(
   batch: ChangeBatchRow,
   direction: 'undo' | 'redo',
 ): ChangeBatchRow {
+  // Inside another writer's transaction this would become a savepoint whose
+  // outcome that writer decides, and the catch below would roll back its work.
+  if (store.db.inTransaction) throw new TransactionInProgressError();
   const log = store
     .stmt(
       `SELECT * FROM change_log WHERE batch_id = ? ORDER BY seq ${direction === 'undo' ? 'DESC' : 'ASC'}`,

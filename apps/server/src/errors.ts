@@ -1,4 +1,4 @@
-import { NotFoundError, UndoConflictError } from '@open-ancestry/db';
+import { NotFoundError, TransactionInProgressError, UndoConflictError } from '@open-ancestry/db';
 import { GedcomSerializeError } from '@open-ancestry/gedcom';
 import type { FastifyError, FastifyInstance } from 'fastify';
 
@@ -46,6 +46,10 @@ export function toApiError(error: FastifyError | Error): ApiError {
   if (error instanceof ApiError) return error;
   if (error instanceof NotFoundError) return notFound(error.message);
   if (error instanceof UndoConflictError) return conflict(error.message);
+  // Backstop for a write that reached a tree inside another writer's transaction.
+  if (error instanceof TransactionInProgressError) {
+    return conflict('The tree is busy (an import is running); try again when it finishes');
+  }
   // Stored data that cannot be written as valid GEDCOM (export); say what, rather than a bare 500.
   if (error instanceof GedcomSerializeError) {
     return conflict(`The tree cannot be exported as GEDCOM: ${error.message}`);

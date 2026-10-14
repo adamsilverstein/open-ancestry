@@ -1,8 +1,8 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createServer, startServer, type RunningServer } from './index';
+import { allowedHostsFor, createServer, startServer, type RunningServer } from './index';
 
 describe('server', () => {
   let running: RunningServer | undefined;
@@ -19,10 +19,13 @@ describe('server', () => {
     expect(res.json()).toEqual({ ok: true });
   });
 
-  it('returns JSON 404 for unknown API routes', async () => {
+  it('returns the typed JSON error for unknown API routes', async () => {
     const app = createServer();
     const res = await app.inject({ method: 'GET', url: '/api/nope' });
     expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({
+      error: { code: 'not_found', message: 'No route for GET /api/nope' },
+    });
   });
 
   it('binds to loopback by default', async () => {
@@ -50,5 +53,29 @@ describe('server', () => {
     expect(head.statusCode).toBe(200);
     const api = await app.inject({ method: 'GET', url: '/api/nope' });
     expect(api.statusCode).toBe(404);
+  });
+
+  it('caches hashed assets forever and the shell never', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'oa-static-'));
+    await writeFile(join(dir, 'index.html'), '<!doctype html><title>spa</title>');
+    await mkdir(join(dir, 'assets'));
+    await writeFile(join(dir, 'assets', 'index-abc123.js'), 'console.log(1)');
+    const app = createServer({ staticDir: dir });
+    const asset = await app.inject({ method: 'GET', url: '/assets/index-abc123.js' });
+    expect(asset.headers['cache-control']).toBe('public, max-age=31536000, immutable');
+    expect((await app.inject({ method: 'GET', url: '/' })).headers['cache-control']).toBe(
+      'no-cache',
+    );
+    expect((await app.inject({ method: 'GET', url: '/people' })).headers['cache-control']).toBe(
+      'no-cache',
+    );
+  });
+
+  it('allows the bound host in the Host header when it is not loopback', () => {
+    expect(allowedHostsFor('127.0.0.1')).toEqual([]);
+    expect(allowedHostsFor('::1')).toEqual([]);
+    expect(allowedHostsFor('192.168.1.20')).toEqual(['192.168.1.20']);
+    expect(allowedHostsFor('fe80::1')).toEqual(['[fe80::1]']);
+    expect(allowedHostsFor('0.0.0.0')).toContain('127.0.0.1');
   });
 });

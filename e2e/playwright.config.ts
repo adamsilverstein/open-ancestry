@@ -1,4 +1,6 @@
 import { createServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
 
 /** Asks the OS for a free loopback port so parallel worktrees never collide. */
@@ -22,6 +24,8 @@ function freePort(): Promise<number> {
 process.env.E2E_PORT ??= String(await freePort());
 const port = Number(process.env.E2E_PORT);
 const baseURL = `http://127.0.0.1:${port}`;
+// A throwaway library per run, never the user's ~/OpenAncestry.
+const library = join(tmpdir(), `oa-e2e-library-${port}`);
 const ci = Boolean(process.env.CI);
 
 export default defineConfig({
@@ -51,7 +55,7 @@ export default defineConfig({
   // The real built app, served by the CLI exactly as users run it.
   // `npm run e2e` builds first.
   webServer: {
-    command: `node ../apps/cli/dist/cli.js serve --port ${port}`,
+    command: `node ../apps/cli/dist/cli.js serve --port ${port} --library "${library}"`,
     url: `${baseURL}/api/health`,
     reuseExistingServer: false,
     timeout: 30_000,

@@ -12,6 +12,8 @@ export default defineConfig({
       include: ['packages/*/src/**/*.{ts,tsx}', 'apps/*/src/**/*.{ts,tsx}'],
       exclude: [
         '**/*.test.{ts,tsx}',
+        // Shared test helpers.
+        'apps/*/src/test/**',
         '**/*.d.ts',
         // Process entry points; exercised by e2e, not unit tests.
         'apps/web/src/main.tsx',

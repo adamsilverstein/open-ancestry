@@ -1,12 +1,51 @@
 import { existsSync } from 'node:fs';
+import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
+import { constants as zlib } from 'node:zlib';
+import fastifyCompress from '@fastify/compress';
+import fastifyEtag from '@fastify/etag';
+import fastifyMultipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
-import Fastify, { type FastifyInstance } from 'fastify';
+import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
+import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
+import type { Deps } from './context';
+import { errorBody, registerErrorHandling, toApiError } from './errors';
+import { JobManager, type Importer } from './jobs';
+import { Library, defaultLibraryRoot } from './library';
+import { editRoutes } from './routes/edit';
+import { importRoutes } from './routes/imports';
+import { mediaRoutes } from './routes/media';
+import { peopleRoutes } from './routes/people';
+import { treeRoutes } from './routes/trees';
+import { SECURITY_HEADERS, createToken, isLoopbackHost, registerSecurity } from './security';
+
+export { Library, defaultLibraryRoot, treeNameProblem } from './library';
+export {
+  JobManager,
+  type Importer,
+  type ImporterOptions,
+  type ImportProgress,
+  type JobView,
+} from './jobs';
+export { SECURITY_HEADERS, TOKEN_HEADER, isLoopbackHost } from './security';
 
 export interface ServerOptions {
   /** Directory containing the built web app (index.html + assets). */
   staticDir?: string | undefined;
   logger?: boolean;
+  /** Library folder or instance (default OA_LIBRARY or ~/OpenAncestry). Created on first use. */
+  library?: string | Library;
+  /** GEDCOM importer; without one the import endpoint answers 501. */
+  importer?: Importer;
+  /** Mutation token; random per process by default. */
+  token?: string;
+  /** Hostnames accepted in the Host header besides loopback. */
+  allowedHosts?: readonly string[];
+  /** Largest import upload in bytes (default 1 GiB). */
+  uploadLimit?: number;
+  /** Concurrent imports (default 1) and how many may wait (default 4). */
+  importConcurrency?: number;
+  maxQueuedImports?: number;
 }
 
 export interface StartOptions extends ServerOptions {
@@ -22,16 +61,76 @@ export interface RunningServer {
 }
 
 export const DEFAULT_HOST = '127.0.0.1';
+export const DEFAULT_UPLOAD_LIMIT = 1024 * 1024 * 1024;
+/** JSON bodies are small edits; uploads go through multipart with their own limit. */
+export const JSON_BODY_LIMIT = 1024 * 1024;
+
+/** Hashed build assets never change, so browsers may cache them forever. */
+function staticHeaders(reply: FastifyReply, path: string) {
+  const hashed = /[\\/]assets[\\/]/.test(path);
+  reply.header('cache-control', hashed ? 'public, max-age=31536000, immutable' : 'no-cache');
+}
 
 export function createServer(options: ServerOptions = {}): FastifyInstance {
-  const app = Fastify({ logger: options.logger ?? false });
+  const app = Fastify({
+    logger: options.logger ?? false,
+    bodyLimit: JSON_BODY_LIMIT,
+    ajv: { customOptions: { removeAdditional: false, coerceTypes: 'array' } },
+    // Router-level failures (malformed URL, bad content type) get the typed envelope too.
+    frameworkErrors: (error, _request, reply: FastifyReply) => {
+      const api = toApiError(error);
+      // These replies skip the request hooks, so add the headers here.
+      return reply
+        .headers(SECURITY_HEADERS)
+        .code(api.statusCode)
+        .send(errorBody(api.code, api.message));
+    },
+  }).withTypeProvider<TypeBoxTypeProvider>();
 
-  app.get('/api/health', async () => ({ ok: true }));
+  const library =
+    options.library instanceof Library
+      ? options.library
+      : new Library(options.library ?? defaultLibraryRoot());
+  const jobs = new JobManager({
+    concurrency: options.importConcurrency,
+    maxQueued: options.maxQueuedImports,
+  });
+  const deps: Deps = {
+    library,
+    jobs,
+    importer: options.importer,
+    uploadLimit: options.uploadLimit ?? DEFAULT_UPLOAD_LIMIT,
+  };
+
+  registerErrorHandling(app);
+  registerSecurity(app, {
+    token: options.token ?? createToken(),
+    allowedHosts: options.allowedHosts,
+  });
+  // ETag hashes the uncompressed body, so it must run before compression.
+  app.register(fastifyEtag, { weak: true });
+  app.register(fastifyCompress, {
+    threshold: 1024,
+    encodings: ['br', 'gzip'],
+    // Default Brotli quality (11) costs tens of ms per response; 4 is near gzip speed.
+    brotliOptions: { params: { [zlib.BROTLI_PARAM_QUALITY]: 4 } },
+  });
+  app.register(fastifyMultipart, { throwFileSizeLimit: true });
+
+  app.register(async (api) => {
+    const typed = api.withTypeProvider<TypeBoxTypeProvider>();
+    typed.get('/api/health', async () => ({ ok: true }));
+    treeRoutes(typed, deps);
+    peopleRoutes(typed, deps);
+    editRoutes(typed, deps);
+    importRoutes(typed, deps);
+    mediaRoutes(typed, deps);
+  });
 
   const { staticDir } = options;
   const hasSpa = staticDir !== undefined && existsSync(join(staticDir, 'index.html'));
   if (hasSpa) {
-    app.register(fastifyStatic, { root: staticDir, wildcard: false });
+    app.register(fastifyStatic, { root: staticDir, wildcard: false, setHeaders: staticHeaders });
   }
 
   app.setNotFoundHandler((request, reply) => {
@@ -39,17 +138,38 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     const isRead = request.method === 'GET' || request.method === 'HEAD';
     if (hasSpa && isRead && !isApi) {
       // Client-side routes (/tree/:id, /person/:id) all load the SPA shell.
-      return reply.sendFile('index.html');
+      return reply.header('cache-control', 'no-cache').sendFile('index.html');
     }
-    return reply.code(404).send({ error: 'not_found', message: `No route for ${request.url}` });
+    return reply
+      .code(404)
+      .send(errorBody('not_found', `No route for ${request.method} ${request.url}`));
+  });
+
+  app.addHook('onClose', async () => {
+    await jobs.shutdown();
+    library.closeAll();
   });
 
   return app;
 }
 
+/**
+ * Host header names to accept besides loopback when bound to `host`: the host
+ * itself, or every interface address for a wildcard bind (0.0.0.0 or ::).
+ */
+export function allowedHostsFor(host: string): string[] {
+  if (isLoopbackHost(host)) return [];
+  const bracket = (h: string) => (h.includes(':') ? `[${h}]` : h);
+  if (host !== '0.0.0.0' && host !== '::') return [bracket(host)];
+  return Object.values(networkInterfaces())
+    .flat()
+    .flatMap((i) => (i ? [bracket(i.address)] : []));
+}
+
 export async function startServer(options: StartOptions = {}): Promise<RunningServer> {
-  const app = createServer(options);
   const host = options.host ?? DEFAULT_HOST;
+  const allowedHosts = [...(options.allowedHosts ?? []), ...allowedHostsFor(host)];
+  const app = createServer({ ...options, allowedHosts });
   await app.listen({ host, port: options.port ?? 0 });
   const address = app.server.address();
   const port = typeof address === 'object' && address ? address.port : options.port;

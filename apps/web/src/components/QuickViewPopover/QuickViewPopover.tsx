@@ -7,6 +7,7 @@ import { Avatar } from '../Avatar/Avatar';
 import { Button } from '../Button/Button';
 import buttonStyles from '../Button/Button.module.css';
 import { LifespanText } from '../LifespanText/LifespanText';
+import { useMediaQuery } from '../../lib/useMediaQuery';
 import { Popover, PopoverAnchor, PopoverContent } from '../Popover/Popover';
 import styles from './QuickViewPopover.module.css';
 
@@ -66,6 +67,9 @@ export function QuickViewPopover({
   onEdit,
 }: QuickViewPopoverProps) {
   const virtualRef = useMemo(() => ({ current: anchor as QuickViewAnchor }), [anchor]);
+  // On a phone there is no room beside a card: open below (or above) it, where
+  // the popover can slide sideways to stay on screen.
+  const narrow = useMediaQuery('(max-width: 640px)');
   if (!person || !anchor) return null;
   const run = (action?: (p: PersonSummary) => void) => () => {
     onOpenChange(false);
@@ -77,8 +81,8 @@ export function QuickViewPopover({
       <PopoverContent
         label={person.name}
         className={styles.content}
-        side="right"
-        align="start"
+        side={narrow ? 'bottom' : 'right'}
+        align={narrow ? 'center' : 'start'}
         onCloseAutoFocus={(event) => {
           // No Radix trigger, so return focus to the card ourselves.
           if (!anchor.isConnected) return;

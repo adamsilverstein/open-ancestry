@@ -4,7 +4,6 @@ import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { treePaths } from '@open-ancestry/db';
 import type { FastifyRequest } from 'fastify';
 import type { Api, Deps } from '../context';
 import { ApiError, badRequest, conflict, notFound } from '../errors';
@@ -38,6 +37,14 @@ export function importRoutes(app: Api, deps: Deps): void {
   /** Streams the one uploaded file to a private temp folder. */
   async function receive(request: FastifyRequest) {
     if (!importer) throw new ApiError(501, 'not_implemented', 'GEDCOM import is not available');
+    // Refuse before streaming up to the size cap to disk for a job that cannot queue.
+    if (!jobs.hasRoom()) {
+      throw new ApiError(
+        429,
+        'too_many_jobs',
+        'Too many imports are queued; try again when one finishes',
+      );
+    }
     if (!request.isMultipart()) {
       throw new ApiError(415, 'unsupported_media_type', 'Upload the file as multipart/form-data');
     }
@@ -82,11 +89,7 @@ export function importRoutes(app: Api, deps: Deps): void {
         { tree, fileName: upload.fileName, createdTree: marker !== null },
         async (signal, onProgress) => {
           const store = library.open(tree);
-          const result = await importer!(upload.path, store, {
-            mediaDir: treePaths(library.dirOf(tree)).media,
-            onProgress,
-            signal,
-          });
+          const result = await importer!(upload.path, store, { onProgress, signal });
           if (marker) library.clearImportPending(tree, marker);
           thumbnails.enqueueTree(store, library.dirOf(tree));
           return result;
@@ -129,7 +132,13 @@ export function importRoutes(app: Api, deps: Deps): void {
     { schema: { params: TreeParams } },
     async (request, reply) => {
       const { tree } = request.params;
-      library.open(tree);
+      const store = library.open(tree);
+      // The importer would refuse a tree with data; say so before reading the upload.
+      const used = store.db
+        .prepare('SELECT (SELECT count(*) FROM person) + (SELECT count(*) FROM import_batch)')
+        .pluck()
+        .get() as number;
+      if (used > 0) throw conflict('Imports go into a new, empty tree');
       const upload = await receive(request);
       const job = start(tree, upload, null);
       return reply.code(202).send({ jobId: job.id, job });

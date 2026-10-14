@@ -1,4 +1,4 @@
-import { toGedcom } from '@open-ancestry/core';
+import { replaceNickname, toGedcom } from '@open-ancestry/core';
 import type {
   ChildRelationship,
   CitationRow,
@@ -17,6 +17,7 @@ import type {
   TagRow,
 } from '@open-ancestry/db';
 import type { GedcomNode } from '@open-ancestry/gedcom';
+import type { NameTextState } from './dirty';
 import { ownerKey, type TreeData } from './load';
 
 /** Kinds of top-level record the writer can point at. */
@@ -33,8 +34,8 @@ export interface WriterContext {
   isPrivateFamily(id: string): boolean;
   /** Whether a note is written as its own record (shared) rather than inline. */
   isNoteRecord(note: NoteRow): boolean;
-  /** The name's parts were edited after its imported text, so the text is out of date. */
-  isStaleNameText(nameId: string): boolean;
+  /** Whether a name's parts or nickname were edited after its imported text was set. */
+  nameTextState(nameId: string): NameTextState | undefined;
   /** A note or media item attached anywhere to a privatized person or family: never written. */
   isWithheld(id: string): boolean;
   /** FILE value for a media row. */
@@ -336,7 +337,13 @@ export class RecordWriter {
   // ------------------------------------------------------------ parts
 
   private name(name: PersonNameRow, first: boolean): GedcomNode {
-    const text = this.ctx.isStaleNameText(name.id) ? null : name.full_text;
+    const state = this.ctx.nameTextState(name.id);
+    const text =
+      state?.kind === 'stale'
+        ? null
+        : state?.kind === 'nickname' && name.full_text
+          ? replaceNickname(name.full_text, state.previous, name.nickname)
+          : name.full_text;
     const value =
       text ??
       ([

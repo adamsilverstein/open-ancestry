@@ -505,9 +505,30 @@ test.describe('family view', () => {
     await dialog.getByRole('option', { name: /Tilda Hale/ }).click();
     // The tree re-focuses and keeps its view settings.
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.tilda}\\?.*layout=pedigree`));
-    await card(page, 'Tilda Hale').focus();
+    // Keyboard focus lands on the new focus card, so arrows and shortcuts keep working.
+    await expect(card(page, 'Tilda Hale')).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    expect([ids.piers, ids.rhea]).toContain(await activeKey(page));
     await page.keyboard.press('f');
     await expect(page.getByRole('dialog', { name: 'Command palette' })).toBeVisible();
+  });
+
+  test('picking a Find result with the keyboard focuses the new focus card', async ({ page }) => {
+    await open(page);
+    await card(page, 'Ada Vale').focus();
+    await page.keyboard.press('f');
+    await expect(page.getByRole('dialog', { name: 'Command palette' })).toBeVisible();
+    await page.keyboard.type('Otto');
+    await expect(
+      page
+        .getByRole('dialog', { name: 'Command palette' })
+        .getByRole('option', { name: /Otto Vale/ }),
+    ).toBeVisible();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(new RegExp(`/tree/${ids.otto}\\?`));
+    await expect(card(page, 'Otto Vale')).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    expect([ids.bram, ids.fenn]).toContain(await activeKey(page));
   });
 
   test('the layout switch shows pedigree, descendants and fan views', async ({ page }) => {

@@ -9,7 +9,7 @@ const fact = (date: string | null, place: string | null = 'Elderford') => ({
   place,
   value: null,
 });
-const base = { id: 'c1', defaultAccept: true, applicable: true };
+const base = { id: 'c1', key: 'k1', defaultAccept: true, applicable: true };
 
 describe('re-import labels', () => {
   it('names only what changed', () => {

@@ -11,6 +11,8 @@ export interface FactView {
 
 export type ReviewChange = {
   id: string;
+  /** Stays the same when the review is compared again (an `id` does not). */
+  key: string;
   defaultAccept: boolean;
   applicable: boolean;
   conflict?: 'local-edit' | 'local-delete';
@@ -55,6 +57,8 @@ export interface ReimportReview {
   fileName: string;
   source: { system: string | null; version: string | null };
   warningCount: number;
+  /** The tree changed since the comparison: apply would be refused. */
+  stale: boolean;
   diff: {
     people: PersonReview[];
     counts: {
@@ -80,6 +84,13 @@ export function startReimport(tree: string, file: File): Promise<{ jobId: string
 
 export const getReimport = (id: string, signal?: AbortSignal) =>
   apiGet<ReimportReview>(`/reimports/${seg(id)}`, signal);
+
+export const getReimportStatus = (id: string, signal?: AbortSignal) =>
+  apiGet<{ stale: boolean }>(`/reimports/${seg(id)}/status`, signal);
+
+/** Compares the same export again with the tree as it is now. */
+export const refreshReimport = (id: string) =>
+  apiSend<ReimportReview>('POST', `/reimports/${seg(id)}/refresh`);
 
 export const applyReimport = (id: string, accept: string[]) =>
   apiSend<{ batchId: string; applied: number; skipped: number; blocked: string[] }>(

@@ -177,6 +177,62 @@ test.describe('command palette', () => {
     await expect(field).toHaveValue('still typing');
   });
 
+  test('after a failed palette chunk, the next Cmd/Ctrl-K opens it and typing still works', async ({
+    page,
+  }) => {
+    // The first request fails (offline), later ones load (back online).
+    let failed = false;
+    await page.route(/\/assets\/ShellCommandPalette-[^/]+\.js$/, (route) => {
+      if (failed) return route.continue();
+      failed = true;
+      return route.abort();
+    });
+    await gotoReady(page, '/design');
+    await page.keyboard.press(`${modKey}+k`);
+    await expect.poll(() => failed).toBe(true);
+    await page.waitForTimeout(300);
+    // One press opens it again, and the keys typed meanwhile land in it.
+    await page.keyboard.press(`${modKey}+k`);
+    await page.keyboard.type('zzzz');
+    const dialog = page.getByRole('dialog', { name: 'Command palette' });
+    await expect(dialog.getByRole('combobox')).toHaveValue('zzzz');
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    const field = page.getByRole('textbox').first();
+    await field.focus();
+    await page.keyboard.type('still typing');
+    await expect(field).toHaveValue('still typing');
+  });
+
+  test('AltGr characters, combining marks and paste typed while the palette loads are kept', async ({
+    page,
+  }) => {
+    await page.route(/\/assets\/ShellCommandPalette-[^/]+\.js$/, async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      await route.continue();
+    });
+    await gotoReady(page, '/');
+    await page.keyboard.press(`${modKey}+k`);
+    await page.evaluate(() => {
+      const key = (init: KeyboardEventInit) =>
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }),
+        );
+      key({ key: 'a' });
+      // AltGr+L on a Polish layout: reported as Ctrl+Alt.
+      key({ key: 'ł', ctrlKey: true, altKey: true });
+      // A key whose value is two code points (e + combining acute).
+      key({ key: 'e\u0301' });
+      const data = new DataTransfer();
+      data.setData('text/plain', 'zz\nyy');
+      window.dispatchEvent(
+        new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: data }),
+      );
+    });
+    const input = page.getByRole('dialog', { name: 'Command palette' }).getByRole('combobox');
+    await expect(input).toHaveValue('ał\u00e9zz yy');
+  });
+
   test('Cmd/Ctrl-K toggles the palette closed', async ({ page }) => {
     await gotoReady(page, '/');
     await page.keyboard.press(`${modKey}+k`);

@@ -664,6 +664,11 @@ test.describe('pedigree, descendant and fan views', () => {
     await settled(page);
     const fan = page.getByTestId('tree-fan');
     expect(await inView(page, fan)).toBe(true);
+    // Its segments stay buttons inside a labelled group (an img role would flatten them).
+    await expect(page.getByRole('group', { name: 'Fan chart' })).toBeVisible();
+    await expect(
+      page.getByRole('group', { name: 'Fan chart' }).getByRole('button', { name: /^Bram Vale/ }),
+    ).toBeVisible();
     // Rhea Lund's parents are unknown: their two slots are drawn empty, not left as a gap.
     const empty = page.getByTestId('fan-empty-slot');
     await expect(empty).not.toHaveCount(0);

@@ -28,7 +28,8 @@ function arcPath({ startAngle: a0, endAngle: a1, innerRadius: r0, outerRadius: r
 export function FanChart({ fan, focusPersonId, person, onRefocus }: FanChartProps) {
   const focusName = person(focusPersonId)?.name ?? '';
   return (
-    <svg className={styles.fan} data-testid="tree-fan">
+    // A group, not the default img role, which would make the segment buttons presentational.
+    <svg className={styles.fan} data-testid="tree-fan" role="group" aria-label="Fan chart">
       {fan.emptySlots.map((slot) => (
         <path
           key={`empty-${slot.ahnentafel}`}

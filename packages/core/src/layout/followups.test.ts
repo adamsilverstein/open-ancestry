@@ -274,5 +274,11 @@ describe('connector band', () => {
       expect(levels[i]! - levels[i - 1]!).toBeGreaterThanOrEqual(8);
     }
     expect([node(layout, 'me').x, node(layout, 'me').y]).toEqual([0, 0]);
+    // Only the crowded gap (above the focus row) grows; the grandparents keep the usual step.
+    expect(node(layout, 'dad').y).toBeLessThan(-(150 + 64));
+    expect(node(layout, 'dad').y - node(layout, 'gpa').y).toBe(150 + 64);
+    // Labels follow their rows.
+    const parents = layout.labels.find((l) => l.generation === -1)!;
+    expect(parents.y).toBe(node(layout, 'dad').y + 75);
   });
 });

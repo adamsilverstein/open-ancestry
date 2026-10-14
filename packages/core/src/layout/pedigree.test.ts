@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { TreePerson } from './types';
 import { layoutFan, layoutPedigree } from './index';
 import {
   cousinMarriage,
@@ -114,5 +115,11 @@ describe('layoutFan', () => {
     expect(slot).toMatchObject({ generation: 2, innerRadius: 130, outerRadius: 200 });
     // Nothing past the last ring, and none for duplicates.
     expect(layoutFan(g, 'me', { generations: 2 }).emptySlots.map((s) => s.ahnentafel)).toEqual([]);
+    // Parents the server left out of the slice are not unknown: no empty slot.
+    const people = g.people as Record<string, TreePerson>;
+    people['mom'] = { ...people['mom']!, hasMoreParents: true };
+    expect(layoutFan(g, 'me', { generations: 4 }).emptySlots.map((s) => s.ahnentafel)).toEqual([
+      5, 8, 9,
+    ]);
   });
 });

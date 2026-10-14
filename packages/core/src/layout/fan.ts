@@ -75,11 +75,13 @@ export function layoutFan(graph: TreeGraph, focusId: string, options: FanOptions
         ? parents
         : [undefined, parents[0]];
     const next = generation + 1;
-    // An unknown parent's slot is drawn empty rather than left as a gap.
+    // An unknown parent's slot is drawn empty rather than left as a gap, unless
+    // the database has parents this slice left out.
+    const unknown = index.person(personId)!.hasMoreParents !== true;
     if (father) queue.push({ personId: father, ahnentafel: 2 * ahnentafel, generation: next });
-    else emptySlots.push(place(2 * ahnentafel));
+    else if (unknown) emptySlots.push(place(2 * ahnentafel));
     if (mother) queue.push({ personId: mother, ahnentafel: 2 * ahnentafel + 1, generation: next });
-    else emptySlots.push(place(2 * ahnentafel + 1));
+    else if (unknown) emptySlots.push(place(2 * ahnentafel + 1));
   }
 
   const radius = inner + (generations - 1) * ring;

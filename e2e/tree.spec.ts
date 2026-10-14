@@ -631,6 +631,19 @@ test.describe('pedigree, descendant and fan views', () => {
     for (const name of ['Bram Vale', 'Elsa Hale', 'Otto Vale', 'Abel Vale', 'Lena Frost']) {
       expect(await inView(page, card(page, name).first())).toBe(true);
     }
+    // Column heads never run into each other.
+    const heads = [];
+    for (const text of [
+      /^Ada.s parents$/,
+      /^Ada.s grandparents$/,
+      /^Ada.s great-grandparents$/,
+      /^Ada.s 2nd great-grandparents$/,
+    ]) {
+      heads.push(await box(world(page).getByText(text).first()));
+    }
+    for (let i = 1; i < heads.length; i++) {
+      expect(heads[i]!.x).toBeGreaterThanOrEqual(heads[i - 1]!.x + heads[i - 1]!.width);
+    }
   });
 
   test('the descendant chart opens with the focus person near the top', async ({ page }) => {

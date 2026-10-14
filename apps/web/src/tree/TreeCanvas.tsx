@@ -1057,6 +1057,8 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     focusGiven ? `${focusGiven}’s ${text.toLowerCase()}` : text;
 
   const shown = visible.source === layout && layout ? visible : null;
+  // Column heads (pedigree) wrap within a card and most of the gap after it.
+  const columnLabelWidth = (layout?.nodes[0]?.width ?? 120) + 48;
   const cardIndexes = useMemo(() => {
     if (!shown || !layout) return [];
     const list = shown.nodes.slice();
@@ -1120,7 +1122,12 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         {layout?.labels
           .filter((l) => l.anchor !== 'right-middle')
           .map((l) => (
-            <div key={l.generation} className={styles.labelColumn} style={{ left: l.x, top: l.y }}>
+            <div
+              key={l.generation}
+              className={styles.labelColumn}
+              // Wrap within the column, so long labels never run into the next one.
+              style={{ left: l.x, top: l.y, width: columnLabelWidth }}
+            >
               <GenerationLabel>{relativeLabel(l.text)}</GenerationLabel>
             </div>
           ))}

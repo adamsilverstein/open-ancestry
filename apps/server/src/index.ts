@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { STATUS_CODES } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { networkInterfaces } from 'node:os';
@@ -20,6 +20,7 @@ import { mediaRoutes } from './routes/media';
 import { peopleRoutes } from './routes/people';
 import { treeRoutes } from './routes/trees';
 import { SECURITY_HEADERS, createToken, isLoopbackHost, registerSecurity } from './security';
+import { sendShell } from './shell';
 
 export { Library, defaultLibraryRoot, treeNameProblem } from './library';
 export {
@@ -151,8 +152,17 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
 
   const { staticDir } = options;
   const hasSpa = staticDir !== undefined && existsSync(join(staticDir, 'index.html'));
+  const indexHtml = hasSpa ? readFileSync(join(staticDir, 'index.html'), 'utf8') : '';
   if (hasSpa) {
-    app.register(fastifyStatic, { root: staticDir, wildcard: false, setHeaders: staticHeaders });
+    app.register(fastifyStatic, {
+      root: staticDir,
+      wildcard: false,
+      setHeaders: staticHeaders,
+      // The shell is rendered per request (CSP nonce), never served as a file.
+      index: false,
+      allowedPath: (pathName) => pathName !== '/index.html',
+    });
+    app.get('/', (_request, reply) => sendShell(reply, indexHtml));
   }
 
   app.setNotFoundHandler((request, reply) => {
@@ -160,7 +170,7 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     const isRead = request.method === 'GET' || request.method === 'HEAD';
     if (hasSpa && isRead && !isApi) {
       // Client-side routes (/tree/:id, /person/:id) all load the SPA shell.
-      return reply.header('cache-control', 'no-cache').sendFile('index.html');
+      return sendShell(reply, indexHtml);
     }
     return reply
       .code(404)

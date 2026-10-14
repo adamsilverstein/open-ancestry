@@ -32,7 +32,9 @@ describe('searchPeople', () => {
     const store = memoryTree();
     const f = seedSmallFamily(store);
     expect(searchPeople(store, 'brackenford').length).toBe(9);
-    expect(searchPeople(store, 'vale 1960').map((r) => r.person.id)).toEqual([f.me]);
+    const exact = searchPeople(store, 'vale 1960');
+    expect(exact[0]).toMatchObject({ person: { id: f.me }, match: 'exact' });
+    expect(exact.slice(1).every((r) => r.match === 'prefix')).toBe(true);
     store.close();
   });
 
@@ -81,6 +83,71 @@ describe('searchPeople', () => {
     expect(store.db.prepare('SELECT count(*) AS n FROM person_search').get()).toEqual({
       n: before.length,
     });
+    store.close();
+  });
+
+  it('ranks exact matches above prefix matches above sounds-alike matches', () => {
+    const store = memoryTree();
+    const keys = (word: string) =>
+      ({ smith: ['SM0'], smithson: ['SM0S'], smyth: ['SM0'] })[word.toLowerCase()] ?? [];
+    const { result } = store.transact('add', (tx) => {
+      const add = (given: string, surname: string, key: string) =>
+        persons.create(tx, { names: [{ given, surname, surname_key: key }] }).id;
+      return {
+        smithson: add('Ada', 'Smithson', 'SM0S'),
+        smyth: add('Ada', 'Smyth', 'SM0'),
+        smith: add('Ada', 'Smith', 'SM0'),
+      };
+    });
+    const found = searchPeople(store, 'ada smith', { phoneticKeys: keys });
+    expect(found.map((r) => r.person.id)).toEqual([result.smith, result.smithson, result.smyth]);
+    expect(found.map((r) => r.match)).toEqual(['exact', 'prefix', 'phonetic']);
+    expect(found[0]!.score).toBeGreaterThan(found[1]!.score);
+    expect(found[1]!.score).toBeGreaterThan(found[2]!.score);
+    store.close();
+  });
+
+  it('applies phonetic keys per word, so other words still have to match', () => {
+    const store = memoryTree();
+    const keys = (word: string) => (word.toLowerCase() === 'smith' ? ['SM0'] : []);
+    const { result } = store.transact('add', (tx) => ({
+      ada: persons.create(tx, { names: [{ given: 'Ada', surname: 'Smyth', surname_key: 'SM0' }] })
+        .id,
+      bea: persons.create(tx, { names: [{ given: 'Bea', surname: 'Smyth', surname_key: 'SM0' }] })
+        .id,
+    }));
+    expect(
+      searchPeople(store, 'ada smith', { phoneticKeys: keys }).map((r) => r.person.id),
+    ).toEqual([result.ada]);
+    store.close();
+  });
+
+  it('matches a year within two years, exact years first', () => {
+    const store = memoryTree();
+    const f = seedSmallFamily(store);
+    const born = (id: string) =>
+      (
+        store.db
+          .prepare(
+            "SELECT e.date_sort / 10000 AS y FROM event e JOIN event_role r ON r.event_id = e.id WHERE r.person_id = ? AND e.type = 'BIRT'",
+          )
+          .get(id) as { y: number }
+      ).y;
+    const year = born(f.me);
+    const near = searchPeople(store, `vale ${year + 1}`);
+    expect(near.map((r) => r.person.id)).toContain(f.me);
+    expect(near.find((r) => r.person.id === f.me)!.match).toBe('prefix');
+    expect(searchPeople(store, `vale ${year}`)[0]!.person.id).toBe(f.me);
+    expect(searchPeople(store, `vale ${year + 5}`).map((r) => r.person.id)).not.toContain(f.me);
+    store.close();
+  });
+
+  it('returns each person once across tiers and honors the limit', () => {
+    const store = memoryTree();
+    seedSmallFamily(store);
+    const all = searchPeople(store, 'vale', { phoneticKeys: () => ['VAL'] });
+    expect(new Set(all.map((r) => r.person.id)).size).toBe(all.length);
+    expect(searchPeople(store, 'va', { limit: 3 })).toHaveLength(3);
     store.close();
   });
 });

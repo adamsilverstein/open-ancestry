@@ -102,6 +102,12 @@ const importRoute = createRoute({
   component: lazyRouteComponent(() => import('../routes/import/ImportPage'), 'ImportPage'),
 });
 
+const reimportRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/reimport/$jobId',
+  component: lazyRouteComponent(() => import('../routes/reimport/ReimportPage'), 'ReimportPage'),
+});
+
 const routeTree = rootRoute.addChildren([
   homeRoute,
   designRoute,
@@ -109,6 +115,7 @@ const routeTree = rootRoute.addChildren([
   personRoute,
   peopleRoute,
   importRoute,
+  reimportRoute,
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent' });

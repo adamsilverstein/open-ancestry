@@ -1,16 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { Link, useParams } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import buttonStyles from '../../components/Button/Button.module.css';
 import { cx } from '../../lib/cx';
-import {
-  getJob,
-  jobEventsUrl,
-  setCurrentTree,
-  treesQuery,
-  type ImportJob,
-  type ImportProgress,
-} from '../../library/api';
+import { setCurrentTree, treesQuery, type ImportProgress } from '../../library/api';
+import { finished, useImportJob } from '../../library/useImportJob';
 import { ImportReport } from './ImportReport';
 import styles from './Import.module.css';
 
@@ -22,47 +16,6 @@ const PHASES: Record<ImportProgress['phase'], string> = {
   commit: 'Saving and building the search index',
   done: 'Finishing',
 };
-
-const finished = (job: ImportJob | null) => job?.state === 'completed' || job?.state === 'failed';
-
-/** Follows an import job over server-sent events and shows its report. */
-function useImportJob(jobId: string) {
-  const [job, setJob] = useState<ImportJob | null>(null);
-  const [missing, setMissing] = useState(false);
-
-  useEffect(() => {
-    let source: EventSource | undefined;
-    let retry: ReturnType<typeof setTimeout> | undefined;
-    let closed = false;
-    const connect = () => {
-      source = new EventSource(jobEventsUrl(jobId));
-      source.addEventListener('state', (event) => setJob(JSON.parse(event.data) as ImportJob));
-      source.addEventListener('progress', (event) => {
-        const progress = JSON.parse(event.data) as ImportProgress;
-        setJob((current) => (current ? { ...current, progress } : current));
-      });
-      // The stream ends when the job does, which also lands here: read the final state.
-      source.onerror = () => {
-        source?.close();
-        getJob(jobId)
-          .then((latest) => {
-            if (closed) return;
-            setJob(latest);
-            if (!finished(latest)) retry = setTimeout(connect, 1000);
-          })
-          .catch(() => !closed && setMissing(true));
-      };
-    };
-    connect();
-    return () => {
-      closed = true;
-      source?.close();
-      clearTimeout(retry);
-    };
-  }, [jobId]);
-
-  return { job, missing };
-}
 
 export function ImportPage() {
   const { jobId } = useParams({ from: '/import/$jobId' });

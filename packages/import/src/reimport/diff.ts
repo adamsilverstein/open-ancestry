@@ -57,12 +57,14 @@ export type ReimportChange =
       incomingFamilyId: string;
       /** Partners as incoming person ids. */
       partners: string[];
+      partnerNames: string[];
     }
   | {
       kind: 'child.add';
       incomingFamilyId: string;
       incomingChildId: string;
       partners: string[];
+      parentNames: string[];
     }
   | { kind: 'person.missing' };
 
@@ -369,6 +371,12 @@ export function diffTrees(
       changes: [],
     }));
   };
+  const nameOf = (incomingId: string) => {
+    const existingId = toExisting.get(incomingId);
+    return displayName(
+      existingId ? existing.people.get(existingId)! : incoming.people.get(incomingId)!,
+    );
+  };
   const requiresFor = (ids: string[]) =>
     ids.flatMap((id) => (toExisting.has(id) ? [] : [newPersonChange.get(id)!]));
   const lowConfidence = (ids: string[]) =>
@@ -382,7 +390,12 @@ export function diffTrees(
     if (!owner) continue;
     if (!existingFamily && partners.length === 2) {
       adder(reviewFor(owner), lowConfidence(partners) ? { defaultAccept: false } : {})(
-        { kind: 'family.add', incomingFamilyId: f.id, partners },
+        {
+          kind: 'family.add',
+          incomingFamilyId: f.id,
+          partners,
+          partnerNames: partners.map(nameOf),
+        },
         { requires: requiresFor(partners) },
       );
     }
@@ -417,7 +430,13 @@ export function diffTrees(
       if (existingFamily && existingChildren.has(`${existingFamily}|${mappedChild}`)) continue;
       const involved = [child, ...partners];
       adder(reviewFor(child), lowConfidence(involved) ? { defaultAccept: false } : {})(
-        { kind: 'child.add', incomingFamilyId: f.id, incomingChildId: child, partners },
+        {
+          kind: 'child.add',
+          incomingFamilyId: f.id,
+          incomingChildId: child,
+          partners,
+          parentNames: partners.map(nameOf),
+        },
         { requires: requiresFor(involved) },
       );
     }

@@ -61,12 +61,14 @@ export interface ImportProgress {
 
 export interface ImportJob {
   id: string;
+  kind: 'import' | 'reimport';
   tree: string;
   fileName: string;
   /** The server created the tree for this upload (and removed it if the import failed). */
   createdTree: boolean;
   state: 'queued' | 'running' | 'completed' | 'failed';
   progress: ImportProgress | null;
+  /** The import report, or for a re-import `{ reimportId, counts }`. */
   result: ImportReportView | null;
   error: string | null;
 }

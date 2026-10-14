@@ -25,6 +25,8 @@ export interface Deps {
   importer: Importer | undefined;
   /** Largest accepted import upload, in bytes. */
   uploadLimit: number;
+  /** Largest media (gallery) upload, in bytes. */
+  mediaUploadLimit: number;
   /** Background WebP thumbnails for media. */
   thumbnails: ThumbnailQueue;
 }

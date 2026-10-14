@@ -309,11 +309,12 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     const labels = [...(gutter?.children ?? [])] as HTMLElement[];
     // A label's right edge never changes (its key includes its text), so
     // measure it once, and all reads before any writes: this runs on every pan
-    // frame and re-focus. A hidden gutter has no size to measure yet.
+    // frame and re-focus. Hidden labels have no size to measure yet.
     if (gutter && !gutter.hidden) {
       const offset = gutter.offsetLeft;
-      for (const label of labels) {
+      for (const label of labels.filter((l) => !l.hidden)) {
         label.dataset.right ||= String(offset + label.offsetLeft + label.offsetWidth + 8);
+        label.dataset.h ||= String(label.offsetHeight);
       }
     }
     for (const label of labels) {
@@ -323,8 +324,6 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       const under = Number(label.dataset.left) * t.scale + t.x < Number(label.dataset.right);
       const y = under ? Number(label.dataset.gapY) : Number(label.dataset.y);
       // Zoomed far out the gap is thinner than the label: hide it rather than cover cards.
-      // Measured once while shown: a hidden label has no height.
-      label.dataset.h ||= String(label.offsetHeight || 22);
       label.hidden = under && Number(label.dataset.gapH) * t.scale < Number(label.dataset.h) + 4;
       label.style.transform = `translateY(${y * t.scale + t.y}px) translateY(-50%)`;
       label.toggleAttribute('data-above', under);

@@ -84,7 +84,7 @@ describe('ancestry-sample.ged: report', () => {
   });
 
   it('stores every record verbatim; concatenated raw text reproduces the file', () => {
-    const text = bytes.toString('utf8').replace(/^﻿/, '');
+    const text = bytes.toString('utf8').replace(/^\uFEFF/, '');
     expect(rawText(t.store)).toBe(text);
     const raws = rows<{ gedcom_tag: string; xref: string | null; owner_type: string | null }>(
       t.store,
@@ -127,7 +127,7 @@ describe('ancestry-sample.ged: people', () => {
       is_primary: 1,
       sort_order: 0,
     });
-    expect(String(name!.surname_key)).toMatch(/A226/);
+    expect(String(name!.surname_key)).toMatch(/\bA261\b/);
     expect(row(t.store, 'SELECT sex FROM person WHERE id = ?', pid(t.store, '@I1@'))).toEqual({
       sex: 'M',
     });

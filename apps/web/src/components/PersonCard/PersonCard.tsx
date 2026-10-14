@@ -1,5 +1,5 @@
 import type { ComponentProps } from 'react';
-import { BookMarked, Link2, Lock, Mars, UserRound, Venus } from 'lucide-react';
+import { BookMarked, CircleCheck, Link2, Lock, Mars, UserRound, Venus } from 'lucide-react';
 import { cx } from '../../lib/cx';
 import { formatLifespan } from '../../lib/lifespan';
 import { sexLabel, type PersonSummary } from '../../lib/person';
@@ -67,7 +67,7 @@ export function PersonCard({
       className={cx(
         styles.card,
         styles[size],
-        styles[`sex${person.sex}`],
+        styles[`sex${isPrivate ? 'U' : person.sex}`],
         selected && styles.selected,
         focusPerson && styles.focusPerson,
         duplicate && styles.duplicate,
@@ -90,13 +90,17 @@ export function PersonCard({
             decorative
           />
         )}
-        <span className={styles.sexBadge}>
-          <SexIcon size={12} strokeWidth={2.5} aria-hidden />
-        </span>
+        {/* Private cards withhold everything but the fact a person is there. */}
+        {!isPrivate && (
+          <span className={styles.sexBadge}>
+            <SexIcon size={12} strokeWidth={2.5} aria-hidden />
+          </span>
+        )}
       </span>
       <span className={styles.name}>{isPrivate ? 'Private' : person.name}</span>
       {!isPrivate && <LifespanText className={styles.lifespan} {...person} />}
       <span className={styles.badges} aria-hidden>
+        {selected && <CircleCheck size={12} className={styles.selectedBadge} />}
         {duplicate && <Link2 size={12} />}
         {!isPrivate && person.sourceCount ? <BookMarked size={12} /> : null}
         {!isPrivate &&

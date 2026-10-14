@@ -44,26 +44,40 @@
   background: var(--oa-surface-hover);
 }
 
+/*
+ * Three states, three shapes, so they read apart without relying on color:
+ * keyboard focus is a detached outer ring, the focus person an attached outer
+ * ring, selection an inset ring plus tint and a check badge.
+ */
 .card:focus-visible,
 .card[data-demo-focus] {
-  outline: var(--oa-focus-ring);
-  outline-offset: var(--oa-focus-offset);
+  outline: var(--oa-focus-width) solid var(--oa-focus);
+  outline-offset: 4px;
 }
 
-/* Selected: accent outline plus tinted surface. */
 .selected {
   border-color: var(--oa-accent);
   border-top-color: var(--oa-sex-color);
   background: var(--oa-surface-selected);
-  box-shadow: 0 0 0 2px var(--oa-accent);
+  box-shadow: inset 0 0 0 2px var(--oa-accent);
 }
 
-/* Focus person: raised, bold ring (outside the box so content never reflows), bold name. */
 .focusPerson {
   box-shadow:
-    0 0 0 2px var(--oa-text),
+    0 0 0 2px var(--oa-canvas-text),
     var(--oa-shadow-2);
   transform: translateY(-2px);
+}
+
+.selected.focusPerson {
+  box-shadow:
+    inset 0 0 0 2px var(--oa-accent),
+    0 0 0 2px var(--oa-canvas-text),
+    var(--oa-shadow-2);
+}
+
+.selectedBadge {
+  color: var(--oa-accent);
 }
 
 .focusPerson .name {

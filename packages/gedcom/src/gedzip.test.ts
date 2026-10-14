@@ -207,6 +207,16 @@ describe('readGedzip', () => {
     expect(result.warnings[1]).toMatch(/duplicate/);
   });
 
+  it('treats composed and decomposed spellings of a name as duplicates', () => {
+    const nfc = 'photos/Zoë.jpg'.normalize('NFC');
+    const nfd = 'photos/Zoë.jpg'.normalize('NFD');
+    const result = readGedzip(
+      zip({ 'gedcom.ged': GED, [nfc]: new Uint8Array([1]), [nfd]: new Uint8Array([2]) }),
+    );
+    expect([...result.media.keys()]).toEqual([nfc]);
+    expect(result.warnings[0]).toMatch(/Unicode form/);
+  });
+
   it('enforces the entry count limit', () => {
     const files: Zippable = { 'gedcom.ged': GED };
     for (let i = 0; i < 5; i++) files[`m${i}.jpg`] = new Uint8Array([i]);

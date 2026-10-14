@@ -57,6 +57,13 @@ await importGedcom({ bytes }, openMemoryTree());
 
 The same summary is stored on the `import_batch` row (`counts_json`, `warnings_json`).
 
+## Shared derived columns
+
+Code that writes names or event dates outside an import (API edits) should use the same helpers so search and sorting agree:
+
+- `surnameKey(surname)`: `person_name.surname_key`, `phoneticKeys(surname).join(' ')` or null.
+- `dateColumns(text)`: `{ date_text, date_qualifier, date_sort, date_sort_end, calendar }` from `parseDate`; unparseable text gets qualifier `text` and null sort keys, and Gregorian is stored as a null calendar.
+
 ## Errors and warnings
 
 Bad data never throws. Broken or wrong-type pointers, duplicate xrefs and links, one-sided links, people who are their own partner, child or ancestor, invalid `SEX`/`QUAY`/coordinates and media problems all become warnings with the line number; the affected lines stay in `unmapped_line`. Parser warnings (encoding, malformed lines) are included.

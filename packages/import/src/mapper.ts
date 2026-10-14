@@ -278,7 +278,7 @@ export class Mapper {
     if (!surname) return null;
     let key = this.surnameKeys.get(surname);
     if (key === undefined) {
-      key = phoneticKeys(surname).join(' ') || null;
+      key = surnameKey(surname);
       this.surnameKeys.set(surname, key);
     }
     return key;
@@ -1700,6 +1700,11 @@ const DATE_CACHE = new Map<
     'date_text' | 'date_qualifier' | 'date_sort' | 'date_sort_end' | 'calendar'
   >
 >();
+
+/** `person_name.surname_key`: Soundex and Double Metaphone keys, space separated. */
+export function surnameKey(surname: string | null | undefined): string | null {
+  return surname ? phoneticKeys(surname).join(' ') || null : null;
+}
 
 /** Event date columns from the date as written (parsed by packages/core). */
 export function dateColumns(dateText: string) {

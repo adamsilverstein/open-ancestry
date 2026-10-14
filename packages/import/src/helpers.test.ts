@@ -7,6 +7,7 @@ import { importGedcom } from './import';
 import { classifyFile, kindFromType, mediaType, MediaSource, writeMediaFile } from './media';
 import { coordinate, placeParts, Places } from './places';
 import { childRelationship, nameType, privacy, relationshipStatus } from './tags';
+import { dateColumns, surnameKey } from './index';
 import { ged } from './test-helpers';
 
 describe('tags', () => {
@@ -189,5 +190,25 @@ describe('media folder edge cases', () => {
     expect(
       MediaSource.fromDir(join(tmp, 'missing')).find({ type: 'absolute', name: 'a.jpg' }),
     ).toBeUndefined();
+  });
+});
+
+describe('shared derived columns', () => {
+  it('computes surname keys and date columns the same way the importer does', () => {
+    expect(surnameKey('Ashgrove')).toMatch(/\bA261\b/);
+    expect(surnameKey('')).toBeNull();
+    expect(surnameKey(null)).toBeNull();
+    expect(dateColumns('BET 1870 AND 1872')).toMatchObject({
+      date_qualifier: 'between',
+      calendar: null,
+    });
+    expect(dateColumns('@#DJULIAN@ 5 SEP 1700')).toMatchObject({ calendar: 'julian' });
+    expect(dateColumns('sometime')).toEqual({
+      date_text: 'sometime',
+      date_qualifier: 'text',
+      date_sort: null,
+      date_sort_end: null,
+      calendar: null,
+    });
   });
 });

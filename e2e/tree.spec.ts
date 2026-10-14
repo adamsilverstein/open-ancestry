@@ -940,53 +940,85 @@ test.describe('fan chart keyboard', () => {
   });
 });
 
-test.describe('phone width', () => {
-  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+for (const [width, height] of [
+  [320, 568],
+  [390, 844],
+  [568, 320],
+  [680, 900],
+  [844, 390],
+] as const) {
+  test.describe(`quick view at ${width}x${height}`, () => {
+    test.use({ viewport: { width, height }, hasTouch: true });
 
-  test('the quick view stays on screen with tappable actions for cards in every column', async ({
-    page,
-  }) => {
-    await open(page);
-    await settled(page);
-    const viewport = page.viewportSize()!;
-    // The leftmost, a middle and the rightmost card fully on screen in the focus row.
-    const row = await canvas(page).locator('[data-key][data-generation="0"]').all();
-    const onScreen: { card: Locator; x: number }[] = [];
-    for (const c of row) {
-      const b = await c.boundingBox();
-      if (b && b.x >= 0 && b.x + b.width <= viewport.width) onScreen.push({ card: c, x: b.x });
-    }
-    onScreen.sort((a, b) => a.x - b.x);
-    expect(onScreen.length).toBeGreaterThanOrEqual(2);
-    const picks = [
-      onScreen[0]!.card,
-      onScreen[Math.floor(onScreen.length / 2)]!.card,
-      onScreen.at(-1)!.card,
-    ];
-    for (const target of picks) {
-      const name = (await target.getAttribute('aria-label'))!.split(',')[0]!;
-      await target.tap();
-      const quick = page.getByRole('dialog', { name });
-      await expect(quick).toBeVisible();
-      const b = await box(quick);
-      expect(b.x, name).toBeGreaterThanOrEqual(0);
-      expect(b.x + b.width, name).toBeLessThanOrEqual(viewport.width);
-      expect(b.y + b.height, name).toBeLessThanOrEqual(viewport.height);
-      for (const action of [
-        quick.getByRole('link', { name: 'Profile' }),
-        quick.getByRole('button', { name: 'Make focus' }),
-        quick.getByRole('button', { name: 'Edit' }),
-      ]) {
-        const a = await box(action);
-        expect(a.x + a.width, name).toBeLessThanOrEqual(viewport.width);
-        expect(a.height).toBeGreaterThanOrEqual(44);
-        expect(a.width).toBeGreaterThanOrEqual(44);
+    test('stays on screen, below the top bar, off its card, with reachable actions', async ({
+      page,
+    }) => {
+      await open(page);
+      await settled(page);
+      const topBar = (await page.getByRole('banner').boundingBox())!;
+      const top = topBar.y + topBar.height;
+      const touchTargets = await page.evaluate(
+        () => window.matchMedia('(pointer: coarse), (max-width: 640px)').matches,
+      );
+      // The leftmost, rightmost, topmost and bottommost cards fully on screen.
+      const onScreen: { card: Locator; b: { x: number; y: number } }[] = [];
+      for (const c of await canvas(page).locator('[data-key]').all()) {
+        const b = await c.boundingBox();
+        if (b && b.x >= 0 && b.y >= top && b.x + b.width <= width && b.y + b.height <= height) {
+          onScreen.push({ card: c, b });
+        }
       }
-      await page.keyboard.press('Escape');
-      await expect(quick).toHaveCount(0);
-    }
+      expect(onScreen.length).toBeGreaterThanOrEqual(1);
+      const by = (f: (o: (typeof onScreen)[number]) => number) =>
+        [...onScreen].sort((a, b) => f(a) - f(b));
+      const picks = new Set([
+        by((o) => o.b.x)[0]!.card,
+        by((o) => -o.b.x)[0]!.card,
+        by((o) => o.b.y)[0]!.card,
+        by((o) => -o.b.y)[0]!.card,
+      ]);
+      for (const target of picks) {
+        const name = (await target.getAttribute('aria-label'))!.split(',')[0]!;
+        const cardBox = await box(target);
+        await target.tap();
+        const quick = page.getByRole('dialog', { name });
+        await expect(quick).toBeVisible();
+        const b = await box(quick);
+        expect(b.x, name).toBeGreaterThanOrEqual(0);
+        expect(b.y, name).toBeGreaterThanOrEqual(top);
+        expect(b.x + b.width, name).toBeLessThanOrEqual(width);
+        expect(b.y + b.height, name).toBeLessThanOrEqual(height);
+        // It does not cover the card it describes.
+        const overlap =
+          b.x < cardBox.x + cardBox.width &&
+          cardBox.x < b.x + b.width &&
+          b.y < cardBox.y + cardBox.height &&
+          cardBox.y < b.y + b.height;
+        expect(overlap, `${name} covered by its quick view`).toBe(false);
+        const actions = [
+          quick.getByRole('link', { name: 'Profile' }),
+          quick.getByRole('button', { name: 'Make focus' }),
+          quick.getByRole('button', { name: 'Edit' }),
+        ];
+        // Initial focus is on the first action.
+        await expect(actions[0]!).toBeFocused();
+        for (const action of actions) {
+          const a = await box(action);
+          expect(a.x, name).toBeGreaterThanOrEqual(0);
+          expect(a.y, name).toBeGreaterThanOrEqual(top);
+          expect(a.x + a.width, name).toBeLessThanOrEqual(width);
+          expect(a.y + a.height, name).toBeLessThanOrEqual(height);
+          if (touchTargets) {
+            expect(a.height).toBeGreaterThanOrEqual(44);
+            expect(a.width).toBeGreaterThanOrEqual(44);
+          }
+        }
+        await page.keyboard.press('Escape');
+        await expect(quick).toHaveCount(0);
+      }
+    });
   });
-});
+}
 
 test.describe('visual snapshots', () => {
   // Baselines are Linux Chromium only, like design.spec.ts.

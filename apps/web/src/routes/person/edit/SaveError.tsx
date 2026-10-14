@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CircleAlert } from 'lucide-react';
 import styles from './Edit.module.css';
 
@@ -8,6 +8,14 @@ import styles from './Edit.module.css';
  */
 export function useSaveState(onSaved: () => void) {
   const [error, setError] = useState<string | null>(null);
+  // A save that finishes after its form closed (Cancel) must not act on a newer one.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   return {
     error,
     /** Clears a stale error, e.g. when another form opens. */
@@ -17,9 +25,12 @@ export function useSaveState(onSaved: () => void) {
     handlers: () => {
       setError(null);
       return {
-        onDone: () => onSaved(),
-        onError: (cause: unknown) =>
-          setError(cause instanceof Error ? cause.message : String(cause)),
+        onDone: () => {
+          if (mounted.current) onSaved();
+        },
+        onError: (cause: unknown) => {
+          if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause));
+        },
       };
     },
   };
@@ -31,7 +42,7 @@ export function SaveError({ error }: { error: string | null }) {
   return (
     <p role="alert" className={styles.error}>
       <CircleAlert size={14} aria-hidden />
-      Could not save: {error}. Your changes are still here.
+      Could not save: {error.replace(/\.+$/, '')}. Your changes are still here.
     </p>
   );
 }

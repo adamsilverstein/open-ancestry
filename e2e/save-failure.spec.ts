@@ -173,10 +173,13 @@ test('Edit note keeps the text when the save fails, and retries', async ({ page 
   await expect(page.getByText('Kept the mill accounts.')).toBeVisible();
 
   const restore = await failWrites(page, /\/notes\/[^/]+$/, 'PATCH');
-  await page.getByRole('button', { name: 'Edit note' }).click();
+  // The note just added is the last one.
+  await page.getByRole('button', { name: 'Edit note', exact: true }).last().click();
   const field = page.getByRole('textbox', { name: 'Note', exact: true });
   await field.fill('Kept the mill accounts until 1902.');
-  await page.getByRole('button', { name: 'Save note' }).click();
+  // From the keyboard (WebKit does not focus a clicked button), so focus can be checked.
+  await page.getByRole('button', { name: 'Save note' }).focus();
+  await page.keyboard.press('Enter');
   await expect(page.getByRole('alert')).toContainText('Simulated failure');
   await expect(field).toHaveValue('Kept the mill accounts until 1902.');
   await expect(page.getByRole('button', { name: 'Try again' })).toBeFocused();
@@ -225,7 +228,14 @@ test('a save that finishes after Cancel does not close the next dialog', async (
   await timeline(page).getByRole('button', { name: 'Add event' }).click();
   const second = page.getByRole('dialog', { name: 'Add event' });
   await expect(second).toBeVisible();
+  const saved = page.waitForResponse(
+    (r) => /\/events$/.test(r.url()) && r.request().method() === 'POST',
+  );
   release();
-  await expect(timeline(page).getByText('1905')).toBeVisible();
+  await saved;
+  // Give the late onDone its chance to (wrongly) close the new dialog.
+  await page.waitForTimeout(500);
   await expect(second).toBeVisible();
+  await second.getByRole('button', { name: 'Cancel' }).click();
+  await expect(timeline(page).getByText('1905').first()).toBeVisible();
 });

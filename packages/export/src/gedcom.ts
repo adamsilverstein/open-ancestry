@@ -246,6 +246,22 @@ class GedcomWriter implements WriterContext, MergeContext {
         else this.withheld.add(id);
       }
     }
+    // Before RESN lines combined, an import stored "locked, privacy" (or locked then
+    // confidential) as locked: re-read those records' own RESN lines.
+    const locked = new Set(
+      [...this.data.persons, ...this.data.families]
+        .filter((r) => r.privacy === 'locked')
+        .map((r) => r.id),
+    );
+    if (!locked.size) return;
+    for (const raw of this.data.rawRecords) {
+      if (!raw.owner_id || !locked.has(raw.owner_id)) continue;
+      const record = parseGedcom(raw.raw_text).records[0];
+      const resn = record?.children.filter((c) => c.tag === 'RESN').map((c) => c.value);
+      if (!resn || resnRestrictions(resn.join(',')).every((r) => r === 'LOCKED')) continue;
+      if (raw.owner_type === 'person') this.living.add(raw.owner_id);
+      else if (raw.owner_type === 'family') this.privateFamilies.add(raw.owner_id);
+    }
   }
 
   /**

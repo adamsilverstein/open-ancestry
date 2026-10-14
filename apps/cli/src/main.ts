@@ -310,6 +310,16 @@ function stopOnSignals(
 
 const row = (label: string, value: string | number) => `${label.padEnd(15)}${value}`;
 const MAX_LISTED = 50;
+/** Longest unmapped example shown; real exports have lines of 500+ characters. */
+const MAX_EXAMPLE = 80;
+
+/** Pads a column, always leaving at least one space before the next. */
+const column = (text: string, width: number) =>
+  text.length < width ? text.padEnd(width) : `${text} `;
+const shorten = (text: string, max: number) =>
+  text.length > max ? `${text.slice(0, max - 1)}…` : text;
+/** Import time for the report: tenths of a second, or "under 0.1s". */
+export const seconds = (ms: number) => (ms < 100 ? 'under 0.1s' : `${(ms / 1000).toFixed(1)}s`);
 
 /**
  * The import report as plain text for the terminal. Every value from the file
@@ -323,7 +333,7 @@ export function formatReport(
   const rows = report.rows as Record<string, number | undefined>;
   const source = report.source;
   const lines = [
-    `Imported ${e(report.file.name ?? 'file')} into "${e(tree.name)}" (${e(tree.dir)}) in ${(report.timings.total / 1000).toFixed(1)}s`,
+    `Imported ${e(report.file.name ?? 'file')} into "${e(tree.name)}" (${e(tree.dir)}) in ${seconds(report.timings.total)}`,
     '',
     row(
       'Source',
@@ -349,7 +359,7 @@ export function formatReport(
     row('Warnings', report.warningCount || 'none'),
   ];
   for (const w of report.warnings.slice(0, MAX_LISTED)) {
-    lines.push(`  ${`line ${w.line}`.padEnd(11)}${e(w.code).padEnd(22)}${e(w.message)}`);
+    lines.push(`  ${column(`line ${w.line}`, 11)}${column(e(w.code), 22)}${e(w.message)}`);
   }
   if (report.warningCount > MAX_LISTED) {
     lines.push(`  ... and ${report.warningCount - MAX_LISTED} more`);
@@ -357,7 +367,7 @@ export function formatReport(
   lines.push(row('Unmapped tags', report.unmapped.length ? report.unmapped.length : 'none'));
   for (const u of report.unmapped.slice(0, MAX_LISTED)) {
     lines.push(
-      `  ${e(u.path).padEnd(28)}${String(u.count).padEnd(7)}line ${u.example.line}: ${e(u.example.text)}`,
+      `  ${column(e(u.path), 28)}${column(String(u.count), 7)}line ${u.example.line}: ${shorten(e(u.example.text), MAX_EXAMPLE)}`,
     );
   }
   if (report.unmapped.length > MAX_LISTED) {

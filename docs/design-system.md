@@ -30,7 +30,7 @@ Semantic tokens only in components; raw palette stays in tokens.css.
 | `--oa-border` | `#E2DED5` | `#2E343D` | Hairlines |
 | `--oa-accent` | `#2F6F4E` | `#5FB98A` | Primary actions, links, focus (a leaf green nod) |
 | `--oa-accent-contrast` | `#FFFFFF` | `#0D1F16` | Text on accent |
-| `--oa-focus` | `#2F6F4E` | `#7FD3A8` | 2px focus ring + 2px offset |
+| `--oa-focus` | `#2F6F4E` | `#7FD3A8` | 2px focus ring + 2px offset. Resolves to `--oa-focus-surface` or `--oa-focus-canvas` depending on the surface (see below) |
 | `--oa-person-male` | `#5B7FA6` | `#7FA3CB` | Card top stripe + silhouette tint (with icon) |
 | `--oa-person-female` | `#C0664A` | `#E08A6E` | Card top stripe + silhouette tint (with icon) |
 | `--oa-person-unknown` | `#7B7F87` | `#9AA0A8` | Unknown/other sex |
@@ -48,6 +48,9 @@ Supporting tokens added during implementation:
 | `--oa-accent-hover` | `#255A3F` | `#77C79C` | Primary button hover |
 | `--oa-canvas-text` / `-muted` | `#ECEEF1` / `#C9CED6` | `#ECEEF1` / `#A3ABB6` | Text drawn on the tree canvas (generation labels) |
 | `--oa-danger-contrast` | `#FFFFFF` | `#14171C` | Text on danger |
+| `--oa-focus-surface` | `#2F6F4E` | `#7FD3A8` | Focus color on bg and surfaces (5.6:1+) |
+| `--oa-focus-canvas` | `#7FD3A8` | `#7FD3A8` | Focus color on the tree canvas (5.7:1 light, 8.5:1 dark); the surface green is only 1.7:1 there |
+| `--oa-focus-width` | `2px` | | Write rings as `outline: var(--oa-focus-width) solid var(--oa-focus)` so they pick up the surface's focus color |
 | `--oa-scrim` | 40% ink | 60% black | Dialog overlay |
 | `--oa-elevated-border` | transparent | `#3A414B` | Border on popovers/dialogs (replaces shadows in dark) |
 
@@ -59,6 +62,10 @@ Tag colors: an 8-color categorical set, each at least 4.5:1 on `--oa-surface` an
 |---|---|---|---|---|---|---|---|---|
 | Light | `#0F766E` | `#1D4ED8` | `#6D28D9` | `#A21CAF` | `#B91C1C` | `#B45309` | `#4D7C0F` | `#475569` |
 | Dark | `#2DD4BF` | `#93C5FD` | `#C4B5FD` | `#F0ABFC` | `#FCA5A5` | `#FCD34D` | `#BEF264` | `#CBD5E1` |
+
+### Focus on the canvas
+
+Mark canvas areas with `data-surface="canvas"` (tree view, person header band, canvas demos) and surfaces floating on them with `data-surface="raised"` (`Toolbar` and `Minimap` do this themselves). The attribute swaps `--oa-focus`, so every component's focus ring keeps 3:1 against whatever it sits on. `src/design/tokens.test.ts` asserts the token pairs, and e2e checks the rendered ring on a canvas card in both themes.
 
 ### Theming
 
@@ -109,10 +116,10 @@ Code: `apps/web/src/components/<Name>/<Name>.tsx` + `<Name>.module.css`, re-expo
 
 | Component | Key props | Notes |
 |---|---|---|
-| `PersonCard` | `person: PersonSummary`, `size` (`compact` 96x120 / `regular` 120x150), `selected`, `focusPerson`, `duplicate`, `isPrivate`, plus button props | Top stripe colored by sex + sex icon badge on the avatar. States: hover, focus ring, selected (accent outline + tint), focus person (raised + 2px ring outside the box, bold name), private/living (lock, "Private", no dates), duplicate (dashed border + link icon). Badges: tag dots, has-sources. Every state is also in the accessible name (`personCardLabel`). Forwards refs, so it can be a popover trigger. |
+| `PersonCard` | `person: PersonSummary`, `size` (`compact` 96x120 / `regular` 120x150), `selected`, `focusPerson`, `duplicate`, `isPrivate`, plus button props | Top stripe colored by sex + sex icon badge on the avatar. States read apart by shape, not just color: keyboard focus is a detached ring (4px offset, canvas focus color), focus person an attached `--oa-canvas-text` ring plus lift and bold name, selected an inset accent ring plus tint and a check badge (selected focus person shows both rings). Private/living shows a lock and "Private" and withholds name, dates and sex (neutral stripe, no sex badge). Duplicate: dashed border + link icon. Every state is also in the accessible name (`personCardLabel`). No portals, tooltips or per-card effects, so it stays cheap in a virtualized tree. |
 | `Avatar` | `name`, `sex`, `src`, `size` (24/40/64/120), `fallback` (`silhouette`/`initials`), `decorative` | Photo is `loading="lazy" decoding="async"` with fixed width/height; falls back on error. Silhouette shows a Mars/Venus/person icon tinted by sex. |
 | `LifespanText` | `birth`, `death` (`LifeDate`), `living` | `1911–1957`, `1947–Living`, `abt. 1890–1955`, `b. 1820`, `d. 1880`. Tabular numerals. Formatting in `lib/lifespan.ts`. |
-| `QuickViewPopover` | `person`, `birth`/`death` (`{ date, place }`), `onMakeFocus`, `onEdit`, `children` (trigger) | Avatar, serif name, born/died lines, Profile (link to `/person/$id`), Make focus, Edit. Actions close the popover. |
+| `QuickViewPopover` | `person`, `anchor` (the clicked card element), `open`, `onOpenChange`, `birth`/`death` (`{ date, place }`), `onMakeFocus`, `onEdit` | One controlled instance per canvas, anchored to the active card through a virtual ref, rather than a popover per card. Give cards `aria-haspopup="dialog"` and `aria-expanded`. Avatar, serif name, born/died lines, Profile (link to `/person/$id`), Make focus, Edit. Actions close it; focus returns to the card. |
 | `TreeToolbar` | `layout`, `onLayoutChange`, `onFind`, `onHome`, `onZoomIn`, `onZoomOut`, `onFit` | Vertical `Toolbar` of IconButtons with tooltips and shortcuts (`L`, `F`, `H`, `+`, `-`, `0`); layout is a radio menu (family, pedigree, descendants, fan). The tree view binds the shortcuts. |
 | `Minimap` | `nodes` (rects + sex), `bounds`, `viewport`, `onNavigate(center)`, `onDismiss`, `width`, `height` | Canvas overview with the viewport rectangle; click or drag to move, arrow keys pan by a quarter viewport. Redraws on theme change. |
 | `GenerationLabel` | `children` | Muted uppercase caption for the canvas. |

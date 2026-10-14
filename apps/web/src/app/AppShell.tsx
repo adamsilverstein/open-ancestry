@@ -36,7 +36,12 @@ export function AppShell() {
       setPaletteOpen((open) => !open);
     }
     window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    // Lets tests (and anything else) know global shortcuts are live.
+    document.documentElement.dataset.shellReady = '';
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      delete document.documentElement.dataset.shellReady;
+    };
   }, []);
 
   return (

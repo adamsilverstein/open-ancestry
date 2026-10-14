@@ -305,6 +305,17 @@ test('quick view popover shows details and actions', async ({ page }) => {
   await expect(region.getByRole('status')).toHaveText('Make focus: Eleanor Whitcombe');
   await expect(popover).toBeHidden();
 
+  // One shared popover: opening another card swaps the person, Escape returns focus to the card.
+  const thaddeusCard = region.getByRole('button', { name: /Thaddeus Marlowe/ });
+  await thaddeusCard.click();
+  await expect(thaddeusCard).toHaveAttribute('aria-expanded', 'true');
+  const other = page.getByRole('dialog', { name: 'Thaddeus Marlowe' });
+  await expect(other).toContainText('Cork, Ireland');
+  await expect(page.getByRole('dialog')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(other).toBeHidden();
+  await expect(thaddeusCard).toBeFocused();
+
   await region.getByRole('button', { name: /Eleanor Whitcombe/ }).click();
   await page
     .getByRole('dialog', { name: 'Eleanor Whitcombe' })
@@ -409,4 +420,55 @@ test('reduced motion disables transitions', async ({ page }) => {
     getComputedStyle(document.documentElement).getPropertyValue('--oa-duration-base').trim(),
   );
   expect(duration).toMatch(/^0m?s$/);
+  // global.css removes transitions outright, which is what components rely on.
+  const transition = await section(page, 'Button')
+    .getByRole('button', { name: 'Primary' })
+    .first()
+    .evaluate((el) => getComputedStyle(el).transitionProperty);
+  expect(transition).toBe('none');
 });
+
+/** WCAG relative luminance contrast between two `rgb()` colors. */
+function contrast(a: string, b: string): number {
+  const lum = (color: string) => {
+    const [r, g, bl] = (color.match(/[\d.]+/g) ?? []).slice(0, 3).map((v) => {
+      const c = Number(v) / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r! + 0.7152 * g! + 0.0722 * bl!;
+  };
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+  return (hi! + 0.05) / (lo! + 0.05);
+}
+
+for (const colorScheme of ['light', 'dark'] as const) {
+  test(`person card focus ring is visible on the canvas in ${colorScheme}`, async ({
+    page,
+    browserName,
+  }) => {
+    await page.emulateMedia({ colorScheme });
+    const region = section(page, 'PersonCard');
+    const cards = region.getByRole('button');
+    await cards.nth(1).focus();
+    await page.keyboard.press(tab(browserName, true));
+    await expect(cards.first()).toBeFocused();
+    const ring = await cards.first().evaluate((el) => {
+      const style = getComputedStyle(el);
+      const canvas = el.closest('[data-surface="canvas"]')!;
+      return {
+        color: style.outlineColor,
+        width: style.outlineWidth,
+        offset: style.outlineOffset,
+        canvas: getComputedStyle(canvas).backgroundColor,
+      };
+    });
+    expect(ring.width).toBe('2px');
+    // Detached ring: focus never looks like selection (inset ring) or the focus person (attached ring).
+    expect(ring.offset).toBe('4px');
+    expect(contrast(ring.color, ring.canvas)).toBeGreaterThanOrEqual(3);
+
+    const selected = region.getByRole('button', { name: /selected/ }).first();
+    const selectedStyle = await selected.evaluate((el) => getComputedStyle(el).boxShadow);
+    expect(selectedStyle).toContain('inset');
+  });
+}

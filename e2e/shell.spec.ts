@@ -3,6 +3,12 @@ import { expect, test } from './fixtures';
 
 const modKey = process.platform === 'darwin' ? 'Meta' : 'Control';
 
+/** Navigates and waits until the shell's global shortcuts are listening. */
+async function gotoReady(page: Page, path: string) {
+  await page.goto(path);
+  await expect(page.locator('html[data-shell-ready]')).toBeAttached();
+}
+
 /** Resolved background color of the page, to prove the theme tokens switched. */
 function bodyBackground(page: Page): Promise<string> {
   return page.evaluate(() => getComputedStyle(document.body).backgroundColor);
@@ -115,7 +121,7 @@ test.describe('theme', () => {
 
 test.describe('command palette', () => {
   test('opens with Cmd/Ctrl-K, closes with Escape and restores focus', async ({ page }) => {
-    await page.goto('/');
+    await gotoReady(page, '/');
     const trigger = page.getByRole('button', { name: 'Import GEDCOM' });
     await trigger.focus();
     await page.keyboard.press(`${modKey}+k`);
@@ -132,7 +138,7 @@ test.describe('command palette', () => {
   });
 
   test('Cmd/Ctrl-K toggles the palette closed', async ({ page }) => {
-    await page.goto('/');
+    await gotoReady(page, '/');
     await page.keyboard.press(`${modKey}+k`);
     const dialog = page.getByRole('dialog', { name: 'Command palette' });
     await expect(dialog).toBeVisible();
@@ -141,7 +147,7 @@ test.describe('command palette', () => {
   });
 
   test('Find button opens the palette and actions navigate', async ({ page }) => {
-    await page.goto('/');
+    await gotoReady(page, '/');
     await page.getByRole('banner').getByRole('button', { name: /^Find/ }).click();
     const dialog = page.getByRole('dialog', { name: 'Command palette' });
     await expect(dialog).toBeVisible();
@@ -153,7 +159,7 @@ test.describe('command palette', () => {
 
   test('theme action toggles the theme', async ({ page }) => {
     await page.emulateMedia({ colorScheme: 'light' });
-    await page.goto('/');
+    await gotoReady(page, '/');
     await page.keyboard.press(`${modKey}+k`);
     await expect(
       page.getByRole('dialog', { name: 'Command palette' }).getByRole('combobox'),

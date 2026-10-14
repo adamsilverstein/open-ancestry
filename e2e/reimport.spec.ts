@@ -130,12 +130,12 @@ test('import, edit, re-import, review, apply, then undo', async ({
   await expect(summary).toContainText('1 missing');
 
   const birth = card(page, 'Thaddeus Ashgrove').getByRole('checkbox', {
-    name: /Birth: Abt\. 1842 → 12 MAR 1842/,
+    name: /Birth: abt\. 1842 → 12 Mar 1842/,
   });
   await expect(birth).toBeChecked();
   await expect(card(page, 'Thaddeus Ashgrove')).toContainText(/\d+% match/);
   const deathChange = card(page, 'Josiah Ashgrove').getByRole('checkbox', {
-    name: /Death: 3 MAY 1939 → 1940/,
+    name: /Death: 3 May 1939 → 1940/,
   });
   await expect(deathChange).not.toBeChecked();
   await expect(card(page, 'Josiah Ashgrove')).toContainText('Edited in this tree');
@@ -191,7 +191,7 @@ test('rejecting changes, overriding a local edit and bulk selection', async ({
   await page.getByRole('button', { name: 'Accept all high-confidence' }).click();
   // Bulk accept leaves local edits alone.
   await expect(
-    card(page, 'Josiah Ashgrove').getByRole('checkbox', { name: /Death: 3 MAY 1939 → 1940/ }),
+    card(page, 'Josiah Ashgrove').getByRole('checkbox', { name: /Death: 3 May 1939 → 1940/ }),
   ).not.toBeChecked();
   // The new child depends on Noah being added.
   await card(page, 'Noah Ashgrove')
@@ -204,7 +204,7 @@ test('rejecting changes, overriding a local edit and bulk selection', async ({
     .getByRole('checkbox', { name: /Birth:/ })
     .uncheck();
   await card(page, 'Josiah Ashgrove')
-    .getByRole('checkbox', { name: /Death: 3 MAY 1939 → 1940/ })
+    .getByRole('checkbox', { name: /Death: 3 May 1939 → 1940/ })
     .check();
   await apply.click();
   await expect(

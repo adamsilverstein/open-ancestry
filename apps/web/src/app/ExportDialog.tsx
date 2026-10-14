@@ -5,6 +5,7 @@ import { Button } from '../components/Button/Button';
 import { Checkbox } from '../components/Checkbox/Checkbox';
 import { Dialog, DialogClose } from '../components/Dialog/Dialog';
 import { Select } from '../components/Select/Select';
+import { treeQuery } from '../api/queries';
 import { currentTreeQuery, treesQuery } from '../library/api';
 import {
   EXPORT_FORMATS,
@@ -29,6 +30,20 @@ type ExportState =
   | { status: 'error'; message: string }
   | { status: 'warned'; count: number; shown: string[] };
 
+/** What an unprivatized export gives away, in words. */
+function exposure(living: number, marked: number, json: boolean): string {
+  const people = (n: number, what: string) => `${n} ${n === 1 ? 'person' : 'people'} ${what}`;
+  const who = [
+    living > 0 && people(living, 'who may be living'),
+    marked > 0 && people(marked, 'marked private'),
+  ]
+    .filter(Boolean)
+    .join(' and ');
+  return json
+    ? `JSON is a full backup: it includes everything about ${who}.`
+    : `This export includes everything about ${who}.`;
+}
+
 /** Saves a downloaded body under `name` through a temporary object URL. */
 function save(blob: Blob, name: string) {
   const href = URL.createObjectURL(blob);
@@ -51,7 +66,8 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
   const { data: current = null } = useQuery(currentTreeQuery);
   const [tree, setTree] = useState<string | undefined>();
   const [format, setFormat] = useState<ExportFormat>('gedcom-5.5.1');
-  const [privatize, setPrivatize] = useState(false);
+  // Undefined until the user decides: then it follows the tree (on when anyone is hidden).
+  const [choice, setChoice] = useState<boolean | undefined>();
   const [state, setState] = useState<ExportState>({ status: 'idle' });
   const list = trees.data ?? [];
   // The open tree by default, or the only one there is.
@@ -59,6 +75,11 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
     tree ??
     (current && list.some((t) => t.id === current) ? current : undefined) ??
     (list.length === 1 ? list[0]!.id : undefined);
+  const info = useQuery({ ...treeQuery(selected ?? ''), enabled: open && Boolean(selected) });
+  const living = info.data?.livingCount ?? 0;
+  const marked = info.data?.privateCount ?? 0;
+  // Privatize by default whenever the tree has living or private people: safe unless asked.
+  const privatize = canPrivatize(format) && (choice ?? living + marked > 0);
 
   const changeOpen = (next: boolean) => {
     if (!next) setState({ status: 'idle' });
@@ -151,7 +172,10 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
             label="Tree"
             options={list.map((t) => ({ value: t.id, label: t.name }))}
             value={selected}
-            onValueChange={setTree}
+            onValueChange={(id) => {
+              setTree(id);
+              setChoice(undefined);
+            }}
             placeholder={trees.isPending ? 'Loading trees…' : 'Choose a tree'}
             error={
               trees.isError
@@ -168,16 +192,22 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
             onValueChange={(value) => setFormat(value as ExportFormat)}
           />
           <Checkbox
-            label="Privatize living people"
+            label="Privatize living and private people"
             description={
               canPrivatize(format)
-                ? 'Living people are written as "Private" with only their family links.'
+                ? 'Living people, and anyone marked private, confidential or locked, are written as "Private" with only their family links.'
                 : 'JSON is a full backup and always includes everyone.'
             }
-            checked={privatize && canPrivatize(format)}
+            checked={privatize}
             disabled={!canPrivatize(format)}
-            onChange={(event) => setPrivatize(event.target.checked)}
+            onChange={(event) => setChoice(event.target.checked)}
           />
+          {!privatize && living + marked > 0 && (
+            <p className={styles.warning} role="status">
+              <TriangleAlert size={16} aria-hidden />
+              {exposure(living, marked, format === 'json')}
+            </p>
+          )}
           {state.status === 'error' && (
             <p className={styles.error} role="alert">
               <CircleAlert size={16} aria-hidden />

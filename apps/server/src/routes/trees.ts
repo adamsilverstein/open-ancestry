@@ -16,9 +16,21 @@ import { ExportQuery, GedzipQuery, HistoryQuery, HomeBody, TreeBody, TreeParams 
 function treeDetail(deps: Deps, id: string) {
   const store = deps.library.open(id);
   const { n } = store.stmt('SELECT count(*) AS n FROM person').get() as { n: number };
+  // Who a privatized export hides: living people (isLiving: living, inferred or unknown),
+  // and anyone else marked private, confidential or locked.
+  const hidden = store
+    .stmt(
+      `SELECT
+         sum(living IN ('living', 'inferred_living', 'unknown')) AS living,
+         sum(living NOT IN ('living', 'inferred_living', 'unknown') AND privacy <> 'public') AS private
+       FROM person`,
+    )
+    .get() as { living: number | null; private: number | null };
   return {
     ...deps.library.info(id),
     peopleCount: n,
+    livingCount: hidden.living ?? 0,
+    privateCount: hidden.private ?? 0,
     homePersonId: meta.getHomePersonId(store),
     schemaVersion: LATEST_SCHEMA_VERSION,
   };
@@ -50,6 +62,10 @@ function warningHeaders(warnings: string[]): Record<string, string> {
     [WARNINGS_HEADER]: encodeURIComponent(JSON.stringify(warnings.slice(0, MAX_HEADER_WARNINGS))),
   };
 }
+
+/** A privatized download is not named after the tree: tree names are often surnames. */
+const downloadName = (tree: string, privatize: boolean | undefined) =>
+  privatize ? 'private-tree' : tree;
 
 function hasBatch(store: TreeStore, state: 'applied' | 'undone'): boolean {
   return store.stmt('SELECT 1 FROM change_batch WHERE state = ? LIMIT 1').get(state) !== undefined;
@@ -159,7 +175,10 @@ export function treeRoutes(app: Api, deps: Deps): void {
       });
       return reply
         .type('text/vnd.familysearch.gedcom; charset=utf-8')
-        .header('content-disposition', attachment(tree, 'ged'))
+        .header(
+          'content-disposition',
+          attachment(downloadName(tree, request.query.privatize), 'ged'),
+        )
         .headers(warningHeaders(warnings))
         .send(text);
     },
@@ -175,7 +194,10 @@ export function treeRoutes(app: Api, deps: Deps): void {
       });
       return reply
         .type('application/vnd.familysearch.gedcom+zip')
-        .header('content-disposition', attachment(tree, 'gdz'))
+        .header(
+          'content-disposition',
+          attachment(downloadName(tree, request.query.privatize), 'gdz'),
+        )
         .headers(warningHeaders(warnings))
         .send(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
     },

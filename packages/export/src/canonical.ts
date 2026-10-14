@@ -1,4 +1,4 @@
-import { toGedcom } from '@open-ancestry/core';
+import { replaceNickname, toGedcom } from '@open-ancestry/core';
 import type {
   ChildRelationship,
   CitationRow,
@@ -176,28 +176,6 @@ const mimeOfPath = (path: string | null | undefined) =>
 const AGE_7 =
   /^(?:[<>] )?(?:\d+y(?: \d+m)?(?: \d+w)?(?: \d+d)?|\d+m(?: \d+w)?(?: \d+d)?|\d+w(?: \d+d)?|\d+d)$/;
 
-/**
- * The imported name text with its quoted nickname (`Ann "Nan" /Ash/`)
- * replaced by the current one, added after the given names when there was
- * none, or removed when the nickname was cleared.
- */
-export function withNickname(text: string, nickname: string | null): string {
-  // Straight or curly quotes, as the name parser accepts; the original quote marks are kept.
-  const quoted = /\s*(["“])[^"“”]*(["”])/;
-  if (quoted.test(text)) {
-    return text
-      .replace(quoted, (_, open: string, close: string) =>
-        nickname ? ` ${open}${nickname}${close}` : '',
-      )
-      .trim();
-  }
-  if (!nickname) return text;
-  const slash = text.indexOf('/');
-  return slash > 0
-    ? `${text.slice(0, slash).trimEnd()} "${nickname}" ${text.slice(slash)}`
-    : `${text} "${nickname}"`;
-}
-
 const coordinate = (value: number, positive: string, negative: string) =>
   value < 0 ? `${negative}${-value}` : `${positive}${value}`;
 
@@ -361,10 +339,10 @@ export class RecordWriter {
   private name(name: PersonNameRow, first: boolean): GedcomNode {
     const state = this.ctx.nameTextState(name.id);
     const text =
-      state === 'stale'
+      state?.kind === 'stale'
         ? null
-        : state === 'nickname' && name.full_text
-          ? withNickname(name.full_text, name.nickname)
+        : state?.kind === 'nickname' && name.full_text
+          ? replaceNickname(name.full_text, state.previous, name.nickname)
           : name.full_text;
     const value =
       text ??

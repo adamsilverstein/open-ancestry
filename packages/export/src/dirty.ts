@@ -119,14 +119,17 @@ export function dirtyRecords(store: TreeStore, data: TreeData): Set<string> {
 const NAME_PARTS = ['given', 'surname', 'surname_prefix', 'prefix', 'suffix'];
 
 /** How a name's imported `full_text` relates to its columns after edits. */
-export type NameTextState = 'stale' | 'nickname';
+export type NameTextState =
+  | { kind: 'stale' }
+  /** `previous` is the nickname the text was written with. */
+  | { kind: 'nickname'; previous: string | null };
 
 /**
  * Names edited after `full_text` was last set (the edit API changes the
  * columns and may leave the imported text alone): `stale` when a part the
  * text spells out (given, surname, prefixes, suffix) changed, so the NAME
  * line must be built from the columns; `nickname` when only the nickname
- * changed, so the text is kept with its quoted nickname replaced.
+ * changed, so the text is kept with that nickname swapped for the new one.
  */
 export function nameTextStates(store: TreeStore): Map<string, NameTextState> {
   const rows = store.db
@@ -141,9 +144,13 @@ export function nameTextStates(store: TreeStore): Map<string, NameTextState> {
     const before = JSON.parse(row.before_json) as Record<string, unknown>;
     const after = JSON.parse(row.after_json) as Record<string, unknown>;
     if (before.full_text !== after.full_text) states.delete(row.entity_id);
-    else if (NAME_PARTS.some((c) => before[c] !== after[c])) states.set(row.entity_id, 'stale');
-    else if (before.nickname !== after.nickname && states.get(row.entity_id) !== 'stale') {
-      states.set(row.entity_id, 'nickname');
+    else if (NAME_PARTS.some((c) => before[c] !== after[c])) {
+      states.set(row.entity_id, { kind: 'stale' });
+    } else if (before.nickname !== after.nickname && !states.has(row.entity_id)) {
+      states.set(row.entity_id, {
+        kind: 'nickname',
+        previous: (before.nickname as string | null) ?? null,
+      });
     }
   }
   return states;

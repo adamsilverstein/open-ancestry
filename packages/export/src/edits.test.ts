@@ -132,8 +132,15 @@ describe('edited records', () => {
     expect(exportGedcom(store, { now: TODAY })).toContain('1 NAME Theo "Ted" /Ashby/');
   });
 
-  it('never keeps an old quoted nickname in the NAME text', async () => {
-    const store = await importInto(ged('0 @I1@ INDI', '1 NAME Ann "Nan" /Ash/', '2 NICK Nan'));
+  it.each([
+    ['"', '"'],
+    ['“', '”'],
+    ['(', ')'],
+  ])('never keeps an old %snickname%s in the NAME text', async (open, close) => {
+    const written = (nick: string) => `${open}${nick}${close}`;
+    const store = await importInto(
+      ged('0 @I1@ INDI', `1 NAME Ann ${written('Nan')} /Ash/`, '2 NICK Nan'),
+    );
     const id = primaryName(store, '@I1@');
     const nameLine = async (nickname: string | null) => {
       store.transact('Nick', (tx) => names.update(tx, id, { nickname }));
@@ -144,15 +151,19 @@ describe('edited records', () => {
         nickname: rows(again, 'SELECT nickname FROM person_name')[0]!.nickname,
       };
     };
-    expect(await nameLine('Tad')).toEqual({ line: '1 NAME Ann "Tad" /Ash/', nickname: 'Tad' });
+    expect(await nameLine('Tad')).toEqual({
+      line: `1 NAME Ann ${written('Tad')} /Ash/`,
+      nickname: 'Tad',
+    });
+    // Cleared: the marks go too.
     expect(await nameLine(null)).toEqual({ line: '1 NAME Ann /Ash/', nickname: null });
-    // Back to a nickname on a text that no longer quotes one: it is added after the given names.
+    // The stored text still has the imported nickname, so a new one takes its place.
     expect(await nameLine('Annie')).toEqual({
-      line: '1 NAME Ann "Annie" /Ash/',
+      line: `1 NAME Ann ${written('Annie')} /Ash/`,
       nickname: 'Annie',
     });
     const v7 = buildGedcomExport(store, { version: '7', now: TODAY }).text;
-    expect(recordText(v7, '@I1@')).toContain('1 NAME Ann "Annie" /Ash/');
+    expect(recordText(v7, '@I1@')).toContain(`1 NAME Ann ${written('Annie')} /Ash/`);
     expect(v7).not.toMatch(/Nan|Tad/);
   });
 

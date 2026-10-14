@@ -3,6 +3,7 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { inferLiving } from '../living';
 import { formatDate, parseDate, toGedcom } from './index';
+import { arbSpanDate } from './test-arbitraries';
 import type { ParsedDate } from './types';
 
 const shape = (p: ParsedDate) => ({
@@ -131,6 +132,63 @@ describe('periods bounded by decades and centuries', () => {
       expect(shape(parseDate(toGedcom(parsed, version)))).toEqual(shape(parsed));
     }
     expect(shape(parseDate(formatDate(parsed)))).toEqual(shape(parsed));
+  });
+});
+
+describe('span date properties', () => {
+  it('every generated span date parses to the GEDCOM date it means', () => {
+    fc.assert(
+      fc.property(arbSpanDate, ({ text, means }) => {
+        const date = parseDate(text);
+        expect(date.valid, text).toBe(true);
+        expect(shape(date), text).toEqual(shape(parseDate(means)));
+      }),
+      { numRuns: 2000 },
+    );
+  });
+
+  it('keeps sort keys ordered and inside the years written', () => {
+    fc.assert(
+      fc.property(arbSpanDate, ({ text }) => {
+        const date = parseDate(text);
+        if (date.end) {
+          expect(date.sortKey).toBeLessThanOrEqual(date.sortKeyEnd!);
+          expect(date.start!.year).toBeLessThanOrEqual(date.end.year);
+          expect(date.sortKey).toBe(parseDate(`BEF ${date.start!.year}`).sortKey + 1);
+          expect(date.sortKeyEnd).toBe(parseDate(`AFT ${date.end.year}`).sortKey - 1);
+        }
+        const years = [...text.matchAll(/\d+/g)].map((m) => Number(m[0]));
+        expect(Math.floor(date.sortKey / 10000)).toBeGreaterThanOrEqual(Math.min(...years));
+      }),
+      { numRuns: 2000 },
+    );
+  });
+
+  it('parse, format and parse again give the same date', () => {
+    fc.assert(
+      fc.property(arbSpanDate, ({ text }) => {
+        const parsed = parseDate(text);
+        for (const version of ['5.5.1', '7'] as const) {
+          expect(shape(parseDate(toGedcom(parsed, version))), `${text} ${version}`).toEqual(
+            shape(parsed),
+          );
+        }
+        expect(shape(parseDate(formatDate(parsed))), text).toEqual(shape(parsed));
+      }),
+      { numRuns: 2000 },
+    );
+  });
+
+  it.each(['TO 1850s TO 1860s', 'TO 1850 TO 1860', 'FROM 1850s FROM 1860s'])(
+    '%j repeats its keyword, so it stays text',
+    (input) => {
+      expect(parseDate(input).qualifier).toBe('text');
+    },
+  );
+
+  it('TO a range keeps its end: the period ends there, wherever it began', () => {
+    expect(shape(parseDate('TO 1850-60'))).toEqual(shape(parseDate('TO 1860')));
+    expect(shape(parseDate('TO 1850s-1860s'))).toEqual(shape(parseDate('TO 1869')));
   });
 });
 

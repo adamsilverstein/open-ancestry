@@ -21,12 +21,12 @@ POST/PUT/PATCH/DELETE /api/...    needs  Origin: <this server>  and  x-oa-token:
 |---|---|
 | Binds `127.0.0.1` unless `--host` is given (the CLI warns loudly otherwise) | Private data never reaches the network by default. |
 | `Host` must be `localhost`, `127.0.0.1` or `[::1]` (any port), else 403 `forbidden_host` | Defeats DNS rebinding. |
-| Mutations need a same-origin `Origin` and the per-process token, else 403 `forbidden` | Defeats CSRF; other origins cannot read the token because there is no CORS. |
+| Every method except GET, HEAD and OPTIONS needs the per-process token and an `Origin` that exactly equals this server's serialized origin (no `null`, userinfo, path, case or duplicate variations), else 403 `forbidden` | Defeats CSRF; other origins cannot read the token because there is no CORS. |
 | `Sec-Fetch-Site: cross-site` is refused on `/api` | Defense in depth. |
 | No CORS headers, ever | |
 | CSP `default-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'`, `nosniff`, `Referrer-Policy: no-referrer`, COOP `same-origin` on every response | |
 | JSON bodies up to 1 MiB; import uploads up to 1 GiB (streamed to a temp file); one import at a time, four queued | Bounded memory and disk. |
-| Media paths are resolved (following symlinks) inside the tree's `media/` folder; media responses add `CSP: sandbox` | Path traversal and stored-XSS defense. |
+| Media paths are resolved (following symlinks) inside the tree's `media/` folder. The content type is sniffed from magic bytes against an allowlist (JPEG, PNG, GIF, WebP, AVIF, MP3, WAV, Ogg, FLAC, MP4/M4A, WebM, PDF); `media.mime` and extensions are ignored, anything else is an `application/octet-stream` attachment, and every media response carries `CSP: default-src 'none'; style-src 'unsafe-inline'; sandbox` and `nosniff` | Path traversal and stored-XSS defense; GEDCOM media is untrusted. |
 
 The SPA fetches the token once at startup and sends it with every mutation; browsers add `Origin` themselves.
 

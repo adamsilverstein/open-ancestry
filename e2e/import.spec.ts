@@ -246,7 +246,7 @@ test.describe('failed imports never delete data', () => {
     expect((await treeInfo(page, name))?.peopleCount).toBe(26);
   });
 
-  test('a failure importing into a populated tree leaves it alone', async ({
+  test('an import into a populated tree is refused and leaves it alone', async ({
     page,
     baseURL,
   }, testInfo) => {
@@ -265,13 +265,9 @@ test.describe('failed imports never delete data', () => {
         file: { name: 'again.ged', mimeType: 'application/octet-stream', buffer: sample },
       },
     });
-    expect(started.status()).toBe(202);
-    const { jobId } = (await started.json()) as { jobId: string };
-    await page.goto(`/import/${jobId}`);
-    await expect(page.getByRole('heading', { level: 1, name: 'Import failed' })).toBeVisible({
-      timeout: 30_000,
-    });
-    await expect(page.getByRole('alert')).toContainText('new, empty tree');
+    // Refused before the upload is read (issue #98): the tree already has data.
+    expect(started.status()).toBe(409);
+    expect((await started.json()).error.message).toContain('new, empty tree');
     expect((await treeInfo(page, name))?.peopleCount).toBe(26);
   });
 });

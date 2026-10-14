@@ -34,8 +34,9 @@ describe('relationshipName', () => {
     expect(relationshipName(1, 4, 'F')).toBe('great-grandniece');
     expect(relationshipName(2, 1, 'M')).toBe('uncle');
     expect(relationshipName(2, 1, 'F')).toBe('aunt');
-    expect(relationshipName(3, 1, 'M')).toBe('great-uncle');
-    expect(relationshipName(4, 1, 'F')).toBe('2nd great-aunt');
+    expect(relationshipName(3, 1, 'M')).toBe('granduncle');
+    expect(relationshipName(4, 1, 'M')).toBe('great-granduncle');
+    expect(relationshipName(5, 1, 'F')).toBe('2nd great-grandaunt');
     expect(relationshipName(2, 1, 'U')).toBe('parent’s sibling');
   });
 

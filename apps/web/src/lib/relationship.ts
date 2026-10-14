@@ -50,8 +50,10 @@ export function relationshipName(up: number, down: number, sex: Sex, half = fals
     return `${h}${greats(down - 3)}grand${base}`;
   }
   if (down === 1) {
+    // Ancestry wording: a grandparent's sibling is a granduncle, not a great-uncle.
     const base = word(sex, 'uncle', 'aunt', 'parent’s sibling');
-    return h + greats(up - 2) + base;
+    if (up === 2) return h + base;
+    return `${h}${greats(up - 3)}grand${base}`;
   }
   const degree = Math.min(up, down) - 1;
   const removed = Math.abs(up - down);

@@ -398,3 +398,26 @@ describe('undo / redo', { timeout: PROPERTY_TIMEOUT }, () => {
     store.close();
   });
 });
+
+describe('owner links (#164 review)', () => {
+  it('refuses to undo a batch that would delete a row a later note still links to', () => {
+    const store = memoryTree();
+    const { batchId: addPat, result: pat } = store.transact('Add Pat', (tx) =>
+      persons.create(tx, { names: [{ given: 'Pat', surname: 'Ash' }] }),
+    );
+    store.transact('Add note', (tx) => {
+      const note = tx.insert('note', { text: 'Pat moved' });
+      tx.insert('note_link', { note_id: note.id, owner_type: 'person', owner_id: pat.id });
+    });
+    expect(() => undo(store, addPat)).toThrow(UndoConflictError);
+    expect(() => undo(store, addPat)).toThrow(
+      /still links to the person it would remove \(note link\)/,
+    );
+    expect(store.getRow('person', pat.id)).toBeDefined();
+    // Undoing the note first frees Pat.
+    undoLast(store);
+    undo(store, addPat);
+    expect(store.getRow('person', pat.id)).toBeUndefined();
+    store.close();
+  });
+});

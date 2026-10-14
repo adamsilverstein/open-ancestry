@@ -22,6 +22,7 @@ export {
   Tx,
   type StoreOptions,
 } from './store';
+export { isNfcColumn, nfcRow, toNFC } from './nfc';
 export {
   TREE_EXTENSION,
   createTree,
@@ -54,6 +55,8 @@ export {
   redoLast,
   undo,
   undoLast,
+  undoLatest,
+  touchesMergedRows,
 } from './undo';
 export { BULK_TABLE_ORDER, BulkWriter, bulkInsert, type BulkCounts, type BulkData } from './bulk';
 export {

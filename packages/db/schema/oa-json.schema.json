@@ -14,7 +14,7 @@
       "const": 1
     },
     "schemaVersion": {
-      "const": 2
+      "const": 3
     },
     "tables": {
       "type": "object",

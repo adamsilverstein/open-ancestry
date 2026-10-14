@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { existsSync, mkdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { refreshDerivedColumns } from './derived';
+import { toNFC } from './nfc';
 import { TreeStore, type StoreOptions } from './store';
 
 /*
@@ -38,7 +39,7 @@ function assertTreeDir(dir: string): void {
 }
 
 function setName(store: TreeStore, name: string): void {
-  store.db.prepare("INSERT INTO meta (key, value) VALUES ('tree_name', ?)").run(name);
+  store.db.prepare("INSERT INTO meta (key, value) VALUES ('tree_name', ?)").run(toNFC(name));
   store.db.prepare("INSERT INTO meta (key, value) VALUES ('created_at', ?)").run(store.clock());
 }
 

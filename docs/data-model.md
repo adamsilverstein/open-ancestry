@@ -1,10 +1,10 @@
 # open-ancestry data model
 
-Current schema version: **2**
+Current schema version: **3**
 
 This is the reference for the local data format: the SQLite schema inside every tree, the rules the code keeps on top of it, and the JSON interchange format. It is owned by `packages/db`. `packages/db/src/data-model-doc.test.ts` fails if a table or column exists in the live database but not here (or the other way round), or if an enum value is missing, so this document cannot drift from the DDL.
 
-- DDL: `packages/db/src/migrations/v001-initial.ts` and `v002-history-order.ts` (frozen dumps and history fixtures: `packages/db/src/migrations/history/schema-vN.sql`, `oa-vN.json`)
+- DDL: `packages/db/src/migrations/v001-initial.ts` and `v002-history-order.ts`; `v003-nfc-text.ts` changes no tables (see [Text normalization](#text-normalization)) (frozen dumps and history fixtures: `packages/db/src/migrations/history/schema-vN.sql`, `oa-vN.json`)
 - Row types: `packages/db/src/types.ts`; enums: `packages/db/src/enums.ts`
 - JSON Schema for interchange: `packages/db/schema/oa-json.schema.json`
 
@@ -21,7 +21,8 @@ This is the reference for the local data format: the SQLite schema inside every 
 9. [Change log, undo and redo](#change-log-undo-and-redo)
 10. [Search index](#search-index)
 11. [JSON interchange](#json-interchange)
-12. [Versioning policy](#versioning-policy)
+12. [Text normalization](#text-normalization)
+13. [Versioning policy](#versioning-policy)
 
 ## Storage layout
 
@@ -85,7 +86,7 @@ Key/value settings for the tree.
 
 | Column | Type | Null | Meaning |
 |---|---|---|---|
-| `key` | TEXT | no | Primary key. Known keys: `schema_version` (written only by migrations; `meta.set` and `meta.delete` refuse it), `tree_name`, `created_at`, `home_person_id` (the person relationships are described from), `settings` (JSON object of UI preferences), `import_pending` (set only on a tree the server created for an import upload, holding that import's marker until it succeeds; an empty tree that still has it after a failure or restart is removed by the server), and `check.dismissed:<issue key>` (one row per tree checker issue the user dismissed; the value is when; written and removed in undoable batches, and carried by the JSON interchange like every meta row; a row outlives its issue on purpose, so an issue that comes back after an edit is undone stays dismissed). |
+| `key` | TEXT | no | Primary key. Known keys: `schema_version` (written only by migrations; `meta.set` and `meta.delete` refuse it), `tree_name`, `created_at`, `home_person_id` (the person relationships are described from), `settings` (JSON object of UI preferences), `import_pending` (set only on a tree the server created for an import upload, holding that import's marker until it succeeds; an empty tree that still has it after a failure or restart is removed by the server), `nfc_merged_ids` (JSON array of the place and tag ids migration 3 merged away, written only by that migration; undo uses it to explain refusals), and `check.dismissed:<issue key>` (one row per tree checker issue the user dismissed; the value is when; written and removed in undoable batches, and carried by the JSON interchange like every meta row; a row outlives its issue on purpose, so an issue that comes back after an edit is undone stays dismissed). |
 | `value` | TEXT | no | Value as text. |
 
 ### `import_batch`
@@ -552,6 +553,7 @@ All edits go through `store.transact(label, tx => ...)`. One call is one `change
 
 - **Undo** replays a batch's log newest-first, restoring each row's `before_json`; **redo** replays oldest-first, restoring `after_json`. Both run in one transaction and keep the search index in sync.
 - **Conflict check:** before restoring a row, its current value must equal the image being replaced. If a later batch changed the same row, the operation fails with `UndoConflictError` and nothing changes.
+- **Owner links:** foreign keys cannot cover `owner_type` + `owner_id` references (`citation_link`, `media_link`, `note_link`, `tag_link`, `raw_record`, `unmapped_line`). So when an undo or redo would remove a row that one of those still links to, it fails with `UndoConflictError` ("a later change still links to the person it would remove") and nothing changes. Undoing the linking change first frees it.
 - **Order:** batches are ordered by `change_batch.seq` (commit order), never by their ULIDs, whose time part follows the wall clock.
 - **Redo stack:** committing a new batch marks every `undone` batch `superseded`; superseded batches cannot be redone. `undoLast` takes the `applied` batch with the highest `seq`, `redoLast` the `undone` one with the lowest.
 - **Images across versions:** each `change_log` row records the `schema_version` its images were written under. Before replaying, an older image is upgraded through every later migration's column map, then shaped to the table's current columns: unknown keys are ignored (they never reach SQL), missing columns take their DEFAULT, and a missing NOT NULL column without a default is an error. The conflict check compares the shaped image with the live row.
@@ -590,6 +592,16 @@ Each result reports its `match` tier. Within a tier, BM25 ranks names 10, phonet
 - Import requires an empty tree. A document from an older `schemaVersion` is upgraded through each later migration (its column map, then any `upgradeTables` step) before validation; one from a newer version is refused. Import loads everything in one transaction and rebuilds the search index.
 - The JSON Schema in `packages/db/schema/oa-json.schema.json` is generated from the live schema (`npm run generate:json-schema -w @open-ancestry/db`); a test fails if it is stale, and exports are validated against it.
 
+## Text normalization
+
+Human text is stored in Unicode NFC, so the same name, place or tag written composed (`ü`) or decomposed (`u` + combining diaeresis, as macOS file names and text pasted from PDFs produce) is one value (#99).
+
+- `Tx.insert` and `Tx.update` normalize string columns (`nfcRow` in `packages/db/src/nfc.ts`), and the GEDCOM importer normalizes every mapped value, so all edits and imports store NFC.
+- Left byte-exact: `raw_record`, `unmapped_line` and `import_batch` (the original GEDCOM and import bookkeeping, so exports stay verbatim), `change_batch` and `change_log` (images are upgraded per migration instead), derived search tables, `media.local_path`, `remote_url`, `sha256` and `mime` (they name files and URLs outside the database), and ids, keys and timestamps.
+- Migration 3 changes no tables. It rewrites existing text in place inside the migration transaction, without a change batch, so nothing appears in History. Places whose `full_name` is then identical merge into the oldest row: events, child places and media and note links move to it, and it inherits missing coordinates. A note that was attached to one of the merged places is therefore shown for every event at the merged place. Tags whose category and name are then identical merge the same way. The search index is rebuilt, and the merged-away ids are listed in `meta.nfc_merged_ids`. Older JSON backups are normalized and merged the same way on import.
+- Undo of edits made before migration 3: `upgradeRow` normalizes older change_log images, so they still match the live rows and undo and redo work. The exception is an edit whose images name a place or tag the upgrade merged away (it created or edited the duplicate, moved an event to it, put a place under it, or tagged with it). Its images point at a row that no longer exists, so undo refuses it with `UndoConflictError` ("this change touched a place or tag that was merged during an upgrade, so it can't be undone. Older changes stay in History.") and changes nothing. It stays in History as applied. Cmd/Ctrl-Z (`undoLast`, or `undoLatest`, which also returns what it skipped so the app can say so) steps over such batches to the next older one, so they do not block the undo stack. Each older batch is still checked for conflicts as usual, including the owner-link check below, so stepping over cannot remove a row that a skipped batch still links to.
+- Export compares values after NFC, so a record whose stored text only changed form (for example by this upgrade) is still written verbatim from `raw_record`.
+
 ## Versioning policy
 
 - `meta.schema_version` holds the applied migration number. Migrations are forward-only: a database is never downgraded, and opening a database newer than the app is refused.
@@ -614,6 +626,9 @@ Each result reports its `match` tier. Within a tier, BM25 ranks names 10, phonet
     upgradeRow: (table, row) => row,
     // Optional, for values computed from other rows (v2 numbers batches this way):
     upgradeTables: (tables) => { /* edit an older JSON document's rows in place */ },
+    // Optional, for rewrites SQL cannot express (v3 normalizes Unicode this way): runs in the
+    // migration's transaction after `sql`. Its writes are an upgrade, so they are not change-logged.
+    run: (db) => {},
   }
   ```
 

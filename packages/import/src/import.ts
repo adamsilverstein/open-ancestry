@@ -2,6 +2,7 @@ import {
   BulkWriter,
   TreeStore,
   createTree,
+  toNFC,
   treePaths,
   type BulkCounts,
   type InsertRow,
@@ -248,11 +249,11 @@ export function checkLimits(
 }
 
 function treeName(doc: ParseResult, fileName: string | null): string | undefined {
-  return (
+  const name =
     doc.header.ancestry?.treeName ??
     doc.header.source?.data ??
-    (fileName ? fileName.replace(/\.[^.]+$/, '') : undefined)
-  );
+    (fileName ? fileName.replace(/\.[^.]+$/, '') : undefined);
+  return name === undefined ? undefined : toNFC(name);
 }
 
 /** Media the import wrote into the tree, for cleanup after a failure. */

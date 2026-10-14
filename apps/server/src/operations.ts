@@ -1,5 +1,4 @@
 import { closeSync, openSync, readSync } from 'node:fs';
-import { join } from 'node:path';
 import {
   familyChildren,
   names,
@@ -13,7 +12,7 @@ import {
 } from '@open-ancestry/db';
 import { nameRow, refreshLiving, requireRow } from './edits';
 import { conflict, notFound } from './errors';
-import { sniffMediaType } from './routes/media';
+import { resolveMediaPathSync, sniffMediaType } from './routes/media';
 import type { BatchOperation, NameBody } from './schemas';
 import type { Static } from 'typebox';
 import type { FamilyChildPatch, PersonPatch, TagBody } from './schemas';
@@ -31,7 +30,9 @@ function profilePhotoProblem(store: TreeStore, media: MediaRow): string | null {
     return 'This media has no file in this tree, so it cannot be the profile photo';
   // In-memory trees (tests) have no media folder to check.
   if (store.dir === null) return null;
-  const path = join(treePaths(store.dir).media, ...media.local_path.split('/'));
+  // Confined like every media read: a symlink out of the media folder is no file here.
+  const path = resolveMediaPathSync(treePaths(store.dir).media, media.local_path);
+  if (!path) return 'This media has no file in this tree, so it cannot be the profile photo';
   let head: Buffer;
   try {
     const fd = openSync(path, 'r');

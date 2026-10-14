@@ -1081,12 +1081,24 @@ test.describe('wide descendant charts (#74)', () => {
       await page.getByRole('button', { name: 'Zoom in' }).click();
       await settled(page);
     }
-    // Like a minimum font size setting or a late web font: the labels grow.
-    await page.addStyleTag({ content: '[data-testid="tree-row-label"] { font-size: 26px; }' });
-    for (const dx of [150, 150, 150]) {
-      await drag(page, dx, 0);
-      await expectLabelsClear(page);
-    }
+    // Clear every row of its label, then slide left until one row reaches its
+    // label and back one step: that label sits just beside its row.
+    const above = page.locator('[data-testid="tree-row-label"][data-above]');
+    for (let i = 0; i < 15 && (await above.count()) > 0; i++) await drag(page, 100, 0);
+    await expect(above).toHaveCount(0);
+    for (let i = 0; i < 100 && (await above.count()) === 0; i++) await drag(page, -8, 0);
+    await expect(above).not.toHaveCount(0);
+    await drag(page, 8, 0);
+    await expect(above).toHaveCount(0);
+    // Like a minimum font size setting or a late web font: the labels grow,
+    // and now reach into their rows unless they move up into the gap.
+    await labels(page).evaluateAll((els) => {
+      for (const el of els.flatMap((l) => [...l.querySelectorAll<HTMLElement>('*')])) {
+        el.style.fontSize = '26px';
+      }
+    });
+    await drag(page, 6, 0);
+    await expectLabelsClear(page);
   });
 
   test('the minimap moves or collapses rather than cover a label or the active card', async ({

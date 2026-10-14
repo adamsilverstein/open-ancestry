@@ -163,7 +163,10 @@ export class Mapper {
   private readonly linkOrder = new Map<string, number>();
   private readonly citationKeys = new Map<string, string[]>();
   private readonly surnameKeys = new Map<string, string | null>();
-  private readonly copiedMedia = new Set<string>();
+  /** Relative paths of media files written into the tree's media folder. */
+  readonly copiedMedia = new Set<string>();
+  /** Folders created under the media folder for those files. */
+  readonly createdMediaFolders: string[] = [];
   private readonly insertedTags = new Set<string>();
   private readonly unmappedByPath = new Map<string, UnmappedTag>();
   private firstPerson: string | null = null;
@@ -1018,8 +1021,9 @@ export class Mapper {
     try {
       const bytes = file.read();
       if (this.options.mediaRoot && !this.copiedMedia.has(file.path)) {
-        writeMediaFile(this.options.mediaRoot, file.path, bytes);
         this.copiedMedia.add(file.path);
+        const folder = writeMediaFile(this.options.mediaRoot, file.path, bytes);
+        if (folder) this.createdMediaFolders.push(folder);
       }
       row.local_path = file.path;
       row.byte_size = bytes.length;

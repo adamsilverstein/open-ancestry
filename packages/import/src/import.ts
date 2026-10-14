@@ -10,7 +10,7 @@ import {
 import { GedzipError, parseGedcom, readGedzip, type ParseResult } from '@open-ancestry/gedcom';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, statSync } from 'node:fs';
-import { basename } from 'node:path';
+import { basename, join } from 'node:path';
 import { Mapper, type Sink } from './mapper';
 import { MediaSource } from './media';
 import {
@@ -119,6 +119,12 @@ function treeName(doc: ParseResult, fileName: string | null): string | undefined
   );
 }
 
+/** Media the import wrote into the tree, for cleanup after a failure. */
+interface Copied {
+  files: Iterable<string>;
+  folders: string[];
+}
+
 function openTarget(target: ImportTarget, doc: ParseResult, fileName: string | null) {
   if (target instanceof TreeStore) {
     const used = target.db
@@ -128,14 +134,34 @@ function openTarget(target: ImportTarget, doc: ParseResult, fileName: string | n
     if (used > 0) {
       throw new ImportError('tree-not-empty', 'Imports go into a new, empty tree');
     }
-    return { store: target, created: false, dirExisted: true };
+    return { store: target, cleanup: (copied: Copied) => void copied };
   }
   if (existsSync(treePaths(target.dir).database)) {
     throw new ImportError('tree-exists', `A tree already exists at ${target.dir}`);
   }
-  const dirExisted = existsSync(target.dir);
+  const paths = treePaths(target.dir);
+  const existed = {
+    dir: existsSync(paths.root),
+    media: existsSync(paths.media),
+    thumbs: existsSync(paths.thumbs),
+  };
   const store = createTree(target.dir, { name: target.name ?? treeName(doc, fileName) });
-  return { store, created: true, dirExisted };
+  /** Removes what this import created, so a retry into the same folder works. */
+  const cleanup = (copied: Copied) => {
+    store.close();
+    if (!existed.dir) {
+      rmSync(paths.root, { recursive: true, force: true });
+      return;
+    }
+    for (const suffix of ['', '-wal', '-shm']) rmSync(paths.database + suffix, { force: true });
+    if (!existed.thumbs) rmSync(paths.thumbs, { recursive: true, force: true });
+    if (!existed.media) rmSync(paths.media, { recursive: true, force: true });
+    else {
+      for (const rel of copied.files) rmSync(join(paths.media, ...rel.split('/')), { force: true });
+      for (const folder of copied.folders) rmSync(folder, { recursive: true, force: true });
+    }
+  };
+  return { store, cleanup };
 }
 
 /**
@@ -171,8 +197,10 @@ export async function importGedcom(
   }
   checkAbort(signal);
 
-  const { store, created, dirExisted } = openTarget(target, doc, read.fileName);
+  const created = !(target instanceof TreeStore);
+  const { store, cleanup } = openTarget(target, doc, read.fileName);
   let writer: BulkWriter | undefined;
+  let mapper: Mapper | undefined;
   try {
     writer = new BulkWriter(store);
     const bulk = writer;
@@ -207,7 +235,7 @@ export async function importGedcom(
       if (name) sink.insert('meta', { key: 'tree_name', value: name });
     }
 
-    const mapper = new Mapper(doc, sink, {
+    mapper = new Mapper(doc, sink, {
       batchId,
       newId: store.newId,
       media: read.media,
@@ -302,10 +330,7 @@ export async function importGedcom(
     return report;
   } catch (error) {
     writer?.rollback();
-    if (created) {
-      store.close();
-      if (!dirExisted) rmSync((target as { dir: string }).dir, { recursive: true, force: true });
-    }
+    cleanup({ files: mapper?.copiedMedia ?? [], folders: mapper?.createdMediaFolders ?? [] });
     throw error;
   }
 }

@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -148,6 +149,35 @@ describe('inputs and targets', () => {
     );
     await expect(promise).rejects.toMatchObject({ code: 'aborted' });
     expect(existsSync(dir)).toBe(false);
+  });
+
+  it('removes only what it created in an existing folder, so a retry works', async () => {
+    const dir = join(tmp, 'existing.oatree');
+    mkdirSync(join(dir, 'media'), { recursive: true });
+    writeFileSync(join(dir, 'keep.txt'), 'mine');
+    writeFileSync(join(dir, 'media', 'mine.jpg'), 'mine');
+    const media = join(tmp, 'media-src');
+    writeMedia(media);
+    const controller = new AbortController();
+    await expect(
+      importGedcom(
+        { bytes: MEDIA_GED },
+        { dir },
+        {
+          mediaDir: media,
+          signal: controller.signal,
+          onProgress: (phase) => {
+            if (phase === 'finalize') controller.abort();
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ code: 'aborted' });
+    expect(readdirSync(dir).sort()).toEqual(['keep.txt', 'media']);
+    expect(readdirSync(join(dir, 'media'))).toEqual(['mine.jpg']);
+
+    const report = await importGedcom({ bytes: MEDIA_GED }, { dir }, { mediaDir: media });
+    expect(report.media.linked).toBe(3);
+    expect(existsSync(join(dir, 'keep.txt'))).toBe(true);
   });
 
   it('rolls back an in-memory tree when aborted before starting', async () => {

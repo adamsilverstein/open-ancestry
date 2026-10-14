@@ -172,11 +172,19 @@ export class MediaSource {
   }
 }
 
-/** Writes a media file under the tree's media folder, refusing anything that would land outside it. */
-export function writeMediaFile(mediaRoot: string, relPath: string, bytes: Uint8Array): void {
+/**
+ * Writes a media file under the tree's media folder, refusing anything that
+ * would land outside it. Returns the first folder it had to create, if any.
+ */
+export function writeMediaFile(
+  mediaRoot: string,
+  relPath: string,
+  bytes: Uint8Array,
+): string | undefined {
   const root = resolve(mediaRoot);
   const target = resolve(root, ...relPath.split('/'));
   if (!target.startsWith(root + sep)) throw new Error(`unsafe media path ${relPath}`);
-  mkdirSync(dirname(target), { recursive: true });
+  const created = mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, bytes);
+  return created;
 }

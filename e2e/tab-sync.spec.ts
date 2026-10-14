@@ -25,9 +25,7 @@ async function rename(page: Page, given: string) {
   await expect(dialog).toBeHidden();
 }
 
-test('an edit, undo or redo in one tab shows up in the other within a second', async ({
-  page,
-}) => {
+test('an edit, undo or redo in one tab shows up in the other within a second', async ({ page }) => {
   const a = page;
   const b = await page.context().newPage();
   await openSeeded(a, seeded);

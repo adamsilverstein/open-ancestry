@@ -31,10 +31,31 @@ export function onTreeChanged(listener: (tree: string) => void): () => void {
   return () => changeListeners.delete(listener);
 }
 
-/** Refetches every query of the tree (keys are `[kind, tree, ...]`) and notifies `onTreeChanged`. */
-export function invalidateTree(queryClient: QueryClient, tree: string) {
+/** Other tabs of the app on this origin; edits, undo and redo are tree-wide on the server. */
+const otherTabs = typeof BroadcastChannel === 'function' ? new BroadcastChannel('oa-tree') : null;
+
+/**
+ * Refetches every query of the tree (keys are `[kind, tree, ...]`), notifies
+ * `onTreeChanged`, and tells other tabs to do the same unless the change came from one.
+ */
+export function invalidateTree(
+  queryClient: QueryClient,
+  tree: string,
+  { fromOtherTab = false } = {},
+) {
   for (const listener of changeListeners) listener(tree);
+  if (!fromOtherTab) otherTabs?.postMessage({ tree });
   return queryClient.invalidateQueries({ predicate: (q) => q.queryKey[1] === tree });
+}
+
+/** Refreshes this tab's copy of a tree whenever another tab changes it; returns a stop function. */
+export function syncTreesAcrossTabs(queryClient: QueryClient): () => void {
+  const onMessage = (event: MessageEvent<unknown>) => {
+    const { tree } = (event.data ?? {}) as { tree?: unknown };
+    if (typeof tree === 'string') void invalidateTree(queryClient, tree, { fromOtherTab: true });
+  };
+  otherTabs?.addEventListener('message', onMessage);
+  return () => otherTabs?.removeEventListener('message', onMessage);
 }
 
 interface Run {

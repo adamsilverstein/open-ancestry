@@ -98,3 +98,43 @@ test('a guessed layout is not reused after an undo changes the person', async ({
   await expect(card(page, 'Rowan Ashdown')).toBeAttached();
   await expect(card(page, 'Hester Ashdown')).toHaveCount(0);
 });
+
+test('generations loaded by a chevron come back after an undo', async ({
+  page,
+  request,
+  baseURL,
+}) => {
+  await post(request, baseURL!, `${base()}/people/${seeded.edmund}/parents`, {
+    person: { sex: 'M', names: [{ given: 'Silas', surname: 'Ashdown' }] },
+  });
+  const silas = (
+    (await (
+      await request.get(`${base()}/neighborhood?focus=${seeded.edmund}&up=1&down=0`)
+    ).json()) as {
+      people: { id: string; given: string }[];
+    }
+  ).people.find((p) => p.given === 'Silas')!.id;
+  await post(request, baseURL!, `${base()}/people/${silas}/parents`, {
+    person: { sex: 'M', names: [{ given: 'Abner', surname: 'Ashdown' }] },
+  });
+  await post(request, baseURL!, `${base()}/people/${seeded.rowan}/children`, {
+    person: { sex: 'M', names: [{ given: 'Tobias', surname: 'Ashdown' }] },
+  });
+  await page.addInitScript((tree) => localStorage.setItem('oa-tree', tree), seeded.tree);
+  // One generation up: Edmund's parents are past the first request.
+  await page.goto(`/tree/${seeded.rowan}?tree=${encodeURIComponent(seeded.tree)}&up=1`);
+  await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+  await canvas(page).getByRole('button', { name: 'Show parents of Edmund Ashdown' }).click();
+  await expect(card(page, 'Silas Ashdown')).toBeAttached();
+  // Silas's parents were not in any request yet: this chevron loads them.
+  await page.getByRole('button', { name: 'Fit to screen' }).click();
+  await expect(page.getByTestId('tree-world')).not.toHaveAttribute('data-animating');
+  await canvas(page).getByRole('button', { name: 'Show parents of Silas Ashdown' }).click();
+  await expect(card(page, 'Abner Ashdown')).toBeAttached();
+
+  await card(page, 'Rowan Ashdown').focus();
+  await page.keyboard.press(`${mod}+z`);
+  await expect(card(page, 'Tobias Ashdown')).toHaveCount(0);
+  await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+  await expect(card(page, 'Abner Ashdown')).toBeAttached();
+});

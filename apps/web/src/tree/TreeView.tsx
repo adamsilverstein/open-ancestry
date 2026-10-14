@@ -139,6 +139,8 @@ function TreeMinimap({
 }
 
 interface Result {
+  /** The graph the layout was made from; its cards' details come from it. */
+  cache: GraphCache;
   layout: TreeLayout | null;
   fan: FanLayout | null;
   kin: Record<string, string>;
@@ -197,8 +199,15 @@ export function TreeView({
 
   const canvas = useRef<TreeCanvasHandle>(null);
   // The page remounts this view per tree, so one cache and worker per tree.
-  const [cache] = useState(() => new GraphCache());
+  // Replaced (with a fresh worker) when an edit, undo or redo changes the tree:
+  // the cache only adds, so a removed relative would otherwise stay on screen.
+  const [cache, setCache] = useState(() => new GraphCache());
   const [client] = useState(() => new LayoutClient(() => cache.snapshot()));
+  // A new worker (after a reset or crash) starts from the current cache.
+  useEffect(() => client.setSnapshot(() => cache.snapshot()), [client, cache]);
+  /** Neighborhoods loaded beyond the focus (expanded chevrons), to reload after a reset. */
+  const extraLoads = useRef(new Map<string, NeighborhoodRequest>());
+  const reload = useRef<NeighborhoodRequest[]>([]);
   const [dataVersion, setDataVersion] = useState(0);
   const [loaded, setLoaded] = useState<{ focus: string; kind: LayoutKind } | null>(null);
   const [failure, setFailure] = useState<{ focus: string; notFound: boolean } | null>(null);
@@ -236,12 +245,15 @@ export function TreeView({
         queryFn: ({ signal }) => fetchNeighborhood(tree, request, signal),
         staleTime: STALE,
       });
+      if (!quiet && request.focus !== personId) {
+        extraLoads.current.set(JSON.stringify(request), request);
+      }
       if (cache.merge(slice)) {
         client.merge(slice);
         if (!quiet) setDataVersion(cache.version);
       }
     },
-    [queryClient, tree, cache, client],
+    [queryClient, tree, cache, client, personId],
   );
 
   /**
@@ -284,6 +296,10 @@ export function TreeView({
     (async () => {
       try {
         await ensure(requestFor(personId));
+        // After a reset, bring back what expanded chevrons had loaded.
+        const again = reload.current;
+        reload.current = [];
+        await Promise.allSettled(again.map((r) => ensure(r)));
         if (!cancelled) {
           setFailure(null);
           setLoaded({ focus: personId, kind });
@@ -338,6 +354,7 @@ export function TreeView({
       (response) => {
         if (id !== latestRequest.current) return;
         setResult({
+          cache,
           layout: response.layout,
           fan: response.fan,
           kin: response.kin,
@@ -356,10 +373,35 @@ export function TreeView({
   const shownResult = result && result.focus === personId && result.kind === kind ? result : null;
   const busy = !shownResult || rendered !== shownResult;
 
+  // Until a reset's new layout arrives, the cards on screen keep their details.
+  const shownCache = shownResult?.cache ?? cache;
   const person = useCallback(
-    (id: string) => cache.display(id, (summary) => toPersonSummary(summary, tree)),
-    [cache, tree],
+    (id: string) => shownCache.display(id, (summary) => toPersonSummary(summary, tree)),
+    [shownCache, tree],
   );
+
+  // An edit, undo or redo invalidates the tree's queries (`invalidateTree`). The
+  // cache cannot tell what was removed, so start it over: refetch the focus and
+  // any expanded neighborhoods, and drop layouts guessed from the old data.
+  useEffect(() => {
+    let scheduled = false;
+    return queryClient.getQueryCache().subscribe((event) => {
+      if (event.type !== 'updated' || event.action.type !== 'invalidate') return;
+      const key = event.query.queryKey;
+      if (key[0] !== 'tree' || key[1] !== tree || key[2] !== 'neighborhood') return;
+      // One edit invalidates every query of the tree at once: reset once.
+      if (scheduled) return;
+      scheduled = true;
+      queueMicrotask(() => {
+        scheduled = false;
+        reload.current = [...extraLoads.current.values()];
+        extraLoads.current.clear();
+        speculative.current.clear();
+        client.dispose();
+        setCache(new GraphCache());
+      });
+    });
+  }, [queryClient, tree, client]);
 
   const goTo = useCallback(
     (id: string, layout?: LayoutKind) => {

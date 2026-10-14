@@ -63,6 +63,55 @@ describe('tag management', () => {
     expect((await api.get(`${s.base}/people/${s.ada}`)).json().tags).toHaveLength(1);
   });
 
+  it('renames and deletes a whole category in one operation, however many tags', async () => {
+    for (const start of [0, 75]) {
+      const res = await api.post(`${s.base}/batch`, {
+        label: 'Add tags',
+        operations: Array.from({ length: 75 }, (_, i) => ({
+          op: 'tag.create',
+          tag: { name: `Ship ${start + i}`, category: 'Passenger lists' },
+        })),
+      });
+      expect(res.statusCode).toBe(200);
+    }
+    const ship = (await tags()).find((t) => t.name === 'Ship 0')!.id;
+    await api.post(`${s.base}/people/${s.ada}/tags`, { tagId: ship });
+    await create('Veteran', 'Military');
+
+    const renamed = await api.post(`${s.base}/batch`, {
+      label: 'Rename category: Passenger lists',
+      operations: [{ op: 'tag.renameCategory', from: 'Passenger lists', to: 'Voyages' }],
+    });
+    expect(renamed.statusCode).toBe(200);
+    expect(renamed.json().results).toEqual([{ updated: 150 }]);
+    const categories = (await tags()).map((t) => t.category);
+    expect(categories.filter((c) => c === 'Voyages')).toHaveLength(150);
+    expect(categories).toContain('Military');
+
+    const deleted = await api.post(`${s.base}/batch`, {
+      label: 'Delete category: Voyages',
+      operations: [{ op: 'tag.deleteCategory', category: 'Voyages' }],
+    });
+    expect(deleted.json().results).toEqual([{ deleted: 150 }]);
+    expect((await tags()).map((t) => t.name)).toEqual(['Veteran']);
+    expect((await api.get(`${s.base}/people/${s.ada}`)).json().tags).toEqual([]);
+
+    await api.post(`${s.base}/undo`);
+    expect((await tags()).filter((t) => t.category === 'Voyages')).toHaveLength(150);
+    expect((await api.get(`${s.base}/people/${s.ada}`)).json().tags).toHaveLength(1);
+    await api.post(`${s.base}/undo`);
+    expect((await tags()).filter((t) => t.category === 'Passenger lists')).toHaveLength(150);
+
+    // Uncategorized tags are not a category to rename or delete.
+    for (const operation of [
+      { op: 'tag.renameCategory', from: '', to: 'X' },
+      { op: 'tag.deleteCategory', category: '' },
+    ]) {
+      const res = await api.post(`${s.base}/batch`, { label: 'x', operations: [operation] });
+      expect(res.statusCode, JSON.stringify(operation)).toBe(400);
+    }
+  });
+
   it("lists a tag's people", async () => {
     const a = await create('Smiths', '');
     await api.post(`${s.base}/people/${s.ada}/tags`, { tagId: a });

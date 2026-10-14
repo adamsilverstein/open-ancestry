@@ -10,9 +10,12 @@ const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
 let tree: string;
 let rowan: string;
 let iris: string;
+let smiths: string;
+let seedSession: Awaited<ReturnType<typeof session>>;
 
 test.beforeEach(async ({ request, baseURL }, testInfo) => {
   const s = await session(request, baseURL!);
+  seedSession = s;
   tree = uniqueTreeName('tags', `${testInfo.project.name} ${testInfo.title}`);
   await send(request, s, 'post', '/api/trees', { name: tree });
   const base = `/api/trees/${encodeURIComponent(tree)}`;
@@ -36,6 +39,7 @@ test.beforeEach(async ({ request, baseURL }, testInfo) => {
     category: 'Occupation',
   });
   await send(request, s, 'post', `${base}/people/${rowan}/tags`, { tagId: tag.id });
+  smiths = tag.id;
 });
 
 async function openTags(page: Page) {
@@ -116,6 +120,66 @@ test('filters the people list and highlights the tree by tag', async ({ page }) 
 
   await page.getByRole('button', { name: 'Clear highlight' }).click();
   await expect(card('Iris Vale')).not.toHaveAttribute('data-dimmed', /.*/);
+});
+
+test('dims other cards without fading their text, and marks the tagged ones', async ({ page }) => {
+  await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+  await page.goto(`/tree/${rowan}?tag=${smiths}`);
+  const card = (name: string) => page.locator(`[data-key][aria-label^="${name}"]`).first();
+  await expect(card('Iris Vale')).toHaveAttribute('data-dimmed', 'true');
+  await expect(card('Rowan Ashdown')).toHaveAttribute('data-highlighted', 'true');
+  await expect(card('Rowan Ashdown').getByTestId('tag-highlight')).toBeVisible();
+  // Nothing on a dimmed card is see-through, so its text keeps full contrast.
+  const opacities = await card('Iris Vale').evaluate((el) =>
+    [el, ...el.querySelectorAll('*')].map((e) => getComputedStyle(e).opacity),
+  );
+  expect(new Set(opacities)).toEqual(new Set(['1']));
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme });
+    const results = await new AxeBuilder({ page }).include('[data-key]').analyze();
+    expect(results.violations, colorScheme).toEqual([]);
+  }
+});
+
+test('counts tagged people and steps to those out of view', async ({ page, request }) => {
+  const base = `/api/trees/${encodeURIComponent(tree)}`;
+  const wren = (
+    await send<{ person: { id: string } }>(
+      request,
+      seedSession,
+      'post',
+      `${base}/people`,
+      person('Wren', 'Hollis', 'F', '1900'),
+    )
+  ).person.id;
+  await send(request, seedSession, 'post', `${base}/people/${wren}/tags`, { tagId: smiths });
+  await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+  await page.goto(`/tree/${rowan}?tag=${smiths}`);
+  const pill = page.getByRole('status').filter({ hasText: 'tagged Smiths' });
+  await expect(pill).toContainText('2 tagged, 1 shown');
+  await pill.getByRole('button', { name: 'Next tagged person' }).click();
+  await expect(page).toHaveURL(new RegExp(`/tree/${wren}\\?.*tag=${smiths}`));
+  const card = (name: string) => page.locator(`[data-key][aria-label^="${name}"]`).first();
+  await expect(card('Wren Hollis')).toHaveAttribute('data-highlighted', 'true');
+  await pill.getByRole('button', { name: 'Next tagged person' }).click();
+  await expect(page).toHaveURL(new RegExp(`/tree/${rowan}\\?`));
+});
+
+test('highlights in the fan chart too', async ({ page, request }) => {
+  const base = `/api/trees/${encodeURIComponent(tree)}`;
+  await send(request, seedSession, 'post', `${base}/people/${rowan}/parents`, {
+    person: person('Edmund', 'Ashdown', 'M', '1850'),
+  });
+  await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+  await page.goto(`/tree/${rowan}?tag=${smiths}&layout=fan`);
+  const fan = page.getByTestId('tree-fan');
+  const rowanSegment = fan.getByRole('button', { name: /^Rowan Ashdown/ });
+  await expect(rowanSegment).toHaveAttribute('data-highlighted', 'true');
+  await expect(rowanSegment).toHaveAccessibleName(/tagged Smiths/);
+  await expect(fan.getByRole('button', { name: /^Edmund Ashdown/ })).toHaveAttribute(
+    'data-dimmed',
+    'true',
+  );
 });
 
 test('is reachable from the command palette and the people list', async ({ page }) => {

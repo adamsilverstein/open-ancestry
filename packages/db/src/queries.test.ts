@@ -239,6 +239,45 @@ describe('neighborhood', () => {
     store.close();
   });
 
+  it("includes siblings' partners and half siblings", () => {
+    const store = memoryTree();
+    const f = seedSmallFamily(store);
+    const { result: r } = store.transact('extend', (tx) => {
+      const add = (given: string) => persons.create(tx, { names: [{ given, surname: 'Vale' }] }).id;
+      const sisterSpouse = add('Tobin');
+      const niece = add('Iris');
+      const sisterFamily = families.create(tx, {
+        partner1_id: f.sister,
+        partner2_id: sisterSpouse,
+        children: [{ child_id: niece }],
+      }).id;
+      // Dad's second family: a step-mother and a half brother.
+      const stepMother = add('Odette');
+      const halfBrother = add('Pell');
+      const second = families.create(tx, {
+        partner1_id: f.dad,
+        partner2_id: stepMother,
+        children: [{ child_id: halfBrother }],
+      }).id;
+      return { sisterSpouse, niece, sisterFamily, stepMother, halfBrother, second };
+    });
+    const n = getNeighborhood(store, f.me, { up: 1, down: 0 });
+    const ids = n.people.map((p) => p.id);
+    expect(ids).toEqual(expect.arrayContaining([r.sisterSpouse, r.stepMother, r.halfBrother]));
+    expect(ids).not.toContain(r.niece);
+    expect(n.families.map((x) => x.id)).toEqual(expect.arrayContaining([r.sisterFamily, r.second]));
+    expect(n.children).toContainEqual(
+      expect.objectContaining({ familyId: r.second, childId: r.halfBrother }),
+    );
+    expect(n.children.some((c) => c.childId === r.niece)).toBe(false);
+    expect(n.moreDown).toContain(f.sister);
+
+    const none = getNeighborhood(store, f.me, { up: 1, down: 0, siblingsDepth: 0 });
+    for (const id of [r.sisterSpouse, r.stepMother, r.halfBrother])
+      expect(none.people.map((p) => p.id)).not.toContain(id);
+    store.close();
+  });
+
   it('handles pedigree collapse without duplicates', () => {
     const store = memoryTree();
     // Double first cousins marry: both sets of grandparents are shared.

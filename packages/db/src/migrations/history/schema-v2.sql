@@ -306,6 +306,9 @@ CREATE INDEX citation_link_owner_idx ON citation_link (owner_type, owner_id);
 
 CREATE INDEX citation_source_idx ON citation (source_id);
 
+CREATE INDEX event_converted_calendar_idx ON event (calendar)
+  WHERE calendar IN ('julian', 'hebrew', 'french_r');
+
 CREATE INDEX event_date_sort_idx ON event (date_sort);
 
 CREATE INDEX event_place_idx ON event (place_id);

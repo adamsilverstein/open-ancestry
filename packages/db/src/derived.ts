@@ -70,10 +70,12 @@ const eventDateSort: DerivedStep = {
   recompute(store) {
     const rows = store.db
       .prepare(
+        // Matches the partial index event_converted_calendar_idx exactly.
         `SELECT id, date_text, calendar, date_sort, date_sort_end FROM event
-         WHERE calendar IN (SELECT value FROM json_each(?)) AND date_text IS NOT NULL`,
+         WHERE calendar IN (${CONVERTED_CALENDARS.map((c) => `'${c}'`).join(', ')})
+           AND date_text IS NOT NULL`,
       )
-      .all(JSON.stringify(CONVERTED_CALENDARS)) as {
+      .all() as {
       id: string;
       date_text: string;
       date_sort: number | null;

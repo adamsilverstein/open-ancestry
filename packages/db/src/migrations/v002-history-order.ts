@@ -34,4 +34,8 @@ CREATE TABLE derived_state (
   name TEXT PRIMARY KEY NOT NULL,
   fingerprint TEXT NOT NULL
 ) STRICT;
+-- Only events whose sort keys go through calendar conversion, so the
+-- refresh reads those rows instead of scanning every event.
+CREATE INDEX event_converted_calendar_idx ON event (calendar)
+  WHERE calendar IN ('julian', 'hebrew', 'french_r');
 `;

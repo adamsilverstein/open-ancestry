@@ -95,7 +95,8 @@ function baseScore(e: SnapPerson, i: SnapPerson): { score: number; reasons: stri
   }
   const birthGap =
     e.birthYear !== null && i.birthYear !== null ? Math.abs(e.birthYear - i.birthYear) : 0;
-  if (birthGap > 10) score *= 0.3;
+  // A corrected birth year is common; matched relatives (second pass) can still confirm the pair.
+  if (birthGap > 10) score *= 0.5;
   if (shared.length && !(sexKnown && e.row.sex !== i.row.sex)) {
     score = Math.max(score, Math.min(0.99, 0.9 + 0.03 * shared.length));
     reasons.push(`${shared.length} shared Ancestry record${shared.length > 1 ? 's' : ''}`);
@@ -103,12 +104,22 @@ function baseScore(e: SnapPerson, i: SnapPerson): { score: number; reasons: stri
   return { score, reasons };
 }
 
+/**
+ * Blocking keys: only people sharing one are compared. Given and surname
+ * sounds (for every name the person has, so married names meet birth names),
+ * and surname sound with birth year (for a changed given name).
+ */
 const blockKeys = (p: SnapPerson): string[] => {
-  const keys: string[] = [];
-  if (p.surname) keys.push(`s:${soundex(p.surname)}`);
-  if (p.given) keys.push(`g:${soundex(p.given)}:${p.birthYear ?? '?'}`);
-  for (const n of p.names) if (n.surname) keys.push(`s:${soundex(n.surname)}`);
-  return keys;
+  const keys = new Set<string>();
+  const given = p.given ? soundex(p.given) : '';
+  const surnames = new Set([p.surname, ...p.names.map((n) => norm(n.surname))].filter(Boolean));
+  for (const surname of surnames) {
+    const s = soundex(surname);
+    keys.add(`n:${given}:${s}`);
+    if (p.birthYear !== null) keys.add(`y:${s}:${p.birthYear}`);
+  }
+  if (!surnames.size && given) keys.add(`n:${given}:`);
+  return [...keys];
 };
 
 interface Candidate {
@@ -152,7 +163,7 @@ export function matchPeople(existing: Snapshot, incoming: Snapshot): Map<string,
     for (const apid of i.apids) for (const id of byApid.get(apid) ?? []) ids.add(id);
     for (const id of ids) {
       const { score, reasons } = baseScore(existing.people.get(id)!, i);
-      if (score >= MATCH_THRESHOLD - 0.25) candidates.push({ e: id, i: i.row.id, score, reasons });
+      if (score >= MATCH_THRESHOLD - 0.4) candidates.push({ e: id, i: i.row.id, score, reasons });
     }
   }
 
@@ -175,7 +186,7 @@ export function matchPeople(existing: Snapshot, incoming: Snapshot): Map<string,
       }
     }
     if (agree) {
-      c.score = Math.min(1, c.score + 0.06 * Math.min(agree, 3));
+      c.score = Math.min(1, c.score + 0.1 * Math.min(agree, 3));
       c.reasons = [...c.reasons, `${agree} matching relative${agree > 1 ? 's' : ''}`];
     }
   }

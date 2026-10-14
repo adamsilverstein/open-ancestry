@@ -114,3 +114,29 @@ export function dirtyRecords(store: TreeStore, data: TreeData): Set<string> {
   }
   return dirty;
 }
+
+const NAME_PARTS = ['given', 'surname', 'surname_prefix', 'prefix', 'suffix', 'nickname'];
+
+/**
+ * Names whose parts were edited after `full_text` was last set (the edit API
+ * changes given/surname columns and may leave the imported text alone). Their
+ * NAME line must be built from the columns, or the export would bring back
+ * the old name.
+ */
+export function staleNameTexts(store: TreeStore): Set<string> {
+  const rows = store.db
+    .prepare(
+      `SELECT l.entity_id, l.before_json, l.after_json FROM change_log l
+       JOIN change_batch b ON b.id = l.batch_id
+       WHERE b.state = 'applied' AND l.entity = 'person_name' AND l.op = 'update' ORDER BY l.seq`,
+    )
+    .all() as { entity_id: string; before_json: string; after_json: string }[];
+  const stale = new Set<string>();
+  for (const row of rows) {
+    const before = JSON.parse(row.before_json) as Record<string, unknown>;
+    const after = JSON.parse(row.after_json) as Record<string, unknown>;
+    if (before.full_text !== after.full_text) stale.delete(row.entity_id);
+    else if (NAME_PARTS.some((c) => before[c] !== after[c])) stale.add(row.entity_id);
+  }
+  return stale;
+}

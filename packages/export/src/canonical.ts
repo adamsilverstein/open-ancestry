@@ -33,6 +33,8 @@ export interface WriterContext {
   isPrivateFamily(id: string): boolean;
   /** Whether a note is written as its own record (shared) rather than inline. */
   isNoteRecord(note: NoteRow): boolean;
+  /** The name's parts were edited after its imported text, so the text is out of date. */
+  isStaleNameText(nameId: string): boolean;
   /** A note or media item attached anywhere to a privatized person or family: never written. */
   isWithheld(id: string): boolean;
   /** FILE value for a media row. */
@@ -334,8 +336,9 @@ export class RecordWriter {
   // ------------------------------------------------------------ parts
 
   private name(name: PersonNameRow, first: boolean): GedcomNode {
+    const text = this.ctx.isStaleNameText(name.id) ? null : name.full_text;
     const value =
-      name.full_text ??
+      text ??
       ([
         name.prefix,
         name.given,

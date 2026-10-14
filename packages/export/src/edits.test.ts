@@ -80,6 +80,40 @@ describe('edited records', () => {
     );
   });
 
+  it('writes an edited name from its columns, not the imported NAME line', async () => {
+    const store = await importInto(
+      ged(
+        '0 @I1@ INDI',
+        '1 NAME Thaddeus /Ashgrove/',
+        '2 GIVN Thaddeus',
+        '2 SURN Ashgrove',
+        '2 _NAMEX kept extension',
+        '1 SEX M',
+      ),
+    );
+    // The edit API changes the parts and leaves full_text as imported.
+    store.transact('Rename', (tx) =>
+      names.update(tx, primaryName(store, '@I1@'), { given: 'Theo', surname: 'Ashby' }),
+    );
+    for (const version of ['5.5.1', '7'] as const) {
+      const out = buildGedcomExport(store, { version, now: TODAY });
+      const record = recordText(out.text, '@I1@')!;
+      expect(record).toContain('1 NAME Theo /Ashby/\n2 GIVN Theo\n2 SURN Ashby');
+      expect(record).toContain('2 _NAMEX kept extension');
+      expect(record).not.toMatch(/Thaddeus|Ashgrove/);
+      expect(out.warnings).toEqual([]);
+      const again = await importInto(out.text);
+      expect(rows(again, 'SELECT given, surname, full_text FROM person_name')).toEqual([
+        { given: 'Theo', surname: 'Ashby', full_text: 'Theo /Ashby/' },
+      ]);
+    }
+    // Setting the text itself makes it current again.
+    store.transact('Retype', (tx) =>
+      names.update(tx, primaryName(store, '@I1@'), { full_text: 'Theo "Ted" /Ashby/' }),
+    );
+    expect(exportGedcom(store, { now: TODAY })).toContain('1 NAME Theo "Ted" /Ashby/');
+  });
+
   it('an edited event regenerates its owner only', async () => {
     const store = await sample();
     const birth = value<string>(

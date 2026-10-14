@@ -1,13 +1,13 @@
-import { useState, type ReactElement } from 'react';
+import { useMemo } from 'react';
 import { Link } from '@tanstack/react-router';
 import { Crosshair, Pencil, UserRound } from 'lucide-react';
+import { cx } from '../../lib/cx';
 import type { PersonSummary } from '../../lib/person';
 import { Avatar } from '../Avatar/Avatar';
 import { Button } from '../Button/Button';
 import buttonStyles from '../Button/Button.module.css';
 import { LifespanText } from '../LifespanText/LifespanText';
-import { Popover, PopoverContent, PopoverTrigger } from '../Popover/Popover';
-import { cx } from '../../lib/cx';
+import { Popover, PopoverAnchor, PopoverContent } from '../Popover/Popover';
 import styles from './QuickViewPopover.module.css';
 
 export interface LifeEvent {
@@ -17,13 +17,16 @@ export interface LifeEvent {
 }
 
 export interface QuickViewPopoverProps {
-  person: PersonSummary;
+  /** The person shown; null renders nothing. */
+  person: PersonSummary | null;
+  /** The card the popover points at. Focus returns to it on close. */
+  anchor: HTMLElement | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   birth?: LifeEvent | undefined;
   death?: LifeEvent | undefined;
   onMakeFocus?: (person: PersonSummary) => void;
   onEdit?: (person: PersonSummary) => void;
-  /** The card or button that opens the popover. */
-  children: ReactElement;
 }
 
 function eventLine(label: string, event: LifeEvent | undefined) {
@@ -36,24 +39,43 @@ function eventLine(label: string, event: LifeEvent | undefined) {
   );
 }
 
-/** Card click summary: photo, name, birth and death, and the main actions. */
+/**
+ * Card click summary: photo, name, birth and death, and the main actions.
+ *
+ * One controlled instance serves a whole canvas: point `person` and `anchor`
+ * at the clicked card instead of wrapping every card in its own popover.
+ */
 export function QuickViewPopover({
   person,
+  anchor,
+  open,
+  onOpenChange,
   birth,
   death,
   onMakeFocus,
   onEdit,
-  children,
 }: QuickViewPopoverProps) {
-  const [open, setOpen] = useState(false);
+  const virtualRef = useMemo(() => ({ current: anchor as HTMLElement }), [anchor]);
+  if (!person || !anchor) return null;
   const run = (action?: (p: PersonSummary) => void) => () => {
-    setOpen(false);
+    onOpenChange(false);
     action?.(person);
   };
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>{children}</PopoverTrigger>
-      <PopoverContent label={person.name} className={styles.content} side="right" align="start">
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverAnchor virtualRef={virtualRef} />
+      <PopoverContent
+        label={person.name}
+        className={styles.content}
+        side="right"
+        align="start"
+        onCloseAutoFocus={(event) => {
+          // No Radix trigger, so return focus to the card ourselves.
+          if (!anchor.isConnected) return;
+          event.preventDefault();
+          anchor.focus();
+        }}
+      >
         <div className={styles.header}>
           <Avatar name={person.name} sex={person.sex} src={person.photoUrl} size={64} decorative />
           <div>

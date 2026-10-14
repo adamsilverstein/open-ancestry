@@ -53,6 +53,7 @@ import {
   TreeToolbar,
   treeLayoutLabel,
   useToast,
+  type LifeEvent,
   type MinimapNode,
   type TreeLayout,
 } from '../components';
@@ -98,6 +99,17 @@ const unknown: PersonSummary = {
   name: 'Ashby Fennimore-Castellanos Delacroix',
   sex: 'U',
   birth: { year: 1820 },
+};
+
+const lifeEvents: Record<string, { birth?: LifeEvent; death?: LifeEvent }> = {
+  I1: {
+    birth: { date: '5 Sep 1911', place: 'Philadelphia, PA' },
+    death: { date: '12 Mar 1984', place: 'Boston, MA' },
+  },
+  I2: {
+    birth: { date: '2 Feb 1911', place: 'Cork, Ireland' },
+    death: { date: '1957', place: 'Philadelphia, PA' },
+  },
 };
 
 const places = [
@@ -194,6 +206,9 @@ export function DesignPage() {
   const [eventType, setEventType] = useState<string | undefined>(undefined);
   const [place, setPlace] = useState<string | undefined>(undefined);
   const [quickView, setQuickView] = useState('');
+  const [quickViewPerson, setQuickViewPerson] = useState<PersonSummary | null>(null);
+  const [quickViewAnchor, setQuickViewAnchor] = useState<HTMLElement | null>(null);
+  const [quickViewOpen, setQuickViewOpen] = useState(false);
   const [relationship, setRelationship] = useState('');
   const [treeAction, setTreeAction] = useState('');
   const [layout, setLayout] = useState<TreeLayout>('family');
@@ -527,7 +542,7 @@ export function DesignPage() {
         title="PersonCard"
         notes="Sex shown by stripe color and icon; states by border, icon and label."
       >
-        <div className={styles.canvasDemo}>
+        <div className={styles.canvasDemo} data-surface="canvas">
           <Row>
             <PersonCard person={thaddeus} />
             <PersonCard person={eleanor} data-demo-hover="" />
@@ -549,16 +564,33 @@ export function DesignPage() {
       </Section>
 
       <Section title="QuickViewPopover">
-        <div className={styles.canvasDemo}>
+        <div className={styles.canvasDemo} data-surface="canvas">
+          <Row>
+            {[eleanor, thaddeus].map((person) => (
+              <PersonCard
+                key={person.id}
+                person={person}
+                aria-haspopup="dialog"
+                aria-expanded={quickViewOpen && quickViewPerson?.id === person.id}
+                onClick={(event) => {
+                  setQuickViewPerson(person);
+                  setQuickViewAnchor(event.currentTarget);
+                  setQuickViewOpen(true);
+                }}
+              />
+            ))}
+          </Row>
+          {/* One popover for the whole canvas, anchored to the clicked card. */}
           <QuickViewPopover
-            person={eleanor}
-            birth={{ date: '5 Sep 1911', place: 'Philadelphia, PA' }}
-            death={{ date: '12 Mar 1984', place: 'Boston, MA' }}
+            person={quickViewPerson}
+            anchor={quickViewAnchor}
+            open={quickViewOpen}
+            onOpenChange={setQuickViewOpen}
+            birth={quickViewPerson ? lifeEvents[quickViewPerson.id]?.birth : undefined}
+            death={quickViewPerson ? lifeEvents[quickViewPerson.id]?.death : undefined}
             onMakeFocus={(p) => setQuickView(`Make focus: ${p.name}`)}
             onEdit={(p) => setQuickView(`Edit: ${p.name}`)}
-          >
-            <PersonCard person={eleanor} />
-          </QuickViewPopover>
+          />
         </div>
         <Status>{quickView}</Status>
       </Section>
@@ -643,14 +675,14 @@ export function DesignPage() {
       </Section>
 
       <Section title="GenerationLabel">
-        <div className={styles.canvasDemo}>
+        <div className={styles.canvasDemo} data-surface="canvas">
           <GenerationLabel>Grandparents</GenerationLabel>
           <GenerationLabel>Parents</GenerationLabel>
         </div>
       </Section>
 
       <Section title="TreeToolbar">
-        <div className={styles.canvasDemo}>
+        <div className={styles.canvasDemo} data-surface="canvas">
           <TreeToolbar
             layout={layout}
             onLayoutChange={(next) => {
@@ -668,7 +700,7 @@ export function DesignPage() {
       </Section>
 
       <Section title="Minimap">
-        <div className={styles.canvasDemo}>
+        <div className={styles.canvasDemo} data-surface="canvas">
           {minimapVisible ? (
             <Minimap
               nodes={minimapNodes}

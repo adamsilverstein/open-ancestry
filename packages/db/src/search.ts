@@ -117,6 +117,8 @@ export interface SearchResult {
 
 const quote = (token: string) => `"${token.replaceAll('"', '""')}"`;
 const TIERS: readonly SearchMatch[] = ['exact', 'prefix', 'phonetic'];
+/** Distinct query words searched; the rest are ignored. */
+export const MAX_SEARCH_WORDS = 8;
 /** A year in the query also matches events this many years either side (prefix tier and below). */
 export const YEAR_SLACK = 2;
 
@@ -148,7 +150,11 @@ export function searchPeople(
   query: string,
   { limit = 20, phoneticKeys = [] }: SearchOptions = {},
 ): SearchResult[] {
-  const words = query.match(/[\p{L}\p{N}]+/gu) ?? [];
+  // NFC so decomposed input (pasted from PDFs, macOS) tokenizes like typed text;
+  // distinct and capped so a long repetitive query cannot stall the server.
+  const words = [
+    ...new Set((query.normalize('NFC').match(/[\p{L}\p{N}]+/gu) ?? []).map((w) => w.toLowerCase())),
+  ].slice(0, MAX_SEARCH_WORDS);
   if (words.length === 0 || limit < 1) return [];
   const keysFor = (word: string, index: number): string[] => {
     const keys =

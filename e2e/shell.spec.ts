@@ -1,6 +1,7 @@
 import type { Page } from '@playwright/test';
 import { budget, perfOnly } from './budget';
 import { expect, test } from './fixtures';
+import { FIXTURE_TREE } from './tree-fixture';
 import { readSeed } from './tree-view-fixtures';
 
 const modKey = process.platform === 'darwin' ? 'Meta' : 'Control';
@@ -202,9 +203,17 @@ test.describe('layout stability', () => {
     // Hold the tree list until the page has painted with its fonts, so only its arrival is measured.
     let release!: () => void;
     const held = new Promise<void>((resolve) => (release = resolve));
+    // A fixed list: parallel specs fill the shared library with trees, and a name with
+    // characters outside Latin pulls in another font file whose swap would be measured too.
+    const modifiedAt = new Date().toISOString();
+    const trees = [FIXTURE_TREE, 'Tree one', 'Tree two', 'Tree three'].map((name) => ({
+      id: name,
+      name,
+      modifiedAt,
+    }));
     await page.route('**/api/trees', async (route) => {
       await held;
-      await route.continue();
+      await route.fulfill({ json: { trees } });
     });
     await page.goto('/');
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
@@ -216,20 +225,28 @@ test.describe('layout stability', () => {
     });
     release();
     await expect(page.getByRole('navigation', { name: 'Recent trees' })).toBeVisible();
-    const shift = await page.evaluate(
+    // Every element that moved after the list arrived, so a failure says what shifted.
+    const moved = await page.evaluate(
       (after) =>
-        new Promise<number>((resolve) => {
-          let total = 0;
+        new Promise<string[]>((resolve) => {
+          const out: string[] = [];
+          type Shift = PerformanceEntry & { sources: { node?: Node | null }[] };
           new PerformanceObserver((list) => {
-            for (const e of list.getEntries() as (PerformanceEntry & { value: number })[]) {
-              if (e.startTime >= after) total += e.value;
+            for (const e of list.getEntries() as Shift[]) {
+              if (e.startTime < after) continue;
+              for (const { node } of e.sources) {
+                const el = node instanceof Element ? node : node?.parentElement;
+                out.push(
+                  `${el?.tagName ?? '?'} "${(node?.textContent ?? '').trim().slice(0, 40)}"`,
+                );
+              }
             }
           }).observe({ type: 'layout-shift', buffered: true });
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve(total)));
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve(out)));
         }),
       since,
     );
-    expect(shift).toBe(0);
+    expect(moved).toEqual([]);
   });
 });
 

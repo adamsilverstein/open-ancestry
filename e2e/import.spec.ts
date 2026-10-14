@@ -1,3 +1,4 @@
+import AxeBuilder from '@axe-core/playwright';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Page, TestInfo } from '@playwright/test';
@@ -202,6 +203,18 @@ test.describe('tree switcher', () => {
     expect(box.y + box.height).toBeLessThanOrEqual(420);
     expect(await menu.evaluate((el) => getComputedStyle(el).overflowY)).toBe('auto');
     const last = names.at(-1)!;
+    // Keyboard users reach every tree: End moves focus to the last item and scrolls to it.
+    await page.keyboard.press('End');
+    const lastItem = page.getByRole('menuitemradio').last();
+    await expect(lastItem).toBeFocused();
+    await expect(lastItem).toBeInViewport();
+    // So axe's Safari-only scrollable-region rule, which does not know the ARIA menu
+    // pattern (items out of the tab order, arrow keys move focus), does not apply.
+    const axe = await new AxeBuilder({ page })
+      .include('[role="menu"]')
+      .disableRules(['scrollable-region-focusable'])
+      .analyze();
+    expect(axe.violations).toEqual([]);
     await page.getByRole('menuitemradio', { name: last }).click();
     await expect(switcher).toContainText(last);
   });

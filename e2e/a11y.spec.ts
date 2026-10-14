@@ -57,9 +57,15 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await page.getByRole('banner').getByRole('button', { name: /Tree:/ }).click();
       await expect(page.getByRole('menu')).toBeVisible();
       // A modal menu hides the page behind it, so check the menu itself.
-      expect(
-        (await new AxeBuilder({ page }).include('[role="menu"]').analyze()).violations,
-      ).toEqual([]);
+      // An ARIA menu keeps its items out of the tab order and moves focus with the arrow
+      // keys, scrolling each item into view (import.spec.ts checks End reaches the last
+      // tree). axe's Safari-only scrollable-region rule does not know that pattern, and the
+      // menu only scrolls when parallel specs have filled the shared library with trees.
+      const menu = await new AxeBuilder({ page })
+        .include('[role="menu"]')
+        .disableRules(['scrollable-region-focusable'])
+        .analyze();
+      expect(menu.violations).toEqual([]);
     });
 
     test('open export dialog has no violations', async ({ page }) => {

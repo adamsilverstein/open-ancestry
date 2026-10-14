@@ -105,7 +105,9 @@ export function familyRows(): { data: BulkData; ids: Record<string, string> } {
     event_role: [],
     family: [],
     family_child: [],
-  } as Required<Pick<BulkData, 'person' | 'person_name' | 'event' | 'event_role' | 'family' | 'family_child'>>;
+  } as Required<
+    Pick<BulkData, 'person' | 'person_name' | 'event' | 'event_role' | 'family' | 'family_child'>
+  >;
   const event = (owner: string, type: string, year: number) => {
     const id = `e-${owner}-${type}`;
     data.event.push({

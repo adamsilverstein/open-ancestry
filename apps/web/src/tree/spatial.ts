@@ -7,11 +7,12 @@ import type { Rect } from './viewport';
  */
 export class GridIndex {
   private readonly cells = new Map<string, number[]>();
+  private readonly items: readonly Rect[];
+  private readonly cellSize: number;
 
-  constructor(
-    private readonly items: readonly Rect[],
-    private readonly cellSize = 512,
-  ) {
+  constructor(items: readonly Rect[], cellSize = 512) {
+    this.items = items;
+    this.cellSize = cellSize;
     items.forEach((item, i) => {
       const [c0, r0, c1, r1] = this.range(item);
       for (let c = c0; c <= c1; c++) {

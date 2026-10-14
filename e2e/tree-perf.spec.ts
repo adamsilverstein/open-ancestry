@@ -45,22 +45,30 @@ test('re-focus with cached data takes under 50ms for ~500 laid-out people', asyn
   const { laidOut } = await layoutStats(page);
   expect(laidOut).toBeGreaterThanOrEqual(400);
 
-  // Visit a child, then go back and forth: both neighborhoods are now cached.
-  const child = await canvas(page)
-    .locator('[data-key][data-generation="1"]')
-    .first()
-    .getAttribute('data-key');
-  expect(child).toBeTruthy();
-  await page.goto(url(child!, extra));
-  await ready(page);
+  // Keyboard: down to a child, Enter to re-focus, up to the founder, Enter again.
+  // The first round trip loads both neighborhoods; later ones are cached.
+  const activeKey = () =>
+    page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.key ?? null);
+  await canvas(page).locator(`[data-key="${perf.founderId}"]`).focus();
+  const refocus = async (key: string) => {
+    await page.keyboard.press(key);
+    const before = (await lastRefocus(page))?.count ?? 0;
+    await page.keyboard.press('Enter');
+    await expect.poll(async () => (await lastRefocus(page))?.count ?? 0).toBeGreaterThan(before);
+    await ready(page);
+    return (await lastRefocus(page))!.duration;
+  };
+  await refocus('ArrowDown');
+  const child = await activeKey();
+  expect(child).not.toBe(perf.founderId);
+  await refocus('ArrowUp');
+  expect(await activeKey()).toBe(perf.founderId);
 
   const durations: number[] = [];
-  for (let i = 0; i < 6; i++) {
-    const target = i % 2 === 0 ? perf.founderId : child!;
-    const before = (await lastRefocus(page))?.count ?? 0;
-    await canvas(page).locator(`[data-key="${target}"]`).first().dblclick();
-    await expect.poll(async () => (await lastRefocus(page))?.count ?? 0).toBeGreaterThan(before);
-    durations.push((await lastRefocus(page))!.duration);
+  for (let i = 0; i < 3; i++) {
+    durations.push(await refocus('ArrowDown'));
+    expect(await activeKey()).toBe(child);
+    durations.push(await refocus('ArrowUp'));
   }
   durations.sort((a, b) => a - b);
   const median = durations[Math.floor(durations.length / 2)]!;

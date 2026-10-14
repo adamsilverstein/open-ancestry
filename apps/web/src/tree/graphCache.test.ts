@@ -65,7 +65,7 @@ describe('GraphCache', () => {
     expect(cache.needsParents('bram')).toBe(true);
     expect(cache.needsChildren('ada')).toBe(true);
     const graph = cache.graph();
-    const people = graph.people as Map<string, { hasMoreParents?: boolean }>;
+    const people = graph.people as ReadonlyMap<string, { hasMoreParents?: boolean }>;
     expect(people.get('bram')?.hasMoreParents).toBe(true);
 
     cache.merge({

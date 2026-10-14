@@ -24,6 +24,16 @@ async function open(page: Page, key = 'ada', extra = '') {
   await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
 }
 
+/** Waits for pan/zoom animations to finish. */
+async function settled(page: Page) {
+  await expect(world(page)).not.toHaveAttribute('data-animating');
+}
+
+async function fit(page: Page) {
+  await page.getByRole('button', { name: 'Fit to screen' }).click();
+  await settled(page);
+}
+
 async function transform(page: Page) {
   const el = world(page);
   return {
@@ -72,13 +82,21 @@ test.describe('family view', () => {
     for (const [name, label] of expected) {
       await expect(card(page, name), name).toHaveAccessibleName(label);
     }
-    for (const label of ['Great-grandparents', 'Grandparents', 'Parents', 'Children', 'Grandchildren']) {
+    for (const label of [
+      'Great-grandparents',
+      'Grandparents',
+      'Parents',
+      'Children',
+      'Grandchildren',
+    ]) {
       await expect(canvas(page).getByText(label, { exact: true })).toBeVisible();
     }
     // Parents sit above the focus row, children below.
     const ada = await box(card(page, 'Ada Vale'));
-    await page.getByRole('button', { name: 'Fit to screen' }).click();
-    expect((await box(card(page, 'Bram Vale'))).y).toBeLessThan((await box(card(page, 'Ada Vale'))).y);
+    await fit(page);
+    expect((await box(card(page, 'Bram Vale'))).y).toBeLessThan(
+      (await box(card(page, 'Ada Vale'))).y,
+    );
     expect((await box(card(page, 'Wren Ash'))).y).toBeGreaterThan(
       (await box(card(page, 'Ada Vale'))).y,
     );
@@ -151,6 +169,7 @@ test.describe('family view', () => {
     page,
   }) => {
     await open(page);
+    await fit(page);
     const before = await box(card(page, 'Ada Vale'));
     await expect(card(page, 'Ezra Vale')).toHaveCount(0);
     await canvas(page).getByRole('button', { name: 'Show parents of Abel Vale' }).click();
@@ -159,6 +178,8 @@ test.describe('family view', () => {
     expect(await box(card(page, 'Ada Vale'))).toEqual(before);
 
     // Ezra's parents are past the first request: expanding fetches them.
+    await fit(page);
+    const fitted = await box(card(page, 'Ada Vale'));
     const request = page.waitForRequest(
       (r) => r.url().includes('/neighborhood') && r.url().includes(`focus=${ids.ezra}`),
     );
@@ -169,7 +190,7 @@ test.describe('family view', () => {
 
     await canvas(page).getByRole('button', { name: 'Hide parents of Abel Vale' }).click();
     await expect(card(page, 'Ezra Vale')).toHaveCount(0);
-    expect(await box(card(page, 'Ada Vale'))).toEqual(before);
+    expect(await box(card(page, 'Ada Vale'))).toEqual(fitted);
   });
 
   test('descendants and siblings collapse and expand', async ({ page }) => {
@@ -224,8 +245,9 @@ test.describe('family view', () => {
     await expect.poll(async () => (await transform(page)).scale).toBeLessThan(start.scale);
 
     await page.keyboard.press('0');
+    await settled(page);
     const viewport = await box(canvas(page));
-    for (const name of ['Abel Vale', 'Juno Hart', 'Tilda Hale', 'Fenn Vale']) {
+    for (const name of ['Abel Vale', 'Wren Ash', 'Mira Reed', 'Fenn Vale']) {
       const b = await box(card(page, name));
       expect(b.x).toBeGreaterThanOrEqual(viewport.x);
       expect(b.y).toBeGreaterThanOrEqual(viewport.y);
@@ -293,10 +315,13 @@ test.describe('family view', () => {
     await expect(minimap).toHaveCount(0);
   });
 
-  test('pedigree collapse renders a linked duplicate that jumps to the original', async ({ page }) => {
+  test('pedigree collapse renders a linked duplicate that jumps to the original', async ({
+    page,
+  }) => {
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(e.message));
     await open(page);
+    await fit(page);
     await expect(card(page, 'Jonas Hale')).toHaveCount(2);
     const duplicate = canvas(page).getByRole('button', {
       name: /^Jonas Hale,.*duplicate, also shown elsewhere/,
@@ -305,6 +330,13 @@ test.describe('family view', () => {
     await duplicate.click();
     await expect.poll(() => activeKey(page)).toBe(ids.jonas);
     await expect(page.getByRole('dialog')).toHaveCount(0);
+    // The original is brought into view.
+    await settled(page);
+    const original = await box(canvas(page).locator(`[data-key="${ids.jonas}"]`));
+    const viewport = await box(canvas(page));
+    expect(
+      Math.abs(original.x + original.width / 2 - (viewport.x + viewport.width / 2)),
+    ).toBeLessThan(2);
     expect(errors).toEqual([]);
   });
 
@@ -370,7 +402,9 @@ test.describe('family view', () => {
     await pick('Fan chart');
     await expect(page).toHaveURL(/layout=fan/);
     await expect(canvas(page).getByRole('button', { name: /^Bram Vale/ })).toBeAttached();
-    await canvas(page).getByRole('button', { name: /^Bram Vale/ }).click();
+    await canvas(page)
+      .getByRole('button', { name: /^Bram Vale/ })
+      .click();
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?.*layout=fan`));
 
     await page.reload();

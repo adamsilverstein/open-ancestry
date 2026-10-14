@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures';
+import { readSeed } from './tree-fixtures';
 
 const modKey = process.platform === 'darwin' ? 'Meta' : 'Control';
 
@@ -54,12 +55,22 @@ test.describe('navigation', () => {
     await expect(page.getByRole('button', { name: 'File' })).toBeFocused();
   });
 
-  test('tree route renders a sized skeleton', async ({ page }) => {
-    await page.goto('/tree/I1');
+  test('tree route renders a sized skeleton while the tree loads', async ({ page }) => {
+    const { tree, ids } = readSeed().family;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route('**/neighborhood?*', async (route) => {
+      await held;
+      await route.continue();
+    });
+    await page.goto(`/tree/${ids.ada}?tree=${encodeURIComponent(tree)}`);
     await expect(page.getByRole('heading', { level: 1, name: 'Family tree' })).toBeAttached();
-    const region = page.getByRole('region', { name: 'Family tree' });
-    await expect(region).toHaveAttribute('aria-busy', 'true');
-    await expect(region.getByTestId('skeleton').first()).toBeVisible();
+    const canvas = page.getByRole('application', { name: /^Family tree/ });
+    await expect(canvas).toHaveAttribute('aria-busy', 'true');
+    await expect(canvas.getByTestId('skeleton').first()).toBeVisible();
+    release();
+    await expect(canvas).toHaveAttribute('aria-busy', 'false');
+    await expect(canvas.getByTestId('skeleton')).toHaveCount(0);
   });
 
   test('unknown routes show a 404 with a way home', async ({ page }) => {

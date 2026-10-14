@@ -55,9 +55,9 @@ describe('viewport math', () => {
   });
 
   it('projects world rects to the screen', () => {
-    expect(toScreen({ x: 10, y: 20, scale: 0.5 }, { x: 100, y: 40, width: 120, height: 150 })).toEqual(
-      { x: 60, y: 40, width: 60, height: 75 },
-    );
+    expect(
+      toScreen({ x: 10, y: 20, scale: 0.5 }, { x: 100, y: 40, width: 120, height: 150 }),
+    ).toEqual({ x: 60, y: 40, width: 60, height: 75 });
   });
 
   it('interpolates transforms', () => {

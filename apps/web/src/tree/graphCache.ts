@@ -25,6 +25,7 @@ export class GraphCache {
   /** Person id to the families they are a partner in. */
   private readonly partnerFamilies = new Map<string, string[]>();
   private memo: { version: number; graph: TreeGraph } | null = null;
+  private readonly displayed = new Map<string, unknown>();
   version = 0;
 
   /** Adds a slice; returns whether anything new arrived. */
@@ -33,6 +34,7 @@ export class GraphCache {
     for (const person of slice.people) {
       if (!this.people.has(person.id)) this.version++;
       this.people.set(person.id, person);
+      this.displayed.delete(person.id);
     }
     for (const family of slice.families) {
       if (this.families.has(family.id)) continue;
@@ -76,6 +78,16 @@ export class GraphCache {
 
   summary(id: string): ApiPersonSummary | undefined {
     return this.people.get(id);
+  }
+
+  /** A derived view of a person (e.g. for cards), built once per summary. */
+  display<T>(id: string, make: (summary: ApiPersonSummary) => T): T | undefined {
+    if (this.displayed.has(id)) return this.displayed.get(id) as T;
+    const summary = this.people.get(id);
+    if (!summary) return undefined;
+    const value = make(summary);
+    this.displayed.set(id, value);
+    return value;
   }
 
   /** The database has parents for this person that no slice has loaded yet. */

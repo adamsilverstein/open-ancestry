@@ -83,8 +83,11 @@ export function neighbor(rel: Relations, key: string, direction: Direction): str
     return line ?? ps[0] ?? null;
   }
   if (direction === 'down') {
-    // A person's children may hang from any of their couples.
-    const kids = rel.children.get(key) ?? [];
+    // A person's children may hang from any of their couples. Prefer the
+    // direct line (a child with their own children or the focus person).
+    const all = rel.children.get(key) ?? [];
+    const line = all.filter((k) => rel.nodes.get(k)?.isFocus || rel.children.has(k));
+    const kids = line.length > 0 ? line : all;
     let best: string | null = null;
     let bestDistance = Infinity;
     for (const kid of kids) {

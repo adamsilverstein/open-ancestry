@@ -1,37 +1,82 @@
-import { useId } from 'react';
-import { Skeleton } from '../components/Skeleton/Skeleton';
-import styles from './TreePage.module.css';
+import { useEffect, useId } from 'react';
+import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
+import { useQuery } from '@tanstack/react-query';
+import { FileUp } from 'lucide-react';
+import { EmptyState } from '../components/EmptyState/EmptyState';
+import { fetchHome, fetchTrees, treeKeys } from '../tree/api';
+import { TreeView } from '../tree/TreeView';
+import styles from '../tree/TreeView.module.css';
 
-/** Card rows of the family view: grandparents, parents, focus couple, children. */
-const rows = [4, 2, 2, 3];
-
-/** Placeholder until the tree view (F9) lands: a skeleton sized like the real canvas. */
+/** `/tree/:personId?tree=`: the tree view. `home` as the person opens the home person. */
 export function TreePage() {
   const headingId = useId();
+  const navigate = useNavigate();
+  const { personId } = useParams({ from: '/tree/$personId' });
+  const search = useSearch({ from: '/tree/$personId' });
+  const trees = useQuery({
+    queryKey: treeKeys.trees,
+    queryFn: ({ signal }) => fetchTrees(signal),
+    enabled: !search.tree,
+  });
+  const tree = search.tree ?? trees.data?.[0]?.id;
+  const wantsHome = personId === 'home';
+  const home = useQuery({
+    queryKey: treeKeys.home(tree ?? ''),
+    queryFn: ({ signal }) => fetchHome(tree!, signal),
+    enabled: Boolean(tree) && wantsHome,
+  });
+
+  useEffect(() => {
+    if (!wantsHome || !home.data || !tree) return;
+    void navigate({
+      to: '/tree/$personId',
+      params: { personId: home.data },
+      search: { ...search, tree },
+      replace: true,
+    });
+  }, [wantsHome, home.data, tree, search, navigate]);
+
+  let body;
+  if (!search.tree && trees.data?.length === 0) {
+    body = (
+      <div className={styles.empty}>
+        <div className={styles.emptyPanel} data-surface="raised">
+          <EmptyState
+            level={2}
+            icon={<FileUp size={28} aria-hidden />}
+            title="No trees yet"
+            description="Import a GEDCOM file to see your family tree here."
+            action={
+              <Link to="/" className={styles.emptyLink}>
+                Import a tree
+              </Link>
+            }
+          />
+        </div>
+      </div>
+    );
+  } else if (wantsHome && home.isSuccess && !home.data) {
+    body = (
+      <div className={styles.empty}>
+        <div className={styles.emptyPanel} data-surface="raised">
+          <EmptyState
+            level={2}
+            title="No home person"
+            description="Choose a home person from someone's profile to open the tree there."
+          />
+        </div>
+      </div>
+    );
+  } else if (tree && !wantsHome) {
+    body = <TreeView key={tree} tree={tree} personId={personId} search={search} />;
+  }
+
   return (
-    <section
-      aria-labelledby={headingId}
-      aria-busy="true"
-      className={styles.canvas}
-      data-surface="canvas"
-    >
+    <section aria-labelledby={headingId} className={styles.page} data-surface="canvas">
       <h1 id={headingId} className="oa-visually-hidden">
         Family tree
       </h1>
-      <div className={styles.toolbar} data-surface="raised">
-        {Array.from({ length: 6 }, (_, i) => (
-          <Skeleton key={i} width={36} height={36} />
-        ))}
-      </div>
-      <div className={styles.rows}>
-        {rows.map((count, row) => (
-          <div key={row} className={styles.row}>
-            {Array.from({ length: count }, (_, i) => (
-              <Skeleton key={i} width={120} height={150} className={styles.card} />
-            ))}
-          </div>
-        ))}
-      </div>
+      {body}
     </section>
   );
 }

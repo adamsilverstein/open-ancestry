@@ -204,7 +204,9 @@ export async function importGedcom(
   let writer: BulkWriter | undefined;
   let mapper: Mapper | undefined;
   try {
-    writer = new BulkWriter(store);
+    // openTarget guarantees an empty tree, so the load can defer indexes and
+    // foreign key checks to commit (#117).
+    writer = new BulkWriter(store, { freshTree: true });
     const bulk = writer;
     const rows: Record<string, number> = {};
     const sink: Sink = {

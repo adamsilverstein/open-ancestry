@@ -108,7 +108,7 @@ Full schema with DDL lives in `docs/data-model.md` (owned by `packages/db`, kept
 
 ### Genealogical dates
 
-`core/dates` parses GEDCOM date grammar (exact, `ABT`, `CAL`, `EST`, `BEF`, `AFT`, `BET..AND`, `FROM..TO`, partial dates, dual years, Julian/Hebrew/French calendars passthrough) plus Ancestry quirks (`05/28/1960`, `2010-2019`, ISO `1941-09-05`, decades and centuries `1850s` / `1700s`, hyphenated `Bet. 1850-1860` and `Abt. 1850-60`). Output: `{ text, qualifier, start, end, calendar, sortKey }`. `sortKey` is an integer `YYYYMMDD` (missing parts set to the midpoint, qualifier offset) for indexed sorting. The original text is always kept.
+`core/dates` parses GEDCOM date grammar (exact, `ABT`, `CAL`, `EST`, `BEF`, `AFT`, `BET..AND`, `FROM..TO`, partial dates, dual years, Julian/Hebrew/French calendars passthrough) plus Ancestry quirks (`05/28/1960`, `2010-2019`, ISO `1941-09-05`, decades and centuries `1850s` / `1700s`, hyphenated `Bet. 1850-1860` and `Abt. 1850-60`, periods bounded by them `FROM 1850s TO 1860s` / `TO 1850s`). Output: `{ text, qualifier, start, end, calendar, sortKey }`. `sortKey` is an integer `YYYYMMDD` (missing parts set to the midpoint, qualifier offset) for indexed sorting. The original text is always kept.
 
 ### JSON interchange
 

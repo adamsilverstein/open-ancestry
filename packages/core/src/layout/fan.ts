@@ -5,12 +5,16 @@
  * father on the start (left) side. Missing ancestors leave empty slots.
  */
 import { Builder, settingsFrom } from './build';
-import { chooseParentFamily, coupleOrder, indexGraph } from './graph';
+import { asIndex, chooseParentFamily, coupleOrder, type GraphSource } from './graph';
 import { boundsOf } from './output';
-import type { Bounds, FanLayout, FanOptions, FanSegment, FanSlot, TreeGraph } from './types';
+import type { Bounds, FanLayout, FanOptions, FanSegment, FanSlot } from './types';
 
-export function layoutFan(graph: TreeGraph, focusId: string, options: FanOptions = {}): FanLayout {
-  const index = indexGraph(graph);
+export function layoutFan(
+  graph: GraphSource,
+  focusId: string,
+  options: FanOptions = {},
+): FanLayout {
+  const index = asIndex(graph);
   const generations = Math.max(1, Math.floor(options.generations ?? 6));
   const inner = options.innerRadius ?? 60;
   const ring = options.ringWidth ?? 70;

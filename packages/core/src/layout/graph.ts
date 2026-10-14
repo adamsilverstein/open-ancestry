@@ -26,6 +26,18 @@ interface Indexed {
   entries: Map<string, TreeFamilyChild>;
 }
 
+/**
+ * What the layouts read: a graph, or an index a caller keeps for one so that
+ * laying out the same (large) graph again does not index it again.
+ */
+export type GraphSource = TreeGraph | GraphIndex;
+
+export function asIndex(source: GraphSource): GraphIndex {
+  return typeof (source as GraphIndex).parentFamilies === 'function'
+    ? (source as GraphIndex)
+    : indexGraph(source as TreeGraph);
+}
+
 export function indexGraph(graph: TreeGraph): GraphIndex {
   const people: ReadonlyMap<string, TreePerson> =
     graph.people instanceof Map ? graph.people : new Map(Object.entries(graph.people));

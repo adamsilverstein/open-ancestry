@@ -6,7 +6,6 @@ import {
   layoutPedigree,
   type FanLayout,
   type TreeLayout,
-  type TreePerson,
 } from '@open-ancestry/core';
 import { GraphCache } from './graphCache';
 import { buildRelations, kinshipLabels } from './relations';
@@ -28,7 +27,9 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
   }
   const start = performance.now();
   try {
-    const graph = cache.graph();
+    // Kept by the cache between layouts, so a small view costs what it shows,
+    // not everything merged this session (#210).
+    const graph = cache.index();
     const { kind, focusId, options } = message;
     let layout: TreeLayout | null = null;
     let fan: FanLayout | null = null;
@@ -39,12 +40,11 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
     else layout = layoutFamily(graph, focusId, options);
     if (layout?.focusKey) {
       // Card labels ("father of ..."): one walk here instead of one per card on the main thread.
-      const people = graph.people as ReadonlyMap<string, TreePerson>;
       const nodes = new Map(layout.nodes.map((n) => [n.key, n.personId]));
       kin = kinshipLabels(
         buildRelations(layout),
         layout.focusKey,
-        (key) => people.get(nodes.get(key)!)?.sex ?? 'U',
+        (key) => graph.person(nodes.get(key)!)?.sex ?? 'U',
       );
     }
     const response: WorkerResponse = {

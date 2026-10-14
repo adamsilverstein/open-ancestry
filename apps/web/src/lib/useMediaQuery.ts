@@ -5,7 +5,7 @@ import { useCallback, useSyncExternalStore } from 'react';
  * screen too short for the desktop layout). The one breakpoint the app's
  * phone-specific layouts share.
  */
-export const PHONE_LAYOUT_QUERY = '(max-width: 640px), (pointer: coarse) and (max-height: 500px)';
+export const PHONE_LAYOUT_QUERY = '(width < 640px), (pointer: coarse) and (max-height: 500px)';
 
 /** Whether a CSS media query matches, updated as it changes. */
 export function useMediaQuery(query: string): boolean {

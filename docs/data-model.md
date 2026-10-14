@@ -1,10 +1,10 @@
 # open-ancestry data model
 
-Current schema version: **1**
+Current schema version: **3**
 
 This is the reference for the local data format: the SQLite schema inside every tree, the rules the code keeps on top of it, and the JSON interchange format. It is owned by `packages/db`. `packages/db/src/data-model-doc.test.ts` fails if a table or column exists in the live database but not here (or the other way round), or if an enum value is missing, so this document cannot drift from the DDL.
 
-- DDL: `packages/db/src/migrations/v001-initial.ts` (frozen dump: `packages/db/src/migrations/history/schema-v1.sql`)
+- DDL: `packages/db/src/migrations/v001-initial.ts` and `v002-history-order.ts`; `v003-nfc-text.ts` changes no tables (see [Text normalization](#text-normalization)) (frozen dumps and history fixtures: `packages/db/src/migrations/history/schema-vN.sql`, `oa-vN.json`)
 - Row types: `packages/db/src/types.ts`; enums: `packages/db/src/enums.ts`
 - JSON Schema for interchange: `packages/db/schema/oa-json.schema.json`
 
@@ -21,7 +21,8 @@ This is the reference for the local data format: the SQLite schema inside every 
 9. [Change log, undo and redo](#change-log-undo-and-redo)
 10. [Search index](#search-index)
 11. [JSON interchange](#json-interchange)
-12. [Versioning policy](#versioning-policy)
+12. [Text normalization](#text-normalization)
+13. [Versioning policy](#versioning-policy)
 
 ## Storage layout
 
@@ -85,7 +86,7 @@ Key/value settings for the tree.
 
 | Column | Type | Null | Meaning |
 |---|---|---|---|
-| `key` | TEXT | no | Primary key. Known keys: `schema_version` (written only by migrations; `meta.set` and `meta.delete` refuse it), `tree_name`, `created_at`, `home_person_id` (the person relationships are described from), `settings` (JSON object of UI preferences), `import_pending` (set only on a tree the server created for an import upload, holding that import's marker until it succeeds; an empty tree that still has it after a failure or restart is removed by the server). |
+| `key` | TEXT | no | Primary key. Known keys: `schema_version` (written only by migrations; `meta.set` and `meta.delete` refuse it), `tree_name`, `created_at`, `home_person_id` (the person relationships are described from), `settings` (JSON object of UI preferences), `import_pending` (set only on a tree the server created for an import upload, holding that import's marker until it succeeds; an empty tree that still has it after a failure or restart is removed by the server), `nfc_merged_ids` (JSON array of the place and tag ids migration 3 merged away, written only by that migration; undo uses it to explain refusals), and `check.dismissed:<issue key>` (one row per tree checker issue the user dismissed; the value is when; written and removed in undoable batches, and carried by the JSON interchange like every meta row; a row outlives its issue on purpose, so an issue that comes back after an edit is undone stays dismissed). |
 | `value` | TEXT | no | Value as text. |
 
 ### `import_batch`
@@ -418,11 +419,12 @@ One unit of work (one user action). See [undo and redo](#change-log-undo-and-red
 
 | Column | Type | Null | Meaning |
 |---|---|---|---|
-| `id` | TEXT | no | ULID; sorts in creation order. |
+| `id` | TEXT | no | ULID. Its time part follows the wall clock, so it is **not** used for ordering (a session with its clock behind would sort its edits before older ones). |
 | `label` | TEXT | no | Human label for the history panel, e.g. `Edit birth of Ellis Vale`. |
 | `state` | TEXT | no | `applied` (default), `undone`, or `superseded` (was undone, then a new edit discarded the redo stack). |
 | `created_at` | TEXT | no | When the batch was committed. |
 | `state_changed_at` | TEXT | yes | Last undo, redo or supersede. |
+| `seq` | INTEGER | no | Commit order, 1, 2, 3, ... (unique). Assigned as `max(seq) + 1` inside the batch's write transaction; undo, redo and the history panel order by it. Added in v2, which numbered existing batches by their first `change_log.seq`. |
 
 ### `change_log`
 
@@ -438,6 +440,16 @@ Every row-level change made through the unit of work, with full before and after
 | `op` | TEXT | no | `insert`, `update` or `delete`. |
 | `before_json` | TEXT | yes | Whole row before (JSON, columns in table order); null for inserts. |
 | `after_json` | TEXT | yes | Whole row after; null for deletes. CHECK ties nullness to `op`. |
+| `schema_version` | INTEGER | no | Schema version the images were written under (rows from before v2 are `1`). Undo upgrades older images through later migrations; see [versioning](#versioning-policy). |
+
+### `derived_state`
+
+Derived bookkeeping: one fingerprint per derived-column computation (see [Dates](#dates)). Not exported, not change-logged.
+
+| Column | Type | Null | Meaning |
+|---|---|---|---|
+| `name` | TEXT | no | Step name, e.g. `event_date_sort`. |
+| `fingerprint` | TEXT | no | Output of the computation on fixed sample inputs. When the current code gives a different fingerprint, the step recomputes its rows. |
 
 ### `search_doc`
 
@@ -483,7 +495,10 @@ Dates are parsed by packages/core and stored as five columns on `event` (and `da
 - `date_qualifier`, `date_sort`, `date_sort_end`, `calendar` come from the parser. `date_sort` is an integer `YYYYMMDD` (missing month or day set to the midpoint, offsets for qualifiers) indexed by `event_date_sort_idx`, so timelines and "born between" queries sort and filter numerically.
 - Unparseable input is kept with `date_qualifier = 'text'` and null sort keys.
 
-packages/db does not parse dates; callers pass these fields in.
+Callers pass these fields in on write (the importer and editor parse with packages/core). One exception keeps stored keys in step with the parser:
+
+- **Derived column refresh.** Sort keys of `julian`, `hebrew` and `french_r` dates depend on calendar conversion in packages/core, which can change (for example #142 making Hebrew and French Republican keys exact). `refreshDerivedColumns` fingerprints the conversion on fixed sample dates and keeps the fingerprint in `derived_state`. When a tree opens with a different fingerprint, and always after a JSON import, it recomputes `date_sort` / `date_sort_end` from `date_text` for those calendars and refreshes the affected search documents. It only writes rows whose keys changed, is idempotent, writes no `change_log` rows (derived values are not edits), and logs one line per step that changed rows (`StoreOptions.log`, default `console.info`).
+- Undo stays consistent: the conflict check ignores these derived keys, and restored rows get keys from the current parser, like a fresh write. Gregorian rows are never recomputed, so stored keys there are exactly what the writer passed.
 
 ## How GEDCOM and Ancestry map
 
@@ -538,7 +553,10 @@ All edits go through `store.transact(label, tx => ...)`. One call is one `change
 
 - **Undo** replays a batch's log newest-first, restoring each row's `before_json`; **redo** replays oldest-first, restoring `after_json`. Both run in one transaction and keep the search index in sync.
 - **Conflict check:** before restoring a row, its current value must equal the image being replaced. If a later batch changed the same row, the operation fails with `UndoConflictError` and nothing changes.
-- **Redo stack:** committing a new batch marks every `undone` batch `superseded`; superseded batches cannot be redone. `undoLast` takes the newest `applied` batch, `redoLast` the oldest `undone` one.
+- **Owner links:** foreign keys cannot cover `owner_type` + `owner_id` references (`citation_link`, `media_link`, `note_link`, `tag_link`, `raw_record`, `unmapped_line`). So when an undo or redo would remove a row that one of those still links to, it fails with `UndoConflictError` ("a later change still links to the person it would remove") and nothing changes. Undoing the linking change first frees it.
+- **Order:** batches are ordered by `change_batch.seq` (commit order), never by their ULIDs, whose time part follows the wall clock.
+- **Redo stack:** committing a new batch marks every `undone` batch `superseded`; superseded batches cannot be redone. `undoLast` takes the `applied` batch with the highest `seq`, `redoLast` the `undone` one with the lowest.
+- **Images across versions:** each `change_log` row records the `schema_version` its images were written under. Before replaying, an older image is upgraded through every later migration's column map, then shaped to the table's current columns: unknown keys are ignored (they never reach SQL), missing columns take their DEFAULT, and a missing NOT NULL column without a default is an error. The conflict check compares the shaped image with the live row.
 - **Bulk import** (`BulkWriter`) does not write `change_log` rows: a v1 import creates a new tree, and undoing it means deleting the tree.
 
 Property tests (fast-check) apply random edit scripts and assert that undoing every batch restores each earlier snapshot byte for byte, and redoing restores each later one.
@@ -561,7 +579,7 @@ Each result reports its `match` tier. Within a tier, BM25 ranks names 10, phonet
 {
   "format": "open-ancestry",
   "formatVersion": 1,
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "tables": {
     "change_batch": [],
     "person": [{ "id": "01J...", "sex": "F", "living": "inferred_dead", "...": "..." }]
@@ -571,12 +589,56 @@ Each result reports its `match` tier. Within a tier, BM25 ranks names 10, phonet
 
 - Rows have exactly the table's columns, in schema order. Tables appear in name order; rows are sorted by primary key. The file is `JSON.stringify(doc, null, 2)` plus a trailing newline. This canonical form makes export, import into a new tree, and export again byte-identical (tested).
 - `change_batch` and `change_log` are included by default (so undo history survives a round-trip) and can be left out with `{ history: false }`.
-- Import requires an empty tree with the same `schemaVersion`; it loads everything in one transaction and rebuilds the search index.
+- Import requires an empty tree. A document from an older `schemaVersion` is upgraded through each later migration (its column map, then any `upgradeTables` step) before validation; one from a newer version is refused. Import loads everything in one transaction and rebuilds the search index.
 - The JSON Schema in `packages/db/schema/oa-json.schema.json` is generated from the live schema (`npm run generate:json-schema -w @open-ancestry/db`); a test fails if it is stale, and exports are validated against it.
+
+## Text normalization
+
+Human text is stored in Unicode NFC, so the same name, place or tag written composed (`ü`) or decomposed (`u` + combining diaeresis, as macOS file names and text pasted from PDFs produce) is one value (#99).
+
+- `Tx.insert` and `Tx.update` normalize string columns (`nfcRow` in `packages/db/src/nfc.ts`), and the GEDCOM importer normalizes every mapped value, so all edits and imports store NFC.
+- Left byte-exact: `raw_record`, `unmapped_line` and `import_batch` (the original GEDCOM and import bookkeeping, so exports stay verbatim), `change_batch` and `change_log` (images are upgraded per migration instead), derived search tables, `media.local_path`, `remote_url`, `sha256` and `mime` (they name files and URLs outside the database), and ids, keys and timestamps.
+- Migration 3 changes no tables. It rewrites existing text in place inside the migration transaction, without a change batch, so nothing appears in History. Places whose `full_name` is then identical merge into the oldest row: events, child places and media and note links move to it, and it inherits missing coordinates. A note that was attached to one of the merged places is therefore shown for every event at the merged place. Tags whose category and name are then identical merge the same way. The search index is rebuilt, and the merged-away ids are listed in `meta.nfc_merged_ids`. Older JSON backups are normalized and merged the same way on import.
+- Undo of edits made before migration 3: `upgradeRow` normalizes older change_log images, so they still match the live rows and undo and redo work. The exception is an edit whose images name a place or tag the upgrade merged away (it created or edited the duplicate, moved an event to it, put a place under it, or tagged with it). Its images point at a row that no longer exists, so undo refuses it with `UndoConflictError` ("this change touched a place or tag that was merged during an upgrade, so it can't be undone. Older changes stay in History.") and changes nothing. It stays in History as applied. Cmd/Ctrl-Z (`undoLast`, or `undoLatest`, which also returns what it skipped so the app can say so) steps over such batches to the next older one, so they do not block the undo stack. Each older batch is still checked for conflicts as usual, including the owner-link check below, so stepping over cannot remove a row that a skipped batch still links to.
+- Export compares values after NFC, so a record whose stored text only changed form (for example by this upgrade) is still written verbatim from `raw_record`.
 
 ## Versioning policy
 
 - `meta.schema_version` holds the applied migration number. Migrations are forward-only: a database is never downgraded, and opening a database newer than the app is refused.
 - Each migration runs in its own transaction; a failure leaves the database at the previous version.
 - Released migrations are frozen. `history/schema-vN.sql` is the exact schema each version produced; tests check that migration N still produces it, and that a database at every historical version upgrades to exactly the fresh schema.
-- To change the schema: add `vNNN-<name>.ts` and append it to `MIGRATIONS`, run `npm run dump-schema -w @open-ancestry/db` to freeze `schema-vN.sql`, regenerate the JSON Schema, update this document (the doc test lists what is missing), and bump `formatVersion` only if the JSON envelope itself changes.
+- Undo history and JSON backups survive migrations. Each migration declares how it changed columns, so rows written before it can be upgraded:
+
+  ```ts
+  {
+    version: 3,
+    name: 'person-alias',
+    sql: v003,
+    columns: {
+      person: { added: { future_col: 'none' } },   // new column -> value existing rows get (its DEFAULT)
+      place: { renamed: { type: 'kind' } },          // old name -> new name
+      event: { dropped: ['cause'] },
+    },
+    // Optional JS data step, run after sql in the same transaction (e.g. NFC normalization):
+    run: (db) => { /* rewrite values SQL cannot */ },
+    // Optional, when sql or run rewrites or backfills existing values:
+    // the same rewrite for one older row, applied to change_log images and JSON rows.
+    upgradeRow: (table, row) => row,
+    // Optional, for values computed from other rows (v2 numbers batches this way):
+    upgradeTables: (tables) => { /* edit an older JSON document's rows in place */ },
+    // Optional, for rewrites SQL cannot express (v3 normalizes Unicode this way): runs in the
+    // migration's transaction after `sql`. Its writes are an upgrade, so they are not change-logged.
+    run: (db) => {},
+  }
+  ```
+
+  Without `upgradeRow`, a migration that rewrites or backfills values would make every earlier edit of an affected row look like a conflict to undo. `upgradeRow` sees one row at a time, so a backfill must be computable from the row itself; a value computed from other rows belongs in a derived column (see [Dates](#dates)) instead.
+- The `columns` map is checked: for every released migration, a test diffs the frozen schemas of versions N-1 and N and fails unless each added, dropped and renamed column is declared. A rename left out of the map would otherwise make undo restore NULL into the renamed column.
+
+  A new table needs no entry: older images and documents simply have no rows for it. Renaming or dropping a whole table is not supported by the column map; add an `upgradeTables` step and keep history replay in mind.
+- `history/oa-vN.json` is a frozen synthetic tree with undo history (including a clock step back) exported by version N. Tests load every fixture both as a database at its version (frozen schema plus rows) and as a JSON backup, upgrade them to the latest version, and undo and redo the whole history. A simulated future migration that adds, renames and drops columns runs the same checks, so every new migration is gated on keeping old history usable.
+- To change the schema:
+  1. add `vNNN-<name>.ts`, append it to `MIGRATIONS` with its `columns` map (and `upgradeTables` if needed);
+  2. run `npm run dump-schema -w @open-ancestry/db` and `npm run freeze-history-fixture -w @open-ancestry/db` to freeze `schema-vN.sql` and `oa-vN.json`;
+  3. regenerate the JSON Schema (`npm run generate:json-schema -w @open-ancestry/db`);
+  4. update this document (the doc test lists what is missing), and bump `formatVersion` only if the JSON envelope itself changes.

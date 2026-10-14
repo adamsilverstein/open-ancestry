@@ -140,3 +140,9 @@
   font-weight: var(--oa-weight-medium);
   text-overflow: ellipsis;
 }
+
+.checkLink {
+  margin-left: auto;
+  font: var(--oa-text-sm);
+  font-weight: var(--oa-weight-medium);
+}

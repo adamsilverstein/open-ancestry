@@ -91,8 +91,18 @@ const NAME_TYPES = new Set([
   'OTHER',
 ]);
 const PEDI = new Set(['ADOPTED', 'BIRTH', 'FOSTER', 'SEALING', 'OTHER']);
-const MONTH = '(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)';
-const DATE_POINT = `(?:(?:\\d{1,2} )?${MONTH} )?\\d+(?: BCE)?`;
+// GEDCOM 7 DateValue (spec 2.x, "Date"): an optional calendar decides which
+// months are valid and whether the BCE epoch is allowed.
+const CALENDAR_POINTS = [
+  ['(?:GREGORIAN )?', 'JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC', true],
+  ['JULIAN ', 'JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC', true],
+  ['HEBREW ', 'TSH|CSH|KSL|TVT|SHV|ADR|ADS|NSN|IYR|SVN|TMZ|AAV|ELL', false],
+  ['FRENCH_R ', 'VEND|BRUM|FRIM|NIVO|PLUV|VENT|GERM|FLOR|PRAI|MESS|THER|FRUC|COMP', false],
+] as const;
+const DATE_POINT = `(?:${CALENDAR_POINTS.map(
+  ([calendar, months, bce]) =>
+    `${calendar}(?:(?:\\d+ )?(?:${months}) )?\\d+${bce ? '(?: BCE)?' : ''}`,
+).join('|')})`;
 const DATE_VALUE = new RegExp(
   `^(?:(?:ABT|CAL|EST|BEF|AFT) ${DATE_POINT}|BET ${DATE_POINT} AND ${DATE_POINT}|FROM ${DATE_POINT}(?: TO ${DATE_POINT})?|TO ${DATE_POINT}|${DATE_POINT})?$`,
 );

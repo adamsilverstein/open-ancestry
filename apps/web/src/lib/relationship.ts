@@ -1,6 +1,9 @@
 import type { Neighborhood } from '../api/types';
 
 /*
+ * TODO(#15): switch to the packages/core relationship calculator once it lands
+ * and delete this file; the header only needs a label from two ancestor slices.
+ *
  * Relationship to the home person from two ancestor slices (home's and the
  * person's), by their nearest common ancestors. Blood relationships only;
  * spouses are recognized by the caller from the person detail.

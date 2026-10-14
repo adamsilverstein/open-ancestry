@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from '@tanstack/react-router';
+import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { Network, Pencil } from 'lucide-react';
 import { ancestorsQuery, treeQuery } from '../../api/queries';
 import { avatarUrl } from '../../lib/media';
@@ -110,6 +110,14 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
   const relationship = useRelationshipToHome(tree, detail);
   const sex = summary.sex === 'M' || summary.sex === 'F' ? summary.sex : 'U';
   const [editing, setEditing] = useState(false);
+  // `?edit=true` (the tree's quick view Edit) opens the editor on arrival.
+  const { edit } = useSearch({ from: '/person/$personId' });
+  const navigate = useNavigate({ from: '/person/$personId' });
+  const closeEditor = () => {
+    setEditing(false);
+    // Drop the flag, so reloading or going back to this page does not reopen it.
+    if (edit) void navigate({ search: (prev) => ({ ...prev, edit: undefined }), replace: true });
+  };
   return (
     <header className={styles.header} data-surface="canvas" data-testid="person-header">
       <Avatar
@@ -179,12 +187,12 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
           View in tree
         </Link>
       </div>
-      {editing && (
+      {(editing || edit) && (
         <EditPersonDialog
           tree={tree}
           detail={detail}
           open
-          onOpenChange={(open) => !open && setEditing(false)}
+          onOpenChange={(open) => !open && closeEditor()}
         />
       )}
     </header>

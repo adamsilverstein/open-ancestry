@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { APIRequestContext, Page, TestInfo } from '@playwright/test';
+import type { APIRequestContext, Locator, Page, TestInfo } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from './fixtures';
 
@@ -101,7 +101,8 @@ async function startReimport(page: Page, seeded: Seeded, text = laterExport()) {
   });
 }
 
-const card = (page: Page, name: string) => page.getByRole('region', { name, exact: true });
+const card = (scope: Page | Locator, name: string) =>
+  scope.getByRole('region', { name, exact: true });
 
 test('import, edit, re-import, review, apply, then undo', async ({
   page,
@@ -277,6 +278,51 @@ test('a partner dropped from the export adds no parent family by default', async
   ).toBeVisible({ timeout: 30_000 });
   expect(await parentFamilies('George')).toBe(before.george);
   expect(await parentFamilies('Iris')).toBe(before.iris);
+});
+
+test('the review lists what needs a decision first, filters by group, and formats dates', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const josiah = (await personByName(request, seeded.tree, 'Josiah'))!;
+  const death = await eventDate(request, seeded.tree, josiah, 'DEAT');
+  await request.patch(`/api/trees/${encodeURIComponent(seeded.tree)}/events/${death.id}`, {
+    headers: seeded.headers,
+    data: { date_text: '3 MAY 1939' },
+  });
+  await startReimport(page, seeded);
+  const groups = page.locator('[data-group]');
+  await expect(groups.first()).toHaveAttribute('data-group', 'decide');
+  const decide = page.getByRole('region', { name: /Needs your decision/ });
+  // Marked by more than colour: an icon with a text label.
+  const conflict = card(decide, 'Josiah Ashgrove').getByText('Conflict', { exact: true });
+  await expect(conflict).toBeVisible();
+  // App date format, not raw GEDCOM.
+  await expect(
+    card(decide, 'Josiah Ashgrove').getByRole('checkbox', { name: 'Death: 3 May 1939 → 1940' }),
+  ).toBeVisible();
+  // Summary counts filter the list and match the cards they describe.
+  const filters = page.getByRole('group', { name: 'Show' });
+  for (const [label, id] of [
+    ['Needs your decision', 'decide'],
+    ['Changes', 'changes'],
+    ['New people', 'new'],
+    ['For information', 'info'],
+  ] as const) {
+    const button = filters.getByRole('button', { name: new RegExp(`^${label} \\d+$`) });
+    const count = Number(/\d+$/.exec((await button.textContent())!)![0]);
+    await button.click();
+    await expect(button).toHaveAttribute('aria-pressed', 'true');
+    await expect(groups).toHaveCount(1);
+    await expect(groups.first()).toHaveAttribute('data-group', id);
+    await expect(groups.first().locator('section[data-status]')).toHaveCount(count);
+  }
+  await filters.getByRole('button', { name: /^All \d+$/ }).click();
+  await expect(groups).toHaveCount(4);
+  const results = await new AxeBuilder({ page }).analyze();
+  expect(results.violations).toEqual([]);
 });
 
 test('discarding a review changes nothing', async ({ page, request, baseURL }, testInfo) => {

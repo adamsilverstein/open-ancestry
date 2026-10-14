@@ -130,11 +130,21 @@ describe('fuzz: parser never throws', () => {
 describe('fuzz: bounded time on hostile shapes', () => {
   // Each case is linear work of a few hundred ms at most; anything quadratic in
   // line length, chunk count or continuation count takes minutes instead.
+  // The budget is CPU time (this test worker's own process), because wall time
+  // swings with whatever else the CI runner is doing; a looser wall-clock cap
+  // still catches a hang that burns no CPU.
   const LIMIT_MS = 5000;
+  const WALL_LIMIT_MS = 15_000;
   const timed = async (fn: () => unknown) => {
-    const start = performance.now();
+    const wallStart = performance.now();
+    const cpuStart = process.cpuUsage();
     await fn();
-    return performance.now() - start;
+    const { user, system } = process.cpuUsage(cpuStart);
+    return { cpu: (user + system) / 1000, wall: performance.now() - wallStart };
+  };
+  const expectBounded = ({ cpu, wall }: { cpu: number; wall: number }) => {
+    expect(cpu).toBeLessThan(LIMIT_MS);
+    expect(wall).toBeLessThan(WALL_LIMIT_MS);
   };
   async function* chunked(bytes: Uint8Array, size: number) {
     for (let i = 0; i < bytes.length; i += size) yield bytes.subarray(i, i + size);
@@ -159,14 +169,14 @@ describe('fuzz: bounded time on hostile shapes', () => {
       serializeGedcom(result);
       checkInvariants(result);
     });
-    expect(elapsed).toBeLessThan(LIMIT_MS);
+    expectBounded(elapsed);
   });
 
   it('a 20 MB single line streamed in 64 KiB chunks', async () => {
     const bytes = new Uint8Array(20_000_000).fill(0x78);
     bytes.set(new TextEncoder().encode('0 HEAD\n1 NOTE '));
     const elapsed = await timed(() => parseGedcomStream(chunked(bytes, 65536)));
-    expect(elapsed).toBeLessThan(LIMIT_MS);
+    expectBounded(elapsed);
   });
 
   it('a 50 MB single line streamed in 4 KiB chunks', async () => {
@@ -176,7 +186,7 @@ describe('fuzz: bounded time on hostile shapes', () => {
       const result = await parseGedcomStream(chunked(bytes, 4096));
       expect(result.records[0]?.children[0]?.value?.length).toBe(50_000_000 - 14);
     });
-    expect(elapsed).toBeLessThan(LIMIT_MS);
+    expectBounded(elapsed);
   });
 
   it('1M CONC lines streamed in 7-byte chunks', async () => {
@@ -185,6 +195,6 @@ describe('fuzz: bounded time on hostile shapes', () => {
       const result = await parseGedcomStream(chunked(bytes, 7));
       expect(result.records[0]?.children[0]?.value?.length).toBe(1_000_001);
     });
-    expect(elapsed).toBeLessThan(LIMIT_MS);
+    expectBounded(elapsed);
   });
 });

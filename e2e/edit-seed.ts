@@ -51,6 +51,13 @@ const person = (
   ],
 });
 
+/** Opens `path` with `tree` as the current tree. */
+export async function openTree(page: Page, tree: string, path: string) {
+  await page.addInitScript((name) => localStorage.setItem('oa-tree', name), tree);
+  await page.goto(path);
+  await page.locator('html[data-shell-ready]').waitFor({ state: 'attached' });
+}
+
 export async function seedTree(
   request: APIRequestContext,
   baseURL: string,
@@ -59,7 +66,7 @@ export async function seedTree(
   const s = await session(request, baseURL);
   // Unique part first: long titles are cut to the 100-character limit.
   const unique = `${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
-  const tree = `edit ${unique} ${label.replace(/[^\w ]/g, '')}`.slice(0, 100);
+  const tree = `edit ${unique} ${label.replace(/[^\w ]/g, '')}`.slice(0, 100).trimEnd();
   await send(request, s, 'post', '/api/trees', { name: tree });
   const base = `/api/trees/${encodeURIComponent(tree)}`;
 

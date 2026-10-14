@@ -1,0 +1,1952 @@
+{
+  "AddChildBody": {
+    "type": "object",
+    "properties": {
+      "personId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      },
+      "person": {
+        "type": "object",
+        "properties": {
+          "sex": {
+            "enum": ["M", "F", "X", "U"]
+          },
+          "living": {
+            "enum": ["living", "dead", "inferred_living", "inferred_dead", "unknown"]
+          },
+          "privacy": {
+            "enum": ["public", "private", "confidential", "locked"]
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "enum": [
+                    "birth",
+                    "married",
+                    "maiden",
+                    "aka",
+                    "immigrant",
+                    "professional",
+                    "religious",
+                    "other"
+                  ]
+                },
+                "given": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "surname": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "surname_prefix": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 50
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "prefix": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 50
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "suffix": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 50
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "nickname": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 100
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "is_primary": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "maxItems": 20
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["type"],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 32,
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                },
+                "custom_type": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 100
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "date_text": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 100
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "place": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 500
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 1000
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "description": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 2000
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "age": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 50
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "cause": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 500
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "privacy": {
+                  "enum": ["public", "private", "confidential", "locked"]
+                },
+                "role": {
+                  "enum": [
+                    "principal",
+                    "witness",
+                    "godparent",
+                    "officiator",
+                    "clergy",
+                    "informant",
+                    "parent",
+                    "father",
+                    "mother",
+                    "child",
+                    "spouse",
+                    "husband",
+                    "wife",
+                    "friend",
+                    "neighbor",
+                    "multiple",
+                    "other"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "maxItems": 50
+          }
+        },
+        "additionalProperties": false
+      },
+      "familyId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      },
+      "partner1_rel": {
+        "enum": [
+          "biological",
+          "adopted",
+          "step",
+          "foster",
+          "related",
+          "guardian",
+          "private",
+          "unknown"
+        ]
+      },
+      "partner2_rel": {
+        "enum": [
+          "biological",
+          "adopted",
+          "step",
+          "foster",
+          "related",
+          "guardian",
+          "private",
+          "unknown"
+        ]
+      }
+    },
+    "additionalProperties": false
+  },
+  "AddParentBody": {
+    "type": "object",
+    "properties": {
+      "personId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      },
+      "person": {
+        "type": "object",
+        "properties": {
+          "sex": {
+            "enum": ["M", "F", "X", "U"]
+          },
+          "living": {
+            "enum": ["living", "dead", "inferred_living", "inferred_dead", "unknown"]
+          },
+          "privacy": {
+            "enum": ["public", "private", "confidential", "locked"]
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "enum": [
+                    "birth",
+                    "married",
+                    "maiden",
+                    "aka",
+                    "immigrant",
+                    "professional",
+                    "religious",
+                    "other"
+                  ]
+                },
+                "given": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "surname": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "surname_prefix": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 50
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "prefix": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 50
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "suffix": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 50
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "nickname": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 100
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "is_primary": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "maxItems": 20
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["type"],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 32,
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                },
+                "custom_type": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 100
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "date_text": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 100
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "place": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 500
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 1000
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "description": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 2000
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "age": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 50
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "cause": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 500
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "privacy": {
+                  "enum": ["public", "private", "confidential", "locked"]
+                },
+                "role": {
+                  "enum": [
+                    "principal",
+                    "witness",
+                    "godparent",
+                    "officiator",
+                    "clergy",
+                    "informant",
+                    "parent",
+                    "father",
+                    "mother",
+                    "child",
+                    "spouse",
+                    "husband",
+                    "wife",
+                    "friend",
+                    "neighbor",
+                    "multiple",
+                    "other"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "maxItems": 50
+          }
+        },
+        "additionalProperties": false
+      },
+      "familyId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      },
+      "rel": {
+        "enum": [
+          "biological",
+          "adopted",
+          "step",
+          "foster",
+          "related",
+          "guardian",
+          "private",
+          "unknown"
+        ]
+      }
+    },
+    "additionalProperties": false
+  },
+  "AddSiblingBody": {
+    "type": "object",
+    "properties": {
+      "personId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      },
+      "person": {
+        "type": "object",
+        "properties": {
+          "sex": {
+            "enum": ["M", "F", "X", "U"]
+          },
+          "living": {
+            "enum": ["living", "dead", "inferred_living", "inferred_dead", "unknown"]
+          },
+          "privacy": {
+            "enum": ["public", "private", "confidential", "locked"]
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "enum": [
+                    "birth",
+                    "married",
+                    "maiden",
+                    "aka",
+                    "immigrant",
+                    "professional",
+                    "religious",
+                    "other"
+                  ]
+                },
+                "given": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "surname": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "surname_prefix": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 50
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "prefix": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 50
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "suffix": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 50
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "nickname": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 100
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "is_primary": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "maxItems": 20
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["type"],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 32,
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                },
+                "custom_type": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 100
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "date_text": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 100
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "place": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 500
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 1000
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "description": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 2000
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "age": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 50
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "cause": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 500
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "privacy": {
+                  "enum": ["public", "private", "confidential", "locked"]
+                },
+                "role": {
+                  "enum": [
+                    "principal",
+                    "witness",
+                    "godparent",
+                    "officiator",
+                    "clergy",
+                    "informant",
+                    "parent",
+                    "father",
+                    "mother",
+                    "child",
+                    "spouse",
+                    "husband",
+                    "wife",
+                    "friend",
+                    "neighbor",
+                    "multiple",
+                    "other"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "maxItems": 50
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "additionalProperties": false
+  },
+  "AddSpouseBody": {
+    "type": "object",
+    "properties": {
+      "personId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      },
+      "person": {
+        "type": "object",
+        "properties": {
+          "sex": {
+            "enum": ["M", "F", "X", "U"]
+          },
+          "living": {
+            "enum": ["living", "dead", "inferred_living", "inferred_dead", "unknown"]
+          },
+          "privacy": {
+            "enum": ["public", "private", "confidential", "locked"]
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "enum": [
+                    "birth",
+                    "married",
+                    "maiden",
+                    "aka",
+                    "immigrant",
+                    "professional",
+                    "religious",
+                    "other"
+                  ]
+                },
+                "given": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "surname": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 200
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "surname_prefix": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 50
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "prefix": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 50
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "suffix": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 50
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "nickname": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 100
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "is_primary": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "maxItems": 20
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["type"],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 32,
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                },
+                "custom_type": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 100
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "date_text": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 100
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "place": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 500
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "value": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 1000
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "description": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 2000
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "age": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 50
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "cause": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 500
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "privacy": {
+                  "enum": ["public", "private", "confidential", "locked"]
+                },
+                "role": {
+                  "enum": [
+                    "principal",
+                    "witness",
+                    "godparent",
+                    "officiator",
+                    "clergy",
+                    "informant",
+                    "parent",
+                    "father",
+                    "mother",
+                    "child",
+                    "spouse",
+                    "husband",
+                    "wife",
+                    "friend",
+                    "neighbor",
+                    "multiple",
+                    "other"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "maxItems": 50
+          }
+        },
+        "additionalProperties": false
+      },
+      "relationship_type": {
+        "enum": ["married", "civil_union", "partners", "unknown"]
+      }
+    },
+    "additionalProperties": false
+  },
+  "ChildRel": {
+    "enum": ["biological", "adopted", "step", "foster", "related", "guardian", "private", "unknown"]
+  },
+  "EventBody": {
+    "type": "object",
+    "required": ["type"],
+    "properties": {
+      "type": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 32,
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+      },
+      "custom_type": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 100
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "date_text": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 100
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "place": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 500
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "value": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 1000
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "description": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 2000
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "age": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 50
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "cause": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 500
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "privacy": {
+        "enum": ["public", "private", "confidential", "locked"]
+      },
+      "role": {
+        "enum": [
+          "principal",
+          "witness",
+          "godparent",
+          "officiator",
+          "clergy",
+          "informant",
+          "parent",
+          "father",
+          "mother",
+          "child",
+          "spouse",
+          "husband",
+          "wife",
+          "friend",
+          "neighbor",
+          "multiple",
+          "other"
+        ]
+      }
+    },
+    "additionalProperties": false
+  },
+  "EventPatch": {
+    "type": "object",
+    "properties": {
+      "type": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 32,
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+      },
+      "custom_type": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 100
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "date_text": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 100
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "place": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 500
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "value": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 1000
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "description": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 2000
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "age": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 50
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "cause": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 500
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "privacy": {
+        "enum": ["public", "private", "confidential", "locked"]
+      }
+    },
+    "additionalProperties": false
+  },
+  "FamilyChildPatch": {
+    "type": "object",
+    "properties": {
+      "partner1_rel": {
+        "enum": [
+          "biological",
+          "adopted",
+          "step",
+          "foster",
+          "related",
+          "guardian",
+          "private",
+          "unknown"
+        ]
+      },
+      "partner2_rel": {
+        "enum": [
+          "biological",
+          "adopted",
+          "step",
+          "foster",
+          "related",
+          "guardian",
+          "private",
+          "unknown"
+        ]
+      },
+      "sort_order": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 10000
+      },
+      "is_preferred": {
+        "type": "boolean",
+        "const": true
+      }
+    },
+    "additionalProperties": false
+  },
+  "FamilyPatch": {
+    "type": "object",
+    "properties": {
+      "relationship_type": {
+        "enum": ["married", "civil_union", "partners", "unknown"]
+      },
+      "partner1_id": {
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[0-9A-Za-z_-]+$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "partner2_id": {
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[0-9A-Za-z_-]+$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "privacy": {
+        "enum": ["public", "private", "confidential", "locked"]
+      }
+    },
+    "additionalProperties": false
+  },
+  "HistoryQuery": {
+    "type": "object",
+    "properties": {
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 500
+      }
+    }
+  },
+  "HomeBody": {
+    "type": "object",
+    "required": ["personId"],
+    "properties": {
+      "personId": {
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[0-9A-Za-z_-]+$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "additionalProperties": false
+  },
+  "Id": {
+    "type": "string",
+    "minLength": 1,
+    "maxLength": 64,
+    "pattern": "^[0-9A-Za-z_-]+$"
+  },
+  "JobParams": {
+    "type": "object",
+    "required": ["id"],
+    "properties": {
+      "id": {
+        "type": "string",
+        "format": "uuid"
+      }
+    }
+  },
+  "Living": {
+    "enum": ["living", "dead", "inferred_living", "inferred_dead", "unknown"]
+  },
+  "MediaThumbParams": {
+    "type": "object",
+    "required": ["tree", "id", "size"],
+    "properties": {
+      "tree": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      },
+      "size": {
+        "type": "string",
+        "maxLength": 16
+      }
+    }
+  },
+  "NameBody": {
+    "type": "object",
+    "properties": {
+      "type": {
+        "enum": [
+          "birth",
+          "married",
+          "maiden",
+          "aka",
+          "immigrant",
+          "professional",
+          "religious",
+          "other"
+        ]
+      },
+      "given": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 200
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "surname": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 200
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "surname_prefix": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 50
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "prefix": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 50
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "suffix": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 50
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "nickname": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 100
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "is_primary": {
+        "type": "boolean"
+      }
+    },
+    "additionalProperties": false
+  },
+  "NeighborhoodQuery": {
+    "type": "object",
+    "properties": {
+      "focus": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      },
+      "up": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 10
+      },
+      "down": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 10
+      },
+      "siblings": {
+        "type": "boolean"
+      },
+      "siblingsDepth": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 10
+      }
+    }
+  },
+  "NoteBody": {
+    "type": "object",
+    "required": ["text", "owner_type", "owner_id"],
+    "properties": {
+      "text": {
+        "type": "string",
+        "maxLength": 100000
+      },
+      "owner_type": {
+        "enum": [
+          "person",
+          "person_name",
+          "event",
+          "family",
+          "family_child",
+          "source",
+          "citation",
+          "media",
+          "place",
+          "repository"
+        ]
+      },
+      "owner_id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      }
+    },
+    "additionalProperties": false
+  },
+  "NotePatch": {
+    "type": "object",
+    "required": ["text"],
+    "properties": {
+      "text": {
+        "type": "string",
+        "maxLength": 100000
+      }
+    },
+    "additionalProperties": false
+  },
+  "PeopleQuery": {
+    "type": "object",
+    "properties": {
+      "sort": {
+        "enum": ["surname", "given", "birth", "death"]
+      },
+      "dir": {
+        "enum": ["asc", "desc"]
+      },
+      "sex": {
+        "enum": ["M", "F", "X", "U"]
+      },
+      "living": {
+        "type": "string",
+        "maxLength": 100,
+        "pattern": "^[a-z_]+(,[a-z_]+)*$"
+      },
+      "tag": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 1000
+      },
+      "offset": {
+        "type": "integer",
+        "minimum": 0
+      }
+    }
+  },
+  "PersonBody": {
+    "type": "object",
+    "properties": {
+      "sex": {
+        "enum": ["M", "F", "X", "U"]
+      },
+      "living": {
+        "enum": ["living", "dead", "inferred_living", "inferred_dead", "unknown"]
+      },
+      "privacy": {
+        "enum": ["public", "private", "confidential", "locked"]
+      },
+      "names": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "enum": [
+                "birth",
+                "married",
+                "maiden",
+                "aka",
+                "immigrant",
+                "professional",
+                "religious",
+                "other"
+              ]
+            },
+            "given": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "surname": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "surname_prefix": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 50
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "prefix": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 50
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "suffix": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 50
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "nickname": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "is_primary": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        "maxItems": 20
+      },
+      "events": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 32,
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            },
+            "custom_type": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "date_text": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "place": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 1000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 2000
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "age": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 50
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "cause": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 500
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "privacy": {
+              "enum": ["public", "private", "confidential", "locked"]
+            },
+            "role": {
+              "enum": [
+                "principal",
+                "witness",
+                "godparent",
+                "officiator",
+                "clergy",
+                "informant",
+                "parent",
+                "father",
+                "mother",
+                "child",
+                "spouse",
+                "husband",
+                "wife",
+                "friend",
+                "neighbor",
+                "multiple",
+                "other"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "maxItems": 50
+      }
+    },
+    "additionalProperties": false
+  },
+  "PersonPatch": {
+    "type": "object",
+    "properties": {
+      "sex": {
+        "enum": ["M", "F", "X", "U"]
+      },
+      "living": {
+        "enum": ["living", "dead", "inferred_living", "inferred_dead", "unknown"]
+      },
+      "privacy": {
+        "enum": ["public", "private", "confidential", "locked"]
+      },
+      "primary_media_id": {
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[0-9A-Za-z_-]+$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "additionalProperties": false
+  },
+  "PersonTagBody": {
+    "type": "object",
+    "required": ["tagId"],
+    "properties": {
+      "tagId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      }
+    },
+    "additionalProperties": false
+  },
+  "PersonTagParams": {
+    "type": "object",
+    "required": ["tree", "id", "tagId"],
+    "properties": {
+      "tree": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      },
+      "tagId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      }
+    }
+  },
+  "Privacy": {
+    "enum": ["public", "private", "confidential", "locked"]
+  },
+  "RelationshipType": {
+    "enum": ["married", "civil_union", "partners", "unknown"]
+  },
+  "SearchQuery": {
+    "type": "object",
+    "required": ["q"],
+    "properties": {
+      "q": {
+        "type": "string",
+        "maxLength": 200
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100
+      }
+    }
+  },
+  "Sex": {
+    "enum": ["M", "F", "X", "U"]
+  },
+  "TagBody": {
+    "type": "object",
+    "required": ["name"],
+    "properties": {
+      "name": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "category": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "color": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 32,
+            "pattern": "^[#A-Za-z0-9(),.% -]+$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "additionalProperties": false
+  },
+  "TagPatch": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "category": {
+        "type": "string",
+        "maxLength": 100
+      },
+      "color": {
+        "anyOf": [
+          {
+            "type": "string",
+            "maxLength": 32,
+            "pattern": "^[#A-Za-z0-9(),.% -]+$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "additionalProperties": false
+  },
+  "TreeBody": {
+    "type": "object",
+    "required": ["name"],
+    "properties": {
+      "name": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      }
+    },
+    "additionalProperties": false
+  },
+  "TreeIdParams": {
+    "type": "object",
+    "required": ["tree", "id"],
+    "properties": {
+      "tree": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      }
+    }
+  },
+  "TreeParams": {
+    "type": "object",
+    "required": ["tree"],
+    "properties": {
+      "tree": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      }
+    }
+  }
+}

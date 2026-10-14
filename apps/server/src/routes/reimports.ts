@@ -23,7 +23,8 @@ export function reimportRoutes(app: Api, { library, reimports }: Deps): void {
       warningCount: report.warningCount,
       lines: report.lines,
       timings: session.timings,
-      diff: session.diff,
+      // familyMatches is apply's bookkeeping; the review doesn't need it.
+      diff: { people: session.diff.people, counts: session.diff.counts },
     };
   });
 

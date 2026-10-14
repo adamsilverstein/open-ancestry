@@ -338,6 +338,12 @@ export function applyReimport(
     }
     const familyFor = (incomingFamilyId: string, create: boolean): string | null => {
       if (familyMap.has(incomingFamilyId)) return familyMap.get(incomingFamilyId)!;
+      // The family the review matched it to (also when the export dropped a partner).
+      const matched = session.diff.familyMatches[incomingFamilyId];
+      if (matched && has('family', matched)) {
+        familyMap.set(incomingFamilyId, matched);
+        return matched;
+      }
       const f = get('family', incomingFamilyId) as FamilyRow;
       const p1 = f.partner1_id ? (personMap.get(f.partner1_id) ?? null) : null;
       const p2 = f.partner2_id ? (personMap.get(f.partner2_id) ?? null) : null;

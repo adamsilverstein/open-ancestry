@@ -1,4 +1,4 @@
-import type { MediaRow, TableName, TreeStore } from '@open-ancestry/db';
+import type { FamilyRow, MediaRow, TableName, TreeStore } from '@open-ancestry/db';
 import { HIGH_CONFIDENCE, type PersonMatch } from './match';
 import {
   mediaKey,
@@ -106,6 +106,8 @@ export interface PersonReview {
 
 export interface ReimportDiff {
   people: PersonReview[];
+  /** Incoming family id to the tree's family it describes (apply adds to these, never a copy). */
+  familyMatches: Record<string, string>;
   counts: {
     incoming: number;
     matched: number;
@@ -712,9 +714,17 @@ export function diffTrees(
   const mapPerson = (id: string | null) => (id ? (toExisting.get(id) ?? `new:${id}`) : null);
   const familyKey = (a: string | null, b: string | null) => [a, b].filter(Boolean).sort().join('+');
   const existingFamilies = new Map<string, string>();
+  const familiesOf = new Map<string, FamilyRow[]>();
   for (const f of existing.families.values()) {
     existingFamilies.set(familyKey(f.partner1_id, f.partner2_id), f.id);
+    for (const p of [f.partner1_id, f.partner2_id]) {
+      if (p) familiesOf.set(p, [...(familiesOf.get(p) ?? []), f]);
+    }
   }
+  const keyOfFamily = (id: string) => {
+    const f = existing.families.get(id)!;
+    return familyKey(f.partner1_id, f.partner2_id);
+  };
   const existingChildren = new Set(
     existing.familyChildren.map((c) => `${c.family_id}|${c.child_id}`),
   );
@@ -752,10 +762,50 @@ export function diffTrees(
   const lowConfidence = (ids: string[]) =>
     ids.some((id) => (matches.get(id)?.confidence ?? 1) < HIGH_CONFIDENCE);
 
+  /**
+   * A tree family the export now lists with a partner missing (Ancestry
+   * dropped one): the one holding the most of its children, if that is clear.
+   */
+  const partnerDropped = (f: FamilyRow, partners: string[]): string | undefined => {
+    const mapped = partners.map((p) => toExisting.get(p));
+    if (!mapped.length || mapped.some((p) => !p)) return undefined;
+    const kids = new Set((incomingChildren.get(f.id) ?? []).map((c) => mapPerson(c)));
+    const candidates = (familiesOf.get(mapped[0]!) ?? [])
+      .filter((ef) => {
+        const has = [ef.partner1_id, ef.partner2_id].filter(Boolean);
+        return has.length > mapped.length && mapped.every((p) => has.includes(p!));
+      })
+      .map((ef) => ({
+        id: ef.id,
+        shared: (childrenOf.get(ef.id) ?? []).filter((c) => kids.has(c.child_id)).length,
+      }))
+      .sort((a, b) => b.shared - a.shared);
+    if (candidates.length === 1) return candidates[0]!.id;
+    if (candidates.length > 1 && candidates[0]!.shared > candidates[1]!.shared) {
+      return candidates[0]!.id;
+    }
+    return undefined;
+  };
+  const childrenOf = new Map<string, FamilyChildRef[]>();
+  for (const c of existing.familyChildren) {
+    childrenOf.set(c.family_id, [...(childrenOf.get(c.family_id) ?? []), c]);
+  }
+  const familyMatches: Record<string, string> = {};
+  /** Tree families the export lists with a partner dropped, and the partners it still has. */
+  const dropped = new Map<string, string[]>();
+
   for (const f of incoming.families.values()) {
     const partners = [f.partner1_id, f.partner2_id].filter((p): p is string => !!p);
     const key = familyKey(mapPerson(f.partner1_id), mapPerson(f.partner2_id));
-    const existingFamily = existingFamilies.get(key);
+    const exact = existingFamilies.get(key);
+    const partial = exact ? undefined : partnerDropped(f, partners);
+    const existingFamily = exact ?? partial;
+    if (existingFamily) familyMatches[f.id] = existingFamily;
+    if (partial)
+      dropped.set(
+        partial,
+        partners.map((p) => toExisting.get(p)!),
+      );
     const owner = partners[0] ?? incomingChildren.get(f.id)?.[0];
     if (!owner) continue;
     if (!existingFamily && partners.length === 2) {
@@ -799,7 +849,8 @@ export function diffTrees(
       const mappedChild = mapPerson(child)!;
       if (existingFamily && existingChildren.has(`${existingFamily}|${mappedChild}`)) continue;
       const involved = [child, ...partners];
-      adder(reviewFor(child), lowConfidence(involved) ? { defaultAccept: false } : {})(
+      // Joining a family the export lists with a partner dropped: the user's call.
+      adder(reviewFor(child), lowConfidence(involved) || partial ? { defaultAccept: false } : {})(
         {
           kind: 'child.add',
           incomingFamilyId: f.id,
@@ -809,7 +860,11 @@ export function diffTrees(
         },
         {
           requires: requiresFor(involved),
-          ...(gone.childLinks.has(`${key}|${mappedChild}`) ? DELETED : {}),
+          ...(gone.childLinks.has(
+            `${existingFamily ? keyOfFamily(existingFamily) : key}|${mappedChild}`,
+          )
+            ? DELETED
+            : {}),
         },
       );
     }
@@ -819,8 +874,11 @@ export function diffTrees(
   // Only between people still in the export: anyone missing is listed below.
   const incomingFamilies = new Map<string, Set<string>>();
   for (const f of incoming.families.values()) {
+    const matched = familyMatches[f.id];
     incomingFamilies.set(
-      familyKey(mapPerson(f.partner1_id), mapPerson(f.partner2_id)),
+      matched
+        ? keyOfFamily(matched)
+        : familyKey(mapPerson(f.partner1_id), mapPerson(f.partner2_id)),
       new Set((incomingChildren.get(f.id) ?? []).map((c) => mapPerson(c)!)),
     );
   }
@@ -843,27 +901,23 @@ export function diffTrees(
       };
     });
   const info = { applicable: false, defaultAccept: false };
-  const childrenOf = new Map<string, FamilyChildRef[]>();
-  for (const c of existing.familyChildren) {
-    childrenOf.set(c.family_id, [...(childrenOf.get(c.family_id) ?? []), c]);
-  }
   for (const f of existing.families.values()) {
     if (!f.import_batch_id) continue;
     const partners = [f.partner1_id, f.partner2_id].filter((p): p is string => !!p);
     if (!partners.every((p) => matchedExisting.has(p))) continue;
     const kids = incomingFamilies.get(familyKey(f.partner1_id, f.partner2_id));
     const partnerNames = partners.map(existingName);
-    if (!kids && partners.length === 2) {
-      for (const p of partners) {
-        adder(
-          matchedReview(p),
-          info,
-        )({
-          kind: 'family.missing',
-          existingFamilyId: f.id,
-          partnerNames,
-        });
-      }
+    // Listed once per couple: on a partner the export still has with them, else the first.
+    const kept = dropped.get(f.id);
+    if ((!kids || kept) && partners.length === 2) {
+      adder(
+        matchedReview(kept?.[0] ?? partners[0]!),
+        info,
+      )({
+        kind: 'family.missing',
+        existingFamilyId: f.id,
+        partnerNames,
+      });
     }
     for (const c of childrenOf.get(f.id) ?? []) {
       if (!matchedExisting.has(c.child_id) || kids?.has(c.child_id)) continue;
@@ -904,6 +958,7 @@ export function diffTrees(
   const matched = [...matches.values()];
   return {
     people,
+    familyMatches,
     counts: {
       incoming: incoming.people.size,
       matched: matched.length,

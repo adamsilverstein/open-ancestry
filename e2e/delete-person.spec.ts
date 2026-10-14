@@ -74,3 +74,29 @@ test('undo from the History panel also returns to the restored person', async ({
   await history.getByRole('button', { name: 'Undo' }).click();
   await expect(page).toHaveURL(new RegExp(`/person/${seeded.rowan}$`));
 });
+
+test('the toast Undo refuses once a newer change was made, instead of undoing that', async ({
+  page,
+}) => {
+  await openSeeded(page, seeded);
+  await deletePerson(page, 'Rowan Ashdown');
+  await expect(h1(page)).toHaveText('Edmund Ashdown');
+  // A newer edit before pressing Undo on the delete's toast.
+  await page.getByRole('button', { name: 'Edit person', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit person' });
+  await dialog.getByRole('textbox', { name: 'Given names' }).first().fill('Edwin');
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(h1(page)).toHaveText('Edwin Ashdown');
+
+  await deletedToast(page, 'Rowan Ashdown').getByRole('button', { name: 'Undo' }).click();
+  await expect(
+    page.getByRole('region', { name: /Notifications/ }).getByText(/Can't undo the delete/),
+  ).toBeVisible();
+  // Neither the rename nor the delete was undone.
+  await expect(h1(page)).toHaveText('Edwin Ashdown');
+  await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}$`));
+  const rowan = await page.request.get(
+    `/api/trees/${encodeURIComponent(seeded.tree)}/people/${seeded.rowan}`,
+  );
+  expect(rowan.status()).toBe(404);
+});

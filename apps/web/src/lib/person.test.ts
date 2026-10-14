@@ -102,4 +102,37 @@ describe('nearestRelative', () => {
     const childless = { ...noParents, partnerFamilies: [] };
     expect(nearestRelative(childless)).toBeUndefined();
   });
+
+  const rowan = fixtureDetail('rowan');
+  const someone = (id: string) => ({ ...rowan.summary, id });
+
+  it('uses a single parent when the other is unknown', () => {
+    const family = { ...rowan.parentFamilies[0]!, partner1: null, partner2: someone('mum') };
+    expect(nearestRelative({ ...rowan, parentFamilies: [family] })).toBe('mum');
+  });
+
+  it('falls back to a child when there are no parents or partners', () => {
+    const own = rowan.partnerFamilies[0]!;
+    const family = {
+      ...own,
+      partner: null,
+      children: [{ ...own.children[0]!, person: someone('kid') }],
+    };
+    expect(nearestRelative({ ...rowan, parentFamilies: [], partnerFamilies: [family] })).toBe(
+      'kid',
+    );
+  });
+
+  it('falls back to a sibling when the parents are unknown', () => {
+    const parents = rowan.parentFamilies[0]!;
+    const family = {
+      ...parents,
+      partner1: null,
+      partner2: null,
+      siblings: [{ ...parents.siblings[0]!, person: someone('sib') }],
+    };
+    expect(nearestRelative({ ...rowan, parentFamilies: [family], partnerFamilies: [] })).toBe(
+      'sib',
+    );
+  });
 });

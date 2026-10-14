@@ -1,5 +1,7 @@
 import { parseDate } from '@open-ancestry/core';
-import { refreshSearch } from './search';
+import { foldForSearch } from '@open-ancestry/core';
+import { rebuildSearchIndex, refreshSearch } from './search';
+import { SEARCH_DOC_VERSION } from './search-docs';
 import type { TreeStore } from './store';
 
 /*
@@ -53,6 +55,8 @@ export function hasConvertedDate(row: Record<string, unknown>): row is Record<st
 
 interface DerivedStep {
   name: string;
+  /** Why it reran, for the log line. */
+  reason: string;
   fingerprint(): string;
   /** Recomputes stale rows; returns how many changed. */
   recompute(store: TreeStore): number;
@@ -60,6 +64,7 @@ interface DerivedStep {
 
 const eventDateSort: DerivedStep = {
   name: 'event_date_sort',
+  reason: 'date parser changed',
   fingerprint: () =>
     JSON.stringify(
       DATE_PROBES.map((text) => {
@@ -127,6 +132,7 @@ const OWNER_TABLES = [
  */
 const orphanCleanup: DerivedStep = {
   name: 'orphan_cleanup',
+  reason: 'records orphaned by earlier deletes',
   fingerprint: () => '1',
   recompute(store) {
     const queries: [table: string, sql: string][] = [
@@ -221,7 +227,21 @@ function scrubReport(
   }
 }
 
-export const DERIVED_STEPS: readonly DerivedStep[] = [eventDateSort, orphanCleanup];
+/** Spellings the search fold changes, so its fingerprint moves with it. */
+const FOLD_PROBES = ['Yılmaz', 'Straße', 'כֹּהֵן', 'عَلِيّ', "O'Brien", 'Ro\u200bwan'];
+
+/** The search index: rebuilt when the spelling fold or what is indexed changes (#199). */
+const searchIndex: DerivedStep = {
+  name: 'search_index',
+  reason: 'search fold changed',
+  fingerprint: () => JSON.stringify([SEARCH_DOC_VERSION, FOLD_PROBES.map(foldForSearch)]),
+  recompute(store) {
+    rebuildSearchIndex(store);
+    return store.db.prepare('SELECT COUNT(*) FROM search_doc').pluck().get() as number;
+  },
+};
+
+export const DERIVED_STEPS: readonly DerivedStep[] = [eventDateSort, orphanCleanup, searchIndex];
 
 export interface RefreshOptions {
   /** Recompute even if the fingerprint matches (JSON import does). */
@@ -237,10 +257,7 @@ export interface RefreshOptions {
  */
 export function refreshDerivedColumns(
   store: TreeStore,
-  {
-    force = false,
-    reason = force ? 'refresh requested' : 'date parser changed',
-  }: RefreshOptions = {},
+  { force = false, reason }: RefreshOptions = {},
 ): Record<string, number> {
   const results: Record<string, number> = {};
   store.db.transaction(() => {
@@ -257,7 +274,8 @@ export function refreshDerivedColumns(
         )
         .run(step.name, fingerprint);
       results[step.name] = changed;
-      if (changed > 0) store.log(`Recomputed ${step.name} for ${changed} rows (${reason})`);
+      const why = reason ?? (force ? 'refresh requested' : step.reason);
+      if (changed > 0) store.log(`Recomputed ${step.name} for ${changed} rows (${why})`);
     }
   })();
   return results;

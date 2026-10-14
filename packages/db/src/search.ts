@@ -1,3 +1,4 @@
+import { foldForSearch } from '@open-ancestry/core';
 import { getPersonSummaries, type PersonSummary } from './queries';
 import { DOC_COLUMNS, rebuildSearchDocs } from './search-docs';
 import { rebuildSortKeys, refreshSortKeys } from './sort-keys';
@@ -124,6 +125,9 @@ export const TIEBREAK_CAP = 2000;
  */
 export const TIEBREAK_MAX_MATCHES = 20_000;
 
+/** Han, kana and Hangul: scripts written without spaces between the parts of a name. */
+const CJK = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+
 /** FTS5 expression for one query word in one tier, or null if the word cannot match in it. */
 function wordMatch(word: string, tier: SearchMatch, keys: string[]): string {
   if (/^\d{4}$/.test(word)) {
@@ -135,8 +139,9 @@ function wordMatch(word: string, tier: SearchMatch, keys: string[]): string {
     return `years : (${years.map((y) => quote(String(y))).join(' OR ')})`;
   }
   // One-character prefixes are not in the FTS prefix index (2 and 3) and match
-  // most of a big tree, so a lone letter only matches exactly (an initial).
-  const prefix = tier !== 'exact' && [...word].length >= MIN_PREFIX_LENGTH;
+  // most of a big tree, so a lone letter only matches exactly (an initial). A
+  // CJK name is one token with no spaces, so one character may start it (小 for 小明).
+  const prefix = tier !== 'exact' && ([...word].length >= MIN_PREFIX_LENGTH || CJK.test(word));
   const text = `{names places years} : ${quote(word)}${prefix ? '*' : ''}`;
   return tier === 'phonetic' && keys.length > 0
     ? `(${text} OR phonetic : (${keys.map(quote).join(' OR ')}))`
@@ -152,16 +157,13 @@ function wordMatch(word: string, tier: SearchMatch, keys: string[]): string {
  */
 /** Query words and their phonetic keys, or null when nothing can match. */
 function parseQuery(query: string, phoneticKeys: SearchOptions['phoneticKeys'] = []) {
-  // NFC so decomposed input (pasted from PDFs, macOS) tokenizes like typed text;
-  // distinct and capped so a long repetitive query cannot stall the server.
+  // Folded like the index (NFC, ı, ß, vowel marks, apostrophes); distinct and
+  // capped so a long repetitive query cannot stall the server.
   const words = [
     ...new Set(
-      (
-        query
-          .normalize('NFC')
-          .slice(0, MAX_SEARCH_LENGTH)
-          .match(/[\p{L}\p{N}]+/gu) ?? []
-      ).map((w) => w.toLowerCase()),
+      (foldForSearch(query.slice(0, MAX_SEARCH_LENGTH)).match(/[\p{L}\p{N}]+/gu) ?? []).map((w) =>
+        w.toLowerCase(),
+      ),
     ),
   ].slice(0, MAX_SEARCH_WORDS);
   if (words.length === 0) return null;

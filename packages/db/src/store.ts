@@ -2,6 +2,7 @@ import type { Database, Statement } from 'better-sqlite3';
 import { MIGRATIONS, migrate, type Migration } from './migrations/index';
 import { nfcRow } from './nfc';
 import { markSearchDirty, refreshSearch } from './search';
+import { registerSearchFold } from './search-docs';
 import { assertDataTable } from './tables';
 import type { InsertRow, PatchRow, TableName, TableRows } from './types';
 import { ulid } from './ulid';
@@ -93,6 +94,7 @@ export class TreeStore {
     db.pragma('synchronous = NORMAL');
     db.pragma('temp_store = MEMORY');
     db.pragma('cache_size = -65536');
+    registerSearchFold(db);
     this.log = options.log ?? ((message) => console.info(message));
     this.migrations = options.migrations ?? MIGRATIONS;
     this.schemaVersion = this.migrations.length;

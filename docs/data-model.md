@@ -603,6 +603,8 @@ Property tests (fast-check) apply random edit scripts and assert that undoing ev
 
 Each result reports its `match` tier. Within a tier, BM25 ranks names 10, phonetic keys 5, places and years 1.
 
+**Spelling fold.** Indexed names and places, and the query, go through `foldForSearch` (packages/core), applied in SQL as `oa_search_fold`, a function registered on every TreeStore connection. It makes these read the same: dotless ı and i; ß, ẞ and ss; pointed and unpointed Hebrew (points and cantillation U+0591-U+05C7 removed); Arabic with and without harakat (U+064B-U+065F, U+0670); O'Brien and OBrien (apostrophes ' ’ ʼ between letters removed). Invisible format characters (zero-width space and joiner, soft hyphen, bidi controls) are also removed, so they cannot split a word. Case and Latin diacritics are left to the `unicode61 remove_diacritics 2` tokenizer. A query word in Han, kana or Hangul may be a one-character prefix (小 finds 小明), because those names are one token with no spaces; a lone Latin letter still matches only exactly (an initial). The index is a derived step (`search_index` in `derived_state`): when the fold or `SEARCH_DOC_VERSION` changes, a tree rebuilds its whole index the next time it opens, so no migration is needed.
+
 ## JSON interchange
 
 `exportJson` / `importJson` read and write `open-ancestry.json`: a full-fidelity dump of every table except the derived search tables.

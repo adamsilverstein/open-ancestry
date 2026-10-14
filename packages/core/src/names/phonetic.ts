@@ -13,21 +13,37 @@ const SPECIAL: Record<string, string> = {
   ı: 'i',
 };
 
+/** Hebrew points and cantillation, and Arabic harakat: written in some records, left out in others. */
+const VOWEL_MARKS = /[\u0591-\u05bd\u05bf\u05c1\u05c2\u05c4\u05c5\u05c7\u064b-\u065f\u0670]/gu;
+
+/**
+ * The spelling fold shared by the search index and the query (#199): ı and i,
+ * ß and ss, pointed and unpointed Hebrew, Arabic with and without harakat, and
+ * O'Brien and OBrien read the same. Invisible format characters (zero-width
+ * space and joiner, soft hyphen, bidi controls) go too, so they cannot split a
+ * word (#190). Case and Latin diacritics are left to the FTS tokenizer.
+ */
+export function foldForSearch(text: string): string {
+  return text
+    .normalize('NFC')
+    .replace(/\p{Cf}/gu, '')
+    .replace(VOWEL_MARKS, '')
+    .replace(/ı/g, 'i')
+    .replace(/ß/g, 'ss')
+    .replace(/ẞ/g, 'SS')
+    .replace(/(?<=[\p{L}\p{N}])['’ʼ](?=[\p{L}\p{N}])/gu, '');
+}
+
 /** Lower-case, accent-free, punctuation-free text for search: `Émile O'Brien` -> `emile obrien`. */
 export function normalizeForSearch(text: string): string {
-  return (
-    text
-      // Invisible format characters (zero-width space and joiner, soft hyphen, bidi
-      // controls) would otherwise split a word: "Ro\u200bwan" must match "Rowan".
-      .replace(/\p{Cf}/gu, '')
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/\p{M}/gu, '')
-      .replace(/[ßæœøłđðþı]/g, (c) => SPECIAL[c]!)
-      .replace(/['’`]/g, '')
-      .replace(/[^\p{L}\p{N}]+/gu, ' ')
-      .trim()
-  );
+  return foldForSearch(text)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[ßæœøłđðþı]/g, (c) => SPECIAL[c]!)
+    .replace(/['’ʼ`]/g, '')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
 }
 
 const lettersOnly = (text: string): string => normalizeForSearch(text).replace(/[^a-z]/g, '');

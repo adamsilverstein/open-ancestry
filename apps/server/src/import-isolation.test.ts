@@ -58,12 +58,20 @@ describe('reads while a tree imports in the worker', () => {
         api.get(`${base}/search?q=${encodeURIComponent(surname)}`),
         api.get(`${base}/export.json`),
       ]);
-      // Re-read the phase after the reads: the transaction may have committed meanwhile.
-      const after = (await api.get(`/api/jobs/${jobId}`)).json() as { state: string };
-      if (after.state === 'running') {
-        seen.add(job.progress?.phase ?? 'queued');
+      // Re-read the phase after the reads: only while the import has not
+      // started saving can nothing be committed yet. Once it has, rows may
+      // legitimately appear before the job reports completed.
+      const after = (await api.get(`/api/jobs/${jobId}`)).json() as {
+        state: string;
+        progress?: { phase: string };
+      };
+      const phase = after.progress?.phase ?? 'read';
+      if (after.state === 'running' && ['read', 'parse', 'map', 'finalize'].includes(phase)) {
+        seen.add(phase);
         expect(people.json().total).toBe(0);
         expect(search.json().items).toEqual([]);
+      }
+      if (after.state === 'running') {
         expect(exported.statusCode).toBe(409);
         expect(exported.json().error.message).toMatch(/busy/);
       }

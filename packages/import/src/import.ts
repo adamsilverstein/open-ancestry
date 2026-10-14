@@ -460,6 +460,8 @@ export async function importGedcom(
         batchId,
       );
 
+    // Last chance to stop: past this line the import is saved whatever happens.
+    checkAbort(signal);
     progress('commit', 0, 1);
     const commitStart = performance.now();
     const committed: BulkCounts = writer.commit();

@@ -18,7 +18,13 @@ describe('siblingKind', () => {
   it.each<[string, typeof both | typeof one, ChildRelationship[], ChildRelationship[], string]>([
     ['both biological', both, ['biological', 'biological'], ['biological', 'biological'], 'full'],
     ['unknown links', both, ['unknown', 'unknown'], ['biological', 'unknown'], 'full'],
-    ['adopted into the family', both, ['adopted', 'adopted'], ['biological', 'biological'], 'full'],
+    [
+      'adopted into the family',
+      both,
+      ['adopted', 'adopted'],
+      ['biological', 'biological'],
+      'adopted',
+    ],
     [
       'my stepfather is their father',
       both,

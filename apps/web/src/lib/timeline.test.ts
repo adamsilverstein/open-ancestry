@@ -85,11 +85,19 @@ describe('buildTimeline', () => {
     expect(adopted.map((e) => e.title)).toContain('Death of adoptive mother Clara Penhallow');
   });
 
-  it('adds half siblings passed in', () => {
+  it('adds siblings from other partnerships, worded by kind', () => {
     const nell = fixtureDetail('nell').summary;
-    const titles = buildTimeline(fixtureDetail('rowan'), { halfSiblings: [nell] }).map(
-      (e) => e.title,
-    );
+    const silas = { ...nell, id: 'silas', given: 'Silas', sex: 'M' as const };
+    const finn = { ...nell, id: 'finn', given: 'Finn', sex: 'M' as const };
+    const titles = buildTimeline(fixtureDetail('rowan'), {
+      otherSiblings: [
+        { person: nell, kind: 'half' },
+        { person: silas, kind: 'step' },
+        { person: finn, kind: 'foster' },
+      ],
+    }).map((e) => e.title);
+    expect(titles).toContain('Birth of stepbrother Silas Marsh');
+    expect(titles).toContain('Birth of foster brother Finn Marsh');
     expect(titles.indexOf('Birth of half-sister Nell Marsh')).toBe(
       titles.indexOf('Death of father Edmund Ashdown') + 1,
     );

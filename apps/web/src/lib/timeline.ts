@@ -1,7 +1,16 @@
 import { ageAt, formatDate } from '@open-ancestry/core';
 import type { ApiPersonSummary, EventBrief, EventDetail, PersonDetail } from '../api/types';
 import { dateRange, overlaps } from './dateRange';
-import { bySex, childWord, linkToPartner, parentWord, siblingWord, siblingsOf } from './kin';
+import {
+  bySex,
+  childWord,
+  closest,
+  linkToPartner,
+  parentWord,
+  siblingWord,
+  siblingsOf,
+  type Sibling,
+} from './kin';
 import { fullName } from './person';
 
 export type TimelineCategory = 'life' | 'family' | 'work' | 'other';
@@ -115,8 +124,8 @@ const display = (text: string | null | undefined) => (text ? formatDate(text) : 
 const yearOf = (text: string | null | undefined) => (text ? formatDate(text, 'year') : undefined);
 
 export interface TimelineOptions {
-  /** Children of the parents' other partnerships, loaded separately. */
-  halfSiblings?: ApiPersonSummary[];
+  /** Children of the parents' other partnerships, loaded separately (`otherSiblings`). */
+  otherSiblings?: Sibling[];
 }
 
 /**
@@ -235,11 +244,12 @@ export function buildTimeline(
       if (parent) relativeEvent(parent, parent.death, 'Death', parentWord(parent.sex, rel));
     }
   }
-  for (const { person, kind } of siblingsOf(detail.parentFamilies)) {
+  const siblings = closest([
+    ...siblingsOf(detail.parentFamilies),
+    ...(options.otherSiblings ?? []),
+  ]);
+  for (const { person, kind } of siblings) {
     relativeEvent(person, person.birth, 'Birth', siblingWord(person.sex, kind));
-  }
-  for (const person of options.halfSiblings ?? []) {
-    relativeEvent(person, person.birth, 'Birth', siblingWord(person.sex, 'half'));
   }
   for (const { family, partner, children } of detail.partnerFamilies) {
     if (partner)

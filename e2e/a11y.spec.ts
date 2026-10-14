@@ -1,11 +1,17 @@
 import AxeBuilder from '@axe-core/playwright';
+import { FIXTURE_PEOPLE } from './tree-fixture';
 import { expect, test } from './fixtures';
+
+const people = FIXTURE_PEOPLE;
 
 const routes = [
   { path: '/', heading: 'Import your Ancestry GEDCOM' },
   { path: '/design', heading: 'Design system' },
   { path: '/tree/I1', heading: 'Family tree' },
-  { path: '/person/I1', heading: 'Person' },
+  { path: `/person/${people.rowan}`, heading: 'Rowan Ashdown' },
+  { path: `/person/${people.rowan}?tab=lifestory`, heading: 'Rowan Ashdown' },
+  { path: `/person/${people.rowan}?tab=sources`, heading: 'Rowan Ashdown' },
+  { path: '/person/01NOSUCHPERSON0000000000000', heading: 'Person not found' },
   { path: '/no-such-page', heading: 'Page not found' },
 ];
 

@@ -64,3 +64,32 @@
   color: var(--oa-text-muted);
   font: var(--oa-text-sm);
 }
+
+.nested {
+  margin-left: var(--oa-space-5);
+  padding-left: var(--oa-space-2);
+  border-left: 1px solid var(--oa-border);
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oa-space-1);
+  padding: 0;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.chevron {
+  transition: rotate var(--oa-duration-fast) var(--oa-ease);
+}
+
+.closed {
+  rotate: -90deg;
+}

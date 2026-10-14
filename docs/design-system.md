@@ -124,7 +124,7 @@ Code: `apps/web/src/components/<Name>/<Name>.tsx` + `<Name>.module.css`, re-expo
 | `Minimap` | `nodes` (rects + sex), `bounds`, `viewport`, `onNavigate(center)`, `onDismiss`, `width`, `height` | Canvas overview with the viewport rectangle; click or drag to move, arrow keys pan by a quarter viewport. Redraws on theme change. |
 | `GenerationLabel` | `children` | Muted uppercase caption for the canvas. |
 | `TimelineItem` | `year`, `age`, `title`, `date`, `place`, `sourceCount`, `variant` (`own`/`family`/`alternate`), `actions` | Renders an `<li>`; wrap in `<ol>`. Family events: sunken row + people icon + hidden "Family event" text. Alternate: indented, dotted rule, "alternate" chip. Unsourced: muted italic "No sources". |
-| `RelationshipList` | `groups: { title, people, onAdd?, addLabel? }[]`, `headingLevel` | Labelled sections with person rows (avatar, name, lifespan) that link to `/person/$id`. |
+| `RelationshipList` | `groups: { title, people, nested?, collapsible?, defaultCollapsed?, onAdd?, addLabel? }[]`, `headingLevel` | Labelled sections with person rows (avatar, name, lifespan) that link to `/person/$id` (each link carries `data-name`). `nested` people sit indented under `people` (a spouse's children); `collapsible` turns the title into a disclosure button showing the count. Titles must be unique: they name the regions. |
 | `SourceItem` | `title`, `citation`, `quality` (GEDCOM QUAY 0-3), `externalUrl`, `externalLabel` | Quality chip (dashed when weak), external link opens in a new tab with `rel="noreferrer noopener"`. |
 | `TagBadge` | `label`, `color` (1-8), `variant` (`badge`/`dot`) | Dot variant is a labelled image for dense spots. |
 | `CommandPalette` | `open`, `onOpenChange`, `groups: { heading, items: PaletteAction[] }[]`, `onQueryChange` | Radix dialog + cmdk, substring filtering on label and keywords, "No results" empty state. Restores focus to whatever was focused before it opened. The shell wires Cmd/Ctrl-K and app actions; people search plugs in via `onQueryChange`. |
@@ -166,7 +166,7 @@ Hover and focus can be forced for screenshots with `data-demo-hover` / `data-dem
 
 - **App shell:** skip link, 48px sticky top bar (home link, tree name, Find with the Cmd/Ctrl-K hint, File menu with import/export, theme toggle), then `<main id="main">`. Cmd/Ctrl-K toggles the command palette from anywhere.
 - **Tree page:** full-bleed canvas, left floating toolbar, bottom-left minimap, quick view popovers anchored to cards.
-- **Person page:** header band on `--oa-canvas` (avatar 120, serif name, birth/death, relationship to home, tags, Edit), tab bar, then the three-column Facts grid (Timeline 1.6fr, Sources 1fr, Relationships 1fr).
+- **Person page** (`/person/$id`, tab in `?tab=`): header band on `--oa-canvas` marked `data-surface="canvas"` (avatar 120, serif display name, `BIRTH`/`DEATH` lines with date and place, relationship to the home person on a reserved line, tags, View in tree), tab bar (Facts, Gallery, Notes, LifeStory, Sources), then the Facts grid: Timeline 1.6fr, Sources 1fr, Relationships 1fr at `lg`; Timeline beside Sources over Relationships at `md`; one column below. Timeline rows: own events, alternates indented under the preferred fact, relatives' births and deaths shaded as family events, filterable by category. LifeStory is set in the serif face at a reading measure.
 
 ## Content style
 

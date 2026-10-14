@@ -28,6 +28,7 @@ export type ReviewChange = {
   | { kind: 'family.add'; partnerNames: string[] }
   | { kind: 'child.add'; parentNames: string[] }
   | { kind: 'person.missing' }
+  | { kind: 'merged'; incomingName: string }
 );
 
 export interface PersonReview {

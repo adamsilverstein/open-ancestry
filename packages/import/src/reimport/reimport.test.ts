@@ -246,9 +246,43 @@ describe('after people were merged in the tree (#70)', () => {
       const onto = [...merged.matches.values()].filter((m) => m.existingId === keep);
       expect(onto).toHaveLength(2);
       expect(onto.every((m) => m.reasons.includes('merged in this tree'))).toBe(true);
+      const review = merged.diff.people.find((p) => p.existingId === keep)!;
+      expect(review.changes.map((c) => c.kind)).toEqual(['merged']);
+      expect(review.changes[0]).toMatchObject({
+        applicable: false,
+        incomingName: 'Thaddeus Ashgrove',
+      });
       const accepted = defaults(merged);
       applyReimport(tree, merged, accepted, 'Re-import');
       expect(value(tree, 'SELECT count(*) FROM person')).toBe(26);
+    } finally {
+      closeReimport(merged);
+      tree.close();
+    }
+  });
+
+  it('offers what a merged duplicate adds, without its conflicting values', async () => {
+    const tree = openMemoryTree();
+    await importGedcom({ bytes: withDuplicate }, tree, { today: TODAY });
+    const keep = mergeLocally(tree, '@I1@', '@I30@');
+    const later = renumber(
+      withDuplicate.replace(
+        '0 @I30@ INDI\n1 NAME Thaddeus /Ashgrove/\n1 SEX M',
+        '0 @I30@ INDI\n1 NAME Thaddeus /Ashgrove/\n1 SEX M\n1 OCCU Barrel maker\n1 DEAT\n2 DATE 1912',
+      ),
+    );
+    const merged = await prepareReimport(tree, { bytes: later }, { today: TODAY });
+    try {
+      expect(merged.diff.counts.newPeople).toBe(0);
+      const review = merged.diff.people.find((p) => p.existingId === keep)!;
+      const adds = review.changes.filter((c) => c.kind === 'fact.add') as (ReviewChange & {
+        kind: 'fact.add';
+      })[];
+      expect(adds.map((c) => [c.fact.type, c.defaultAccept])).toEqual([
+        ['OCCU', true],
+        ['DEAT', false],
+      ]);
+      expect(review.changes.some((c) => c.kind === 'fact.change')).toBe(false);
     } finally {
       closeReimport(merged);
       tree.close();

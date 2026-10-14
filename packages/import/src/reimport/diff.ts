@@ -66,7 +66,9 @@ export type ReimportChange =
       partners: string[];
       parentNames: string[];
     }
-  | { kind: 'person.missing' };
+  | { kind: 'person.missing' }
+  /** Another exported record that was merged into this person here: folded in, never added. */
+  | { kind: 'merged'; incomingId: string; incomingName: string };
 
 export type ReviewChange = ReimportChange & {
   id: string;
@@ -143,6 +145,84 @@ export function locallyEdited(store: TreeStore): Set<string> {
     .all() as { entity: string; entity_id: string }[];
   return new Set(rows.map((r) => `${r.entity}|${r.entity_id}`));
 }
+
+/**
+ * A second exported record matched to a person merged in this tree: list it,
+ * and offer only what it adds (facts, names, sources, tags, media the person
+ * lacks). Its conflicting values (another birth, another sex) are not offered
+ * as changes, since the user already chose when merging.
+ */
+function foldMerged(
+  r: PersonReview,
+  e: SnapPerson,
+  i: SnapPerson,
+  m: PersonMatch,
+  adder: (
+    r: PersonReview,
+    defaults: Partial<ReviewChange>,
+  ) => (change: ReimportChange, extra?: Partial<ReviewChange>) => ReviewChange,
+) {
+  const confident = m.confidence >= HIGH_CONFIDENCE;
+  const add = adder(r, confident ? {} : { defaultAccept: false });
+  add(
+    { kind: 'merged', incomingId: i.row.id, incomingName: displayName(i) },
+    { applicable: false, defaultAccept: false },
+  );
+  const offered = new Set(
+    r.changes.flatMap((c) =>
+      c.kind === 'fact.add'
+        ? [factKey(c.fact)]
+        : c.kind === 'name.add'
+          ? [`name|${norm(c.name)}`]
+          : [],
+    ),
+  );
+  const names = new Set(
+    e.names.map((n) => `name|${norm([n.given, n.surname].filter(Boolean).join(' '))}`),
+  );
+  for (const n of i.names) {
+    const full = [n.given, n.surname].filter(Boolean).join(' ');
+    const key = `name|${norm(full)}`;
+    if (names.has(key) || offered.has(key)) continue;
+    offered.add(key);
+    add({ kind: 'name.add', incomingNameId: n.id, name: full, nameType: n.type });
+  }
+  for (const ie of i.events) {
+    const same = e.events.find((ee) => sameFact(ee, ie));
+    if (same) {
+      diffCitations(same, ie, add);
+      continue;
+    }
+    const key = factKey(factOf(ie));
+    if (offered.has(key)) continue;
+    offered.add(key);
+    // A second birth or death from the duplicate is an alternate at most: not pre-ticked.
+    add(
+      { kind: 'fact.add', incomingEventId: ie.row.id, fact: factOf(ie), owner: 'person' },
+      SINGULAR.has(ie.row.type) ? { defaultAccept: false } : {},
+    );
+  }
+  diffCitations(null, null, add, { existing: e.citations, incoming: i.citations });
+  const tags = new Set(e.tags.map((t) => t.key));
+  for (const t of i.tags) {
+    if (tags.has(t.key)) continue;
+    tags.add(t.key);
+    add({
+      kind: 'tag.add',
+      incomingTagId: t.id,
+      tag: t.category ? `${t.category}: ${t.name}` : t.name,
+    });
+  }
+  const media = new Set(e.media.map((x) => x.key));
+  for (const x of i.media) {
+    if (media.has(x.key)) continue;
+    media.add(x.key);
+    add({ kind: 'media.add', incomingMediaId: x.row.id, title: x.row.title });
+  }
+}
+
+const factKey = (f: FactView) =>
+  `fact|${f.type}|${norm(f.customType)}|${norm(f.date)}|${norm(f.place)}|${norm(f.value)}`;
 
 /** Pairs the incoming person's events with the existing person's. */
 function diffFacts(
@@ -269,11 +349,24 @@ export function diffTrees(
   // Matched people: facts, names, sex, citations, tags and media. When several
   // exported records match one person (merged in this tree), the best match
   // is compared; the others are folded into it, not added again.
-  const compared = new Set<string>();
+  const compared = new Map<string, PersonReview>();
   const ordered = [...matches.values()].sort((a, b) => b.confidence - a.confidence);
   for (const m of ordered) {
-    if (compared.has(m.existingId)) continue;
-    compared.add(m.existingId);
+    const folded = compared.get(m.existingId);
+    if (folded) {
+      foldMerged(
+        folded,
+        existing.people.get(m.existingId)!,
+        incoming.people.get(m.incomingId)!,
+        m,
+        adder,
+      );
+      if (folded.changes.length && !reviews.has(folded.key)) {
+        reviews.set(folded.key, folded);
+        people.push(folded);
+      }
+      continue;
+    }
     const e = existing.people.get(m.existingId)!;
     const i = incoming.people.get(m.incomingId)!;
     const r: PersonReview = {
@@ -287,6 +380,7 @@ export function diffTrees(
       reasons: m.reasons,
       changes: [],
     };
+    compared.set(m.existingId, r);
     // A low-confidence match is offered, never pre-accepted.
     const add = adder(r, m.confidence >= HIGH_CONFIDENCE ? {} : { defaultAccept: false });
     if (i.row.sex !== 'U' && i.row.sex !== e.row.sex) {

@@ -56,6 +56,10 @@ describe('re-import labels', () => {
       [{ ...base, kind: 'child.add', parentNames: ['A', 'B', 'C'] }, 'Child of A, B and C'],
       [{ ...base, kind: 'child.add', parentNames: [] }, 'Child of unknown'],
       [{ ...base, kind: 'person.missing' }, 'Not in the new export'],
+      [
+        { ...base, kind: 'merged', incomingName: 'Thad Ashgrove' },
+        'Exported separately as Thad Ashgrove; previously merged into Noah Ashgrove, so not added again',
+      ],
     ];
     for (const [change, text] of cases) expect(describeChange(change, 'Noah Ashgrove')).toBe(text);
   });

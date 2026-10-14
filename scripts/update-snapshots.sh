@@ -18,6 +18,8 @@ docker run --rm --ipc=host --platform linux/amd64 \
   bash -euo pipefail -c '
     tar -C /src --exclude=node_modules --exclude=dist --exclude=coverage \
       --exclude=test-results --exclude=playwright-report --exclude=.git -cf - . | tar -xf -
+    # better-sqlite3 may need compiling when no prebuild matches this Node ABI.
+    apt-get update -qq && apt-get install -y -qq build-essential python3 >/dev/null
     npm ci --no-audit --no-fund --loglevel=error
     npm run build
     CI=1 npx playwright test -c e2e design.spec.ts --project chromium \

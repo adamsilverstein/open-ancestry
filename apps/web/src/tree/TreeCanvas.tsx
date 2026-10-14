@@ -178,6 +178,7 @@ const TreeCard = memo(function TreeCard({
       ) : (
         <PersonCard
           person={person}
+          size={node.width < 120 ? 'compact' : 'regular'}
           focusPerson={node.isFocus}
           duplicate={node.isDuplicate}
           className={styles.card}
@@ -556,9 +557,39 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       }
       return { x, y, scale };
     }
+    const pad = 32;
+    // Clear of the floating toolbar on the left.
+    const toolbar = 80;
+    const fitScale = (w: number, h: number) =>
+      Math.max(
+        LOD_SCALE + 0.05,
+        Math.min(
+          1,
+          w / Math.max(1, current!.bounds.width),
+          h / Math.max(1, current!.bounds.height),
+        ),
+      );
+    if (focus && current && latest.current.kind === 'pedigree') {
+      // Focus at the left, ancestors spreading right, the whole chart down the screen.
+      const scale = fitRows ? fitScale(width - toolbar - 2 * pad, height - 2 * pad) : t.scale;
+      const b = current.bounds;
+      return {
+        x: toolbar + pad - focus.x * scale,
+        y: height / 2 - (b.minY + b.height / 2) * scale,
+        scale,
+      };
+    }
+    if (focus && current && latest.current.kind === 'descendants') {
+      // Focus at the top center, descendants below.
+      const scale = fitRows ? fitScale(width - 2 * pad, height - 2 * pad - 28) : t.scale;
+      const centered = centerOn({ ...t, scale }, focus.x + focus.width / 2, 0, width, height);
+      return { x: centered.x, y: pad + 14 - focus.y * scale, scale };
+    }
     if (focus)
       return centerOn(t, focus.x + focus.width / 2, focus.y + focus.height / 2, width, height);
     if (currentFan) {
+      // The whole fan, as large as fits.
+      if (fitRows) return fitBounds(currentFan.bounds, width, height, FIT_PADDING);
       const b = currentFan.bounds;
       return centerOn(t, b.minX + b.width / 2, b.minY + b.height / 2, width, height);
     }

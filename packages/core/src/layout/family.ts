@@ -33,6 +33,8 @@ import type {
 
 /** Least vertical distance between two couple lanes. */
 const LANE_SPACING = 8;
+/** Least vertical distance between two families' sideways connector jogs. */
+const JOG_SPACING = 8;
 /** Sideways jogs shorter than this are drawn as straight drops. */
 const SNAP = 4;
 
@@ -133,18 +135,17 @@ function layoutVertical(
     const [p, q] = link.parents.map((c) => slot.get(c));
     if (p && q && p[0].cards === q[0].cards) lanes = Math.max(lanes, Math.abs(p[1] - q[1]) - 1);
   }
-  const generation = Math.max(gaps.generation, 2 * (2 * margin + LANE_SPACING * (lanes - 1)));
-  const laneStep = lanes > 1 ? (generation / 2 - 2 * margin) / (lanes - 1) : 0;
+  let generation = Math.max(gaps.generation, 2 * (2 * margin + LANE_SPACING * (lanes - 1)));
 
   const metrics = { card: size.width, couple: gaps.couple, sibling: gaps.sibling };
   const step = size.width + gaps.couple;
-  const rowStep = size.height + generation;
+  const row = new Map<Card, number>();
   const place = (units: Unit[], sign: number) => {
     tidyLayout(units, metrics);
     for (const u of units) {
       u.cards.forEach((card, i) => {
         card.x = u.x + i * step;
-        card.y = z(sign * u.level * rowStep);
+        row.set(card, sign * u.level);
       });
     }
   };
@@ -152,6 +153,29 @@ function layoutVertical(
   place(descUnits, 1);
   const dx = focus.x;
   for (const card of b.cards) card.x -= dx;
+
+  // Rows go in once the space between generations is known. When many
+  // families' connectors jog in one gap, grow it so they stay JOG_SPACING apart.
+  const route = () => {
+    for (const card of b.cards) card.y = z(row.get(card)! * (size.height + generation));
+    const laneStep = lanes > 1 ? (generation / 2 - 2 * margin) / (lanes - 1) : 0;
+    const routed = { steps: 0 };
+    const edges = verticalEdges(
+      b.links,
+      b.cards,
+      size,
+      { ...gaps, generation },
+      { margin, step: laneStep },
+      routed,
+    );
+    return { edges, steps: routed.steps };
+  };
+  let routed = route();
+  if (generation / 2 / routed.steps < JOG_SPACING) {
+    generation = 2 * JOG_SPACING * routed.steps;
+    routed = route();
+  }
+  const rowStep = size.height + generation;
 
   const nodes = nodesFrom(b, size, withAncestors ? FAMILY_CHEVRONS : DESCENDANT_CHEVRONS);
   const bounds = boundsOf(nodes);
@@ -168,13 +192,7 @@ function layoutVertical(
   return {
     focusKey: focus.key,
     nodes,
-    edges: verticalEdges(
-      b.links,
-      b.cards,
-      size,
-      { ...gaps, generation },
-      { margin, step: laneStep },
-    ),
+    edges: routed.edges,
     labels,
     bounds,
     alternateParentFamilies: b.alternates,
@@ -215,6 +233,8 @@ function verticalEdges(
   size: CardSize,
   gaps: LayoutGaps,
   lane: { margin: number; step: number },
+  /** Receives the most jog levels any row needed (levels + 1 steps). */
+  routed: { steps: number } = { steps: 0 },
 ): LayoutEdge[] {
   const { width: w, height: h } = size;
   const half = gaps.generation / 2;
@@ -357,6 +377,7 @@ function verticalEdges(
     right.forEach((d, i) => levels.set(d, right.length - i));
     left.forEach((d, i) => levels.set(d, i + 1));
     const steps = Math.max(right.length, left.length) + 1;
+    routed.steps = Math.max(routed.steps, steps);
     for (const d of drops) {
       const top = d.parents[0]!.y + h;
       const barY = d.link.children[0]!.card.y - half;

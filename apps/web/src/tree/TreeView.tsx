@@ -48,6 +48,8 @@ function cleanSearch(search: { [K in keyof TreeSearch]?: TreeSearch[K] | undefin
   return out;
 }
 
+const PEDIGREE_CARD = { width: 96, height: 120 };
+
 /** Generations shown above and below the focus person per layout. */
 export const DEFAULT_DEPTH: Record<LayoutKind, { up: number; down: number }> = {
   family: { up: 3, down: 2 },
@@ -265,6 +267,8 @@ export function TreeView({
         : {
             ancestorsDepth: up,
             descendantsDepth: down,
+            // The pedigree doubles every generation: compact cards fit four on screen.
+            ...(kind === 'pedigree' && { cardSize: PEDIGREE_CARD }),
             expanded: current.expanded,
             collapsed: current.collapsed,
             selectedParentFamilies: current.parents,

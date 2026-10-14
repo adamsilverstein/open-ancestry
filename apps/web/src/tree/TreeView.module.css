@@ -179,6 +179,14 @@
   cursor: pointer;
 }
 
+/* An unknown parent: the slot is kept, outlined, so the fan reads as complete. */
+.fanEmpty {
+  fill: none;
+  stroke: var(--oa-canvas-line);
+  stroke-dasharray: 4 4;
+  stroke-width: 1.5;
+}
+
 .fanSegment path {
   fill: color-mix(in oklab, var(--oa-person-unknown) 30%, var(--oa-surface));
   stroke: var(--oa-canvas);

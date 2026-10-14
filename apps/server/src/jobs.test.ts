@@ -67,4 +67,47 @@ describe('JobManager', () => {
       expect(jobs.get(job.id)).toMatchObject({ state: 'failed', error: 'boom' }),
     );
   });
+
+  it('cancels a running job through its abort signal', async () => {
+    const jobs = new JobManager();
+    const cleaned: string[] = [];
+    const job = jobs.enqueue(
+      meta,
+      (signal) =>
+        new Promise((_, reject) =>
+          signal.addEventListener('abort', () => reject(new Error('Import was cancelled'))),
+        ),
+      async () => void cleaned.push('a'),
+    );
+    await vi.waitFor(() => expect(jobs.get(job.id)?.state).toBe('running'));
+    expect(jobs.cancel(job.id)).toBe(true);
+    await vi.waitFor(() =>
+      expect(jobs.get(job.id)).toMatchObject({ state: 'failed', error: 'Import was cancelled' }),
+    );
+    expect(cleaned).toEqual(['a']);
+    // Finished jobs cannot be cancelled; unknown ones neither.
+    expect(jobs.cancel(job.id)).toBe(false);
+    expect(jobs.cancel('nope')).toBe(false);
+  });
+
+  it('cancels a queued job at once, without running it', async () => {
+    const jobs = new JobManager({ concurrency: 1 });
+    let release!: () => void;
+    const first = jobs.enqueue(meta, () => new Promise<void>((r) => (release = r)));
+    let ran = false;
+    const cleaned: string[] = [];
+    const queued = jobs.enqueue(
+      meta,
+      async () => void (ran = true),
+      async () => void cleaned.push('q'),
+    );
+    expect(jobs.cancel(queued.id)).toBe(true);
+    await vi.waitFor(() =>
+      expect(jobs.get(queued.id)).toMatchObject({ state: 'failed', error: 'Cancelled' }),
+    );
+    expect(cleaned).toEqual(['q']);
+    release();
+    await vi.waitFor(() => expect(jobs.get(first.id)?.state).toBe('completed'));
+    expect(ran).toBe(false);
+  });
 });

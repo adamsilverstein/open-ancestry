@@ -277,14 +277,21 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     const gutter = gutterRef.current;
     // Rows closer than a label's height would overlap: hide them when zoomed far out.
     if (gutter) gutter.hidden = t.scale < 0.15;
-    const offset = gutter?.offsetLeft ?? 0;
-    for (const el of gutter?.children ?? []) {
-      const label = el as HTMLElement;
+    const labels = [...(gutter?.children ?? [])] as HTMLElement[];
+    // A label's right edge never changes (its key includes its text), so
+    // measure it once, and all reads before any writes: this runs on every pan
+    // frame and re-focus. A hidden gutter has no size to measure yet.
+    if (gutter && !gutter.hidden) {
+      const offset = gutter.offsetLeft;
+      for (const label of labels) {
+        label.dataset.right ||= String(offset + label.offsetLeft + label.offsetWidth + 8);
+      }
+    }
+    for (const label of labels) {
       // Beside the row while the row's cards start right of the label; once a
       // wide row slides under the gutter, up in the gap above it instead, so
       // the label never covers a card.
-      const right = offset + label.offsetLeft + label.offsetWidth + 8;
-      const under = Number(label.dataset.left) * t.scale + t.x < right;
+      const under = Number(label.dataset.left) * t.scale + t.x < Number(label.dataset.right);
       const y = under ? Number(label.dataset.gapY) : Number(label.dataset.y);
       label.style.transform = `translateY(${y * t.scale + t.y}px) translateY(-50%)`;
       label.toggleAttribute('data-above', under);
@@ -1204,7 +1211,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
           .filter((l) => l.anchor === 'right-middle')
           .map((l) => (
             <div
-              key={l.generation}
+              key={`${l.generation}:${l.text}`}
               className={styles.labelGutter}
               data-testid="tree-row-label"
               data-y={l.y}

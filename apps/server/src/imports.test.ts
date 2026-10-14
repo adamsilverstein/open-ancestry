@@ -308,7 +308,10 @@ describe('POST /api/import (new tree owned by the server)', () => {
     expect(cancelled.statusCode).toBe(202);
     expect(cancelled.json().job.id).toBe(jobId);
     expect(fake.calls[0]!.options.signal.aborted).toBe(true);
-    expect(await waitForJob(api, jobId, 'failed')).toMatchObject({ error: 'aborted' });
+    expect(await waitForJob(api, jobId, 'failed')).toMatchObject({
+      error: 'aborted',
+      cancelled: true,
+    });
     expect(existsSync(`${api.root}/${job.tree}.oatree`)).toBe(false);
     expect(existsSync(fake.calls[0]!.path)).toBe(false);
 

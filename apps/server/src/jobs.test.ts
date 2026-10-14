@@ -80,9 +80,14 @@ describe('JobManager', () => {
       async () => void cleaned.push('a'),
     );
     await vi.waitFor(() => expect(jobs.get(job.id)?.state).toBe('running'));
+    expect(jobs.get(job.id)?.cancelled).toBe(false);
     expect(jobs.cancel(job.id)).toBe(true);
     await vi.waitFor(() =>
-      expect(jobs.get(job.id)).toMatchObject({ state: 'failed', error: 'Import was cancelled' }),
+      expect(jobs.get(job.id)).toMatchObject({
+        state: 'failed',
+        error: 'Import was cancelled',
+        cancelled: true,
+      }),
     );
     expect(cleaned).toEqual(['a']);
     // Finished jobs cannot be cancelled; unknown ones neither.
@@ -103,7 +108,11 @@ describe('JobManager', () => {
     );
     expect(jobs.cancel(queued.id)).toBe(true);
     await vi.waitFor(() =>
-      expect(jobs.get(queued.id)).toMatchObject({ state: 'failed', error: 'Cancelled' }),
+      expect(jobs.get(queued.id)).toMatchObject({
+        state: 'failed',
+        error: 'Cancelled',
+        cancelled: true,
+      }),
     );
     expect(cleaned).toEqual(['q']);
     release();

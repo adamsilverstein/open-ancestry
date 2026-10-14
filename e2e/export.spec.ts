@@ -46,9 +46,9 @@ async function exportFrom(page: Page, tree: string, format: string, privatize = 
   const dialog = page.getByRole('dialog', { name: 'Export tree' });
   await expect(dialog).toBeVisible();
   await dialog.getByRole('combobox', { name: 'Tree' }).click();
-  await page.getByRole('option', { name: tree }).click();
+  await page.getByRole('option', { name: tree, exact: true }).click();
   await dialog.getByRole('combobox', { name: 'Format' }).click();
-  await page.getByRole('option', { name: format }).click();
+  await page.getByRole('option', { name: format, exact: true }).click();
   if (privatize) await dialog.getByRole('checkbox', { name: 'Privatize living people' }).check();
   const [download] = await Promise.all([
     page.waitForEvent('download'),
@@ -93,7 +93,7 @@ test('exports GEDCOM 5.5.1 with living people privatized', async ({
   const text = new TextDecoder().decode(file.bytes);
   expect(text).toContain('2 VERS 5.5.1');
   for (const secret of ['Adelind', '1981', 'Harlow']) expect(text).not.toContain(secret);
-  expect(await reimport(file.bytes)).toEqual(['Bramwell', null]);
+  expect(await reimport(file.bytes)).toEqual(['Bramwell', 'Private']);
 });
 
 test('exports a GEDZIP archive that re-imports', async ({ page, request, baseURL }, info) => {

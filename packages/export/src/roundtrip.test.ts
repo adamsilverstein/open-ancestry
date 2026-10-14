@@ -36,7 +36,7 @@ describe('export in the version the file was imported from', () => {
     expect(head.form).toBe('LINEAGE-LINKED');
     expect(head.source?.system).toBe('Ancestry.com Family Trees');
     for (const tag of ['_APID', '_MTTAG', '_OID', '_PHOTO', '_PRIM', '_FREL', '_MREL', '_MILT']) {
-      expect(out).toContain(` ${tag} `);
+      expect(out).toMatch(new RegExp(`^\\d ${tag}\\b`, 'm'));
     }
   });
 

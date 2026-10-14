@@ -7,6 +7,7 @@ import {
   names,
   notes,
   persons,
+  sources,
   undoLast,
   type TreeStore,
 } from '@open-ancestry/db';
@@ -40,10 +41,10 @@ function rawByXref(store: TreeStore): Map<string, string> {
   );
 }
 
-function expectVerbatimExcept(store: TreeStore, out: string, changed: string[]) {
+/** Every imported record except `regenerated` comes out exactly as it was read. */
+function expectVerbatimExcept(store: TreeStore, out: string, regenerated: string[]) {
   for (const [xref, raw] of rawByXref(store)) {
-    if (changed.includes(xref)) expect(recordText(out, xref), xref).not.toBe(raw);
-    else expect(recordText(out, xref), xref).toBe(raw);
+    if (!regenerated.includes(xref)) expect(recordText(out, xref), xref).toBe(raw);
   }
 }
 
@@ -64,6 +65,7 @@ describe('edited records', () => {
     expectVerbatimExcept(store, out.text, ['@I1@']);
     expect(out.stats.generated).toBe(1);
     const thad = recordText(out.text, '@I1@')!;
+    expect(thad).not.toBe(rawByXref(store).get('@I1@'));
     expect(thad).toContain('1 NAME Thad /Ashgrove/\n2 GIVN Thad\n2 SURN Ashgrove');
     // Ancestry tags survive regeneration.
     expect(thad).toContain('3 _APID 1,60525::1000001');
@@ -196,6 +198,32 @@ describe('edited records', () => {
     const out = exportGedcom(store, { now: TODAY });
     expect(out).not.toContain('@F10@');
     expect(danglingPointers(parseGedcom(out))).toEqual([]);
+  });
+
+  it('still exports records nothing points at', async () => {
+    const store = await sample();
+    store.transact('Orphans', (tx) => {
+      tx.insert('repository', { name: 'County archive' });
+      sources.create(tx, { title: 'Unused parish register' });
+      notes.create(tx, { text: 'A note about nothing yet' });
+      tx.insert('tag', { name: 'To research', category: 'Custom' });
+    });
+    for (const version of ['5.5.1', '7'] as const) {
+      const out = exportGedcom(store, { version, now: TODAY });
+      expect(out).toMatch(/^0 @R2@ REPO\n1 NAME County archive$/m);
+      expect(out).toMatch(/^0 @S6@ SOUR\n1 TITL Unused parish register$/m);
+      expect(out).toMatch(/^0 @N1@ S?NOTE A note about nothing yet$/m);
+      expect(out).toMatch(/^0 @T3@ _MTTAG\n1 NAME To research\n1 _MTCAT Custom$/m);
+    }
+  });
+
+  it('leaves media out when asked', async () => {
+    const store = await sample();
+    for (const version of ['5.5.1', '7'] as const) {
+      const out = exportGedcom(store, { version, includeMedia: false, now: TODAY });
+      expect(out).not.toMatch(/OBJE|_PHOTO|_OID/);
+      expect(out).toContain('_APID');
+    }
   });
 
   it('surfaces serializer errors instead of writing broken GEDCOM', async () => {

@@ -41,7 +41,7 @@ function livingOnlyStrings(store: TreeStore): string[] {
   const strings = new Map<string, boolean>(); // value -> seen on a non-private owner
   const add = (value: unknown, isPrivate: boolean) => {
     if (typeof value !== 'string' || value.trim().length < 3) return;
-    for (const part of [value, ...value.split(/[\s/,;:]+/)]) {
+    for (const part of value.split(/[\s/,;:]+/)) {
       if (part.length < 4) continue;
       strings.set(part, (strings.get(part) ?? false) || !isPrivate);
     }

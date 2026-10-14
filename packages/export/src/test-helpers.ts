@@ -326,9 +326,9 @@ export function domainSnapshot(
         ...attached('family_child', c.id as string),
       })),
       spouseIn: all(
-        `SELECT id FROM family WHERE partner1_id = ?1 OR partner2_id = ?1
-         ORDER BY CASE WHEN partner1_id = ?1 THEN partner1_order ELSE partner2_order END, id`,
-        id,
+        `SELECT id FROM family WHERE partner1_id = @id OR partner2_id = @id
+         ORDER BY CASE WHEN partner1_id = @id THEN partner1_order ELSE partner2_order END, id`,
+        { id },
       ).map((f) => familyX(f.id)),
     };
   }

@@ -207,6 +207,19 @@ test.describe('family view', () => {
     await expect(card(page, 'Hugo Vale')).toBeAttached();
   });
 
+  test('sibling and aunt/uncle chevrons reveal nephews, nieces and cousins', async ({ page }) => {
+    await open(page);
+    await fit(page);
+    await expect(card(page, 'Nico Vale')).toHaveCount(0);
+    await canvas(page).getByRole('button', { name: 'Show children of Hugo Vale' }).click();
+    await expect(card(page, 'Nico Vale')).toHaveAccessibleName(/nephew of Ada Vale/);
+    await expect(card(page, 'Cass Vale')).toHaveCount(0);
+    await canvas(page).getByRole('button', { name: 'Show children of Fenn Vale' }).click();
+    await expect(card(page, 'Cass Vale')).toHaveAccessibleName(/cousin of Ada Vale/);
+    await canvas(page).getByRole('button', { name: 'Hide children of Hugo Vale' }).click();
+    await expect(card(page, 'Nico Vale')).toHaveCount(0);
+  });
+
   test('arrow keys move between related cards', async ({ page }) => {
     await open(page);
     await card(page, 'Ada Vale').focus();

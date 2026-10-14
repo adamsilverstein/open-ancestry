@@ -19,6 +19,7 @@ import type { BulkData } from '@open-ancestry/db';
  *              |                         Rolf+Una (Ada's adoptive parents)
  *   Hugo, Ada, Ilsa                          |
  *   Corin+Ada+Lucan   <- two spouses        Ada
+ *   (Hugo+Vera have Nico, a nephew; Fenn+Mae have Cass, a cousin)
  *     |        |
  *  Wren,Tobin  Mira
  *   Wren+Dax
@@ -74,6 +75,10 @@ const people: PersonSpec[] = [
   { key: 'mira', given: 'Mira', surname: 'Reed', sex: 'F', born: 1975 },
   { key: 'dax', given: 'Dax', surname: 'Hart', sex: 'M', born: 1963 },
   { key: 'juno', given: 'Juno', surname: 'Hart', sex: 'F', born: 1990 },
+  { key: 'vera', given: 'Vera', surname: 'Moss', sex: 'F', born: 1941, died: 2015 },
+  { key: 'nico', given: 'Nico', surname: 'Vale', sex: 'M', born: 1966 },
+  { key: 'mae', given: 'Mae', surname: 'Orr', sex: 'F', born: 1912, died: 1990 },
+  { key: 'cass', given: 'Cass', surname: 'Vale', sex: 'F', born: 1936, died: 2010 },
 ];
 
 /** [family key, partner1, partner2, children (with optional relationship)] */
@@ -90,6 +95,8 @@ const families: FamilySpec[] = [
   ['f-corin', 'corin', 'ada', ['wren', 'tobin']],
   ['f-lucan', 'lucan', 'ada', ['mira']],
   ['f-dax', 'dax', 'wren', ['juno']],
+  ['f-hugo', 'hugo', 'vera', ['nico']],
+  ['f-fenn', 'fenn', 'mae', ['cass']],
 ];
 
 const now = '2026-01-01T00:00:00.000Z';

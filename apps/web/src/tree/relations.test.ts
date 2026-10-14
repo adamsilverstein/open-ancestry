@@ -83,6 +83,26 @@ describe('kinship', () => {
     expect(k('dax')).toBe('son-in-law');
   });
 
+  it('names nephews, nieces and cousins', () => {
+    const wide: TreeGraph = {
+      people: {
+        ...graph.people,
+        nico: person('nico', 'M'),
+        cass: person('cass', 'F'),
+      } as Record<string, TreePerson>,
+      families: [
+        ...graph.families,
+        { id: 'f-hugo', partners: ['hugo', null], children: [{ id: 'nico' }] },
+        { id: 'f-fenn', partners: ['fenn', null], children: [{ id: 'cass' }] },
+      ],
+    };
+    const l = layoutFamily(wide, 'ada', { expanded: ['hugo:down', 'fenn:down'] });
+    const r = buildRelations(l);
+    const sex = (key: string) => (key === 'nico' ? 'M' : 'F');
+    expect(kinship(r, 'ada', 'nico', sex)).toBe('nephew');
+    expect(kinship(r, 'ada', 'cass', sex)).toBe('cousin');
+  });
+
   it('returns null for the focus person and strangers', () => {
     expect(k('ada')).toBeNull();
     expect(k('nobody')).toBeNull();

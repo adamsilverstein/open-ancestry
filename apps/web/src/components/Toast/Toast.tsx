@@ -4,10 +4,13 @@ import {
   Suspense,
   use,
   useCallback,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from 'react';
+import { ChunkBoundary } from '../../lib/ChunkBoundary';
+import { ToastFallback } from './ToastFallback';
 
 export type ToastVariant = 'info' | 'error';
 
@@ -36,7 +39,8 @@ export function useToast(): ShowToast {
 
 let nextId = 1;
 
-const ToastStack = lazy(() => import('./ToastStack'));
+const loadToastStack = () => import('./ToastStack');
+const ToastStack = lazy(loadToastStack);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -52,13 +56,22 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
   const value = useMemo(() => show, [show]);
 
+  // Fetch the toast chunk once the page is idle: the first toast is often an
+  // error, shown exactly when the network is least reliable.
+  useEffect(() => {
+    const id = setTimeout(() => void loadToastStack().catch(() => {}), 2000);
+    return () => clearTimeout(id);
+  }, []);
+
   return (
     <ToastContext value={value}>
       {children}
       {shown && (
-        <Suspense fallback={null}>
-          <ToastStack toasts={toasts} onRemove={remove} />
-        </Suspense>
+        <ChunkBoundary fallback={<ToastFallback toasts={toasts} onRemove={remove} />}>
+          <Suspense fallback={null}>
+            <ToastStack toasts={toasts} onRemove={remove} />
+          </Suspense>
+        </ChunkBoundary>
       )}
     </ToastContext>
   );

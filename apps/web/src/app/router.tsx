@@ -14,6 +14,7 @@ import { queryClient } from './queryClient';
 import { AppShell } from './AppShell';
 import { HomePage } from '../routes/HomePage';
 import { NotFoundPage } from '../routes/NotFoundPage';
+import { RouteErrorPage } from '../routes/RouteErrorPage';
 import { validatePeopleSearch } from '../routes/people/search';
 
 const rootRoute = createRootRoute({
@@ -111,7 +112,13 @@ const routeTree = rootRoute.addChildren([
   importRoute,
 ]);
 
-export const router = createRouter({ routeTree, defaultPreload: 'intent' });
+export const router = createRouter({
+  routeTree,
+  defaultPreload: 'intent',
+  // Failed pages, including code that will not load after an update, render
+  // inside the shell instead of replacing it.
+  defaultErrorComponent: RouteErrorPage,
+});
 
 declare module '@tanstack/react-router' {
   interface Register {

@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { Outlet } from '@tanstack/react-router';
 import { ToastProvider } from '../components/Toast/Toast';
+import { ChunkBoundary } from '../lib/ChunkBoundary';
 import { PaletteContext } from './palette';
 import { TopBar } from './TopBar';
 import { UndoShortcuts } from './UndoShortcuts';
@@ -31,7 +32,7 @@ export function AppShell() {
 
   // Fetch the palette chunk once the page is idle so Cmd-K never waits on the network.
   useEffect(() => {
-    const id = setTimeout(() => void loadPalette(), 1500);
+    const id = setTimeout(() => void loadPalette().catch(() => {}), 1500);
     return () => clearTimeout(id);
   }, []);
 
@@ -63,9 +64,11 @@ export function AppShell() {
           <Outlet />
         </main>
         {paletteLoaded && (
-          <Suspense fallback={null}>
-            <ShellCommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
-          </Suspense>
+          <ChunkBoundary fallback={null}>
+            <Suspense fallback={null}>
+              <ShellCommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+            </Suspense>
+          </ChunkBoundary>
         )}
       </ToastProvider>
     </PaletteContext>

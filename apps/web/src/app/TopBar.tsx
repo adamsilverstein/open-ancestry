@@ -2,6 +2,7 @@ import { lazy, Suspense, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { ChevronDown, History, Moon, Search, Sun, TreeDeciduous, Users } from 'lucide-react';
 import { Button } from '../components/Button/Button';
+import { ChunkBoundary } from '../lib/ChunkBoundary';
 import buttonStyles from '../components/Button/Button.module.css';
 import { IconButtonBase } from '../components/IconButton/IconButtonBase';
 import { cx } from '../lib/cx';
@@ -55,9 +56,11 @@ export function TopBar({ onFind }: { onFind: () => void }) {
         <span aria-hidden>open-ancestry</span>
       </Link>
       <span className={styles.divider} aria-hidden />
-      <Suspense fallback={<TreeSwitcherPlaceholder />}>
-        <TreeSwitcher />
-      </Suspense>
+      <ChunkBoundary fallback={<TreeSwitcherPlaceholder />}>
+        <Suspense fallback={<TreeSwitcherPlaceholder />}>
+          <TreeSwitcher />
+        </Suspense>
+      </ChunkBoundary>
 
       <div className={styles.actions}>
         <Link
@@ -79,9 +82,11 @@ export function TopBar({ onFind }: { onFind: () => void }) {
           Find
           <kbd className={styles.kbd}>{isMac ? '⌘K' : 'Ctrl K'}</kbd>
         </Button>
-        <Suspense fallback={<FileMenuPlaceholder />}>
-          <FileMenu />
-        </Suspense>
+        <ChunkBoundary fallback={<FileMenuPlaceholder />}>
+          <Suspense fallback={<FileMenuPlaceholder />}>
+            <FileMenu />
+          </Suspense>
+        </ChunkBoundary>
         <IconButtonBase
           label="History"
           title="History (undo and redo)"
@@ -89,9 +94,11 @@ export function TopBar({ onFind }: { onFind: () => void }) {
           onClick={() => setHistoryOpen(true)}
         />
         {historyOpen && (
-          <Suspense fallback={null}>
-            <HistoryPanel open={historyOpen} onOpenChange={setHistoryOpen} />
-          </Suspense>
+          <ChunkBoundary fallback={null}>
+            <Suspense fallback={null}>
+              <HistoryPanel open={historyOpen} onOpenChange={setHistoryOpen} />
+            </Suspense>
+          </ChunkBoundary>
         )}
         <IconButtonBase
           label={`Switch to ${next} theme`}

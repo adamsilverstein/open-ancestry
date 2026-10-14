@@ -281,6 +281,61 @@ test.describe('family view', () => {
     expect(await activeKey(page)).toBe(ids.elsa);
   });
 
+  test('mid zoom shows lighter cards with the same names and labels', async ({ page }) => {
+    await open(page);
+    const ada = card(page, 'Ada Vale');
+    const label = await ada.getAttribute('aria-label');
+    await ada.focus();
+    // Step out to between 35% and 60%: cards are DOM but drop avatar and badges.
+    while ((await transform(page)).scale >= 0.6) {
+      await page.keyboard.press('-');
+      await settled(page);
+    }
+    expect((await transform(page)).scale).toBeGreaterThanOrEqual(0.35);
+    await expect(ada).toBeFocused();
+    await expect(ada).toHaveAttribute('aria-label', label!);
+    await expect(ada).toContainText('Ada Vale');
+    await expect(ada).toContainText('1941–Living');
+    await expect(ada.locator('svg')).toHaveCount(0);
+    // The quick view and re-focus work as at full detail.
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
+    await expect(card(page, 'Bram Vale')).toBeFocused();
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    // Back at full detail the avatar returns, and focus stays.
+    await page.keyboard.press('+');
+    await page.keyboard.press('+');
+    await settled(page);
+    expect((await transform(page)).scale).toBeGreaterThanOrEqual(0.6);
+    await expect(card(page, 'Bram Vale')).toBeFocused();
+    await expect(card(page, 'Bram Vale').locator('svg').first()).toBeAttached();
+  });
+
+  test('sweeping the pointer across cards prepares only where it rests', async ({ page }) => {
+    await open(page);
+    await fit(page);
+    const requests: string[] = [];
+    page.on('request', (r) => {
+      const url = new URL(r.url());
+      if (url.pathname.startsWith('/api/') && url.pathname.endsWith('/neighborhood')) {
+        requests.push(url.searchParams.get('focus')!);
+      }
+    });
+    // Pass over six cards without stopping (all within one task, so no dwell can
+    // elapse even on a busy machine), then rest on the last one.
+    const keys = [ids.otto, ids.greta, ids.piers, ids.rhea, ids.elsa, ids.tilda];
+    await page.evaluate((list) => {
+      for (const key of list) {
+        document
+          .querySelector(`[data-key="${key}"]`)!
+          .dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }));
+      }
+    }, keys);
+    await page.waitForTimeout(600);
+    expect(requests).toEqual([ids.tilda]);
+  });
+
   test('a click on empty canvas keeps the tree shortcuts working', async ({ page }) => {
     await open(page);
     const viewport = await box(canvas(page));

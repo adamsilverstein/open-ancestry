@@ -125,6 +125,11 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   };
 
   registerErrorHandling(app);
+  // Lets clients and tests read server-side latency without network noise.
+  app.addHook('onSend', async (_request, reply, payload) => {
+    reply.header('server-timing', `app;dur=${reply.elapsedTime.toFixed(2)}`);
+    return payload;
+  });
   registerSecurity(app, {
     token: options.token ?? createToken(),
     allowedHosts: options.allowedHosts,

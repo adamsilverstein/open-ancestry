@@ -74,6 +74,25 @@ test('arrow keys move through results and Shift+Enter or Alt+Enter focus the tre
   await expect(page).toHaveURL(new RegExp(`/tree/${ezra}$`));
 });
 
+test('Enter right after typing waits for this query, never the previous one', async ({
+  page,
+  request,
+}) => {
+  const ezra = await personId(request, 'ezra thackery');
+  await open(page);
+  const dialog = await search(page, 'mabyn');
+  await expect(people(dialog).first()).toContainText('Mabyn Thackeray');
+  await dialog.getByRole('combobox').fill('ezra');
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(new RegExp(`/person/${ezra}$`));
+
+  const second = await search(page, 'mabyn');
+  await expect(people(second).first()).toContainText('Mabyn Thackeray');
+  await second.getByRole('combobox').fill('ezra thackery');
+  await page.keyboard.press('Shift+Enter');
+  await expect(page).toHaveURL(new RegExp(`/tree/${ezra}$`));
+});
+
 test('matches married names, prefixes, places and approximate years', async ({ page }) => {
   await open(page);
   const dialog = await search(page, 'abernathy');
@@ -118,13 +137,15 @@ test('on the tree, Find focuses the tree and Alt+Enter opens the person page', a
 });
 
 test('search answers within the budget on a 10k tree', async ({ request }) => {
-  // Warm the tree, then time the API the palette calls (design.md section 7: < 50ms).
-  await request.get(`${base}/search?q=a`);
-  const timings: number[] = [];
+  // Server time (Server-Timing), so parallel workers and HTTP overhead do not
+  // count; design.md section 7 budgets search at 50ms.
+  const serverMs = async (q: string) => {
+    const res = await request.get(`${base}/search?q=${encodeURIComponent(q)}`);
+    expect(res.ok()).toBe(true);
+    return Number(/dur=([\d.]+)/.exec(res.headers()['server-timing'] ?? '')?.[1]);
+  };
+  await serverMs('a');
   for (const q of ['wren', 'thackeray 1850', 'ash', 'kestrel cove', 'vail']) {
-    const start = performance.now();
-    expect((await request.get(`${base}/search?q=${encodeURIComponent(q)}`)).ok()).toBe(true);
-    timings.push(performance.now() - start);
+    expect(await serverMs(q), q).toBeLessThan(50);
   }
-  expect(Math.max(...timings)).toBeLessThan(50);
 });

@@ -83,3 +83,50 @@ jobs:
           name: coverage
           path: coverage/merged/
           retention-days: 14
+
+  # Tree view budgets (design.md section 7) in the browser, on an uninstrumented
+  # build and its own runner so coverage and other jobs do not skew timings.
+  perf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Tree view perf (10k and 100k trees)
+        run: npm run e2e:perf
+        env:
+          # Budgets are for an M-series laptop; shared runners are about 2-3x slower.
+          OA_BENCH_FACTOR: '2.5'
+
+      - name: Perf job summary
+        if: ${{ !cancelled() && hashFiles('perf-results/tree-view.md') != '' }}
+        run: |
+          {
+            echo '## Tree view performance'
+            echo
+            echo "Budgets scaled by OA_BENCH_FACTOR=2.5 for shared runners."
+            echo
+            echo '| People | Measure | Result | Budget | Status |'
+            echo '| --- | --- | --- | --- | --- |'
+            cat perf-results/tree-view.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Playwright report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14

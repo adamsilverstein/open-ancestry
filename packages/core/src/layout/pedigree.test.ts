@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { TreePerson } from './types';
 import { layoutFan, layoutPedigree } from './index';
 import {
   cousinMarriage,
@@ -100,5 +101,25 @@ describe('layoutFan', () => {
       height: 260,
     });
     expect(layoutFan(threeGenerations, 'ghost').segments).toEqual([]);
+  });
+
+  it('marks the missing parents of shown ancestors as empty slots', () => {
+    const g = makeGraph({ me: 'M', dad: 'M', mom: 'F', gpa: 'M' }, [
+      ['F1', 'dad', 'mom', ['me']],
+      ['F2', 'gpa', null, ['dad']],
+    ]);
+    const fan = layoutFan(g, 'me', { generations: 4 });
+    // Dad's mother, both of Mom's parents and Gpa's parents: the next ring only.
+    expect(fan.emptySlots.map((s) => s.ahnentafel).sort((a, b) => a - b)).toEqual([5, 6, 7, 8, 9]);
+    const slot = fan.emptySlots.find((s) => s.ahnentafel === 5)!;
+    expect(slot).toMatchObject({ generation: 2, innerRadius: 130, outerRadius: 200 });
+    // Nothing past the last ring, and none for duplicates.
+    expect(layoutFan(g, 'me', { generations: 2 }).emptySlots.map((s) => s.ahnentafel)).toEqual([]);
+    // Parents the server left out of the slice are not unknown: no empty slot.
+    const people = g.people as Record<string, TreePerson>;
+    people['mom'] = { ...people['mom']!, hasMoreParents: true };
+    expect(layoutFan(g, 'me', { generations: 4 }).emptySlots.map((s) => s.ahnentafel)).toEqual([
+      5, 8, 9,
+    ]);
   });
 });

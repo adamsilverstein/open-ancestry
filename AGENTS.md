@@ -28,6 +28,7 @@ npm run typecheck
 npm test             # unit (vitest) with coverage
 npm run e2e          # playwright, builds instrumented app
 npm run coverage     # merged unit + e2e coverage report
+npm run e2e:perf     # tree view budgets on 10k and 100k trees (Chromium)
 npm run bench        # performance budgets
 ```
 

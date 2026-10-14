@@ -183,13 +183,19 @@ describe('POST import', () => {
   it('bounds concurrency and the queue', async () => {
     const fake = controllableImporter();
     api = await testApi({ importer: fake.importer, maxQueuedImports: 1 });
-    const base = await createTestTree(api);
-    const first = (await upload(api, base)).json().jobId;
+    const [a, b, c] = [
+      await createTestTree(api, 'A'),
+      await createTestTree(api, 'B'),
+      await createTestTree(api, 'C'),
+    ];
+    const first = (await upload(api, a)).json().jobId;
     await waitForJob(api, first, 'running');
-    const second = await upload(api, base);
+    // A second import into a tree that is already importing is refused outright.
+    expect((await upload(api, a)).statusCode).toBe(409);
+    const second = await upload(api, b);
     expect(second.statusCode).toBe(202);
     expect(second.json().job.state).toBe('queued');
-    const third = await upload(api, base);
+    const third = await upload(api, c);
     expect(third.statusCode).toBe(429);
     expect(third.json().error.code).toBe('too_many_jobs');
     fake.release();

@@ -26,6 +26,9 @@ import type {
 } from '@open-ancestry/core';
 import { GenerationLabel } from '../components/GenerationLabel/GenerationLabel';
 import { PersonCard, personCardLabel } from '../components/PersonCard/PersonCard';
+import cardStyles from '../components/PersonCard/PersonCard.module.css';
+import { cx } from '../lib/cx';
+import { formatLifespan } from '../lib/lifespan';
 import { useTheme } from '../lib/useTheme';
 import type { TreeLayout as LayoutKind } from '../components/TreeToolbar/TreeToolbar';
 import type { PersonSummary } from '../lib/person';
@@ -54,6 +57,12 @@ const OVERSCAN = 240;
  * one canvas instead of mounted (only the keyboard's active card stays in the DOM).
  */
 const LOD_SCALE = 0.35;
+/**
+ * Below this zoom (but above LOD_SCALE) cards drop their avatar and badges:
+ * mounting about 100 full cards on a re-focus cost most of its time, and at
+ * this size the silhouettes and icons are a few pixels wide.
+ */
+const LIGHT_SCALE = 0.6;
 const ANIMATION_MS = 180;
 const FIT_PADDING = 64;
 const DRAG_THRESHOLD = 4;
@@ -97,6 +106,7 @@ interface Visible {
   nodes: number[];
   edges: number[];
   lod: boolean;
+  light: boolean;
 }
 
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -137,6 +147,7 @@ interface CardProps {
   tabbable: boolean;
   expanded: boolean;
   lod: boolean;
+  light: boolean;
   alternate: ParentFamilyChoice | undefined;
 }
 
@@ -148,6 +159,7 @@ const TreeCard = memo(function TreeCard({
   tabbable,
   expanded,
   lod,
+  light,
   alternate,
 }: CardProps) {
   const tabIndex = tabbable ? 0 : -1;
@@ -175,9 +187,27 @@ const TreeCard = memo(function TreeCard({
           data-focus={node.isFocus || undefined}
           {...common}
         />
+      ) : light ? (
+        <button
+          type="button"
+          className={cx(
+            cardStyles.card,
+            cardStyles.regular,
+            cardStyles[`sex${person.sex}`],
+            node.isFocus && cardStyles.focusPerson,
+            node.isDuplicate && cardStyles.duplicate,
+            styles.card,
+            styles.lightCard,
+          )}
+          {...common}
+        >
+          <span className={cardStyles.name}>{person.name}</span>
+          <span className={cardStyles.lifespan}>{formatLifespan(person)}</span>
+        </button>
       ) : (
         <PersonCard
           person={person}
+          size={node.width < 120 ? 'compact' : 'regular'}
           focusPerson={node.isFocus}
           duplicate={node.isDuplicate}
           className={styles.card}
@@ -276,9 +306,24 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     const gutter = gutterRef.current;
     // Rows closer than a label's height would overlap: hide them when zoomed far out.
     if (gutter) gutter.hidden = t.scale < 0.15;
-    for (const el of gutter?.children ?? []) {
-      const label = el as HTMLElement;
-      label.style.transform = `translateY(${Number(label.dataset.y) * t.scale + t.y}px) translateY(-50%)`;
+    const labels = [...(gutter?.children ?? [])] as HTMLElement[];
+    // A label's right edge never changes (its key includes its text), so
+    // measure it once, and all reads before any writes: this runs on every pan
+    // frame and re-focus. A hidden gutter has no size to measure yet.
+    if (gutter && !gutter.hidden) {
+      const offset = gutter.offsetLeft;
+      for (const label of labels) {
+        label.dataset.right ||= String(offset + label.offsetLeft + label.offsetWidth + 8);
+      }
+    }
+    for (const label of labels) {
+      // Beside the row while the row's cards start right of the label; once a
+      // wide row slides under the gutter, up in the gap above it instead, so
+      // the label never covers a card.
+      const under = Number(label.dataset.left) * t.scale + t.x < Number(label.dataset.right);
+      const y = under ? Number(label.dataset.gapY) : Number(label.dataset.y);
+      label.style.transform = `translateY(${y * t.scale + t.y}px) translateY(-50%)`;
+      label.toggleAttribute('data-above', under);
     }
   };
   const transform = useRef<Transform>({ x: 0, y: 0, scale: 1 });
@@ -287,6 +332,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   const animation = useRef(0);
   const idle = useRef<ReturnType<typeof setTimeout>>(undefined);
   const lastCells = useRef('');
+  const lastMode = useRef('');
   const previous = useRef<{ layout: TreeLayout | null; kind: LayoutKind; focus: string } | null>(
     null,
   );
@@ -298,6 +344,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     nodes: [],
     edges: [],
     lod: false,
+    light: false,
   });
 
   const source = layout ?? fan;
@@ -412,16 +459,20 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       const c1 = Math.floor((world.x + world.width + pad) / CELL);
       const r1 = Math.floor((world.y + world.height + pad) / CELL);
       // Far out, nothing mounts while panning: the canvas layer shows it all.
-      const key = lod ? 'lod' : `${c0},${r0},${c1},${r1}`;
+      const light = t.scale < LIGHT_SCALE;
+      const key = lod ? 'lod' : `${c0},${r0},${c1},${r1},${light}`;
       if (!force && key === lastCells.current) return;
-      // Crossing the canvas threshold swaps the focused card's element: put
-      // keyboard focus back on the active card after the swap (WCAG 2.4.3).
-      if (lastCells.current !== '' && (key === 'lod') !== (lastCells.current === 'lod')) {
+      // Crossing a detail threshold (full, light, canvas) swaps the focused card's
+      // element: put keyboard focus back on the active card after the swap
+      // (WCAG 2.4.3).
+      const mode = lod ? 'lod' : light ? 'light' : 'full';
+      if (lastMode.current !== '' && mode !== lastMode.current) {
         const focused = document.activeElement as HTMLElement | null;
         if (focused?.dataset.key && viewportRef.current?.contains(focused)) {
           pendingFocus.current = focused.dataset.key;
         }
       }
+      lastMode.current = mode;
       lastCells.current = key;
       const rect = {
         x: c0 * CELL,
@@ -434,6 +485,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         nodes: lod ? [] : nodeIndex.query(rect),
         edges: lod ? [] : edgeIndex.query(rect),
         lod,
+        light,
       });
     },
     [nodeIndex, edgeIndex, drawLod],
@@ -556,9 +608,43 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       }
       return { x, y, scale };
     }
+    const pad = 32;
+    // Clear of the floating toolbar on the left.
+    const toolbar = 80;
+    const fitScale = (w: number, h: number) =>
+      Math.max(
+        LOD_SCALE + 0.05,
+        Math.min(
+          1,
+          w / Math.max(1, current!.bounds.width),
+          h / Math.max(1, current!.bounds.height),
+        ),
+      );
+    if (focus && current && latest.current.kind === 'pedigree') {
+      // Focus at the left, ancestors spreading right, the whole chart down the screen.
+      // Room above the chart for the two-line column heads.
+      const heads = 48;
+      const scale = fitRows
+        ? fitScale(width - toolbar - 2 * pad, height - 2 * pad - heads)
+        : t.scale;
+      const b = current.bounds;
+      return {
+        x: toolbar + pad - focus.x * scale,
+        y: (height + heads) / 2 - (b.minY + b.height / 2) * scale,
+        scale,
+      };
+    }
+    if (focus && current && latest.current.kind === 'descendants') {
+      // Focus at the top center, descendants below.
+      const scale = fitRows ? fitScale(width - 2 * pad, height - 2 * pad - 28) : t.scale;
+      const centered = centerOn({ ...t, scale }, focus.x + focus.width / 2, 0, width, height);
+      return { x: centered.x, y: pad + 14 - focus.y * scale, scale };
+    }
     if (focus)
       return centerOn(t, focus.x + focus.width / 2, focus.y + focus.height / 2, width, height);
     if (currentFan) {
+      // The whole fan, as large as fits.
+      if (fitRows) return fitBounds(currentFan.bounds, width, height, FIT_PADDING);
       const b = currentFan.bounds;
       return centerOn(t, b.minX + b.width / 2, b.minY + b.height / 2, width, height);
     }
@@ -599,6 +685,9 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       setActiveKey(key);
       pendingFocus.current = key;
       ensureOnScreen(key);
+      // Enter would re-focus here next: get its layout ready.
+      const node = nodeByKey(key);
+      if (node && !node.isDuplicate && !node.isFocus) latest.current.onPrefetch(node.personId);
       // Already mounted: focus now. Otherwise the commit effect below does.
       const el = viewportRef.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`);
       if (el) {
@@ -606,7 +695,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         pendingFocus.current = null;
       }
     },
-    [ensureOnScreen],
+    [ensureOnScreen, nodeByKey],
   );
 
   useImperativeHandle(
@@ -931,16 +1020,14 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     if (node && !node.isDuplicate && !node.isFocus) refocus(node.personId);
   }
 
-  const hover = useRef<{ key: string; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const hovered = useRef<string | null>(null);
   function onPointerOver(event: PointerEvent<HTMLDivElement>) {
     if (drag.current?.moved) return;
     const node = nodeOf(event.target);
-    if (!node || hover.current?.key === node.key) return;
-    if (hover.current) clearTimeout(hover.current.timer);
-    hover.current = {
-      key: node.key,
-      timer: setTimeout(() => latest.current.onPrefetch(node.personId), 120),
-    };
+    if (!node || hovered.current === node.key) return;
+    hovered.current = node.key;
+    // The view waits for the pointer to rest before preparing anything.
+    if (!node.isDuplicate) latest.current.onPrefetch(node.personId);
   }
 
   const arrows: Record<string, Direction> = {
@@ -1026,6 +1113,27 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     focusGiven ? `${focusGiven}’s ${text.toLowerCase()}` : text;
 
   const shown = visible.source === layout && layout ? visible : null;
+  // Per labelled row: its leftmost card, and the middle of the gap above it.
+  const rowExtent = useMemo(() => {
+    const extent = new Map<number, { 'data-left': number; 'data-gap-y': number }>();
+    if (!layout) return extent;
+    const rows = new Map<number, { left: number; top: number }>();
+    for (const n of layout.nodes) {
+      const row = rows.get(n.generation);
+      if (!row) rows.set(n.generation, { left: n.x, top: n.y });
+      else row.left = Math.min(row.left, n.x);
+    }
+    for (const [generation, row] of rows) {
+      const above = rows.get(generation - 1);
+      const height = layout.nodes[0]!.height;
+      // Chevrons sit on the cards' top edges: keep the label clear of them.
+      const gapY = above ? (above.top + height + row.top) / 2 - 7 : row.top - 28;
+      extent.set(generation, { 'data-left': row.left, 'data-gap-y': gapY });
+    }
+    return extent;
+  }, [layout]);
+  // Column heads (pedigree) wrap within a card and most of the gap after it.
+  const columnLabelWidth = (layout?.nodes[0]?.width ?? 120) + 48;
   const cardIndexes = useMemo(() => {
     if (!shown || !layout) return [];
     const list = shown.nodes.slice();
@@ -1089,7 +1197,12 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         {layout?.labels
           .filter((l) => l.anchor !== 'right-middle')
           .map((l) => (
-            <div key={l.generation} className={styles.labelColumn} style={{ left: l.x, top: l.y }}>
+            <div
+              key={l.generation}
+              className={styles.labelColumn}
+              // Wrap within the column, so long labels never run into the next one.
+              style={{ left: l.x, top: l.y, width: columnLabelWidth }}
+            >
               <GenerationLabel>{relativeLabel(l.text)}</GenerationLabel>
             </div>
           ))}
@@ -1121,6 +1234,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
                 tabbable={node.key === active}
                 expanded={popoverKey === node.key}
                 lod={shown.lod}
+                light={shown.light}
                 alternate={layout.alternateParentFamilies[node.personId]}
               />
             );
@@ -1134,7 +1248,13 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         {layout?.labels
           .filter((l) => l.anchor === 'right-middle')
           .map((l) => (
-            <div key={l.generation} className={styles.labelGutter} data-y={l.y}>
+            <div
+              key={`${l.generation}:${l.text}`}
+              className={styles.labelGutter}
+              data-testid="tree-row-label"
+              data-y={l.y}
+              {...rowExtent.get(l.generation)}
+            >
               <GenerationLabel>{relativeLabel(l.text)}</GenerationLabel>
             </div>
           ))}

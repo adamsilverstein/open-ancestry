@@ -201,13 +201,11 @@ export interface FanOptions {
 }
 
 /**
- * One ring segment. Angles are radians in screen space (y down): 0 points
- * right and angles grow clockwise, so 3*PI/2 is straight up. The fan centre is
- * the origin.
+ * Where an Ahnentafel number sits on the fan. Angles are radians in screen
+ * space (y down): 0 points right and angles grow clockwise, so 3*PI/2 is
+ * straight up. The fan centre is the origin.
  */
-export interface FanSegment {
-  key: string;
-  personId: string;
+export interface FanSlot {
   generation: number;
   /** Ahnentafel number: focus 1, father 2n, mother 2n+1. */
   ahnentafel: number;
@@ -215,6 +213,12 @@ export interface FanSegment {
   endAngle: number;
   innerRadius: number;
   outerRadius: number;
+}
+
+/** One person's ring segment. */
+export interface FanSegment extends FanSlot {
+  key: string;
+  personId: string;
   isFocus: boolean;
   isDuplicate: boolean;
   duplicateOf?: string;
@@ -223,6 +227,8 @@ export interface FanSegment {
 export interface FanLayout {
   focusKey: string | null;
   segments: FanSegment[];
+  /** The next ring's slots for unknown parents of shown ancestors, to draw empty. */
+  emptySlots: FanSlot[];
   bounds: Bounds;
   alternateParentFamilies: Record<string, ParentFamilyChoice>;
 }

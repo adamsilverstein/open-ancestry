@@ -163,7 +163,8 @@ test.describe('person', () => {
       const { items } = (await res.json()) as { items: { label: string; state: string }[] };
       return `${items[0]!.label}: ${items[0]!.state}`;
     };
-    expect(await latest()).toMatch(/^Edit person: .*applied$/);
+    // The page can show the edit before the server has recorded it.
+    await expect.poll(latest).toMatch(/^Edit person: .*applied$/);
 
     // A select outside any dialog: the people list's Sex filter.
     await page.getByRole('banner').getByRole('link', { name: 'People' }).click();

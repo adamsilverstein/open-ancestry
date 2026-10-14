@@ -5,6 +5,18 @@ import { assertDataTable } from './tables';
 import type { InsertRow, PatchRow, TableName, TableRows } from './types';
 import { ulid } from './ulid';
 
+/**
+ * A write was attempted while the connection already has a transaction open,
+ * such as an import's: SQLite would nest it as a savepoint inside that
+ * transaction, so its fate would follow the other writer's.
+ */
+export class TransactionInProgressError extends Error {
+  constructor() {
+    super('nested transactions are not supported');
+    this.name = 'TransactionInProgressError';
+  }
+}
+
 export class NotFoundError extends Error {
   constructor(table: string, id: string) {
     super(`${table} ${id} not found`);
@@ -154,7 +166,7 @@ export class TreeStore {
    * all recorded in change_log under a new change_batch, so it can be undone.
    */
   transact<R>(label: string, fn: (tx: Tx) => R): { batchId: string; result: R } {
-    if (this.db.inTransaction) throw new Error('nested transactions are not supported');
+    if (this.db.inTransaction) throw new TransactionInProgressError();
     const batchId = this.newId();
     const now = this.clock();
     const tx = new Tx(this, batchId, now, true);

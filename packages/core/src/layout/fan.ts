@@ -7,7 +7,7 @@
 import { Builder, settingsFrom } from './build';
 import { chooseParentFamily, coupleOrder, indexGraph } from './graph';
 import { boundsOf } from './output';
-import type { Bounds, FanLayout, FanOptions, FanSegment, TreeGraph } from './types';
+import type { Bounds, FanLayout, FanOptions, FanSegment, FanSlot, TreeGraph } from './types';
 
 export function layoutFan(graph: TreeGraph, focusId: string, options: FanOptions = {}): FanLayout {
   const index = indexGraph(graph);
@@ -17,29 +17,42 @@ export function layoutFan(graph: TreeGraph, focusId: string, options: FanOptions
   const sweep = options.sweep ?? Math.PI;
   const start = (3 * Math.PI) / 2 - sweep / 2;
   if (!index.person(focusId)) {
-    return { focusKey: null, segments: [], bounds: boundsOf([]), alternateParentFamilies: {} };
+    return {
+      focusKey: null,
+      segments: [],
+      emptySlots: [],
+      bounds: boundsOf([]),
+      alternateParentFamilies: {},
+    };
   }
   const b = new Builder(index, settingsFrom(options, { ancestorsDepth: 0, descendantsDepth: 0 }));
 
   const segments: FanSegment[] = [];
-  const queue: { personId: string; ahnentafel: number; generation: number }[] = [
-    { personId: focusId, ahnentafel: 1, generation: 0 },
-  ];
-  for (let i = 0; i < queue.length; i++) {
-    const { personId, ahnentafel, generation } = queue[i]!;
-    const card = b.card(personId, generation === 0 ? 'focus' : 'ancestor', -generation);
-    const slots = 2 ** generation;
-    const per = sweep / slots;
-    const slot = ahnentafel - slots;
-    const segment: FanSegment = {
-      key: card.key,
-      personId,
+  const emptySlots: FanSlot[] = [];
+  /** The ring segment of an Ahnentafel number. */
+  const place = (ahnentafel: number): FanSlot => {
+    const generation = Math.floor(Math.log2(ahnentafel));
+    const per = sweep / 2 ** generation;
+    const slot = ahnentafel - 2 ** generation;
+    return {
       generation,
       ahnentafel,
       startAngle: start + slot * per,
       endAngle: start + (slot + 1) * per,
       innerRadius: generation === 0 ? 0 : inner + (generation - 1) * ring,
       outerRadius: inner + generation * ring,
+    };
+  };
+  const queue: { personId: string; ahnentafel: number; generation: number }[] = [
+    { personId: focusId, ahnentafel: 1, generation: 0 },
+  ];
+  for (let i = 0; i < queue.length; i++) {
+    const { personId, ahnentafel, generation } = queue[i]!;
+    const card = b.card(personId, generation === 0 ? 'focus' : 'ancestor', -generation);
+    const segment: FanSegment = {
+      key: card.key,
+      personId,
+      ...place(ahnentafel),
       isFocus: generation === 0,
       isDuplicate: card.dupOf !== undefined,
     };
@@ -51,26 +64,31 @@ export function layoutFan(graph: TreeGraph, focusId: string, options: FanOptions
     segments.push(segment);
     const families = index.parentFamilies(personId);
     const family = chooseParentFamily(index, personId, b.s.selected);
-    if (!family) continue;
-    if (families.length > 1) {
+    if (family && families.length > 1) {
       b.alternates[personId] = { selected: family.id, families: families.map((f) => f.id) };
     }
     if (generation + 1 >= generations || b.budget(personId, 'up', 1) === 0) continue;
-    const parents = coupleOrder(index, family);
+    const parents = family ? coupleOrder(index, family) : [];
     // Slot by role, not by position: a lone mother keeps the mother's slot.
     const [father, mother] =
-      parents.length === 2 || index.person(parents[0]!)!.sex !== 'F'
+      parents.length !== 1 || index.person(parents[0]!)!.sex !== 'F'
         ? parents
         : [undefined, parents[0]];
     const next = generation + 1;
+    // An unknown parent's slot is drawn empty rather than left as a gap, unless
+    // the database has parents this slice left out.
+    const unknown = index.person(personId)!.hasMoreParents !== true;
     if (father) queue.push({ personId: father, ahnentafel: 2 * ahnentafel, generation: next });
+    else if (unknown) emptySlots.push(place(2 * ahnentafel));
     if (mother) queue.push({ personId: mother, ahnentafel: 2 * ahnentafel + 1, generation: next });
+    else if (unknown) emptySlots.push(place(2 * ahnentafel + 1));
   }
 
   const radius = inner + (generations - 1) * ring;
   return {
     focusKey: segments[0]!.key,
     segments,
+    emptySlots,
     bounds: sectorBounds(start, sweep, radius),
     alternateParentFamilies: b.alternates,
   };

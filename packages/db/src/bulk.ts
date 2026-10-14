@@ -33,6 +33,13 @@ export interface BulkWriterOptions {
    * a third (#117).
    */
   freshTree?: boolean;
+  /**
+   * With `freshTree`: this connection is the only one that has the file open
+   * (the importer created the tree), so the load can switch from WAL to a
+   * rollback journal, which writes each new page once instead of twice.
+   * Switching while another connection has the file open would lock it out.
+   */
+  soleConnection?: boolean;
 }
 
 /** Page cache for a fresh-tree load, in KiB (256 MiB; only pages actually used count). */
@@ -61,11 +68,14 @@ export class BulkWriter {
   private readonly dataTables = new Set<string>();
   private open = true;
   /** Pragmas to put back, when this load changed them. */
-  private restore?: { foreignKeys: unknown; cacheSize: unknown };
+  private restore?: { foreignKeys: unknown; cacheSize: unknown; wal: boolean };
   /** Secondary indexes dropped for the load, rebuilt at commit. */
   private deferred: { name: string; sql: string }[] = [];
 
-  constructor(store: TreeStore, { freshTree = false }: BulkWriterOptions = {}) {
+  constructor(
+    store: TreeStore,
+    { freshTree = false, soleConnection = false }: BulkWriterOptions = {},
+  ) {
     if (store.db.inTransaction) throw new Error('BulkWriter cannot run inside another transaction');
     this.store = store;
     this.now = store.clock();
@@ -79,6 +89,10 @@ export class BulkWriter {
       this.restore = {
         foreignKeys: store.db.pragma('foreign_keys', { simple: true }),
         cacheSize: store.db.pragma('cache_size', { simple: true }),
+        wal:
+          soleConnection &&
+          store.db.pragma('journal_mode', { simple: true }) === 'wal' &&
+          store.db.pragma('journal_mode = DELETE', { simple: true }) === 'delete',
       };
       store.db.pragma('foreign_keys = OFF');
       store.db.pragma(`cache_size = -${FRESH_TREE_CACHE_KIB}`);
@@ -216,6 +230,7 @@ export class BulkWriter {
     if (!this.restore) return;
     this.store.db.pragma(`cache_size = ${Number(this.restore.cacheSize)}`);
     this.store.db.pragma(`foreign_keys = ${this.restore.foreignKeys ? 'ON' : 'OFF'}`);
+    if (this.restore.wal) this.store.db.pragma('journal_mode = WAL');
     this.restore = undefined;
   }
 }

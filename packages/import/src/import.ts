@@ -206,7 +206,8 @@ export async function importGedcom(
   try {
     // openTarget guarantees an empty tree, so the load can defer indexes and
     // foreign key checks to commit (#117).
-    writer = new BulkWriter(store, { freshTree: true });
+    // A tree this import created has no other connections, so it can skip WAL.
+    writer = new BulkWriter(store, { freshTree: true, soleConnection: created });
     const bulk = writer;
     const rows: Record<string, number> = {};
     const sink: Sink = {

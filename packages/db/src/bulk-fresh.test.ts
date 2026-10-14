@@ -108,7 +108,7 @@ describe('journal mode during a fresh-tree load', () => {
     try {
       const store = createTree(join(root, 'f.oatree'));
       expect(store.db.pragma('journal_mode', { simple: true })).toBe('wal');
-      const writer = new BulkWriter(store, { freshTree: true });
+      const writer = new BulkWriter(store, { freshTree: true, soleConnection: true });
       // A rollback journal writes new pages once; WAL writes them twice (log, then checkpoint).
       expect(store.db.pragma('journal_mode', { simple: true })).toBe('delete');
       writer.insert('person', { id: 'P1' });
@@ -121,9 +121,13 @@ describe('journal mode during a fresh-tree load', () => {
       reopened.close();
 
       const other = createTree(join(root, 'g.oatree'));
-      const aborted = new BulkWriter(other, { freshTree: true });
+      const aborted = new BulkWriter(other, { freshTree: true, soleConnection: true });
       aborted.rollback();
       expect(other.db.pragma('journal_mode', { simple: true })).toBe('wal');
+      // Without soleConnection the tree stays in WAL, since others may have it open.
+      const shared = new BulkWriter(other, { freshTree: true });
+      expect(other.db.pragma('journal_mode', { simple: true })).toBe('wal');
+      shared.rollback();
       other.close();
     } finally {
       rmSync(root, { recursive: true, force: true });

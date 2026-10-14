@@ -359,7 +359,8 @@ test.describe('family view', () => {
   test('a click on empty canvas keeps the tree shortcuts working', async ({ page }) => {
     await open(page);
     const viewport = await box(canvas(page));
-    await page.mouse.click(viewport.x + viewport.width - 40, viewport.y + viewport.height - 40);
+    // Top right: the bottom corners can hold the minimap, which moves to stay off labels.
+    await page.mouse.click(viewport.x + viewport.width - 40, viewport.y + 40);
     await expect(canvas(page)).toBeFocused();
     const before = await transform(page);
     await page.keyboard.press('+');
@@ -1031,9 +1032,8 @@ test.describe('wide descendant charts (#74)', () => {
     await open(page, 'bram', '&layout=descendants');
     await settled(page);
     const minimap = page.getByTestId('tree-minimap');
-    // Shown at the start, in its usual bottom-left corner.
+    // Shown at the start (bottom-left unless something is already there).
     await expect(minimap).toBeVisible();
-    await expect(minimap).toHaveAttribute('data-corner', 'left');
     const check = async () => {
       const m = await visibleBoxes(minimap);
       if (!m.length) return; // collapsed
@@ -1041,14 +1041,17 @@ test.describe('wide descendant charts (#74)', () => {
       const active = canvas(page).locator('[data-key][tabindex="0"]');
       for (const a of await visibleBoxes(active)) expect(intersects(m[0]!, a)).toBe(false);
     };
-    await check();
+    // The minimap re-checks one frame after each pan.
+    await expect(check).toPass({ timeout: 2000 });
     // Bring the focus card and the lowest rows down to the bottom-left corner:
     // the minimap gets out of the way.
     await drag(page, -150, 250);
-    await check();
+    // The minimap re-checks one frame after each pan.
+    await expect(check).toPass({ timeout: 2000 });
     await expect(minimap).not.toHaveAttribute('data-corner', 'left');
     await drag(page, 300, 0);
-    await check();
+    // The minimap re-checks one frame after each pan.
+    await expect(check).toPass({ timeout: 2000 });
   });
 });
 

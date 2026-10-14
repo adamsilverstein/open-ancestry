@@ -246,6 +246,12 @@
   z-index: 2;
 }
 
+/* Moved out of the way of a row label or the active card (see useMinimapCorner). */
+.minimap[data-corner='right'] {
+  right: var(--oa-space-4);
+  left: auto;
+}
+
 .empty {
   display: grid;
   place-items: center;

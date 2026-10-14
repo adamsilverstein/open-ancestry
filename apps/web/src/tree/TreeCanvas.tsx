@@ -322,6 +322,10 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       // the label never covers a card.
       const under = Number(label.dataset.left) * t.scale + t.x < Number(label.dataset.right);
       const y = under ? Number(label.dataset.gapY) : Number(label.dataset.y);
+      // Zoomed far out the gap is thinner than the label: hide it rather than cover cards.
+      // Measured once while shown: a hidden label has no height.
+      label.dataset.h ||= String(label.offsetHeight || 22);
+      label.hidden = under && Number(label.dataset.gapH) * t.scale < Number(label.dataset.h) + 4;
       label.style.transform = `translateY(${y * t.scale + t.y}px) translateY(-50%)`;
       label.toggleAttribute('data-above', under);
     }
@@ -1135,7 +1139,10 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   const shown = visible.source === layout && layout ? visible : null;
   // Per labelled row: its leftmost card, and the middle of the gap above it.
   const rowExtent = useMemo(() => {
-    const extent = new Map<number, { 'data-left': number; 'data-gap-y': number }>();
+    const extent = new Map<
+      number,
+      { 'data-left': number; 'data-gap-y': number; 'data-gap-h': number }
+    >();
     if (!layout) return extent;
     const rows = new Map<number, { left: number; top: number }>();
     for (const n of layout.nodes) {
@@ -1148,7 +1155,9 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       const height = layout.nodes[0]!.height;
       // Chevrons sit on the cards' top edges: keep the label clear of them.
       const gapY = above ? (above.top + height + row.top) / 2 - 7 : row.top - 28;
-      extent.set(generation, { 'data-left': row.left, 'data-gap-y': gapY });
+      // Room between the row above and the chevrons on this row's cards.
+      const gapH = above ? row.top - (above.top + height) - 14 : 56;
+      extent.set(generation, { 'data-left': row.left, 'data-gap-y': gapY, 'data-gap-h': gapH });
     }
     return extent;
   }, [layout]);

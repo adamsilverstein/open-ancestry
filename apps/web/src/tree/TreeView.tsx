@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type RefObject,
+} from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
@@ -126,16 +135,75 @@ function TreeMinimap({
     }),
     [layout],
   );
+  const ref = useRef<HTMLDivElement>(null);
+  const corner = useMinimapCorner(ref, viewport);
   return (
-    <Minimap
+    <div
+      ref={ref}
       className={styles.minimap}
-      nodes={nodes}
-      bounds={bounds}
-      viewport={viewport}
-      onNavigate={onNavigate}
-      onDismiss={onDismiss}
-    />
+      data-testid="tree-minimap"
+      data-corner={corner}
+      hidden={corner === 'collapsed'}
+    >
+      <Minimap
+        nodes={nodes}
+        bounds={bounds}
+        viewport={viewport}
+        onNavigate={onNavigate}
+        onDismiss={onDismiss}
+      />
+    </div>
   );
+}
+
+type Corner = 'left' | 'right' | 'collapsed';
+
+/** Screen gap between the minimap and the canvas edges. */
+const MINIMAP_INSET = 16;
+
+/**
+ * Where the minimap may sit: its bottom-left corner, else bottom-right, else
+ * nowhere, so it never covers a row label or the keyboard's active card.
+ * Re-checked after every pan or zoom (`viewport` changes).
+ */
+function useMinimapCorner(ref: RefObject<HTMLDivElement | null>, viewport: Rect): Corner {
+  const size = useRef({ width: 0, height: 0 });
+  const [value, setValue] = useState<Corner>('left');
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const container = el?.parentElement;
+    if (!el || !container) return;
+    // Measure after the canvas has placed this frame's labels.
+    const frame = requestAnimationFrame(() => {
+      if (!el.hidden) {
+        const own = el.getBoundingClientRect();
+        if (own.width) size.current = { width: own.width, height: own.height };
+      }
+      const { width, height } = size.current;
+      if (!width) return;
+      const box = container.getBoundingClientRect();
+      const obstacles = [
+        ...container.querySelectorAll<HTMLElement>(
+          '[data-testid="tree-row-label"], [data-key][tabindex="0"]',
+        ),
+      ]
+        .filter((o) => !o.closest('[hidden]'))
+        .map((o) => o.getBoundingClientRect())
+        .filter((r) => r.width > 0);
+      const top = box.bottom - MINIMAP_INSET - height;
+      const free = (left: number) =>
+        !obstacles.some(
+          (r) => r.left < left + width && left < r.right && r.top < top + height && top < r.bottom,
+        );
+      const left = box.left + MINIMAP_INSET;
+      const right = box.right - MINIMAP_INSET - width;
+      // Never hide the minimap while it has keyboard focus (arrow keys pan from it).
+      const focused = el.contains(document.activeElement);
+      setValue(free(left) ? 'left' : free(right) || focused ? 'right' : 'collapsed');
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [ref, viewport]);
+  return value;
 }
 
 interface Result {

@@ -119,11 +119,21 @@ test.describe('gallery tiles (#127)', () => {
       expect(caption.y, title).toBeGreaterThanOrEqual(preview.y + preview.height - 0.5);
       expect(caption.y + caption.height, title).toBeLessThanOrEqual(tileBox.y + tileBox.height);
       // Sharp on 2x screens: the browser may pick the 480px thumbnail.
-      await expect(image).toHaveAttribute('srcset', /thumb\/sm 160w, .*thumb\/md 480w/);
+      if (title !== 'Tiny scrap') {
+        await expect(image).toHaveAttribute('srcset', /thumb\/sm 160w, .*thumb\/md 480w/);
+      }
     }
-    // A tiny image is shown at its own size, centered, not blown up to fill the box.
-    const tiny = gallery.getByRole('button', { name: /Tiny scrap/ }).locator('img');
-    expect(await tiny.evaluate((img) => getComputedStyle(img).objectFit)).toBe('scale-down');
+    // A tiny image is shown at its own size, centered: not blown up to fill the box,
+    // and not shrunk by a srcset that claims a 480px candidate.
+    for (const title of ['Tiny scrap', 'Small, size unknown']) {
+      const tiny = gallery.getByRole('button', { name: new RegExp(title) }).locator('img');
+      expect(await tiny.evaluate((img) => getComputedStyle(img).objectFit)).toBe('scale-down');
+      // Without a srcset its intrinsic size is its natural 40px, which scale-down keeps.
+      await expect.poll(() => tiny.getAttribute('srcset')).toBeNull();
+      await expect
+        .poll(() => tiny.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth))
+        .toBe(40);
+    }
     const results = await new AxeBuilder({ page }).include('[aria-label="Gallery"]').analyze();
     expect(results.violations).toEqual([]);
   });
@@ -195,6 +205,8 @@ test.describe('profile photo on the server', () => {
         data: { primary_media_id: mediaId },
       });
     for (const [mediaId, reason] of [
+      // A symlink out of the media folder is not a file in this tree.
+      [MEDIA_IDS.outside, /no file in this tree/],
       [MEDIA_IDS.census, /no file in this tree/],
       [MEDIA_IDS.missing, /no file in this tree/],
       [MEDIA_IDS.corrupt, /not a readable image/],

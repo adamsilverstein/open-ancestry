@@ -1,6 +1,5 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { undoRedo } from '../api/history';
 import { useToast } from '../components/Toast/Toast';
 
 /** Text fields keep their own Cmd/Ctrl-Z. */
@@ -48,6 +47,8 @@ export function UndoShortcuts() {
       while (busy) await new Promise((resolve) => setTimeout(resolve, 20));
       busy = true;
       try {
+        // Loaded on first use so the undo code stays off the initial bundle.
+        const { undoRedo } = await import('../api/history');
         const batch = await undoRedo(queryClient, action);
         toast({
           title: batch

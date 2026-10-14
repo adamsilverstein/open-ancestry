@@ -134,7 +134,7 @@ Code: `apps/web/src/components/<Name>/<Name>.tsx` + `<Name>.module.css`, re-expo
 | `Toolbar` | `label`, `orientation` | ARIA toolbar with roving tabindex: one Tab stop, arrows/Home/End move. |
 | `Tabs`, `TabsList`, `TabsTrigger`, `TabsContent` | Radix Tabs props | Active tab: weight + underline, not color alone. |
 | `Popover`, `PopoverTrigger`, `PopoverContent` (`label`), `PopoverClose`, `PopoverAnchor` | Radix Popover props | Content is a labelled dialog. |
-| `Dialog` | `title`, `hideTitle`, `description`, `trigger`, `footer`, `size` (sm/md/lg), `open`, `onOpenChange` | Focus trapped, initial focus on the first field (close button is last in DOM order), restored on close. `DialogClose` wraps footer buttons. |
+| `Dialog` | `title`, `hideTitle`, `description`, `trigger`, `footer`, `size` (sm/md/lg), `open`, `onOpenChange`, `returnFocusFallback` | Focus trapped, initial focus on the first field (close button is last in DOM order). On close focus returns to the opener: the `trigger`, else the control that had focus when it opened (or, for a menu item, the menu's trigger), else `returnFocusFallback` (e.g. Add event after an event is deleted). `DialogClose` wraps footer buttons. |
 | `Tooltip` | `content`, `shortcut`, `side`, `children` | Opens on hover and keyboard focus. Self-contained provider; `TooltipProvider` optional for groups. |
 | `ToastProvider`, `useToast()` | `toast({ title, description, variant: info/error, duration })` | Icon + colored edge per variant. |
 | `Input`, `Textarea` | `label`, `hint`, `error`, plus native props | Shared `Field` wiring: label, `aria-describedby` for hint and error, `aria-invalid`; error has an icon. |
@@ -147,7 +147,7 @@ Code: `apps/web/src/components/<Name>/<Name>.tsx` + `<Name>.module.css`, re-expo
 | `EmptyState` | `icon`, `title`, `level` (1-3), `description`, `action` | `level={1}` when the empty state is the page (serif title). |
 | `Panel` | `title`, `actions`, `variant` (raised/sunken), `headingLevel` | Titled panels are labelled regions. |
 | `DateInput` | `label`, `value`, `onValueChange`, `hint`, `error`, input props | Keeps the text exactly as typed (it is stored as `date_text`). A live preview line under it (`aria-live`, part of the field's description) shows how core `parseDate` reads it: `abt. 1890 · about`, `bet. 1900 and 1905 · between`, an info note for numeric dates that could be read day first, or a warning that text is not a date and will be kept as text. The line is reserved so the form never shifts. |
-| `ConfirmDialog` | `open`, `onOpenChange`, `title`, `description`, `confirmLabel`, `onConfirm`, `danger` | `role="alertdialog"`; Cancel has initial focus so Enter never confirms by accident. Stacks above a dialog it was opened from. Use for deletes, and say whether the action can be undone. |
+| `ConfirmDialog` | `open`, `onOpenChange`, `title`, `description`, `confirmLabel`, `onConfirm`, `danger` | `role="alertdialog"`; Cancel has initial focus so Enter never confirms by accident; focus returns to the opener on close. Stacks above a dialog it was opened from. Use for deletes, and say whether the action can be undone. |
 
 Hover and focus can be forced for screenshots with `data-demo-hover` / `data-demo-focus` on Button, IconButton, Input and PersonCard; only `/design` uses them.
 

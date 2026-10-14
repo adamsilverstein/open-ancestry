@@ -1,8 +1,9 @@
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import * as RadixDialog from '@radix-ui/react-dialog';
 import { Button } from '../Button/Button';
 import dialogStyles from '../Dialog/Dialog.module.css';
 import { cx } from '../../lib/cx';
+import { captureOpener, returnFocus } from '../../lib/returnFocus';
 import styles from './ConfirmDialog.module.css';
 
 export interface ConfirmDialogProps {
@@ -29,12 +30,19 @@ export function ConfirmDialog({
   onConfirm,
   danger = true,
 }: ConfirmDialogProps) {
+  const opener = useRef<HTMLElement | null>(null);
   return (
     <RadixDialog.Root open={open} onOpenChange={onOpenChange}>
       <RadixDialog.Portal>
         <RadixDialog.Overlay className={cx(dialogStyles.overlay, styles.overlay)} />
         <RadixDialog.Content
           role="alertdialog"
+          onOpenAutoFocus={() => {
+            opener.current = captureOpener();
+          }}
+          onCloseAutoFocus={(event) => {
+            if (returnFocus(opener.current)) event.preventDefault();
+          }}
           className={cx(dialogStyles.content, dialogStyles.sm, styles.content)}
           {...(description ? {} : { 'aria-describedby': undefined })}
         >

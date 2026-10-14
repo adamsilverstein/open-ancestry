@@ -101,6 +101,7 @@ test.describe('focus returns to the opener', () => {
     await openWithKeyboard(opener);
     await page.getByRole('menuitem', { name: 'Add child' }).press('Enter');
     const child = page.getByRole('dialog', { name: 'Add child' });
+    await expect(child.getByRole('textbox', { name: 'Given names' })).toBeFocused();
     await page.keyboard.type('Tamsin');
     await page.keyboard.press('Enter');
     await expect(child).toBeHidden();

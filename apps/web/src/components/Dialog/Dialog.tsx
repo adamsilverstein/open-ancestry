@@ -1,7 +1,8 @@
-import type { ReactElement, ReactNode } from 'react';
+import { useRef, type ReactElement, type ReactNode } from 'react';
 import * as RadixDialog from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import { cx } from '../../lib/cx';
+import { captureOpener, returnFocus } from '../../lib/returnFocus';
 import { IconButton } from '../IconButton/IconButton';
 import styles from './Dialog.module.css';
 
@@ -21,11 +22,13 @@ export interface DialogProps {
   onCloseAutoFocus?: (event: Event) => void;
   /** Override where focus lands on open (call `event.preventDefault()` and focus yourself). */
   onOpenAutoFocus?: (event: Event) => void;
+  /** Where focus goes on close when the opener is gone, e.g. after deleting what it edited. */
+  returnFocusFallback?: () => HTMLElement | null | undefined;
   className?: string;
   children?: ReactNode;
 }
 
-/** Modal dialog: focus trapped, Escape and close button dismiss, focus restored. */
+/** Modal dialog: focus trapped, Escape and close button dismiss, focus restored to the opener. */
 export function Dialog({
   open,
   onOpenChange,
@@ -37,9 +40,11 @@ export function Dialog({
   size = 'md',
   onCloseAutoFocus,
   onOpenAutoFocus,
+  returnFocusFallback,
   className,
   children,
 }: DialogProps) {
+  const opener = useRef<HTMLElement | null>(null);
   return (
     <RadixDialog.Root open={open} onOpenChange={onOpenChange}>
       {trigger && <RadixDialog.Trigger asChild>{trigger}</RadixDialog.Trigger>}
@@ -47,8 +52,16 @@ export function Dialog({
         <RadixDialog.Overlay className={styles.overlay} />
         <RadixDialog.Content
           className={cx(styles.content, styles[size], className)}
-          {...(onCloseAutoFocus ? { onCloseAutoFocus } : {})}
-          onOpenAutoFocus={onOpenAutoFocus}
+          onOpenAutoFocus={(event) => {
+            opener.current = captureOpener();
+            onOpenAutoFocus?.(event);
+          }}
+          onCloseAutoFocus={(event) => {
+            if (onCloseAutoFocus) return onCloseAutoFocus(event);
+            // A Trigger gets focus back from Radix; anything else would land on <body>.
+            if (trigger) return;
+            if (returnFocus(opener.current, returnFocusFallback)) event.preventDefault();
+          }}
           // Radix wires aria-describedby to the Description; opt out when there is none.
           {...(description ? {} : { 'aria-describedby': undefined })}
         >

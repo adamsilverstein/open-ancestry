@@ -765,6 +765,22 @@ export function DesignPage() {
             onFit={() => setTreeAction('Fit to screen')}
           />
         </div>
+        <div className={styles.canvasDemo} data-surface="canvas">
+          {/* Phones: along the bottom of the canvas. */}
+          <TreeToolbar
+            orientation="horizontal"
+            layout={layout}
+            onLayoutChange={(next) => {
+              setLayout(next);
+              setTreeAction(`Layout: ${next}`);
+            }}
+            onFind={() => setTreeAction('Find in tree')}
+            onHome={() => setTreeAction('Go to home person')}
+            onZoomIn={() => setTreeAction('Zoom in')}
+            onZoomOut={() => setTreeAction('Zoom out')}
+            onFit={() => setTreeAction('Fit to screen')}
+          />
+        </div>
         <Status>{treeAction || treeLayoutLabel[layout]}</Status>
       </Section>
 

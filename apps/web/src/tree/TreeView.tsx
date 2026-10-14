@@ -41,6 +41,7 @@ import {
   type NeighborhoodRequest,
 } from './api';
 import { usePalette } from '../app/palette';
+import { NARROW_SCREEN, matchesMedia, useMediaQuery } from '../lib/useMediaQuery';
 import { lifeEvent, toPersonSummary } from './format';
 import { onTreeChanged } from '../api/edits';
 import { GraphCache } from './graphCache';
@@ -205,7 +206,9 @@ function useMinimapCorner(ref: RefObject<HTMLDivElement | null>, viewport: Rect)
         .filter((o) => !o.closest('[hidden]'))
         .map((o) => o.getBoundingClientRect())
         .filter((r) => r.width > 0);
-      const top = box.bottom - MINIMAP_INSET - height;
+      // Higher on phones, above the toolbar along the bottom.
+      const bottom = parseFloat(getComputedStyle(el).bottom) || MINIMAP_INSET;
+      const top = box.bottom - bottom - height;
       const leftOf: Record<'left' | 'right', number> = {
         left: box.left + MINIMAP_INSET,
         right: box.right - MINIMAP_INSET - width,
@@ -320,7 +323,9 @@ export function TreeView({
   const [popoverKey, setPopoverKey] = useState<string | null>(null);
   const palette = usePalette();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [minimapVisible, setMinimapVisible] = useState(true);
+  const narrow = useMediaQuery(NARROW_SCREEN);
+  // A phone has no room to spare: the minimap starts hidden there (M shows it).
+  const [minimapVisible, setMinimapVisible] = useState(() => !matchesMedia(NARROW_SCREEN));
   const viewKey = `${personId}|${kind}`;
   const [view, setView] = useState<ViewState>({
     for: viewKey,
@@ -799,6 +804,7 @@ export function TreeView({
         onFit={() => canvas.current?.fit()}
         minimapVisible={minimapVisible}
         onToggleMinimap={() => setMinimapVisible((v) => !v)}
+        orientation={narrow ? 'horizontal' : 'vertical'}
       />
       <TreeCanvas
         ref={canvas}

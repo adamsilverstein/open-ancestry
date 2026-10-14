@@ -30,12 +30,14 @@ export interface TreeToolbarProps {
   /** Shows a Minimap toggle (shortcut `M`) when given. */
   minimapVisible?: boolean;
   onToggleMinimap?: () => void;
+  /** Vertical beside the canvas; horizontal along the bottom on narrow screens. */
+  orientation?: 'vertical' | 'horizontal';
   className?: string;
 }
 
 const icon = { size: 18, 'aria-hidden': true } as const;
 
-/** Vertical floating toolbar on the tree canvas. Shortcuts are bound by the tree view. */
+/** Floating toolbar on the tree canvas. Shortcuts are bound by the tree view. */
 export function TreeToolbar({
   layout,
   onLayoutChange,
@@ -48,11 +50,13 @@ export function TreeToolbar({
   onLayoutMenuOpenChange,
   minimapVisible,
   onToggleMinimap,
+  orientation = 'vertical',
   className,
 }: TreeToolbarProps) {
-  const side = 'right';
+  // Tooltips and the layout menu open away from the edge the toolbar sits on.
+  const side = orientation === 'vertical' ? 'right' : 'top';
   return (
-    <Toolbar label="Tree tools" orientation="vertical" className={cx(styles.toolbar, className)}>
+    <Toolbar label="Tree tools" orientation={orientation} className={cx(styles.toolbar, className)}>
       <Menu open={layoutMenuOpen} onOpenChange={onLayoutMenuOpenChange}>
         <Tooltip content="Change layout" shortcut="L" side={side}>
           <MenuTrigger
@@ -63,7 +67,7 @@ export function TreeToolbar({
             <LayoutGrid {...icon} />
           </MenuTrigger>
         </Tooltip>
-        <MenuContent side="right" align="start">
+        <MenuContent side={side} align="start">
           <MenuRadioGroup value={layout} onValueChange={(v) => onLayoutChange(v as TreeLayout)}>
             {(Object.keys(treeLayoutLabel) as TreeLayout[]).map((key) => (
               <MenuRadioItem key={key} value={key}>

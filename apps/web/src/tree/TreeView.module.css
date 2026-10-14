@@ -1,4 +1,7 @@
 .page {
+  /* Height of the phone toolbar along the bottom, with its gap; framing leaves it free. */
+  --oa-tree-bottom-bar: 0px;
+
   position: relative;
   height: calc(100dvh - var(--oa-topbar-height));
   min-height: 320px;
@@ -120,6 +123,25 @@
 .switcher:focus-visible {
   outline: var(--oa-focus-width) solid var(--oa-focus);
   outline-offset: 2px;
+}
+
+/*
+ * Touch: a larger invisible target around the small chevrons and switcher.
+ * They are drawn in the zoomed world, about 0.75 on a phone's first view,
+ * so 60px here is 44px or more on screen there.
+ */
+@media (pointer: coarse) {
+  .chevron::before,
+  .switcher::before {
+    position: absolute;
+    inset: -18px;
+    content: '';
+  }
+
+  /* Off the card's corner, so its target does not overlap the up chevron's. */
+  .switcher {
+    translate: 22px 0;
+  }
 }
 
 .labelGutter,
@@ -337,4 +359,26 @@
   padding: var(--oa-space-1) var(--oa-space-2);
   color: var(--oa-accent);
   font-weight: var(--oa-weight-medium);
+}
+
+/* Phones (NARROW_SCREEN): the toolbar along the bottom, the labels and minimap clear of it. */
+@media (max-width: 599px) {
+  .page {
+    --oa-tree-bottom-bar: 56px;
+  }
+
+  .toolbar {
+    top: auto;
+    bottom: var(--oa-space-4);
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .minimap {
+    bottom: calc(var(--oa-space-4) + var(--oa-tree-bottom-bar));
+  }
+
+  .gutter {
+    left: var(--oa-space-4);
+  }
 }

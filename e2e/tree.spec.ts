@@ -1156,7 +1156,7 @@ test.describe('wide descendant charts (#74)', () => {
 });
 
 test.describe('phone width (#139)', () => {
-  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
   const toolbar = (page: Page) => page.getByRole('toolbar', { name: 'Tree tools' });
   type Box = { x: number; y: number; width: number; height: number };
@@ -1198,7 +1198,7 @@ test.describe('phone width (#139)', () => {
     for (const el of await canvas(page).locator('[data-key]').all()) {
       const b = await el.boundingBox();
       if (!b || ![...rows].some((y) => Math.abs(y - b.y) < 1)) continue;
-      expect(overlaps(bar, b), await el.getAttribute('aria-label')).toBe(false);
+      expect(overlaps(bar, b), String(await el.getAttribute('aria-label'))).toBe(false);
     }
   });
 
@@ -1215,7 +1215,7 @@ test.describe('phone width (#139)', () => {
       // Only targets fully on screen and clear of the toolbar.
       if (c.x < view.x || c.y < view.y || c.x + 44 > view.x + view.width) continue;
       if (c.y + 44 > view.y + view.height || overlaps(c, bar)) continue;
-      expect(await reachable(page, el), await el.getAttribute('aria-label')).toBe(true);
+      expect(await reachable(page, el), String(await el.getAttribute('aria-label'))).toBe(true);
       checked++;
     }
     expect(checked).toBeGreaterThan(2);

@@ -1298,7 +1298,7 @@ describe('trustworthy confidence and reasons (#159)', () => {
     try {
       const reasons = (id: string) =>
         [...s2.matches.values()].find((m) => m.existingId === id)!.reasons;
-      expect(reasons(mercy)).toContain('similar name (Mercey / Mercy)');
+      expect(reasons(mercy)).toContain('similar name (Mercey Bellweather / Mercy Bellweather)');
       expect(reasons(mercy)).not.toContain('same name');
       expect(reasons(pid(store, '@I3@'))).toContain('same name');
       // "Thaddeus" is none of Thaddeus's names now; the closest is the old one, Thad.

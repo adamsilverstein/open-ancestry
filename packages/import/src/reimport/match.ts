@@ -21,6 +21,19 @@ export interface PersonMatch {
 export const MATCH_THRESHOLD = 0.6;
 /** At or above this a match is offered for bulk acceptance. */
 export const HIGH_CONFIDENCE = 0.85;
+/** A new person whose closest tree person scores this much may be a duplicate: offered unticked. */
+export const POSSIBLE_MATCH = 0.4;
+/** Each fact that differs (birth or death date, birth place) takes this off the shown confidence. */
+const DIFFERENCE_PENALTY = 0.04;
+
+/** The closest tree person for an incoming person that matched no one. */
+export interface NearMiss {
+  existingId: string;
+  /** Evidence score, 0..1. */
+  score: number;
+  /** The tree person is matched to another incoming record. */
+  taken: boolean;
+}
 
 /** Jaro-Winkler similarity of two strings, 0..1. */
 export function jaroWinkler(a: string, b: string): number {
@@ -65,20 +78,57 @@ function yearScore(a: number | null, b: number | null): number | null {
  * independent agreements beyond the name (birth year, death year, birth
  * place; a shared Ancestry record counts twice).
  */
-function baseScore(
-  e: SnapPerson,
-  i: SnapPerson,
-): { score: number; reasons: string[]; corroboration: number } {
-  const reasons: string[] = [];
-  const shared = [...i.apids].filter((apid) => e.apids.has(apid));
-  const given = jaroWinkler(e.given, i.given);
+const nameText = (n: { given: string | null; surname: string | null }) =>
+  [n.given, n.surname].filter(Boolean).join(' ');
+
+/** The date, or place, of a person's (preferred) fact of one type, normalized. */
+function factOf(p: SnapPerson, type: string, part: 'date' | 'place'): string {
+  const events = p.events.filter((e) => e.row.type === type);
+  const e = events.find((x) => x.isPreferred) ?? events[0];
+  return norm(part === 'date' ? e?.row.date_text : e?.place);
+}
+
+/**
+ * Which of the tree person's names the incoming name is closest to, and how
+ * to say so: the primary name and the person's other names are told apart.
+ */
+function nameMatch(e: SnapPerson, i: SnapPerson): { score: number; reason: string | null } {
+  const incoming = i.names.find((n) => n.is_primary) ?? i.names[0];
+  let best = { given: 0, primary: true, name: e.names[0] };
+  for (const n of e.names.length ? e.names : [undefined]) {
+    const g = jaroWinkler(n ? norm(n.given) : e.given, i.given);
+    const primary = !n || !!n.is_primary || e.names.length === 1;
+    if (g > best.given || (g === best.given && primary && !best.primary)) {
+      best = { given: g, primary, name: n };
+    }
+  }
   // A married name in one export and a birth name in the other is common: take the best surname.
   const surname = Math.max(
     jaroWinkler(e.surname, i.surname),
     ...e.names.map((n) => jaroWinkler(norm(n.surname), i.surname)),
   );
+  const tree = best.name ? nameText(best.name) : '';
+  const exported = incoming ? nameText(incoming) : '';
+  let reason: string | null = null;
+  if (best.given === 1 && surname === 1) {
+    reason = best.primary ? 'same name' : `matches another name (${tree})`;
+  } else if (best.given > 0.85 && surname > 0.85) {
+    reason = best.primary
+      ? `similar name (${tree} / ${exported})`
+      : `similar to another name (${tree} / ${exported})`;
+  }
+  return { score: (best.given + surname) / 2, reason };
+}
+
+function baseScore(
+  e: SnapPerson,
+  i: SnapPerson,
+): { score: number; reasons: string[]; corroboration: number; differences: number } {
+  const reasons: string[] = [];
+  const shared = [...i.apids].filter((apid) => e.apids.has(apid));
+  const name = nameMatch(e, i);
   const parts: [number, number | null][] = [
-    [0.5, (given + surname) / 2],
+    [0.5, name.score],
     [0.2, yearScore(e.birthYear, i.birthYear)],
     [0.15, yearScore(e.deathYear, i.deathYear)],
     [0.15, e.birthPlace && i.birthPlace ? (e.birthPlace === i.birthPlace ? 1 : 0.2) : null],
@@ -91,7 +141,7 @@ function baseScore(
     weight += w;
   }
   let score = total / weight;
-  if (given > 0.92 && surname > 0.92) reasons.push('same name');
+  if (name.reason) reasons.push(name.reason);
   if (e.birthYear !== null && e.birthYear === i.birthYear) reasons.push('same birth year');
   if (e.deathYear !== null && e.deathYear === i.deathYear) reasons.push('same death year');
   if (e.birthPlace && e.birthPlace === i.birthPlace) reasons.push('same birth place');
@@ -108,12 +158,26 @@ function baseScore(
     score = Math.max(score, Math.min(0.99, 0.9 + 0.03 * shared.length));
     reasons.push(`${shared.length} shared Ancestry record${shared.length > 1 ? 's' : ''}`);
   }
+  // Facts both records have that say different things: the match is not certain.
+  let differences = 0;
+  for (const [type, part, label] of [
+    ['BIRT', 'date', 'different birth date'],
+    ['DEAT', 'date', 'different death date'],
+    ['BIRT', 'place', 'different birth place'],
+  ] as const) {
+    const a = factOf(e, type, part);
+    const b = factOf(i, type, part);
+    if (a && b && a !== b) {
+      differences++;
+      reasons.push(label);
+    }
+  }
   const corroboration =
     ((yearScore(e.birthYear, i.birthYear) ?? 0) >= 0.7 ? 1 : 0) +
     ((yearScore(e.deathYear, i.deathYear) ?? 0) >= 0.7 ? 1 : 0) +
     (e.birthPlace && e.birthPlace === i.birthPlace ? 1 : 0) +
     (shared.length ? 2 : 0);
-  return { score, reasons, corroboration };
+  return { score, reasons, corroboration, differences };
 }
 
 /**
@@ -141,6 +205,8 @@ interface Candidate {
   score: number;
   reasons: string[];
   corroboration: number;
+  /** Facts both have that differ (see `DIFFERENCE_PENALTY`). */
+  differences: number;
   agree: number;
   /** The part of the score that is only the kept-xref hint. */
   hint: number;
@@ -180,13 +246,13 @@ function assign(
 
 /**
  * Matches incoming people to the tree's. `nearMisses`, when given, receives
- * each unmatched incoming person whose closest tree person scored as a match
- * on evidence but was taken by someone else: a likely duplicate to check.
+ * the closest tree person (and score) of each incoming person that matched
+ * no one, so the review can say why they are new.
  */
 export function matchPeople(
   existing: Snapshot,
   incoming: Snapshot,
-  nearMisses?: Map<string, string>,
+  nearMisses?: Map<string, NearMiss>,
 ): Map<string, PersonMatch> {
   // Candidate pairs: same surname sound, same given-name sound and birth year, or a shared record.
   const blocks = new Map<string, string[]>();
@@ -232,6 +298,7 @@ export function matchPeople(
           score,
           reasons,
           corroboration: base.corroboration,
+          differences: base.differences,
           agree: 0,
           hint,
         });
@@ -301,7 +368,8 @@ export function matchPeople(
   for (const c of final.values()) {
     const merged = (perExisting.get(c.e) ?? 0) > 1;
     if (merged) c.reasons = [...c.reasons, 'merged in this tree'];
-    let confidence = Math.max(0, Math.min(1, c.score));
+    // Never 100% while a fact differs, however strong the rest of the evidence.
+    let confidence = Math.max(0, Math.min(1 - DIFFERENCE_PENALTY * c.differences, c.score));
     // Name alone (or one detail) is not enough to merge records in bulk.
     if (c.corroboration + (c.agree ? 1 : 0) < MIN_CORROBORATION) {
       confidence = Math.min(confidence, CHECK_CONFIDENCE);
@@ -322,11 +390,18 @@ export function matchPeople(
   if (nearMisses) {
     const closest = new Map<string, Candidate>();
     for (const c of candidates) {
-      if (result.has(c.i) || c.score - c.hint < MATCH_THRESHOLD) continue;
+      if (result.has(c.i)) continue;
       const best = closest.get(c.i);
-      if (!best || c.score > best.score) closest.set(c.i, c);
+      if (!best || c.score - c.hint > best.score - best.hint) closest.set(c.i, c);
     }
-    for (const [i, c] of closest) nearMisses.set(i, c.e);
+    const taken = new Set([...result.values()].map((m) => m.existingId));
+    for (const [i, c] of closest) {
+      nearMisses.set(i, {
+        existingId: c.e,
+        score: Math.round(Math.max(0, Math.min(1, c.score - c.hint)) * 100) / 100,
+        taken: taken.has(c.e),
+      });
+    }
   }
   return result;
 }

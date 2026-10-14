@@ -4,7 +4,8 @@ import { Link } from '@tanstack/react-router';
 import { Ellipsis, House, Network, Pencil, Route } from 'lucide-react';
 import { apiSend, seg } from '../../api/client';
 import { useEdit } from '../../api/edits';
-import { mediaUrl, relationshipQuery, treeQuery } from '../../api/queries';
+import { relationshipQuery, treeQuery } from '../../api/queries';
+import { avatarUrl } from '../../lib/media';
 import type { PersonDetail } from '../../api/types';
 import { IconButton } from '../../components/IconButton/IconButton';
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '../../components/Menu/Menu';
@@ -123,7 +124,8 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
         name={name}
         sex={sex}
         size={120}
-        src={summary.primaryMediaId ? mediaUrl(tree, summary.primaryMediaId) : undefined}
+        // 120px: the 480px thumbnail keeps it sharp on 2x screens.
+        src={avatarUrl(tree, summary, 'md')}
         className={styles.avatar}
       />
       <div className={styles.identity}>

@@ -5,6 +5,10 @@ import type { TreeGraph } from '../layout/types';
 import { kinshipGraph, relationship } from './index';
 import { GraphBuilder } from './test-family';
 
+// Property tests run hundreds of cases; under coverage on a shared CI runner that can
+// pass Vitest's 5s default, so they get room. A hang still fails.
+const PROPERTY_TIMEOUT = 30_000;
+
 const b = new GraphBuilder();
 const P: [string, 'M' | 'F' | 'U' | 'X'][] = [
   ['ggf', 'M'],
@@ -238,7 +242,7 @@ const arbDag = fc
     return { tg: gb.build(), n };
   });
 
-describe('review: oracle', () => {
+describe('review: oracle', { timeout: PROPERTY_TIMEOUT }, () => {
   it('finds every blood shape a brute force finds', () => {
     fc.assert(
       fc.property(arbDag, fc.nat(), fc.nat(), ({ tg, n }, i, j) => {
@@ -286,14 +290,17 @@ describe('review: bounded output', () => {
     expect(r.complete).toBe(false);
     expect(r.name).toMatch(/ and \d+ more$/);
     // Fast even here: the walk keeps a few lines per ancestor, not all of them.
-    const started = performance.now();
+    // CPU time of this test process (Vitest's forks pool), not wall time, which swings
+    // with whatever else the machine is running.
+    const started = process.cpuUsage();
     for (const [a, c] of [
       ['g14_10', 'g13_50'],
       ['g14_100', 'g10_7'],
     ] as const) {
       relationship(kg, a, c);
     }
-    expect(performance.now() - started).toBeLessThan(500);
+    const { user, system } = process.cpuUsage(started);
+    expect((user + system) / 1000).toBeLessThan(500);
   });
 
   it('reports a search cut short by maxNodes as incomplete', () => {

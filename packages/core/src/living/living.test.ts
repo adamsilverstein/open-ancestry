@@ -4,6 +4,10 @@ import { parseDate } from '../dates';
 import { inferLiving } from './index';
 import type { LivingInput, LivingResult } from './index';
 
+// Property tests run hundreds of cases; under coverage on a shared CI runner that can
+// pass Vitest's 5s default, so they get room. A hang still fails.
+const PROPERTY_TIMEOUT = 30_000;
+
 const today = new Date('2026-10-14T12:00:00Z');
 
 describe('inferLiving', () => {
@@ -175,7 +179,7 @@ describe('inferLiving', () => {
   });
 });
 
-describe('inferLiving fails closed (properties)', () => {
+describe('inferLiving fails closed (properties)', { timeout: PROPERTY_TIMEOUT }, () => {
   const noDeath = {
     death: fc.constantFrom(undefined, null),
     burial: fc.constantFrom(undefined, null),

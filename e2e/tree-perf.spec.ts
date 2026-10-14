@@ -14,7 +14,9 @@ import { readSeed, type PerfTree } from './tree-view-fixtures';
  *   first rendered layout, median of 5 cold loads < 1s (the LCP budget).
  * - Re-focus with cached data, from the key press to the painted frame (fetch,
  *   worker layout, render), median of 30 < 50ms with the p95 reported: at fit
- *   (~500+ people painted) and at 35-45% zoom (cards mounted as DOM).
+ *   (~500+ people painted) and at 35-45% zoom (cards mounted as DOM), each warm
+ *   (the keyboard rested on the card past the prefetch dwell, so its layout was
+ *   prepared) and cold (Enter at once, as after Find).
  * - Pan and zoom with 2,000+ laid-out cards, at fit and with cards mounted:
  *   median frame at 58fps or better and under 5% of frames over 33ms. Long
  *   tasks and the longest frame are reported, not asserted: on a loaded machine
@@ -35,6 +37,16 @@ test.skip(({ browserName }) => browserName !== 'chromium', 'Chromium measures th
 test.skip(process.env.OA_PERF !== '1', 'Run with npm run e2e:perf');
 test.skip(process.env.E2E_COVERAGE === '1', 'Timings are not meaningful in a coverage build');
 test.describe.configure({ mode: 'serial' });
+
+// Any page error fails the run: a perf loop is also a stress test.
+let pageErrors: string[] = [];
+test.beforeEach(({ page }) => {
+  pageErrors = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+});
+test.afterEach(() => {
+  expect(pageErrors).toEqual([]);
+});
 test.use({ viewport: { width: 1440, height: 900 } });
 
 const factor = Number(process.env.OA_BENCH_FACTOR ?? 1);
@@ -171,7 +183,7 @@ for (const tree of trees) {
   const url = (person: string, extra: string) =>
     `/tree/${person}?tree=${encodeURIComponent(tree.tree)}${extra}`;
 
-  test.describe(`${people}-person tree`, () => {
+  test.describe(`${people}-person tree`, { tag: '@perf' }, () => {
     test('first paint', async ({ browser }) => {
       const times: number[] = [];
       // Fresh contexts: nothing cached, as on opening the app at the home person.
@@ -201,11 +213,17 @@ for (const tree of trees) {
       expect(median).toBeLessThan(budget);
     });
 
-    for (const zoom of ['fit', 'mounted'] as const) {
-      const title =
+    for (const [zoom, warm] of [
+      ['fit', true],
+      ['mounted', true],
+      ['fit', false],
+      ['mounted', false],
+    ] as const) {
+      const title = `re-focus ${warm ? 'warm' : 'cold'} ${
         zoom === 'fit'
-          ? 're-focus with ~500+ people on screen (fit, painted)'
-          : 're-focus with cards mounted (35-45% zoom)';
+          ? 'with ~500+ people on screen (fit, painted)'
+          : 'with cards mounted (35-45% zoom)'
+      }`;
       test(title, async ({ page }) => {
         await page.goto(url(tree.wideId, '&down=7&up=1'));
         await ready(page);
@@ -222,6 +240,9 @@ for (const tree of trees) {
         const mounted: number[] = [];
         const refocus = async (key: string) => {
           await page.keyboard.press(key);
+          // Warm: rest on the card past the prefetch dwell, as a user reading it
+          // would, so its layout is prepared. Cold: Enter at once, as after Find.
+          if (warm) await page.waitForTimeout(300);
           const before = await refocusCount(page);
           await page.keyboard.press('Enter');
           await expect.poll(() => refocusCount(page)).toBeGreaterThan(before);
@@ -250,14 +271,14 @@ for (const tree of trees) {
         const budget = 50 * factor;
         report(
           tree,
-          `Re-focus, cached, ${zoom === 'fit' ? 'fit' : `${Math.round((await scale(page)) * 100)}% zoom`} (${laidOut} laid out, ${mean(visible)} on screen, ${mean(mounted)} mounted), median of 30`,
+          `Re-focus ${warm ? 'warm' : 'cold'}, cached, ${zoom === 'fit' ? 'fit' : `${Math.round((await scale(page)) * 100)}% zoom`} (${laidOut} laid out, ${mean(visible)} on screen, ${mean(mounted)} mounted), median of 30`,
           `${median.toFixed(1)}ms (p95 ${p95.toFixed(1)}ms; uncached ${uncached.map((d) => d.toFixed(0)).join(' and ')}ms)`,
           `median < ${budget}ms`,
           median < budget,
         );
         if (zoom === 'fit') {
           expect(mean(visible)).toBeGreaterThanOrEqual(500);
-          checkSize(`refocus ${zoom}`, laidOut);
+          checkSize(`refocus ${zoom} ${warm}`, laidOut);
         } else {
           // Cards are DOM here, not painted.
           expect(mean(mounted)).toBeGreaterThanOrEqual(20);

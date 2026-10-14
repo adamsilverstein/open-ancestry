@@ -1,6 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import {
+  TransactionInProgressError,
   UndoConflictError,
   exportJsonString,
   families,
@@ -25,6 +26,10 @@ import {
 } from './index';
 import { memoryTree, seedSmallFamily } from './test/helpers';
 
+// Property tests run hundreds of cases; under coverage on a shared CI runner that can
+// pass Vitest's 5s default, so they get room. A hang still fails.
+const PROPERTY_TIMEOUT = 30_000;
+
 /** Every user-data table (change history excluded) as canonical JSON. */
 function snapshot(store: TreeStore): string {
   return exportJsonString(store, { history: false });
@@ -40,7 +45,7 @@ function searchIndex(store: TreeStore): unknown[] {
     .all();
 }
 
-describe('undo / redo', () => {
+describe('undo / redo', { timeout: PROPERTY_TIMEOUT }, () => {
   it('undoes and redoes a batch', () => {
     const store = memoryTree();
     const before = snapshot(store);
@@ -357,4 +362,25 @@ describe('undo / redo', () => {
     // Each run builds a SQLite tree and replays up to 48 edits; about 0.7s
     // alone, but over the 5s default when the whole suite runs in parallel.
   }, 30_000);
+
+  it('refuses to replay inside a transaction it does not own, and leaves that transaction alone', () => {
+    const store = memoryTree();
+    const f = seedSmallFamily(store);
+    const nameId = names.list(store, f.kid)[0]!.id;
+    const { batchId } = store.transact('rename', (tx) =>
+      names.update(tx, nameId, { given: 'Kester' }),
+    );
+    // Another writer (an import) holds a transaction on the same connection.
+    store.db.exec('BEGIN');
+    store.db
+      .prepare("INSERT INTO person (id, created_at, updated_at) VALUES ('01OUTER', 'x', 'x')")
+      .run();
+    expect(() => undo(store, batchId)).toThrow(TransactionInProgressError);
+    expect(() => undoLast(store)).toThrow(TransactionInProgressError);
+    expect(store.db.inTransaction).toBe(true);
+    store.db.exec('COMMIT');
+    expect(store.getRow('person', '01OUTER')).toBeDefined();
+    expect(listBatches(store)[0]).toMatchObject({ id: batchId, state: 'applied' });
+    store.close();
+  });
 });

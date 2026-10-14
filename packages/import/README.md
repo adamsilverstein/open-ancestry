@@ -79,3 +79,12 @@ The file is untrusted. Size limits apply before parsing; GEDZIP archives go thro
 ## Performance
 
 `npm run bench -- import`: a generated 10k-person Ancestry-style file (225k lines) imports in about 0.8 s into an in-memory tree and 0.9 s into a new tree on disk on an M-series laptop (budget 3 s), 100k people in about 9 s (budget 30 s). Shared CI runners are about 2.5 times slower. Roughly two thirds of the time is SQLite inserts in `BulkWriter`.
+
+## Re-import
+
+`prepareReimport(store, input)` reads an updated export into a memory tree and compares it with `store` without writing; `applyReimport(store, session, acceptedIds, label)` applies the accepted changes as one unit of work (one undo step); `closeReimport(session)` frees it.
+
+- **Matching.** Ancestry renumbers xrefs, so people are matched on evidence: shared Ancestry record ids (`_APID`) on citations, names (Jaro-Winkler, against every name the person has), birth and death years, birth place and sex, then a second pass in which relatives matched to each other confirm a pair. Candidates are blocked by name sounds (and surname sound with birth year), so a 10k tree compares in about a second. Each match has a `confidence` (0..1) and `reasons`; below 0.6 an incoming person is new, from 0.85 a match is offered for bulk acceptance.
+- **Diff.** Per person: new and changed facts (singular facts like birth are compared as one), names, sex, citations, tags, media, new partners and children, new people (with the changes that depend on them), and people and facts missing from the export (listed, never removed).
+- **Local edits win.** A row changed through the app since it was imported (it has `change_log` entries) makes the incoming change a conflict that is unticked by default.
+- **Apply.** Only accepted changes are written; a change whose new person was rejected is skipped. Places, sources, repositories, tags and media already in the tree are reused. The export's text is kept whole in `raw_record` under its own import batch, and matched people's `external_id` moves to the new xrefs. Apply refuses (`ReimportStaleError`) when the tree changed after the comparison. Media files are not copied by a re-import.

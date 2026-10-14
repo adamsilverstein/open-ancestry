@@ -26,6 +26,9 @@ import type {
 } from '@open-ancestry/core';
 import { GenerationLabel } from '../components/GenerationLabel/GenerationLabel';
 import { PersonCard, personCardLabel } from '../components/PersonCard/PersonCard';
+import cardStyles from '../components/PersonCard/PersonCard.module.css';
+import { cx } from '../lib/cx';
+import { formatLifespan } from '../lib/lifespan';
 import { useTheme } from '../lib/useTheme';
 import type { TreeLayout as LayoutKind } from '../components/TreeToolbar/TreeToolbar';
 import type { PersonSummary } from '../lib/person';
@@ -54,6 +57,12 @@ const OVERSCAN = 240;
  * one canvas instead of mounted (only the keyboard's active card stays in the DOM).
  */
 const LOD_SCALE = 0.35;
+/**
+ * Below this zoom (but above LOD_SCALE) cards drop their avatar and badges:
+ * mounting about 100 full cards on a re-focus cost most of its time, and at
+ * this size the silhouettes and icons are a few pixels wide.
+ */
+const LIGHT_SCALE = 0.6;
 const ANIMATION_MS = 180;
 const FIT_PADDING = 64;
 const DRAG_THRESHOLD = 4;
@@ -97,6 +106,7 @@ interface Visible {
   nodes: number[];
   edges: number[];
   lod: boolean;
+  light: boolean;
 }
 
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -137,6 +147,7 @@ interface CardProps {
   tabbable: boolean;
   expanded: boolean;
   lod: boolean;
+  light: boolean;
   alternate: ParentFamilyChoice | undefined;
 }
 
@@ -148,6 +159,7 @@ const TreeCard = memo(function TreeCard({
   tabbable,
   expanded,
   lod,
+  light,
   alternate,
 }: CardProps) {
   const tabIndex = tabbable ? 0 : -1;
@@ -175,6 +187,23 @@ const TreeCard = memo(function TreeCard({
           data-focus={node.isFocus || undefined}
           {...common}
         />
+      ) : light ? (
+        <button
+          type="button"
+          className={cx(
+            cardStyles.card,
+            cardStyles.regular,
+            cardStyles[`sex${person.sex}`],
+            node.isFocus && cardStyles.focusPerson,
+            node.isDuplicate && cardStyles.duplicate,
+            styles.card,
+            styles.lightCard,
+          )}
+          {...common}
+        >
+          <span className={cardStyles.name}>{person.name}</span>
+          <span className={cardStyles.lifespan}>{formatLifespan(person)}</span>
+        </button>
       ) : (
         <PersonCard
           person={person}
@@ -303,6 +332,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   const animation = useRef(0);
   const idle = useRef<ReturnType<typeof setTimeout>>(undefined);
   const lastCells = useRef('');
+  const lastMode = useRef('');
   const previous = useRef<{ layout: TreeLayout | null; kind: LayoutKind; focus: string } | null>(
     null,
   );
@@ -314,19 +344,35 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     nodes: [],
     edges: [],
     lod: false,
+    light: false,
   });
 
   const source = layout ?? fan;
-  const nodeIndex = useMemo(() => new GridIndex(layout?.nodes ?? [], CELL), [layout]);
-  const edgeIndex = useMemo(
-    () => new GridIndex((layout?.edges ?? []).map(edgeRect), CELL),
+  // A layout and the indexes built from it travel together: frame callbacks
+  // queued for an older layout must never pair its indexes with a newer one.
+  const indexed = useMemo(
+    () => ({
+      layout,
+      nodes: new GridIndex(layout?.nodes ?? [], CELL),
+      edges: new GridIndex((layout?.edges ?? []).map(edgeRect), CELL),
+    }),
     [layout],
   );
+  const nodeIndex = indexed.nodes;
   const relations = useMemo(() => (layout ? buildRelations(layout) : null), [layout]);
 
   // Latest props for callbacks that must stay stable.
-  const latest = useRef({ onInteract, onViewportChange, onPrefetch, layout, fan, person, kind });
-  latest.current = { onInteract, onViewportChange, onPrefetch, layout, fan, person, kind };
+  const latest = useRef({
+    onInteract,
+    onViewportChange,
+    onPrefetch,
+    layout,
+    fan,
+    person,
+    kind,
+    indexed,
+  });
+  latest.current = { onInteract, onViewportChange, onPrefetch, layout, fan, person, kind, indexed };
 
   const measure = useCallback(() => {
     const el = viewportRef.current;
@@ -359,62 +405,59 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   }, [theme]);
 
   /** Paints every card and edge in view onto the canvas layer when zoomed far out. */
-  const drawLod = useCallback(
-    (lod: boolean, world: Rect) => {
-      const canvas = lodRef.current;
-      const ctx = canvas?.getContext('2d');
-      const current = latest.current.layout;
-      if (!canvas || !ctx) return 0;
-      const { width, height } = size.current;
-      const dpr = window.devicePixelRatio || 1;
-      if (canvas.width !== Math.round(width * dpr)) canvas.width = Math.round(width * dpr);
-      if (canvas.height !== Math.round(height * dpr)) canvas.height = Math.round(height * dpr);
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const nodes = current ? nodeIndex.query(world) : [];
-      const c = colors.current;
-      if (!lod || !current || !c) return nodes.length;
-      const t = transform.current;
-      ctx.setTransform(dpr * t.scale, 0, 0, dpr * t.scale, dpr * t.x, dpr * t.y);
-      ctx.beginPath();
-      for (const i of edgeIndex.query(world)) {
-        const [first, ...rest] = current.edges[i]!.points;
-        if (!first) continue;
-        ctx.moveTo(first[0], first[1]);
-        for (const [x, y] of rest) ctx.lineTo(x, y);
-      }
-      ctx.strokeStyle = c.line;
-      ctx.lineWidth = 1.5 / t.scale;
-      ctx.stroke();
-      ctx.fillStyle = c.surface;
+  const drawLod = useCallback((lod: boolean, world: Rect) => {
+    const canvas = lodRef.current;
+    const ctx = canvas?.getContext('2d');
+    const { layout: current, nodes: nodeIndex, edges: edgeIndex } = latest.current.indexed;
+    if (!canvas || !ctx) return 0;
+    const { width, height } = size.current;
+    const dpr = window.devicePixelRatio || 1;
+    if (canvas.width !== Math.round(width * dpr)) canvas.width = Math.round(width * dpr);
+    if (canvas.height !== Math.round(height * dpr)) canvas.height = Math.round(height * dpr);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const nodes = current ? nodeIndex.query(world) : [];
+    const c = colors.current;
+    if (!lod || !current || !c) return nodes.length;
+    const t = transform.current;
+    ctx.setTransform(dpr * t.scale, 0, 0, dpr * t.scale, dpr * t.x, dpr * t.y);
+    ctx.beginPath();
+    for (const i of edgeIndex.query(world)) {
+      const [first, ...rest] = current.edges[i]!.points;
+      if (!first) continue;
+      ctx.moveTo(first[0], first[1]);
+      for (const [x, y] of rest) ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = c.line;
+    ctx.lineWidth = 1.5 / t.scale;
+    ctx.stroke();
+    ctx.fillStyle = c.surface;
+    for (const i of nodes) {
+      const n = current.nodes[i]!;
+      ctx.fillRect(n.x, n.y, n.width, n.height);
+    }
+    // The sex stripe, grouped by color to keep fill style changes few.
+    const stripe = Math.max(12, 4 / t.scale);
+    for (const sex of ['M', 'F', 'U'] as const) {
+      ctx.fillStyle = c[sex];
       for (const i of nodes) {
         const n = current.nodes[i]!;
-        ctx.fillRect(n.x, n.y, n.width, n.height);
+        const p = latest.current.person(n.personId);
+        if ((p?.sex ?? 'U') === sex) ctx.fillRect(n.x, n.y, n.width, stripe);
       }
-      // The sex stripe, grouped by color to keep fill style changes few.
-      const stripe = Math.max(12, 4 / t.scale);
-      for (const sex of ['M', 'F', 'U'] as const) {
-        ctx.fillStyle = c[sex];
-        for (const i of nodes) {
-          const n = current.nodes[i]!;
-          const p = latest.current.person(n.personId);
-          if ((p?.sex ?? 'U') === sex) ctx.fillRect(n.x, n.y, n.width, stripe);
-        }
-      }
-      const focus = current.nodes.find((n) => n.isFocus);
-      if (focus) {
-        ctx.strokeStyle = c.focus;
-        ctx.lineWidth = 3 / t.scale;
-        ctx.strokeRect(focus.x, focus.y, focus.width, focus.height);
-      }
-      return nodes.length;
-    },
-    [nodeIndex, edgeIndex],
-  );
+    }
+    const focus = current.nodes.find((n) => n.isFocus);
+    if (focus) {
+      ctx.strokeStyle = c.focus;
+      ctx.lineWidth = 3 / t.scale;
+      ctx.strokeRect(focus.x, focus.y, focus.width, focus.height);
+    }
+    return nodes.length;
+  }, []);
 
   const updateVisible = useCallback(
     (force = false) => {
-      const { layout: current, fan: currentFan } = latest.current;
+      const { layout: current, fan: currentFan, indexed } = latest.current;
       const t = transform.current;
       const { width, height } = size.current;
       const world = visibleWorld(t, width, height);
@@ -428,16 +471,20 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       const c1 = Math.floor((world.x + world.width + pad) / CELL);
       const r1 = Math.floor((world.y + world.height + pad) / CELL);
       // Far out, nothing mounts while panning: the canvas layer shows it all.
-      const key = lod ? 'lod' : `${c0},${r0},${c1},${r1}`;
+      const light = t.scale < LIGHT_SCALE;
+      const key = lod ? 'lod' : `${c0},${r0},${c1},${r1},${light}`;
       if (!force && key === lastCells.current) return;
-      // Crossing the canvas threshold swaps the focused card's element: put
-      // keyboard focus back on the active card after the swap (WCAG 2.4.3).
-      if (lastCells.current !== '' && (key === 'lod') !== (lastCells.current === 'lod')) {
+      // Crossing a detail threshold (full, light, canvas) swaps the focused card's
+      // element: put keyboard focus back on the active card after the swap
+      // (WCAG 2.4.3).
+      const mode = lod ? 'lod' : light ? 'light' : 'full';
+      if (lastMode.current !== '' && mode !== lastMode.current) {
         const focused = document.activeElement as HTMLElement | null;
         if (focused?.dataset.key && viewportRef.current?.contains(focused)) {
           pendingFocus.current = focused.dataset.key;
         }
       }
+      lastMode.current = mode;
       lastCells.current = key;
       const rect = {
         x: c0 * CELL,
@@ -447,12 +494,13 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       };
       setVisible({
         source: current ?? currentFan,
-        nodes: lod ? [] : nodeIndex.query(rect),
-        edges: lod ? [] : edgeIndex.query(rect),
+        nodes: lod ? [] : indexed.nodes.query(rect),
+        edges: lod ? [] : indexed.edges.query(rect),
         lod,
+        light,
       });
     },
-    [nodeIndex, edgeIndex, drawLod],
+    [drawLod],
   );
   const updateVisibleRef = useRef(updateVisible);
   useEffect(() => {
@@ -649,6 +697,9 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       setActiveKey(key);
       pendingFocus.current = key;
       ensureOnScreen(key);
+      // Enter would re-focus here next: get its layout ready.
+      const node = nodeByKey(key);
+      if (node && !node.isDuplicate && !node.isFocus) latest.current.onPrefetch(node.personId);
       // Already mounted: focus now. Otherwise the commit effect below does.
       const el = viewportRef.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`);
       if (el) {
@@ -656,7 +707,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         pendingFocus.current = null;
       }
     },
-    [ensureOnScreen],
+    [ensureOnScreen, nodeByKey],
   );
 
   useImperativeHandle(
@@ -761,6 +812,14 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     }
     const key = pendingFocus.current;
     if (key) {
+      // Only while focus is still the tree's to give: the layout for a re-focus can land
+      // after the user has moved on (to the top bar, say), and taking focus back would
+      // also turn the tree's single-key shortcuts back on behind their back.
+      const focused = document.activeElement;
+      if (focused && focused !== document.body && !focused.closest('[data-tree-region]')) {
+        pendingFocus.current = null;
+        return;
+      }
       const el = viewportRef.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`);
       if (el) {
         el.focus({ preventScroll: true });
@@ -981,16 +1040,14 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     if (node && !node.isDuplicate && !node.isFocus) refocus(node.personId);
   }
 
-  const hover = useRef<{ key: string; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const hovered = useRef<string | null>(null);
   function onPointerOver(event: PointerEvent<HTMLDivElement>) {
     if (drag.current?.moved) return;
     const node = nodeOf(event.target);
-    if (!node || hover.current?.key === node.key) return;
-    if (hover.current) clearTimeout(hover.current.timer);
-    hover.current = {
-      key: node.key,
-      timer: setTimeout(() => latest.current.onPrefetch(node.personId), 120),
-    };
+    if (!node || hovered.current === node.key) return;
+    hovered.current = node.key;
+    // The view waits for the pointer to rest before preparing anything.
+    if (!node.isDuplicate) latest.current.onPrefetch(node.personId);
   }
 
   const arrows: Record<string, Direction> = {
@@ -1197,6 +1254,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
                 tabbable={node.key === active}
                 expanded={popoverKey === node.key}
                 lod={shown.lod}
+                light={shown.light}
                 alternate={layout.alternateParentFamilies[node.personId]}
               />
             );

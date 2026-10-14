@@ -16,7 +16,7 @@ import {
   type ReviewChange,
 } from './index';
 
-const SAMPLE = readFileSync(join(FIXTURES, 'ancestry-sample.ged'), 'utf8').replace(/^﻿/, '');
+const SAMPLE = readFileSync(join(FIXTURES, 'ancestry-sample.ged'), 'utf8').replace(/^\uFEFF/, '');
 
 /** Ancestry renumbers every xref between exports. */
 export function renumber(text: string, offset = 100): string {
@@ -108,7 +108,7 @@ let store: TreeStore;
 let session: ReimportSession | undefined;
 
 beforeEach(async () => {
-  session && closeReimport(session);
+  if (session) closeReimport(session);
   session = undefined;
   store = openMemoryTree();
   await importGedcom({ bytes: SAMPLE }, store, { today: TODAY });

@@ -664,13 +664,27 @@ export function DesignPage() {
       <Section title="RelationshipChart">
         {/* Rafferty is Eleanor's 1st cousin 1x removed through Thaddeus and Wilhelmina's line. */}
         <RelationshipChart
-          cells={[
-            { person: rafferty, row: 3, col: 0, role: 'person' },
-            { person: eleanor, row: 2, col: 0, role: 'between' },
-            { person: null, row: 1, col: 0, role: 'between' },
-            { person: wilhelmina, row: 0, col: 0, role: 'common-ancestor' },
-            { person: thaddeus, row: 1, col: 1, role: 'between' },
-            { person: unknown, row: 2, col: 1, role: 'home' },
+          paths={[
+            {
+              label: '1st cousin 1x removed through Wilhelmina Ostrander',
+              cells: [
+                { person: rafferty, row: 3, col: 0, role: 'person' },
+                { person: eleanor, row: 2, col: 0, role: 'between', step: 'parent' },
+                { person: null, row: 1, col: 0, role: 'between', step: 'parent' },
+                { person: wilhelmina, row: 0, col: 0, role: 'common-ancestor', step: 'parent' },
+                { person: thaddeus, row: 1, col: 1, role: 'between', step: 'child' },
+                { person: unknown, row: 2, col: 1, role: 'home', step: 'child' },
+              ],
+            },
+            {
+              label: 'nephew through Thaddeus Marlowe',
+              cells: [
+                { person: rafferty, row: 2, col: 0, role: 'person' },
+                { person: eleanor, row: 1, col: 0, role: 'between', step: 'parent' },
+                { person: thaddeus, row: 0, col: 0, role: 'common-ancestor', step: 'parent' },
+                { person: unknown, row: 1, col: 1, role: 'home', step: 'child' },
+              ],
+            },
           ]}
         />
       </Section>

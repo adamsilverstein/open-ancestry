@@ -1,3 +1,9 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-3);
+}
+
 .chart {
   position: relative;
   max-width: none;

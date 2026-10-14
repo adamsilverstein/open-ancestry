@@ -53,6 +53,7 @@ export {
 export {
   RelationshipChart,
   type RelationshipChartCell,
+  type RelationshipChartPath,
   type RelationshipChartProps,
   type RelationshipChartRole,
 } from './RelationshipChart/RelationshipChart';

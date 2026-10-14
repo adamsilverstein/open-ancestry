@@ -94,13 +94,38 @@ describe('relationshipPath', () => {
       both('cousin', { cousin: ['uncle'], uncle: ['gpa'] }),
     );
     expect(r?.name).toBe('1st cousin');
-    expect(r?.cells).toEqual([
+    expect(r?.paths).toHaveLength(1);
+    expect(r?.paths[0]!.cells).toEqual([
       { id: 'cousin', row: 2, col: 0, role: 'person' },
-      { id: 'uncle', row: 1, col: 0, role: 'between' },
-      { id: 'gpa', row: 0, col: 0, role: 'common-ancestor' },
-      { id: 'dad', row: 1, col: 1, role: 'between' },
-      { id: 'me', row: 2, col: 1, role: 'home' },
+      { id: 'uncle', row: 1, col: 0, role: 'between', step: 'parent' },
+      { id: 'gpa', row: 0, col: 0, role: 'common-ancestor', step: 'parent' },
+      { id: 'dad', row: 1, col: 1, role: 'between', step: 'child' },
+      { id: 'me', row: 2, col: 1, role: 'home', step: 'child' },
     ]);
+  });
+
+  it('lists every relationship and line with pedigree collapse', () => {
+    // Brothers b1 and b2 married sisters s1 and s2: double first cousins.
+    const tree = {
+      me: ['b1', 's1'],
+      b1: ['pf'],
+      s1: ['mf'],
+      cousin: ['b2', 's2'],
+      b2: ['pf'],
+      s2: ['mf'],
+    };
+    const pick = (id: string, keys: string[]) =>
+      slice(id, Object.fromEntries(keys.map((k) => [k, tree[k as keyof typeof tree]])), sexes);
+    const r = relationshipPath(
+      pick('me', ['me', 'b1', 's1']),
+      pick('cousin', ['cousin', 'b2', 's2']),
+    );
+    expect(r?.name).toBe('double 1st cousin');
+    expect(r?.paths.map((p) => p.label)).toEqual([
+      'double 1st cousin through Unknown name (line 1)',
+      'double 1st cousin through Unknown name (line 2)',
+    ]);
+    expect(r?.paths.map((p) => p.cells[2]!.id)).toEqual(['pf', 'mf']);
   });
 
   it('is null for the home person and for strangers', () => {

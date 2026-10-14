@@ -56,8 +56,8 @@ function Vital({
 interface RelationshipToHome {
   /** `father of Rowan Ashdown`, `Home person`; null while loading or unrelated. */
   text: string | null;
-  /** The connecting path for the mini chart, for blood relatives. */
-  chart: RelationshipChartCell[] | null;
+  /** One mini chart per connecting path, for blood relatives (several with pedigree collapse). */
+  charts: { label: string; cells: RelationshipChartCell[] }[];
 }
 
 function useRelationshipToHome(tree: string, detail: PersonDetail): RelationshipToHome {
@@ -76,12 +76,12 @@ function useRelationshipToHome(tree: string, detail: PersonDetail): Relationship
     [homeAncestors.data, personAncestors.data],
   );
 
-  if (!home) return { text: null, chart: null };
-  if (home === id) return { text: 'Home person', chart: null };
+  if (!home) return { text: null, charts: [] };
+  if (home === id) return { text: 'Home person', charts: [] };
   if (spouseOfHome) {
     const role =
       detail.summary.sex === 'M' ? 'husband' : detail.summary.sex === 'F' ? 'wife' : 'spouse';
-    return { text: `${role} of ${fullName(spouseOfHome)}`, chart: null };
+    return { text: `${role} of ${fullName(spouseOfHome)}`, charts: [] };
   }
   const people = new Map(
     [...(homeAncestors.data?.people ?? []), ...(personAncestors.data?.people ?? [])].map((p) => [
@@ -90,12 +90,15 @@ function useRelationshipToHome(tree: string, detail: PersonDetail): Relationship
     ]),
   );
   const homePerson = people.get(home);
-  if (!found || !homePerson) return { text: null, chart: null };
-  const chart = found.cells.map((cell): RelationshipChartCell => {
-    const person = people.get(cell.id);
-    return { ...cell, person: person ? toPersonSummary(person) : null };
-  });
-  return { text: `${found.name} of ${fullName(homePerson)}`, chart };
+  if (!found || !homePerson) return { text: null, charts: [] };
+  const charts = found.paths.map(({ label, cells }) => ({
+    label,
+    cells: cells.map((cell): RelationshipChartCell => {
+      const person = people.get(cell.id);
+      return { ...cell, person: person ? toPersonSummary(person) : null };
+    }),
+  }));
+  return { text: `${found.name} of ${fullName(homePerson)}`, charts };
 }
 
 export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDetail }) {
@@ -127,7 +130,7 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
           <p className={styles.relationship} data-testid="relationship">
             {relationship.text}
           </p>
-          {relationship.chart && (
+          {relationship.charts.length > 0 && (
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="ghost" size="sm">
@@ -135,7 +138,7 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
                 </Button>
               </PopoverTrigger>
               <PopoverContent label="Relationship path" className={styles.pathPopover}>
-                <RelationshipChart cells={relationship.chart} />
+                <RelationshipChart paths={relationship.charts} />
               </PopoverContent>
             </Popover>
           )}

@@ -60,6 +60,11 @@ test.describe('header', () => {
       /^Rowan Ashdown/,
     ]);
     await expect(chart.getByText('Common ancestor')).toBeVisible();
+    // Screen readers hear each card's name and lifespan, and how it relates to the one before.
+    await expect(chart.getByRole('link', { name: 'Horace Ashdown, 1848 to 1910' })).toBeVisible();
+    await expect(chart.getByText('father of Felix Ashdown')).toBeAttached();
+    await expect(chart.getByText('son of Silas Ashdown')).toBeAttached();
+    await expect(chart.getByText('This person')).toBeAttached();
     await chart.getByRole('link', { name: /Silas Ashdown/ }).click();
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Silas Ashdown');
   });

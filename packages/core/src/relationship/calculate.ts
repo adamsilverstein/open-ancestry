@@ -127,7 +127,6 @@ function joinPath(a: Arrival, b: Arrival): RelationshipPath {
   };
 }
 
-/** Parent ids of `child`, biological links only when `bio`. */
 /** Recorded parent ids of `child` (not parentless-family stand-ins), biological only when `bio`. */
 function parentSet(g: KinshipGraph, child: string, bio: boolean): Set<string> {
   return new Set(

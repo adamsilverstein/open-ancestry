@@ -41,7 +41,8 @@ children are still siblings.
 
 `relationshipCalculator(graph, { cacheSize })` returns a `relationship`-like function that caches
 each person's ancestor walk (bounded LRU), for many queries over one graph such as everyone
-against the home person.
+against the home person. Its intended caller is the server's home-person relationship endpoint
+(see the TODO above); the person page builds a fresh graph from two ancestor slices instead.
 
 `chartPath(path)` turns a path into grid cells (`{ id, row, col }`, row 0 the highest person) for
 the mini chart; the drawing itself belongs to the person page.

@@ -319,6 +319,29 @@ describe('POST /api/import (new tree owned by the server)', () => {
     expect((await api.del('/api/jobs/00000000-0000-4000-8000-000000000000')).statusCode).toBe(404);
   });
 
+  it('answers 409 to a cancel once the import is finalizing or saving', async () => {
+    let release!: () => void;
+    const finalizing: Importer = async (_path, store, { onProgress }) => {
+      onProgress({ phase: 'finalize', done: 0, total: 1 });
+      await new Promise<void>((r) => (release = r));
+      store.transact('import', (tx) => tx.insert('person', {}));
+      return { people: 1 };
+    };
+    api = await testApi({ importer: finalizing });
+    const { jobId, job } = (await importNew('Late.ged')).json();
+    await vi.waitFor(async () =>
+      expect((await api.get(`/api/jobs/${jobId}`)).json().progress).toMatchObject({
+        phase: 'finalize',
+      }),
+    );
+    const late = await api.del(`/api/jobs/${jobId}`);
+    expect(late.statusCode).toBe(409);
+    expect(late.json().error.message).toMatch(/can no longer be cancelled/);
+    release();
+    expect(await waitForJob(api, jobId, 'completed')).toMatchObject({ cancelled: false });
+    expect(existsSync(`${api.root}/${job.tree}.oatree`)).toBe(true);
+  });
+
   it('aborts imports and cleans up on shutdown, even with an event stream open', async () => {
     const fake = controllableImporter();
     api = await testApi(); // keeps afterEach's close happy; this test runs its own server

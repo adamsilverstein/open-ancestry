@@ -1,5 +1,7 @@
 import { join } from 'node:path';
-import { openTree, ulid } from '@open-ancestry/db';
+import { openMemoryTree, openTree, ulid, type TreeStore } from '@open-ancestry/db';
+import { parseGedcom } from '@open-ancestry/gedcom';
+import { importGedcom } from '@open-ancestry/import';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTestTree, testApi, type TestApi } from './test/helpers';
 
@@ -37,6 +39,16 @@ interface Detail {
 const detail = async (id: string) =>
   (await api.get(`${base}/people/${id}`)).json() as Promise<Detail>;
 const status = async (id: string) => (await api.get(`${base}/people/${id}`)).statusCode;
+
+/** Runs `fn` against the test tree's database directly, for rows the API has no routes for. */
+function withStore<T>(fn: (store: TreeStore) => T): T {
+  const store = openTree(join(api.root, 'Merge.oatree'));
+  try {
+    return fn(store);
+  } finally {
+    store.close();
+  }
+}
 
 /** Adds rows the API has no routes for yet: a citation and a media link on a person. */
 function addSourceAndPhoto(personId: string, page: string) {
@@ -168,4 +180,237 @@ describe('merge people', () => {
       expect(res.statusCode, JSON.stringify(choices)).toBe(400);
     }
   });
+
+  it('refuses to merge a person with an ancestor or descendant, in either order', async () => {
+    const grandfather = await person('Tobias', 'Wren', 'M');
+    const father = (
+      await api.post(`${base}/people/${grandfather}/children`, {
+        person: { sex: 'M', names: [{ given: 'Tobias', surname: 'Wren' }] },
+      })
+    ).json().childId as string;
+    const son = (
+      await api.post(`${base}/people/${father}/children`, {
+        person: { sex: 'M', names: [{ given: 'Tobias', surname: 'Wren' }] },
+      })
+    ).json().childId as string;
+    const cases: [keep: string, other: string, message: string][] = [
+      [father, son, 'is a child of'],
+      [son, father, 'is a parent of'],
+      [grandfather, son, 'is a grandchild of'],
+      [son, grandfather, 'is a grandparent of'],
+    ];
+    for (const [keep, other, message] of cases) {
+      const res = await api.post(`${base}/people/${keep}/merge`, { otherId: other });
+      expect(res.statusCode, message).toBe(409);
+      expect(res.json().error.message).toContain(`Tobias Wren ${message} Tobias Wren`);
+    }
+    // Nothing was written.
+    expect((await api.get(`${base}/history?limit=1`)).json().items[0].label).toMatch(/^Add child/);
+    expect(await status(son)).toBe(200);
+  });
+
+  it('drops checker dismissals that name the merged-away person', async () => {
+    const keep = await person('Rowan', 'Ashdown', 'M');
+    const other = await person('Rowan', 'Ashdown', 'M');
+    const keys = [
+      `no-sources:${keep}`,
+      `no-sources:${other}`,
+      `possible-duplicate:${keep}+${other}`,
+    ];
+    expect((await api.post(`${base}/checks/dismiss`, { keys })).statusCode).toBe(200);
+    await api.post(`${base}/people/${keep}/merge`, { otherId: other });
+    const left = withStore((store) =>
+      store.db.prepare(`SELECT key FROM meta WHERE key LIKE 'check.dismissed:%'`).pluck().all(),
+    );
+    expect(left).toEqual([`check.dismissed:no-sources:${keep}`]);
+    await api.post(`${base}/undo`);
+    expect(
+      withStore((store) =>
+        store.db
+          .prepare(`SELECT COUNT(*) FROM meta WHERE key LIKE 'check.dismissed:%'`)
+          .pluck()
+          .get(),
+      ),
+    ).toBe(3);
+  });
+
+  it('keeps the sources and notes of an event both people share', async () => {
+    const keep = await person('Rowan', 'Ashdown', 'M');
+    const other = await person('Rowan', 'Ashdown', 'M');
+    const eventId = withStore(
+      (store) =>
+        store.transact('test rows', (tx) => {
+          const census = tx.insert('event', { type: 'CENS', date_text: '1901' });
+          for (const personId of [keep, other])
+            tx.insert('event_role', {
+              event_id: census.id,
+              person_id: personId,
+              role: 'principal',
+            });
+          const source = tx.insert('source', { title: 'Census' });
+          const citation = tx.insert('citation', { source_id: source.id, page: 'piece 12' });
+          tx.insert('citation_link', {
+            citation_id: citation.id,
+            owner_type: 'event',
+            owner_id: census.id,
+          });
+          const note = tx.insert('note', { text: 'Listed twice' });
+          tx.insert('note_link', { note_id: note.id, owner_type: 'event', owner_id: census.id });
+          return census.id;
+        }).result,
+    );
+    expect((await api.post(`${base}/people/${keep}/merge`, { otherId: other })).statusCode).toBe(
+      200,
+    );
+    const counts = withStore((store) => ({
+      roles: store.db.prepare('SELECT person_id FROM event_role WHERE event_id = ?').all(eventId),
+      citations: store.db
+        .prepare(`SELECT 1 FROM citation_link WHERE owner_type = 'event' AND owner_id = ?`)
+        .all(eventId).length,
+      notes: store.db
+        .prepare(`SELECT 1 FROM note_link WHERE owner_type = 'event' AND owner_id = ?`)
+        .all(eventId).length,
+    }));
+    expect(counts).toEqual({ roles: [{ person_id: keep }], citations: 1, notes: 1 });
+  });
 });
+
+/*
+ * The same man recorded twice (@I1@, @I2@), each married to @I3@ in 1875 with
+ * a cited marriage, both children of @F9@.
+ */
+const DUPLICATES = `0 HEAD
+1 GEDC
+2 VERS 5.5.1
+2 FORM LINEAGE-LINKED
+1 CHAR UTF-8
+0 @I1@ INDI
+1 NAME Tobias /Wren/
+1 SEX M
+1 BIRT
+2 DATE 1850
+1 FAMS @F1@
+1 FAMC @F9@
+0 @I2@ INDI
+1 NAME Tobias /Wrenn/
+1 SEX M
+1 BIRT
+2 DATE ABT 1851
+1 DEAT
+2 DATE 1920
+1 FAMS @F2@
+1 FAMC @F9@
+1 NOTE From the second record
+1 _XYZ kept with the record
+0 @I3@ INDI
+1 NAME Mabel /Stone/
+1 SEX F
+1 FAMS @F1@
+1 FAMS @F2@
+0 @I4@ INDI
+1 NAME Silas /Wren/
+1 SEX M
+1 FAMS @F9@
+0 @I5@ INDI
+1 NAME Ivy /Wren/
+1 FAMC @F1@
+0 @I6@ INDI
+1 NAME Hal /Wren/
+1 FAMC @F2@
+0 @F1@ FAM
+1 HUSB @I1@
+1 WIFE @I3@
+1 CHIL @I5@
+1 MARR
+2 DATE 1875
+2 SOUR @S1@
+3 PAGE entry 1
+0 @F2@ FAM
+1 HUSB @I2@
+1 WIFE @I3@
+1 CHIL @I6@
+1 MARR
+2 DATE 1875
+2 SOUR @S1@
+3 PAGE entry 2
+0 @F9@ FAM
+1 HUSB @I4@
+1 CHIL @I1@
+1 CHIL @I2@
+0 @S1@ SOUR
+1 TITL Parish register
+0 TRLR
+`;
+
+describe('merging imported duplicates', () => {
+  let keep: string;
+  let other: string;
+  beforeEach(async () => {
+    const store = openTree(join(api.root, 'Merge.oatree'));
+    try {
+      await importGedcom({ bytes: DUPLICATES }, store);
+      const id = (xref: string) =>
+        store.db
+          .prepare(`SELECT owner_id FROM raw_record WHERE xref = ? AND owner_type = 'person'`)
+          .pluck()
+          .get(xref) as string;
+      [keep, other] = [id('@I1@'), id('@I2@')];
+    } finally {
+      store.close();
+    }
+    const res = await api.post(`${base}/people/${keep}/merge`, { otherId: other });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('folds the two marriages into one, with both citations', async () => {
+    const marriages = withStore((store) =>
+      store.db
+        .prepare(
+          `SELECT e.id, (SELECT COUNT(*) FROM citation_link l
+             WHERE l.owner_type = 'event' AND l.owner_id = e.id) AS citations
+           FROM event e JOIN event_role r ON r.event_id = e.id
+           JOIN family f ON f.id = r.family_id
+           WHERE e.type = 'MARR' AND ? IN (f.partner1_id, f.partner2_id)`,
+        )
+        .all(keep),
+    );
+    expect(marriages).toEqual([{ id: expect.any(String), citations: 2 }]);
+  });
+
+  for (const version of ['5.5.1', '7'] as const) {
+    it(`exports valid GEDCOM ${version} with one record for the merged person`, async () => {
+      const res = await api.get(`${base}/export.ged?version=${version}`);
+      expect(res.statusCode).toBe(200);
+      const doc = parseGedcom(res.body);
+      expect(doc.warnings).toEqual([]);
+      expect(danglingPointers(doc)).toEqual([]);
+      const records = (tag: string) => doc.records.filter((r) => r.tag === tag);
+      expect(records('INDI')).toHaveLength(5);
+      expect(records('FAM')).toHaveLength(2);
+      const wrens = records('INDI').filter((r) =>
+        r.children.some((c) => c.tag === 'NAME' && c.value?.startsWith('Tobias')),
+      );
+      expect(wrens).toHaveLength(1);
+      // The merged-away record's extension line and both names survive.
+      const lines = res.body as string;
+      expect(lines).toContain('_XYZ kept with the record');
+      expect(lines).toContain('Tobias /Wrenn/');
+
+      const reimported = openMemoryTree();
+      const result = await importGedcom({ bytes: res.body }, reimported);
+      expect(result.warnings).toEqual([]);
+      expect(reimported.db.prepare('SELECT COUNT(*) FROM person').pluck().get()).toBe(5);
+      reimported.close();
+    });
+  }
+});
+
+function danglingPointers(doc: ReturnType<typeof parseGedcom>): string[] {
+  const out: string[] = [];
+  const visit = (n: (typeof doc.records)[number]) => {
+    if (n.pointer && n.pointer !== '@VOID@' && !doc.index.has(n.pointer)) out.push(n.pointer);
+    n.children.forEach(visit);
+  };
+  doc.records.forEach(visit);
+  return out;
+}

@@ -19,6 +19,19 @@ function patchCentral(archive: Uint8Array, name: string, offset: number, value: 
   throw new Error(`no central entry ${name}`);
 }
 
+/** Renames an entry in the central directory (same length names only). */
+function renameCentral(archive: Uint8Array, from: string, to: string) {
+  const view = new DataView(archive.buffer, archive.byteOffset, archive.byteLength);
+  for (let p = 0; p + 46 < archive.length; p++) {
+    if (view.getUint32(p, true) !== 0x02014b50) continue;
+    const length = view.getUint16(p + 28, true);
+    if (new TextDecoder().decode(archive.subarray(p + 46, p + 46 + length)) !== from) continue;
+    archive.set(new TextEncoder().encode(to), p + 46);
+    return;
+  }
+  throw new Error(`no central entry ${from}`);
+}
+
 function expectError(fn: () => unknown, code: GedzipError['code']) {
   try {
     fn();
@@ -84,6 +97,44 @@ describe('readGedzip', () => {
       () => readGedzip(zip({ 'gedcom.ged': GED, 'big.bin': big }), { maxEntrySize: 5000 }),
       'too-large',
     );
+  });
+
+  it('rejects many small high-ratio entries by the aggregate ratio', () => {
+    // Each entry is under the 1 MiB per-entry ratio threshold; together they are a bomb.
+    const files: Zippable = { 'gedcom.ged': GED };
+    for (let i = 0; i < 20; i++) files[`z${i}.bin`] = new Uint8Array(512 * 1024);
+    expectError(() => readGedzip(zip(files)), 'ratio');
+  });
+
+  it('aborts mid-inflation when the running ratio passes the limit', () => {
+    // Overall ratio is fine thanks to the incompressible tail, but the first
+    // entries inflate ~1000:1, so inflation stops before reaching it.
+    const noise = new Uint8Array(4_000_000).map((_, i) => (i * 2654435761) >>> 24);
+    const archive = zip({
+      'gedcom.ged': new Uint8Array(900 * 1024),
+      'a.bin': new Uint8Array(900 * 1024),
+      'b.bin': noise,
+    });
+    expectError(() => readGedzip(archive), 'ratio');
+  });
+
+  it('caps the GEDCOM entry separately', () => {
+    expectError(() => readGedzip(zip({ 'gedcom.ged': GED }), { maxGedcomSize: 10 }), 'too-large');
+  });
+
+  it('warns about and skips case-insensitive and exact duplicate names, keeping the first', () => {
+    const archive = zip({
+      'gedcom.ged': GED,
+      'Photo.jpg': new Uint8Array([1]),
+      'photo.jpg': new Uint8Array([2]),
+      'other.jpg': new Uint8Array([3]),
+    });
+    renameCentral(archive, 'other.jpg', 'Photo.jpg');
+    const result = readGedzip(archive);
+    expect([...result.media]).toEqual([['Photo.jpg', new Uint8Array([1])]]);
+    expect(result.warnings).toHaveLength(2);
+    expect(result.warnings[0]).toMatch(/ignoring case/);
+    expect(result.warnings[1]).toMatch(/duplicate/);
   });
 
   it('enforces the entry count limit', () => {

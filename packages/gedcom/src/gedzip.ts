@@ -3,11 +3,19 @@ import { Inflate } from 'fflate';
 export interface GedzipLimits {
   /** Maximum entries in the archive (default 10,000). */
   maxEntries?: number;
-  /** Maximum total uncompressed bytes of the entries read (default 2 GiB). */
+  /** Maximum total uncompressed bytes held in memory for the entries read (default 256 MiB). */
   maxTotalSize?: number;
-  /** Maximum uncompressed bytes for one entry (default 512 MiB). */
+  /** Maximum uncompressed bytes for one media entry (default 256 MiB). */
   maxEntrySize?: number;
-  /** Maximum uncompressed/compressed ratio for entries over 1 MiB (default 200). */
+  /**
+   * Maximum uncompressed bytes for the GEDCOM file (default 256 MiB), which
+   * keeps its decoded text well under V8's maximum string length.
+   */
+  maxGedcomSize?: number;
+  /**
+   * Maximum uncompressed/compressed ratio, applied to each entry over 1 MiB
+   * and to the entries read in total once they pass 1 MiB (default 200).
+   */
   maxRatio?: number;
 }
 
@@ -129,29 +137,58 @@ function entryData(bytes: Uint8Array, entry: ZipEntry): Uint8Array {
   return bytes.subarray(start, start + entry.compressedSize);
 }
 
+/** Running totals across every entry inflated in one `readGedzip` call. */
+interface Budget {
+  produced: number;
+  consumed: number;
+  maxTotalSize: number;
+  maxRatio: number;
+}
+
+function charge(budget: Budget, produced: number, consumed: number, path: string) {
+  budget.produced += produced;
+  budget.consumed += consumed;
+  if (budget.produced > budget.maxTotalSize) {
+    throw new GedzipError('too-large', `Archive expands to more than ${budget.maxTotalSize} bytes`);
+  }
+  const ratio = budget.produced / Math.max(1, budget.consumed);
+  if (budget.produced > RATIO_MIN_SIZE && ratio > budget.maxRatio) {
+    throw new GedzipError(
+      'ratio',
+      `Archive compresses ${Math.round(ratio)}:1 at ${path}; refusing to inflate`,
+    );
+  }
+}
+
 /**
  * Inflates one entry, counting the bytes actually produced. Inflation stops as
- * soon as the output passes the size the central directory declared, which the
- * limits were checked against, so a lying header cannot get past them.
+ * soon as the output passes the entry's declared size, or the archive-wide
+ * output passes `maxTotalSize` or `maxRatio`, so neither lying headers nor
+ * many small high-ratio entries get past the limits.
  */
-function inflateEntry(bytes: Uint8Array, entry: ZipEntry): Uint8Array {
+function inflateEntry(bytes: Uint8Array, entry: ZipEntry, budget: Budget): Uint8Array {
   const data = entryData(bytes, entry);
   if (entry.method === 0) {
     if (data.length !== entry.size) throw invalid(`${entry.path} size does not match its header`);
+    charge(budget, data.length, data.length, entry.path);
     return data.slice();
   }
   const chunks: Uint8Array[] = [];
   let produced = 0;
+  let consumed = 0;
   const inflater = new Inflate((chunk) => {
     produced += chunk.length;
     if (produced > entry.size) {
       throw invalid(`${entry.path} inflates past its declared ${entry.size} bytes`);
     }
+    charge(budget, chunk.length, consumed, entry.path);
+    consumed = 0;
     chunks.push(chunk);
   });
   try {
     for (let i = 0; i < data.length; i += INFLATE_SLICE) {
       const end = Math.min(i + INFLATE_SLICE, data.length);
+      consumed += end - i;
       inflater.push(data.subarray(i, end), end === data.length);
     }
     if (data.length === 0) inflater.push(data, true);
@@ -159,6 +196,8 @@ function inflateEntry(bytes: Uint8Array, entry: ZipEntry): Uint8Array {
     if (error instanceof GedzipError) throw error;
     throw invalid(`Could not inflate ${entry.path}: ${(error as Error).message}`);
   }
+  // Input that produced no output yet still counts toward the ratio.
+  budget.consumed += consumed;
   if (produced !== entry.size) throw invalid(`${entry.path} size does not match its header`);
   const out = new Uint8Array(produced);
   let offset = 0;
@@ -172,23 +211,27 @@ function inflateEntry(bytes: Uint8Array, entry: ZipEntry): Uint8Array {
 /**
  * Reads a GEDZIP archive (GEDCOM 7: `gedcom.ged` at the root plus media).
  * Archives with a single `.ged` at the root are accepted with a warning.
- * Entry count, sizes and ratios are checked against the central directory
- * before anything is inflated, and inflation counts the bytes it actually
- * produces and aborts the moment an entry exceeds its declared size.
+ * Entry count, sizes and ratios (per entry and in total) are checked against
+ * the central directory before anything is inflated. Inflation then counts
+ * the bytes it actually produces and aborts the moment an entry exceeds its
+ * declared size or the running total exceeds `maxTotalSize` or `maxRatio`.
  *
  * @throws GedzipError when the archive is invalid, over a limit, or has no GEDCOM.
  */
 export function readGedzip(bytes: Uint8Array, options: GedzipOptions = {}): GedzipResult {
   const {
     maxEntries = 10_000,
-    maxTotalSize = 2 * 1024 ** 3,
-    maxEntrySize = 512 * 1024 ** 2,
+    maxTotalSize = 256 * 1024 ** 2,
+    maxEntrySize = 256 * 1024 ** 2,
+    maxGedcomSize = 256 * 1024 ** 2,
     maxRatio = 200,
     includeMedia = true,
   } = options;
 
   const warnings: string[] = [];
   const entries: ZipEntry[] = [];
+  // Lowercased paths: case-insensitive file systems would let one overwrite another.
+  const seen = new Map<string, string>();
   for (const raw of readCentralDirectory(bytes, maxEntries)) {
     if (raw.name.endsWith('/')) continue;
     const path = safeEntryPath(raw.name);
@@ -196,6 +239,16 @@ export function readGedzip(bytes: Uint8Array, options: GedzipOptions = {}): Gedz
       warnings.push(`Skipped unsafe path in archive: ${JSON.stringify(raw.name)}`);
       continue;
     }
+    const first = seen.get(path.toLowerCase());
+    if (first !== undefined) {
+      warnings.push(
+        first === path
+          ? `Skipped duplicate entry ${path}; kept the first`
+          : `Skipped ${path}: same name as ${first} ignoring case; kept the first`,
+      );
+      continue;
+    }
+    seen.set(path.toLowerCase(), path);
     if (raw.flags & 1 || (raw.method !== 0 && raw.method !== 8)) {
       warnings.push(`Skipped ${path}: encrypted or unsupported compression`);
       continue;
@@ -222,6 +275,9 @@ export function readGedzip(bytes: Uint8Array, options: GedzipOptions = {}): Gedz
   if (gedEntry.path !== 'gedcom.ged') {
     warnings.push(`Archive has no gedcom.ged; using ${gedEntry.path}`);
   }
+  if (gedEntry.size > maxGedcomSize) {
+    throw new GedzipError('too-large', `${gedEntry.path} is larger than ${maxGedcomSize} bytes`);
+  }
 
   const mediaEntries = entries.filter((e) => e !== gedEntry);
   const toRead = includeMedia ? [gedEntry, ...mediaEntries] : [gedEntry];
@@ -229,10 +285,20 @@ export function readGedzip(bytes: Uint8Array, options: GedzipOptions = {}): Gedz
   if (total > maxTotalSize) {
     throw new GedzipError('too-large', `Archive expands to more than ${maxTotalSize} bytes`);
   }
+  const compressed = toRead.reduce((sum, e) => sum + e.compressedSize, 0);
+  if (total > RATIO_MIN_SIZE && total / Math.max(1, compressed) > maxRatio) {
+    throw new GedzipError(
+      'ratio',
+      `Archive compresses ${Math.round(total / Math.max(1, compressed))}:1 overall; refusing to inflate`,
+    );
+  }
 
-  const gedcom = inflateEntry(bytes, gedEntry);
+  const budget: Budget = { produced: 0, consumed: 0, maxTotalSize, maxRatio };
+  const gedcom = inflateEntry(bytes, gedEntry, budget);
   const media = new Map<string, Uint8Array>();
-  if (includeMedia) for (const e of mediaEntries) media.set(e.path, inflateEntry(bytes, e));
+  if (includeMedia) {
+    for (const e of mediaEntries) media.set(e.path, inflateEntry(bytes, e, budget));
+  }
   return {
     gedcom,
     gedcomPath: gedEntry.path,

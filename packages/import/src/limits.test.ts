@@ -1,10 +1,10 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdtempSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTree, treePaths } from '@open-ancestry/db';
 import { zipSync } from 'fflate';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { importGedcom } from './import';
 import { ged, importInto, TODAY } from './test-helpers';
 
@@ -91,6 +91,7 @@ describe('import limits', () => {
 
 describe('GEDZIP limits', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'oa-limits-'));
+  afterAll(() => rmSync(tmp, { recursive: true, force: true }));
   const photo = randomBytes(64 * 1024); // incompressible
   const small = ged('0 @I1@ INDI', '1 NAME Ada /Vale/', '1 OBJE', '2 FILE photos/a.jpg');
 
@@ -143,7 +144,8 @@ describe('GEDZIP limits', () => {
 
 describe('after an import commits', () => {
   it('truncates the write-ahead log, which can be as large as the database', async () => {
-    const dir = join(mkdtempSync(join(tmpdir(), 'oa-wal-')), 'wal.oatree');
+    const root = mkdtempSync(join(tmpdir(), 'oa-wal-'));
+    const dir = join(root, 'wal.oatree');
     const store = createTree(dir);
     try {
       const people = Array.from({ length: 2000 }, (_, i) => [
@@ -157,6 +159,7 @@ describe('after an import commits', () => {
       expect(existsSync(wal) ? statSync(wal).size : 0).toBe(0);
     } finally {
       store.close();
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

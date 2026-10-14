@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { prepareReimport } from '@open-ancestry/import';
 import type { FastifyRequest } from 'fastify';
 import type { Api, Deps } from '../context';
 import { ApiError, badRequest, conflict, notFound } from '../errors';
@@ -34,7 +35,7 @@ export async function sweepStaleUploads(now = Date.now(), dir = tmpdir()): Promi
 
 /** Import uploads (multipart, streamed to a temp file) and job status over JSON and SSE. */
 export function importRoutes(app: Api, deps: Deps): void {
-  const { library, jobs, importer, uploadLimit, archiveUploadLimit, thumbnails } = deps;
+  const { library, jobs, importer, uploadLimit, archiveUploadLimit, thumbnails, reimports } = deps;
 
   /** Streams the one uploaded file to a private temp folder. */
   async function receive(request: FastifyRequest) {
@@ -151,8 +152,8 @@ export function importRoutes(app: Api, deps: Deps): void {
     '/api/trees/:tree/import',
     { schema: { params: TreeParams } },
     async (request, reply) => {
-      const { tree } = request.params;
-      const store = library.open(tree);
+      const store = library.open(request.params.tree);
+      const tree = library.canonical(request.params.tree);
       // The importer would refuse a tree with data; say so before reading the upload.
       const used = store.db
         .prepare('SELECT (SELECT count(*) FROM person) + (SELECT count(*) FROM import_batch)')
@@ -162,6 +163,46 @@ export function importRoutes(app: Api, deps: Deps): void {
       const upload = await receive(request);
       const job = start(tree, upload, null);
       return reply.code(202).send({ jobId: job.id, job });
+    },
+  );
+
+  // Compare an updated export with an existing tree; the review is a re-import session.
+  app.post(
+    '/api/trees/:tree/reimport',
+    { schema: { params: TreeParams } },
+    async (request, reply) => {
+      library.open(request.params.tree);
+      // The id as spelled on disk, so the busy guard and the stored review match other requests.
+      const tree = library.canonical(request.params.tree);
+      const upload = await receive(request);
+      // Busy from queueing to the end of cleanup, like an import: the tree is
+      // not written, renamed or deleted under the compare.
+      const release = library.markBusy(tree);
+      try {
+        const job = jobs.enqueue(
+          { tree, fileName: upload.fileName, kind: 'reimport' },
+          async (signal, onProgress) => {
+            const session = await prepareReimport(
+              library.open(tree),
+              { path: upload.path },
+              { signal, onProgress: (phase, done, total) => onProgress({ phase, done, total }) },
+            );
+            const stored = reimports.add(tree, upload.fileName, session);
+            return { reimportId: stored.id, counts: session.diff.counts };
+          },
+          async () => {
+            await upload.cleanup();
+            release();
+          },
+        );
+        return reply.code(202).send({ jobId: job.id, job });
+      } catch (error) {
+        release();
+        await upload.cleanup();
+        if (error instanceof TooManyJobsError)
+          throw new ApiError(429, 'too_many_jobs', error.message);
+        throw error;
+      }
     },
   );
 

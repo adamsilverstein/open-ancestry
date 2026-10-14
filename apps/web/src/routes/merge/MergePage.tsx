@@ -23,6 +23,14 @@ type Side = 'keep' | 'other';
 /** Facts a person has once; when both records have one, the user picks. */
 const SINGULAR = ['BIRT', 'CHR', 'BAPM', 'DEAT', 'BURI', 'CREM'];
 const SEX = { M: 'Male', F: 'Female', X: 'Other', U: 'Unknown' } as Record<string, string>;
+const PRIVACY = {
+  public: 'Public',
+  locked: 'Locked against edits',
+  private: 'Private',
+  confidential: 'Confidential',
+} as Record<string, string>;
+/** Visibility, strictest last; a lock is not a visibility level, so it ranks with public. */
+const VISIBILITY = ['public', 'locked', 'private', 'confidential'];
 
 function factText(item: EventDetail | undefined): string {
   if (!item) return '';
@@ -40,7 +48,9 @@ interface Row {
   label: string;
   values: [string, string];
   /** Choosable when both sides have different values. */
-  choice?: 'name' | 'sex' | 'living' | `fact:${string}`;
+  choice?: 'name' | 'sex' | 'living' | 'privacy' | `fact:${string}`;
+  /** The side picked until the user chooses (otherwise the kept record). */
+  initial?: Side;
 }
 
 function rows(keep: PersonDetail, other: PersonDetail): Row[] {
@@ -74,6 +84,17 @@ function rows(keep: PersonDetail, other: PersonDetail): Row[] {
     label: 'Living status',
     values: [living(keep), living(other)],
     choice: 'living',
+  });
+  add({
+    key: 'privacy',
+    label: 'Privacy',
+    values: [PRIVACY[keep.person.privacy] ?? '', PRIVACY[other.person.privacy] ?? ''],
+    choice: 'privacy',
+    // The stricter visibility, so a merge does not make a private record public by default.
+    initial:
+      VISIBILITY.indexOf(other.person.privacy) > VISIBILITY.indexOf(keep.person.privacy)
+        ? 'other'
+        : 'keep',
   });
   for (const type of SINGULAR) {
     const a = preferredFact(keep, type);
@@ -141,13 +162,16 @@ export function MergePage() {
   const table = a && b ? rows(a, b) : [];
   const nameA = a ? fullName(a.summary) : '';
   const nameB = b ? fullName(b.summary) : '';
+  const pickFor = (row: Row): Side => picks[row.choice!] ?? row.initial ?? 'keep';
 
   const merge = () => {
     const choices: Record<string, unknown> = {};
     const preferred: Record<string, Side> = {};
-    for (const [choice, side] of Object.entries(picks)) {
-      if (choice.startsWith('fact:')) preferred[choice.slice(5)] = side;
-      else choices[choice] = side;
+    for (const row of table) {
+      if (!row.choice) continue;
+      const side = pickFor(row);
+      if (row.choice.startsWith('fact:')) preferred[row.choice.slice(5)] = side;
+      else choices[row.choice] = side;
     }
     if (Object.keys(preferred).length) choices.preferred = preferred;
     edit.mutate({
@@ -208,7 +232,7 @@ export function MergePage() {
                               <input
                                 type="radio"
                                 name={row.key}
-                                checked={(picks[row.choice] ?? 'keep') === side}
+                                checked={pickFor(row) === side}
                                 onChange={() => setPicks((p) => ({ ...p, [row.choice!]: side }))}
                                 aria-label={`${row.label} from ${owner}: ${value}`}
                               />

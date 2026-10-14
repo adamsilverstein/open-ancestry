@@ -6,6 +6,7 @@ import {
   persons,
   events,
   type FamilyRow,
+  type Privacy,
   type Tx,
 } from '@open-ancestry/db';
 import { morePrivate } from '@open-ancestry/import';
@@ -27,6 +28,7 @@ export interface MergeChoices {
   name?: Side | undefined;
   sex?: Side | undefined;
   living?: Side | undefined;
+  privacy?: Side | undefined;
   /** Per event type, whose fact is preferred when both have one (BIRT: 'other'). */
   preferred?: Record<string, Side> | undefined;
 }
@@ -249,6 +251,25 @@ function moveFamilies(tx: Tx, keepId: string, otherId: string) {
   foldDuplicateFamilies(tx, keepId);
 }
 
+const HIDDEN = new Set(['private', 'confidential']);
+
+/**
+ * The kept person's privacy. A choice wins; otherwise the stricter one, so a
+ * merge never makes a private record public. `locked` is an edit lock rather
+ * than a visibility level, and one column cannot hold a lock and `private`
+ * together, so that pair needs a choice instead of losing either silently.
+ */
+function mergedPrivacy(keep: Privacy, other: Privacy, choice: Side | undefined): Privacy {
+  if (choice) return choice === 'other' ? other : keep;
+  const pair = [keep, other];
+  if (pair.includes('locked') && pair.some((p) => HIDDEN.has(p))) {
+    throw conflict(
+      'One record is locked against edits and the other is private; choose which privacy to keep',
+    );
+  }
+  return morePrivate(other, keep);
+}
+
 /**
  * Refuses merging a person with their own ancestor or descendant, which would
  * make the merged person their own parent or grandparent (#95). Any loop a
@@ -280,8 +301,7 @@ export function mergePeople(tx: Tx, keepId: string, otherId: string, choices: Me
   const patch: Record<string, unknown> = {};
   if (choices.sex === 'other') patch.sex = other.sex;
   if (choices.living === 'other') patch.living = other.living;
-  // The stricter privacy wins, so nothing private becomes public by merging.
-  const privacy = morePrivate(other.privacy, keep.privacy);
+  const privacy = mergedPrivacy(keep.privacy, other.privacy, choices.privacy);
   if (privacy !== keep.privacy) patch.privacy = privacy;
   if (!keep.primary_media_id && other.primary_media_id) {
     patch.primary_media_id = other.primary_media_id;

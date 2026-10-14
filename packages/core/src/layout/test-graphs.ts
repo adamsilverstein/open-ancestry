@@ -112,9 +112,10 @@ export const halfSiblings = makeGraph(
 );
 
 /**
- * Focus `me` (born 1985) with an older brother (married), a younger sister,
- * a younger half brother from the father's second marriage, a husband and a
- * child. The father has a married sister; the mother a married brother.
+ * Focus `me` (born 1985) with an older brother (married, one daughter), a
+ * younger sister, a younger half brother from the father's second marriage,
+ * a husband and a child. The father has a married sister with two children;
+ * the mother a married brother with one.
  */
 export const siblings = (() => {
   const g = makeGraph(
@@ -137,15 +138,19 @@ export const siblings = (() => {
       younger: 'F',
       half: 'M',
       kid: 'F',
+      niece: 'F',
+      cousin1: 'M',
+      cousin2: 'F',
+      cousin3: 'M',
     },
     [
       ['F_dad', 'gpa', 'gma', ['aunt', 'dad']],
-      ['F_aunt', 'auntH', 'aunt', []],
+      ['F_aunt', 'auntH', 'aunt', ['cousin1', 'cousin2']],
       ['F_mom', 'mgpa', 'mgma', ['mom', 'uncle']],
-      ['F_uncle', 'uncle', 'uncleW', []],
+      ['F_uncle', 'uncle', 'uncleW', ['cousin3']],
       ['F_me', 'dad', 'mom', ['older', 'me', 'younger']],
       ['F_step', 'dad', 'stepmom', ['half']],
-      ['F_older', 'older', 'olderW', []],
+      ['F_older', 'older', 'olderW', ['niece']],
       ['F_sp', 'sp', 'me', ['kid']],
     ],
   );

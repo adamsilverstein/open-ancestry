@@ -279,6 +279,28 @@ describe('step, adoptive and foster links', () => {
     expect(k.iris).toBe('half-sister');
   });
 
+  it('keeps a half-sister half when the stepfather adopted the child (#157 review)', () => {
+    const adopted: TreeGraph = {
+      people: kin.people,
+      families: [
+        { id: 'f-birth', partners: ['arthur', 'mary'], children: [{ id: 'george' }] },
+        {
+          id: 'f-step',
+          partners: ['leopold', 'mary'],
+          children: [
+            { id: 'george', rel1: 'adopted', rel2: 'biological' },
+            { id: 'iris', rel1: 'biological', rel2: 'biological' },
+          ],
+        },
+      ],
+    };
+    for (const set of ['f-birth', 'f-step']) {
+      const l = layoutFamily(adopted, 'george', { selectedParentFamilies: { george: set } });
+      const k = kinshipLabels(buildRelations(l, adopted), l.focusKey!, sexOfKin);
+      expect(k.iris, set).toBe('half-sister');
+    }
+  });
+
   it('treats guardian and other links like birth for siblings, as for parents', () => {
     const g: TreeGraph = {
       people: kin.people,

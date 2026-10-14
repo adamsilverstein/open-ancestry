@@ -22,6 +22,7 @@
 .section {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: var(--oa-space-3);
   padding-top: var(--oa-space-5);
   border-top: 1px solid var(--oa-border);
@@ -61,6 +62,10 @@
   display: flex;
   flex-direction: column;
   gap: var(--oa-space-3);
+}
+
+.section > :is(.formGrid, .swatches, .canvasDemo, .plainList, .rowWrap, ol, ul) {
+  align-self: stretch;
 }
 
 .formGrid {

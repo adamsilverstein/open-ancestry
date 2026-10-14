@@ -57,6 +57,7 @@ export function Minimap({
     canvas.height = height * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     // Tokens are light-dark() pairs, so resolve them through a real color property.
+    canvas.style.transition = 'none';
     const color = (token: string) => {
       canvas.style.color = `var(${token})`;
       return getComputedStyle(canvas).color;

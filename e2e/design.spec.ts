@@ -29,6 +29,22 @@ test.describe('visual snapshots', () => {
     test(`/design in ${colorScheme}`, async ({ page }) => {
       await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
       await page.evaluate(() => document.fonts.ready);
+      // Full-page captures don't scroll, so scroll once to trigger lazy images.
+      await page.evaluate(async () => {
+        const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+        for (let y = 0; y < document.body.scrollHeight; y += window.innerHeight / 2) {
+          window.scrollTo(0, y);
+          await frame();
+        }
+        window.scrollTo(0, 0);
+      });
+      await expect
+        .poll(() => page.evaluate(() => [...document.images].every((img) => img.complete)))
+        .toBe(true);
+      await expect(page.getByTestId('avatar-broken')).toHaveAttribute(
+        'data-fallback',
+        'silhouette',
+      );
       await expect(page).toHaveScreenshot(`design-${colorScheme}.png`, {
         fullPage: true,
         animations: 'disabled',
@@ -165,7 +181,11 @@ test('dialog traps focus and restores it on close', async ({ page, browserName }
 test('tooltip appears on keyboard focus', async ({ page, browserName }) => {
   const trigger = section(page, 'Tooltip').getByRole('button', { name: 'Hover for tooltip' });
   // Radix closes tooltips on scroll, so settle scrolling before tabbing in.
-  await trigger.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await trigger.evaluate(async (el) => {
+    el.scrollIntoView({ block: 'center' });
+    // Let the scroll event fire before the tooltip opens.
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
   await trigger.focus();
   await page.keyboard.press(tab(browserName, true));
   await page.keyboard.press(tab(browserName));

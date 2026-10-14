@@ -58,13 +58,11 @@
   box-shadow: 0 0 0 2px var(--oa-accent);
 }
 
-/* Focus person: raised, bold border, bold name. */
+/* Focus person: raised, bold ring (outside the box so content never reflows), bold name. */
 .focusPerson {
-  border-width: 2px;
-  border-top-width: 6px;
-  border-color: var(--oa-text);
-  border-top-color: var(--oa-sex-color);
-  box-shadow: var(--oa-shadow-2);
+  box-shadow:
+    0 0 0 2px var(--oa-text),
+    var(--oa-shadow-2);
   transform: translateY(-2px);
 }
 
@@ -75,12 +73,15 @@
 /* Duplicate (pedigree collapse): dashed border plus link icon. */
 .duplicate {
   border-style: dashed;
+  border-color: var(--oa-border-strong);
+  border-top-color: var(--oa-sex-color);
   border-top-style: solid;
   box-shadow: none;
 }
 
 .avatarWrap {
   position: relative;
+  display: flex;
   flex: none;
 }
 

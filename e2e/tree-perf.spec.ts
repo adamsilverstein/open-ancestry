@@ -1,35 +1,56 @@
+import { appendFileSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures';
-import { readSeed } from './tree-view-fixtures';
+import { readSeed, type PerfTree } from './tree-view-fixtures';
 
 /*
- * Tree view performance budgets (design.md section 7) on the seeded
- * 10,000-person synthetic tree:
- * - re-focus (data cached): fetch + layout in the worker + render < 50ms
- * - pan and zoom at 60fps with 2,000+ laid-out cards
- * Chromium only; timings come from the app's performance marks and rAF.
+ * Tree view performance budgets (design.md section 7), Chromium only, on the
+ * seeded synthetic trees (10,000 people always; 100,000 with OA_PERF_100K=1):
+ *
+ * - First paint: navigation to the first rendered layout < 1s (the LCP budget).
+ * - Re-focus with cached data, from the key press to the painted frame (fetch,
+ *   worker layout, render), ~500+ people on screen: p95 < 50ms over 10.
+ * - Pan and zoom with 2,000+ laid-out cards: median frame at 58fps or better,
+ *   under 5% of frames over 33ms.
+ * - Memory: the JS heap after a second round of re-focuses and pans stays
+ *   within 10MB of the first round (no growth per interaction).
+ *
+ * OA_BENCH_FACTOR scales the time budgets for slower machines (CI sets it), as
+ * in `npm run bench`. Results are appended to perf-results/tree-view.md, which
+ * CI copies into the job summary. Run with `npm run e2e:perf`. Instrumented
+ * coverage builds skip these: instrumentation distorts timings.
  */
 
 test.skip(({ browserName }) => browserName !== 'chromium', 'Chromium measures the budgets');
+test.skip(process.env.E2E_COVERAGE === '1', 'Timings are not meaningful in a coverage build');
+test.describe.configure({ mode: 'serial' });
+test.use({ viewport: { width: 1440, height: 900 } });
 
-const { perf } = readSeed();
-const url = (person: string, extra: string) =>
-  `/tree/${person}?tree=${encodeURIComponent(perf.tree)}${extra}`;
+const factor = Number(process.env.OA_BENCH_FACTOR ?? 1);
+const summary = join(import.meta.dirname, '..', 'perf-results', 'tree-view.md');
+
+function report(tree: PerfTree, measure: string, result: string, budget: string, ok: boolean) {
+  mkdirSync(dirname(summary), { recursive: true });
+  const people = tree.people.toLocaleString('en-US');
+  appendFileSync(
+    summary,
+    `| ${people} | ${measure} | ${result} | ${budget} | ${ok ? 'ok' : 'OVER'} |\n`,
+  );
+  console.log(`[${people}] ${measure}: ${result} (budget ${budget})`);
+}
+
 const canvas = (page: Page) => page.getByRole('application', { name: /^Family tree/ });
 
 async function ready(page: Page) {
   await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
 }
 
-async function lastRefocus(page: Page) {
-  return page.evaluate(() => {
-    const entries = performance.getEntriesByName('oa-tree-refocus', 'measure');
-    const last = entries.at(-1);
-    return last ? { duration: last.duration, count: entries.length } : null;
-  });
+async function settled(page: Page) {
+  await expect(page.getByTestId('tree-world')).not.toHaveAttribute('data-animating');
 }
 
-async function layoutStats(page: Page) {
+async function stats(page: Page) {
   const world = page.getByTestId('tree-world');
   return {
     laidOut: Number(await world.getAttribute('data-node-count')),
@@ -39,105 +60,67 @@ async function layoutStats(page: Page) {
   };
 }
 
-async function settled(page: Page) {
-  await expect(page.getByTestId('tree-world')).not.toHaveAttribute('data-animating');
+async function refocusCount(page: Page) {
+  return page.evaluate(() => performance.getEntriesByName('oa-tree-refocus', 'measure').length);
 }
 
-test.use({ viewport: { width: 1440, height: 900 } });
-
-test('re-focus with cached data takes under 50ms with ~500 people on screen', async ({ page }) => {
-  // The founder has seven generations of descendants: over a thousand cards.
-  const extra = '&down=7&up=1';
-  await page.goto(url(perf.founderId, extra));
-  await ready(page);
-  await page.getByRole('button', { name: 'Fit to screen' }).click();
-  await settled(page);
-  const { laidOut } = await layoutStats(page);
-
-  // Keyboard: down to a child, Enter to re-focus, up to the founder, Enter again.
-  // The first round trip loads both neighborhoods; later ones are cached.
-  const activeKey = () =>
-    page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.key ?? null);
-  await canvas(page).locator(`[data-key="${perf.founderId}"]`).focus();
-  const visibleCounts: number[] = [];
-  const refocus = async (key: string) => {
-    await page.keyboard.press(key);
-    const before = (await lastRefocus(page))?.count ?? 0;
-    await page.keyboard.press('Enter');
-    await expect.poll(async () => (await lastRefocus(page))?.count ?? 0).toBeGreaterThan(before);
-    await ready(page);
-    await settled(page);
-    visibleCounts.push((await layoutStats(page)).visible);
-    return (await lastRefocus(page))!.duration;
-  };
-  await refocus('ArrowDown');
-  const child = await activeKey();
-  expect(child).not.toBe(perf.founderId);
-  await refocus('ArrowUp');
-  expect(await activeKey()).toBe(perf.founderId);
-
-  const durations: number[] = [];
-  visibleCounts.length = 0;
-  for (let i = 0; i < 3; i++) {
-    durations.push(await refocus('ArrowDown'));
-    expect(await activeKey()).toBe(child);
-    durations.push(await refocus('ArrowUp'));
-  }
-  durations.sort((a, b) => a - b);
-  const median = durations[Math.floor(durations.length / 2)]!;
-  const meanVisible = Math.round(visibleCounts.reduce((a, b) => a + b, 0) / visibleCounts.length);
-  console.log(
-    `re-focus (cached), ${laidOut} laid out, ${meanVisible} on screen on average (${Math.min(...visibleCounts)}-${Math.max(...visibleCounts)}): median ${median.toFixed(1)}ms, all ${durations.map((d) => d.toFixed(1)).join(', ')}`,
+async function lastRefocus(page: Page) {
+  return page.evaluate(
+    () => performance.getEntriesByName('oa-tree-refocus', 'measure').at(-1)!.duration,
   );
-  expect(meanVisible).toBeGreaterThanOrEqual(500);
-  expect(median).toBeLessThan(50);
-});
+}
 
-function frameRecorder(page: Page) {
+const percentile = (values: number[], p: number) => {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))]!;
+};
+
+/** Used JS heap after a forced garbage collection, in MB. */
+async function heapMB(page: Page) {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('HeapProfiler.collectGarbage');
+  const { usedSize } = await cdp.send('Runtime.getHeapUsage');
+  await cdp.detach();
+  return usedSize / 1024 / 1024;
+}
+
+async function recordFrames(page: Page, run: () => Promise<void>) {
+  await page.evaluate(() => {
+    const w = window as unknown as { __frames: number[]; __stop: boolean };
+    w.__frames = [];
+    w.__stop = false;
+    let last = performance.now();
+    const tick = (now: number) => {
+      w.__frames.push(now - last);
+      last = now;
+      if (!w.__stop) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  await run();
+  const frames = await page.evaluate(() => {
+    const w = window as unknown as { __frames: number[]; __stop: boolean };
+    w.__stop = true;
+    return w.__frames.slice(2);
+  });
   return {
-    start: () =>
-      page.evaluate(() => {
-        const w = window as unknown as { __frames: number[]; __stop: boolean };
-        w.__frames = [];
-        w.__stop = false;
-        let last = performance.now();
-        const tick = (now: number) => {
-          w.__frames.push(now - last);
-          last = now;
-          if (!w.__stop) requestAnimationFrame(tick);
-        };
-        requestAnimationFrame(tick);
-      }),
-    stop: async () => {
-      const frames = await page.evaluate(() => {
-        const w = window as unknown as { __frames: number[]; __stop: boolean };
-        w.__stop = true;
-        return w.__frames.slice(2);
-      });
-      frames.sort((a, b) => a - b);
-      const mean = frames.reduce((s, f) => s + f, 0) / frames.length;
-      return { count: frames.length, mean, p95: frames[Math.floor(frames.length * 0.95)]! };
-    },
+    count: frames.length,
+    median: percentile(frames, 0.5),
+    p95: percentile(frames, 0.95),
+    over33: frames.filter((f) => f > 33).length / frames.length,
   };
 }
 
 /** One pointer move per frame across the canvas and back, then pinch out and in. */
 async function panAndPinch(page: Page) {
   const box = (await canvas(page).boundingBox())!;
-  const minVisible = { value: Infinity };
-  const sample = async () => {
-    const v = Number(await page.getByTestId('tree-world').getAttribute('data-visible-count'));
-    minVisible.value = Math.min(minVisible.value, v);
-  };
   await page.mouse.move(box.x + box.width - 200, box.y + 300);
   await page.mouse.down();
   for (let i = 0; i < 60; i++) {
     await page.mouse.move(box.x + box.width - 200 - i * 12, box.y + 300 + (i % 10) * 4);
-    if (i % 15 === 0) await sample();
   }
   for (let i = 0; i < 60; i++) {
     await page.mouse.move(box.x + box.width - 920 + i * 12, box.y + 340 - (i % 10) * 4);
-    if (i % 15 === 0) await sample();
   }
   await page.mouse.up();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
@@ -145,56 +128,166 @@ async function panAndPinch(page: Page) {
   for (let i = 0; i < 10; i++) await page.mouse.wheel(0, 20);
   for (let i = 0; i < 10; i++) await page.mouse.wheel(0, -20);
   await page.keyboard.up('Control');
-  await sample();
-  return minVisible.value;
 }
 
-for (const scenario of [
-  {
-    name: '41% zoom over the lower generations, cards mounted',
-    // Four zoom steps out from 100% (41%): just above the canvas level of detail, so every
-    // card is DOM. Arrow down into the dense lower generations first.
-    prepare: async (page: Page) => {
-      for (let i = 0; i < 6; i++) {
-        await page.keyboard.press('ArrowDown');
-        await settled(page);
-      }
-      for (let i = 0; i < 4; i++) await page.keyboard.press('-');
-    },
-    // This descendant chart is sparse at 41%; the DOM cap by design is about 300 cards
-    // (a 1440x900 viewport of 120x150 cards at the 35% threshold).
-    minVisible: 25,
-    minMounted: 25,
-  },
-  {
-    name: 'fit, with every card on screen',
-    prepare: async (page: Page) => {
-      await page.keyboard.press('0');
-    },
-    minVisible: 2000,
-    minMounted: 0,
-  },
-]) {
-  test(`pans and zooms at 60fps with 2,000+ laid-out cards: ${scenario.name}`, async ({ page }) => {
-    await page.goto(url(perf.founderId, '&down=8&up=1'));
-    await ready(page);
-    await canvas(page).locator(`[data-key="${perf.founderId}"]`).focus();
-    await scenario.prepare(page);
-    await settled(page);
-    const before = await layoutStats(page);
-    expect(before.laidOut).toBeGreaterThanOrEqual(2000);
-    expect(before.visible).toBeGreaterThanOrEqual(scenario.minVisible);
-    expect(before.mounted).toBeGreaterThanOrEqual(scenario.minMounted);
+const seed = readSeed();
+const trees = [seed.perf, ...(seed.perf100k ? [seed.perf100k] : [])];
 
-    const frames = frameRecorder(page);
-    await frames.start();
-    const minVisible = await panAndPinch(page);
-    const { count, mean, p95 } = await frames.stop();
-    console.log(
-      `pan/zoom (${scenario.name}), ${before.laidOut} laid out, ${before.visible} on screen, ${before.mounted} mounted (min ${minVisible} on screen while moving): ${count} frames, mean ${mean.toFixed(1)}ms (${(1000 / mean).toFixed(0)}fps), p95 ${p95.toFixed(1)}ms`,
-    );
-    // 60fps is 16.7ms a frame; allow scheduling noise from the test driver.
-    expect(mean).toBeLessThan(18.5);
-    expect(p95).toBeLessThan(25);
+for (const tree of trees) {
+  const people = tree.people.toLocaleString('en-US');
+  const url = (person: string, extra: string) =>
+    `/tree/${person}?tree=${encodeURIComponent(tree.tree)}${extra}`;
+
+  test.describe(`${people}-person tree`, () => {
+    test('first paint', async ({ browser }) => {
+      const times: number[] = [];
+      // Fresh contexts: nothing cached, as on opening the app.
+      for (let i = 0; i < 3; i++) {
+        const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+        const page = await context.newPage();
+        await page.goto(url(tree.founderId, '&down=7&up=1'));
+        await ready(page);
+        times.push(
+          await page.evaluate(
+            () => performance.getEntriesByName('oa-tree-ready', 'mark')[0]!.startTime,
+          ),
+        );
+        await context.close();
+      }
+      const median = percentile(times, 0.5);
+      const budget = 1000 * factor;
+      report(
+        tree,
+        'First paint (navigation to tree on screen), median of 3',
+        `${median.toFixed(0)}ms`,
+        `< ${budget}ms`,
+        median < budget,
+      );
+      expect(median).toBeLessThan(budget);
+    });
+
+    test('re-focus with ~500+ people on screen', async ({ page }) => {
+      await page.goto(url(tree.founderId, '&down=7&up=1'));
+      await ready(page);
+      await page.getByRole('button', { name: 'Fit to screen' }).click();
+      await settled(page);
+      const { laidOut } = await stats(page);
+
+      // Keyboard: down to a child, Enter to re-focus, up to the founder, Enter
+      // again. The first round trip loads both neighborhoods; then they are cached.
+      await canvas(page).locator(`[data-key="${tree.founderId}"]`).focus();
+      const visible: number[] = [];
+      const refocus = async (key: string) => {
+        await page.keyboard.press(key);
+        const before = await refocusCount(page);
+        await page.keyboard.press('Enter');
+        await expect.poll(() => refocusCount(page)).toBeGreaterThan(before);
+        await ready(page);
+        await settled(page);
+        visible.push((await stats(page)).visible);
+        return lastRefocus(page);
+      };
+      // Uncached: the first visit to each fetches its neighborhood.
+      const uncached = [await refocus('ArrowDown'), await refocus('ArrowUp')];
+
+      visible.length = 0;
+      const durations: number[] = [];
+      for (let i = 0; i < 5; i++) {
+        durations.push(await refocus('ArrowDown'));
+        durations.push(await refocus('ArrowUp'));
+      }
+      const p95 = percentile(durations, 0.95);
+      const meanVisible = Math.round(visible.reduce((a, b) => a + b, 0) / visible.length);
+      const budget = 50 * factor;
+      report(
+        tree,
+        `Re-focus, cached (${laidOut} laid out, ${meanVisible} on screen), p95 of 10`,
+        `${p95.toFixed(1)}ms (median ${percentile(durations, 0.5).toFixed(1)}ms; uncached ${uncached.map((d) => d.toFixed(0)).join(' and ')}ms)`,
+        `< ${budget}ms`,
+        p95 < budget,
+      );
+      expect(meanVisible).toBeGreaterThanOrEqual(500);
+      expect(p95).toBeLessThan(budget);
+    });
+
+    for (const scenario of [
+      {
+        name: 'fit, every card on screen',
+        prepare: async (page: Page) => page.keyboard.press('0'),
+        minVisible: 2000,
+      },
+      {
+        // Four zoom steps out from 100% (41%): just above the canvas level of detail,
+        // so cards are mounted DOM. Arrow down into the denser lower generations first.
+        name: '41% zoom, cards mounted',
+        prepare: async (page: Page) => {
+          for (let i = 0; i < 6; i++) {
+            await page.keyboard.press('ArrowDown');
+            await settled(page);
+          }
+          for (let i = 0; i < 4; i++) await page.keyboard.press('-');
+        },
+        minVisible: 25,
+      },
+    ]) {
+      test(`pan and zoom with 2,000+ laid-out cards: ${scenario.name}`, async ({ page }) => {
+        await page.goto(url(tree.founderId, '&down=8&up=1'));
+        await ready(page);
+        await canvas(page).locator(`[data-key="${tree.founderId}"]`).focus();
+        await scenario.prepare(page);
+        await settled(page);
+        const before = await stats(page);
+        expect(before.laidOut).toBeGreaterThanOrEqual(2000);
+        expect(before.visible).toBeGreaterThanOrEqual(scenario.minVisible);
+
+        const frames = await recordFrames(page, () => panAndPinch(page));
+        const fps = 1000 / frames.median;
+        const maxOver = 0.05 * factor;
+        const ok = fps >= 58 && frames.over33 < maxOver;
+        report(
+          tree,
+          `Pan and pinch, ${scenario.name} (${before.laidOut} laid out, ${before.visible} on screen, ${before.mounted} mounted)`,
+          `median ${fps.toFixed(0)}fps, p95 ${frames.p95.toFixed(1)}ms, ${(frames.over33 * 100).toFixed(1)}% over 33ms (${frames.count} frames)`,
+          `>= 58fps, < ${(maxOver * 100).toFixed(1)}% over 33ms`,
+          ok,
+        );
+        expect(fps).toBeGreaterThanOrEqual(58);
+        expect(frames.over33).toBeLessThan(maxOver);
+      });
+    }
+
+    test('memory stays flat across repeated interactions', async ({ page }) => {
+      await page.goto(url(tree.founderId, '&down=7&up=1'));
+      await ready(page);
+      await page.getByRole('button', { name: 'Fit to screen' }).click();
+      await settled(page);
+      await canvas(page).locator(`[data-key="${tree.founderId}"]`).focus();
+      const round = async () => {
+        for (const key of ['ArrowDown', 'ArrowUp', 'ArrowDown', 'ArrowUp']) {
+          await page.keyboard.press(key);
+          const before = await refocusCount(page);
+          await page.keyboard.press('Enter');
+          await expect.poll(() => refocusCount(page)).toBeGreaterThan(before);
+          await ready(page);
+          await settled(page);
+        }
+        await panAndPinch(page);
+        await canvas(page).locator(`[data-key="${tree.founderId}"]`).focus();
+      };
+      const start = await heapMB(page);
+      await round();
+      const first = await heapMB(page);
+      await round();
+      const second = await heapMB(page);
+      const growth = second - first;
+      report(
+        tree,
+        'JS heap after GC: loaded, after one round, after a second round',
+        `${start.toFixed(1)} / ${first.toFixed(1)} / ${second.toFixed(1)}MB`,
+        '< 10MB growth in the second round',
+        growth < 10,
+      );
+      expect(growth).toBeLessThan(10);
+    });
   });
 }

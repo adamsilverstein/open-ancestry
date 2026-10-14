@@ -29,11 +29,22 @@ import type { BulkData } from '@open-ancestry/db';
 
 export interface SeedInfo {
   family: { tree: string; ids: Record<string, string> };
-  perf: { tree: string; focusId: string; founderId: string; people: number };
+  perf: PerfTree;
+  /** Only with OA_PERF_100K=1 (the perf job): seeding 100,000 people takes several seconds. */
+  perf100k?: PerfTree;
 }
 
 export const FAMILY_TREE = 'e2e tree view family';
 export const PERF_TREE = 'e2e tree view 10k';
+export const PERF_TREE_100K = 'e2e tree view 100k';
+
+export interface PerfTree {
+  tree: string;
+  focusId: string;
+  /** The first founder: thousands of descendants within eight generations. */
+  founderId: string;
+  people: number;
+}
 export const SEED_FILE = 'tree-view-seed.json';
 
 type Sex = 'M' | 'F';

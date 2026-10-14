@@ -7,9 +7,15 @@ import {
   generateSyntheticTree,
   meta,
 } from '@open-ancestry/db';
-import { FAMILY_TREE, PERF_TREE, SEED_FILE, familyRows, type SeedInfo } from './tree-view-fixtures';
-
-const PERF_PEOPLE = 10_000;
+import {
+  FAMILY_TREE,
+  PERF_TREE,
+  PERF_TREE_100K,
+  SEED_FILE,
+  familyRows,
+  type PerfTree,
+  type SeedInfo,
+} from './tree-view-fixtures';
 
 /** Seeds the tree view's synthetic trees into the e2e library. */
 export function seedTreeViewTrees(library: string): void {
@@ -27,21 +33,24 @@ export function seedTreeViewTrees(library: string): void {
   family.transact('Set home person', (tx) => meta.setHomePerson(tx, ids.ada!));
   family.close();
 
-  const perf = fresh(PERF_TREE);
-  const synthetic = generateSyntheticTree({ people: PERF_PEOPLE, seed: 7 });
-  bulkInsert(perf, synthetic);
-  perf.transact('Set home person', (tx) => meta.setHomePerson(tx, synthetic.focusId));
-  perf.close();
+  const perfTree = (name: string, people: number): PerfTree => {
+    const store = fresh(name);
+    const synthetic = generateSyntheticTree({ people, seed: 7 });
+    bulkInsert(store, synthetic);
+    store.transact('Set home person', (tx) => meta.setHomePerson(tx, synthetic.focusId));
+    store.close();
+    return {
+      tree: name,
+      focusId: synthetic.focusId,
+      founderId: synthetic.person[0]!.id as string,
+      people,
+    };
+  };
 
   const seed: SeedInfo = {
     family: { tree: FAMILY_TREE, ids },
-    perf: {
-      tree: PERF_TREE,
-      focusId: synthetic.focusId,
-      // The first founder: thousands of descendants within eight generations.
-      founderId: synthetic.person[0]!.id as string,
-      people: PERF_PEOPLE,
-    },
+    perf: perfTree(PERF_TREE, 10_000),
   };
+  if (process.env.OA_PERF_100K === '1') seed.perf100k = perfTree(PERF_TREE_100K, 100_000);
   writeFileSync(join(library, SEED_FILE), JSON.stringify(seed));
 }

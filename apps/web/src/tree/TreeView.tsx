@@ -334,9 +334,18 @@ export function TreeView({
     requestAnimationFrame(() => {
       const channel = new MessageChannel();
       channel.port1.onmessage = () => {
-        // When each layout is on screen; the first is the tree's first paint.
+        // The first layout on screen is the tree's first paint; later ones replace
+        // the previous mark, and old re-focus measures are dropped, so the
+        // timeline does not grow for the life of the tab.
+        if (performance.getEntriesByName('oa-tree-first-paint', 'mark').length === 0) {
+          performance.mark('oa-tree-first-paint');
+        }
+        performance.clearMarks('oa-tree-ready');
         performance.mark('oa-tree-ready');
         if (!measure) return;
+        if (performance.getEntriesByName('oa-tree-refocus', 'measure').length >= 100) {
+          performance.clearMeasures('oa-tree-refocus');
+        }
         try {
           performance.measure('oa-tree-refocus', REFOCUS_MARK, 'oa-tree-ready');
         } catch {

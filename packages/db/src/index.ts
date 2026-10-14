@@ -77,3 +77,4 @@ export {
   refreshDerivedColumns,
   type RefreshOptions,
 } from './derived';
+export { getRelationship, type RelationshipView } from './kinship';

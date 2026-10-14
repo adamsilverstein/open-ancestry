@@ -72,6 +72,12 @@ export const NeighborhoodQuery = Type.Object({
   siblingsDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 10 })),
 });
 
+/** What `from` is to `to`; `to` defaults to the home person. */
+export const RelationshipQuery = Type.Object({
+  from: Id,
+  to: Type.Optional(Id),
+});
+
 export const SearchQuery = Type.Object({
   q: Type.String({ maxLength: 200 }),
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),

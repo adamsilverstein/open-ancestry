@@ -156,8 +156,10 @@ card when they are not (`sp3`) and from the person's card when the partner is un
 connector whose children are off to one side jogs sideways on its own level: families whose
 children lie to the right stack with the rightmost highest, those to the left with the leftmost
 highest, so no two families' lines cross or overlap (checked by a property test). Families of
-the same couple share its trunk. Lanes to further spouses nest above nearer ones, keeping a margin from the card tops and from the
-sibling bar above.
+the same couple share its trunk. Lanes to further spouses nest above nearer ones, evenly spaced at least 8px apart with a margin
+from the card tops and from the sibling bar above; when a block has too many spouses for the
+default `generation` gap, every row moves apart to make room. Sideways jogs under 4px are drawn as
+straight drops.
 
 Only one of the focus person's spouses shows parents at a time, and only an outermost one (a lane
 runs over the middle spouses); the focus person's siblings then move to the other side so the

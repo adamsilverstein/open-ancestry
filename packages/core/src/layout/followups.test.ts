@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { layoutFamily } from './index';
 import { crossings, describeLayout, makeGraph, siblings } from './test-graphs';
+import type { FamilySpec } from './test-graphs';
 import type { LayoutNode, TreeLayout } from './types';
 
 const node = (layout: TreeLayout, key: string): LayoutNode => {
@@ -47,26 +48,47 @@ describe('half siblings', () => {
 });
 
 describe('spouse lanes', () => {
-  it('keep clear of the card tops and the sibling bar above', () => {
-    const wives = ['w1', 'w2', 'w3', 'w4', 'w5', 'w6'];
-    const g = makeGraph(
-      { dad: 'M', mom: 'F', me: 'M', ...Object.fromEntries(wives.map((w) => [w, 'F' as const])) },
-      [
-        ['Fp', 'dad', 'mom', ['me']],
-        ...wives.map((w): [string, string, string, string[]] => [`F_${w}`, 'me', w, []]),
-      ],
-    );
-    const layout = layoutFamily(g, 'me');
-    const barY = layout.edges.find((e) => e.kind === 'sibling-bar' || e.child === 'me')!
-      .points[0]![1];
-    const lanes = layout.edges.filter((e) => e.kind === 'couple' && e.points.length === 4);
-    expect(lanes).toHaveLength(4);
-    for (const lane of lanes) {
-      const y = lane.points[1]![1];
-      expect(y).toBeLessThanOrEqual(-8);
-      expect(y - barY).toBeGreaterThanOrEqual(8);
+  const married = (count: number) => {
+    const wives = Array.from({ length: count }, (_, i) => `w${i}`);
+    const people: Record<string, 'M' | 'F'> = { dad: 'M', mom: 'F', me: 'M' };
+    for (const w of wives) Object.assign(people, { [w]: 'F', [`k_${w}`]: 'M' });
+    return makeGraph(people, [
+      ['Fp', 'dad', 'mom', ['me']],
+      ...wives.map((w): FamilySpec => [`F_${w}`, 'me', w, [`k_${w}`]]),
+    ]);
+  };
+
+  it.each([3, 6, 7, 8])(
+    'stay apart and clear of the cards and the bar with %i spouses',
+    (count) => {
+      const layout = layoutFamily(married(count), 'me');
+      const barY = layout.edges.find((e) => e.child === 'me')!.points[0]![1];
+      const ys = layout.edges
+        .filter((e) => e.kind === 'couple' && e.points.length === 4)
+        .map((e) => e.points[1]![1])
+        .sort((a, b) => a - b);
+      expect(ys).toHaveLength(count - 2);
+      for (const y of ys) {
+        expect(y).toBeLessThanOrEqual(-8);
+        expect(y - barY).toBeGreaterThanOrEqual(8);
+      }
+      for (let i = 1; i < ys.length; i++) expect(ys[i]! - ys[i - 1]!).toBeGreaterThanOrEqual(8);
+      // Every row moves together, and the focus card stays put.
+      const rows = new Set(layout.nodes.map((n) => n.y / (n.generation || 1)));
+      expect(rows.size).toBeLessThanOrEqual(2);
+      expect([node(layout, 'me').x, node(layout, 'me').y]).toEqual([0, 0]);
+      expect(crossings(layout.edges)).toEqual([]);
+    },
+  );
+
+  it('draws small offsets as straight drops', () => {
+    // Six spouses with a child each used to leave a 2-3px jog under the last couple.
+    const layout = layoutFamily(married(6), 'me');
+    for (const e of layout.edges.filter((x) => x.kind === 'parent-child' && x.parents)) {
+      if (e.points.length === 4) {
+        expect(Math.abs(e.points[2]![0] - e.points[1]![0])).toBeGreaterThanOrEqual(4);
+      }
     }
-    expect(crossings(layout.edges)).toEqual([]);
   });
 });
 

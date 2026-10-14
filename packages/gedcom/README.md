@@ -10,18 +10,18 @@ doc.header; // { version, majorVersion, charset, source, ancestry?, schema, ... 
 doc.records; // level-0 nodes in source order, HEAD and TRLR included
 doc.index.get('@I1@'); // record by xref (first one wins on duplicates)
 doc.warnings; // [{ code, line, message }], capped by maxWarnings (default 1000)
-doc.lines; // { total, nodes, continuations, blank, skipped }
+doc.lines; // { total, nodes, continuations, blank, skipped, detached }
 
 const streamed = await parseGedcomStream(fs.createReadStream(path));
 const raw = serializeNode(doc.index.get('@I1@')!); // exact GEDCOM text of the subtree
 const { gedcom, media } = readGedzip(zipBytes); // throws GedzipError on unsafe archives
 ```
 
-A node is `{ level, tag, xref?, pointer?, value?, children, line, rawValue?, continuations? }`. `value` has `@@` escapes resolved and CONC/CONT merged (CONT becomes `\n`). `continuations` and `rawValue` keep what is needed to write the original lines back.
+A node is `{ level, tag, xref?, pointer?, value?, children, line, rawValue?, continuations?, source?, extra? }`. `value` has `@@` escapes resolved and CONC/CONT merged (CONT becomes `\n`). `rawValue`, `continuations`, `source` (original text of a non-canonical line) and `extra` (blank or unparseable lines that followed it) keep what is needed to write the original lines back.
 
 ## Encoding
 
-Order of precedence: `encoding` option, byte order mark, `HEAD.CHAR`, then sniffing. Supported: UTF-8, UTF-16 LE/BE (BOM or `0\0` sniffing), ANSEL (combining diacritics reordered and NFC-composed), ASCII (read as UTF-8, falling back to CP1252 if invalid), ANSI/CP1252/ISO-8859-1/IBMPC (CP1252) and MACINTOSH. GEDCOM 7 is always UTF-8. A BOM that contradicts `HEAD.CHAR` wins, with a `charset-mismatch` warning. Invalid bytes become U+FFFD with an `invalid-bytes` warning plus a `replacement-char` warning on each affected line. The stream parser decides from the first 64 KiB, so a late invalid byte in an ASCII file is replaced rather than triggering the CP1252 fallback.
+Order of precedence: `encoding` option, byte order mark, `HEAD.CHAR`, then sniffing. Supported: UTF-8, UTF-16 LE/BE (BOM or `0\0` sniffing), ANSEL (combining diacritics reordered and NFC-composed), ASCII (read as UTF-8, falling back to CP1252 if invalid), ANSI/CP1252/ISO-8859-1/IBMPC (CP1252) and MACINTOSH. GEDCOM 7 is always UTF-8. A BOM that contradicts `HEAD.CHAR` wins, with a `charset-mismatch` warning; so does content that is valid multi-byte UTF-8 but labeled ANSEL, ANSI or ASCII. Text beyond V8's maximum string length becomes a `decode-failed` warning, not an exception. Invalid bytes become U+FFFD with an `invalid-bytes` warning plus a `replacement-char` warning on each affected line. The stream parser decides from the first 64 KiB, so a late invalid byte in an ASCII file is replaced rather than triggering the CP1252 fallback.
 
 ## Leniency
 
@@ -30,7 +30,9 @@ Order of precedence: `encoding` option, byte order mark, `HEAD.CHAR`, then sniff
 | CRLF, LF, CR, mixed                                       | All accepted                                                                          |
 | Leading whitespace, tabs or repeated delimiters before the tag | Accepted                                                                         |
 | Lines over 255 characters                                 | Accepted                                                                              |
-| Bare text line with no level (Ancestry multi-line notes)  | CONT of the previous node, `broken-line` warning. Blank lines between such lines are kept as empty CONTs. Same fix as python-gedcom's "Ancestry.com stores multi-line text without CONT" quirk. |
+| Bare text line with no level (Ancestry multi-line notes)  | CONT of the previous node, `broken-line` warning. Blank lines between such lines are kept as empty CONTs. Same fix as python-gedcom's "Ancestry.com stores multi-line text without CONT" quirk. Never continues a pointer (skipped instead). |
+| Near-miss line such as `0 @I2@INDI`                       | Repaired into its own node, `malformed-line`                                          |
+| Unrepairable structure (`0 @I2@`, `100 FOO x`, `1 NA:ME`) | Skipped, `skipped-line`; on level 0 the open record is closed so following lines become orphan records instead of joining it |
 | CONC split mid-word or before a space                     | Merged verbatim: the parser never trims, so the space survives on whichever side it was written |
 | Text that looks like a line (`1850 was ...`, `1 name x`)  | Treated as bare text: levels are 0-99 and tags with lowercase letters must start with `_` |
 | CONC/CONT after other children                            | Kept as an ordinary child, `misplaced-continuation`                                   |
@@ -43,25 +45,18 @@ Order of precedence: `encoding` option, byte order mark, `HEAD.CHAR`, then sniff
 
 ## Line accounting
 
-Every physical line is counted once: `nodes + continuations + blank + skipped === total` (`lineCount`). `node.line` and `continuation.line` map back to the source; `subtreeLines(node)` lists all lines of a record, so the importer can prove `mapped + preserved == total`.
+Every physical line is counted once: `nodes + continuations + blank + skipped === total` (`lineCount`). Blank and skipped lines are attached to the line they followed (`extra`), or to `preamble` before the first record (`detached`). `subtreeLines(node)` lists every line of a record including those, so summing it over all records plus `lines.detached` gives `total`, which lets the importer prove `mapped + preserved == total`.
 
 ## Round trip
 
-`parse -> serialize -> parse` yields the same tree (fuzz tested). `serializeGedcom(parseGedcom(file))` equals the decoded file except:
-
-- no BOM; line endings are `eol` (default `\n`); the last line gets a terminator
-- whitespace before a level is removed, and repeated delimiters before the tag become one space
-- leading zeros in levels are dropped (`01` -> `1`)
-- blank lines are dropped, except between Ancestry bare-text lines
-- an empty CONC/CONT written with a trailing space loses the space
-- skipped lines (unparseable text before the first record) are dropped
+Unedited, `serializeGedcom(parseGedcom(file))` reproduces the decoded file exactly (fuzz tested), apart from the BOM, the line terminator (`eol`, default `\n`) and a terminator added to an unterminated last line. `serializeNode(record)` is the exact source text of that record, including indentation, tabs, `01` levels, trailing spaces and blank lines inside it, so it is safe for `raw_record`. Non-canonical lines keep their `source` text, which is used only while the node still says the same thing.
 
 Values edited after parsing are re-encoded: `\n` becomes CONT, `@` is escaped for `version` (default 5, `serializeGedcom` uses the header's), and `maxLineLength` splits long lines with CONC away from spaces.
 
 ## GEDZIP
 
-`readGedzip` wants `gedcom.ged` at the root (a single root `.ged` is accepted with a warning). It reads the central directory itself and checks `maxEntries` (10,000), `maxEntrySize` (512 MiB), `maxTotalSize` (2 GiB) and `maxRatio` (200:1 for entries over 1 MiB) before inflating anything. Inflation then counts the bytes it actually produces, 4 KiB of input at a time, and aborts with `GedzipError('invalid')` as soon as an entry passes its declared size (or ends short of it), so a header that lies cannot get past the limits. Absolute paths, drive letters, NUL and `..` segments, encrypted entries and unknown compression methods are skipped with a warning. ZIP64 archives are rejected; they would exceed the limits anyway.
+`readGedzip` wants `gedcom.ged` at the root (a single root `.ged` is accepted with a warning). It reads the central directory itself and checks, before inflating anything: `maxEntries` (10,000), `maxEntrySize` (256 MiB), `maxGedcomSize` (256 MiB, keeping the decoded text under V8's string limit), `maxTotalSize` (256 MiB held in memory) and `maxRatio` (200:1, for each entry over 1 MiB and for all entries read together). Inflation then counts the bytes it actually produces, 4 KiB of input at a time, and aborts as soon as an entry passes its declared size or the running total passes `maxTotalSize` or `maxRatio`. Absolute paths, drive letters, NUL and `..` segments, duplicate names (including case-only differences, which collide on macOS and Windows), encrypted entries and unknown compression methods are skipped with a warning; the first of a duplicate pair wins. ZIP64 archives are rejected; they would exceed the limits anyway.
 
 ## Performance
 
-`npm run bench -- gedcom`: 100k lines (2.2 MB) decode + tokenize + parse in about 17 ms on an M-series laptop (budget 500 ms); the tree for that file retains about 12 MB of heap.
+`npm run bench -- gedcom`: 100k lines (2.2 MB) decode + tokenize + parse in about 19 ms on an M-series laptop (budget 500 ms); the tree for that file retains about 12 MB of heap.

@@ -165,7 +165,8 @@ const sharesFamily = (rel: ChildRelation | undefined) => rel !== 'step' && rel !
 /**
  * How sibling `b` is related to `a` through the parents they share: half
  * when they share only some by birth or adoption (or the layout says so),
- * step or foster when they share none, adopted when an adoption joins them.
+ * or one by birth and another only by adoption; step or foster when they
+ * share none; adopted when only an adoption joins them.
  */
 function siblingQualifier(rel: Relations, a: string, b: string): Qualifier | undefined {
   const theirs = rel.parents.get(b) ?? [];
@@ -179,8 +180,12 @@ function siblingQualifier(rel: Relations, a: string, b: string): Qualifier | und
       : 'step';
   }
   if (shared.length < common.length || rel.nodes.get(b)?.isHalfSibling) return 'half';
-  const adopted = shared.some((p) => linkOf(a, p) === 'adopted' || linkOf(b, p) === 'adopted');
-  return adopted ? 'adopted' : undefined;
+  // A parent by birth to both makes them blood relatives: half when another
+  // shared parent is so only by adoption (a stepfather who adopted).
+  const notAdopted = (child: string, p: string) => linkOf(child, p) !== 'adopted';
+  const byBirth = shared.filter((p) => notAdopted(a, p) && notAdopted(b, p));
+  if (byBirth.length === shared.length) return undefined;
+  return byBirth.length > 0 ? 'half' : 'adopted';
 }
 
 /** Qualifiers that carry on to the relatives reached through that person. */

@@ -7,7 +7,7 @@ import {
   generateSyntheticTree,
   meta,
 } from '@open-ancestry/db';
-import { importGedcom } from '../packages/import/src/index';
+import { importGedcom } from '@open-ancestry/import';
 import {
   FAMILY_TREE,
   SAMPLE_TREE,

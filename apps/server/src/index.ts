@@ -196,8 +196,12 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
       .send(errorBody('not_found', `No route for ${request.method} ${request.url}`));
   });
 
-  app.addHook('onClose', async () => {
+  // Before the HTTP server stops: aborting jobs ends their event streams, which
+  // close() would otherwise wait on forever, and runs their cleanup.
+  app.addHook('preClose', async () => {
     await jobs.shutdown();
+  });
+  app.addHook('onClose', async () => {
     library.closeAll();
   });
 

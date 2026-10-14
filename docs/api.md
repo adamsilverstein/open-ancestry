@@ -58,6 +58,7 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 | `POST /api/import` (multipart `file`: .ged, .gedcom, .zip, .gdz) | Imports into a new tree named after the file (" 2", " 3", ... when taken); 202 `{ jobId, job }` with `job.tree` and `job.createdTree: true`. The server owns that tree: if the import fails or is cancelled it removes it, but only while it is still the empty tree it created. |
 | `POST /api/trees/:tree/import` (multipart `file`) | Starts an import into an existing, empty tree (202 `{ jobId, job }`); that tree is never removed. |
 | `GET /api/jobs/:id` | Job state, progress, result or error. |
+| `DELETE /api/jobs/:id` | Cancel (202 `{ job }`): a queued job never runs, a running one is aborted. Cleanup removes the upload and any empty tree the import created. 409 once finished. Stopping the server (Ctrl-C or SIGTERM on `open-ancestry serve`) cancels every job the same way. |
 | `GET /api/jobs/:id/events` | Server-sent events: `state` (whole job) and `progress`; ends when the job finishes. |
 | `GET /api/trees/:tree/media/:id` | Original media file with `Range` support. |
 | `GET /api/trees/:tree/media/:id/thumb/:size` | 404 until thumbnails exist. |

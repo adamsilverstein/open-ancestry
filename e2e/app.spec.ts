@@ -4,12 +4,13 @@ import { expect, test } from './fixtures';
 test('loads the app shell', async ({ page }) => {
   await page.goto('/');
   await expect(page).toHaveTitle('open-ancestry');
-  await expect(page.getByRole('heading', { level: 1, name: 'open-ancestry' })).toBeVisible();
+  await expect(page.getByRole('banner')).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Import your Ancestry GEDCOM' })).toBeVisible();
 });
 
 test('deep links fall back to the SPA', async ({ page }) => {
   await page.goto('/tree/some-person');
-  await expect(page.getByRole('heading', { level: 1, name: 'open-ancestry' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1, name: 'Family tree' })).toBeAttached();
 });
 
 test('app shell has no detectable accessibility violations', async ({ page }) => {

@@ -126,6 +126,24 @@ export default [
     peakMemoryMB: () => peaks.get(100_000),
     memoryBudgetMB: 2048,
   },
+  {
+    // One person with 50k families and a matching MARR on both sides: the
+    // marriage matching and FAMS duplicate checks were quadratic (102s for
+    // 20k before the security review fixes).
+    name: 'import: one person with 50k families (MARR + FAMS)',
+    setup: () => manyFamilies(50_000),
+    fn: async () => {
+      const store = openMemoryTree();
+      const report = await importGedcom({ bytes: manyFamilies(50_000) }, store);
+      store.close();
+      if (report.records.FAM !== 50_000) throw new Error(`imported ${report.records.FAM} families`);
+    },
+    budgetMs: 8000,
+    metric: 'mean',
+    iterations: 1,
+    time: 0,
+    warmupIterations: 0,
+  },
 ] satisfies BenchCase[];
 
 let manyFamiliesInput: string | undefined;

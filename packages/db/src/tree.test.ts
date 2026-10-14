@@ -130,7 +130,8 @@ describe.skipIf(process.platform === 'win32')('tightening never follows links or
     const paths = treePaths(dir);
     rmSync(paths.thumbs, { recursive: true });
     symlinkSync(outside, paths.thumbs);
-    openTree(dir).close();
+    expect(() => openTree(dir)).toThrow(/symbolic link/);
+    restrictMode(paths.thumbs, 0o700);
     expect(mode(outside)).toBe(0o755);
   });
 

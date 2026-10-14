@@ -62,8 +62,10 @@ export function restrictMode(path: string, mode: number): void {
   try {
     // Open the path itself, never a link's target, and change it through the
     // descriptor: nothing can swap it between the check and the chmod.
-    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    // O_NONBLOCK: opening a FIFO for reading would otherwise wait for a writer.
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const stat = fstatSync(fd);
+    if (!stat.isFile() && !stat.isDirectory()) return;
     if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) return;
     const current = stat.mode & 0o777;
     const tightened = current & mode;
@@ -79,16 +81,18 @@ export function restrictMode(path: string, mode: number): void {
 export class TreeAccessError extends Error {}
 
 /**
- * Refuses a tree whose folder or database files another account could have
- * planted in a shared library: a symlink, anything owned by another account,
- * or a database file with a second hard link (it could be any file of
- * yours, linked in under the tree's name).
+ * Refuses a tree whose folders (the tree, media/, thumbs/) or database files
+ * another account could have planted in a shared library: a symlink,
+ * anything owned by another account, a FIFO or other special file where a
+ * folder or file belongs, or a database file with a second hard link (it
+ * could be any file of yours, linked in under the tree's name).
  */
 function assertOwnTree(paths: TreePaths): void {
   if (process.platform === 'win32') return;
   const uid = typeof process.getuid === 'function' ? process.getuid() : undefined;
   const files = [paths.database, `${paths.database}-wal`, `${paths.database}-shm`];
-  for (const path of [paths.root, ...files]) {
+  const folders = [paths.root, paths.media, paths.thumbs];
+  for (const path of [...folders, ...files]) {
     let stat;
     try {
       stat = lstatSync(path);
@@ -100,6 +104,12 @@ function assertOwnTree(paths: TreePaths): void {
     }
     if (uid !== undefined && stat.uid !== uid) {
       throw new TreeAccessError(`Refusing to open ${path}: it belongs to another account`);
+    }
+    if (folders.includes(path) && !stat.isDirectory()) {
+      throw new TreeAccessError(`Refusing to open ${path}: it is not a folder`);
+    }
+    if (files.includes(path) && !stat.isFile()) {
+      throw new TreeAccessError(`Refusing to open ${path}: it is not a file`);
     }
     if (stat.isFile() && stat.nlink > 1) {
       throw new TreeAccessError(`Refusing to open ${path}: it has another hard link`);

@@ -270,7 +270,9 @@ describe('POST import', () => {
     expect(fake.calls).toHaveLength(0);
     const zip = await upload(api, base, 'photos.zip', Buffer.alloc(4096, 'x'));
     expect(zip.statusCode, zip.body).toBe(202);
-    expect(fake.calls).toHaveLength(1);
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(1));
+    fake.release({});
+    await waitForJob(api, zip.json().jobId, 'completed');
   });
 
   it('enforces the upload size limit', async () => {

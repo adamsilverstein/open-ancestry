@@ -9,7 +9,7 @@ import fastifyEtag from '@fastify/etag';
 import fastifyMultipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
-import { IMPORT_LIMITS } from '@open-ancestry/import';
+import { IMPORT_LIMITS, resolveImportLimits, type ImportLimits } from '@open-ancestry/import';
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import type { Deps } from './context';
 import { errorBody, registerErrorHandling, toApiError } from './errors';
@@ -55,8 +55,15 @@ export interface ServerOptions {
   token?: string;
   /** Hostnames accepted in the Host header besides loopback. */
   allowedHosts?: readonly string[];
-  /** Largest import upload in bytes (default: the import cap, 64 MiB). */
+  /**
+   * The importer's caps, which also size import uploads (default
+   * IMPORT_LIMITS). Pass the same ones to the importer.
+   */
+  importLimits?: Partial<ImportLimits>;
+  /** Largest GEDCOM upload in bytes (default: importLimits.maxBytes, 64 MiB). */
   uploadLimit?: number;
+  /** Largest GEDZIP upload in bytes (default: importLimits.maxArchiveBytes, 1 GiB). */
+  archiveUploadLimit?: number;
   /** Largest media upload in bytes (default 1 GiB). */
   mediaUploadLimit?: number;
   /** Concurrent imports (default 1) and how many may wait (default 4). */
@@ -77,8 +84,10 @@ export interface RunningServer {
 }
 
 export const DEFAULT_HOST = '127.0.0.1';
-/** Import uploads: no larger than the importer accepts (IMPORT_LIMITS.maxBytes). */
+/** GEDCOM uploads: no larger than the importer accepts (IMPORT_LIMITS.maxBytes). */
 export const DEFAULT_UPLOAD_LIMIT = IMPORT_LIMITS.maxBytes;
+/** GEDZIP uploads, photos included (IMPORT_LIMITS.maxArchiveBytes). */
+export const DEFAULT_ARCHIVE_UPLOAD_LIMIT = IMPORT_LIMITS.maxArchiveBytes;
 export const DEFAULT_MEDIA_UPLOAD_LIMIT = 1024 * 1024 * 1024;
 /** JSON bodies are small edits; uploads go through multipart with their own limit. */
 export const JSON_BODY_LIMIT = 1024 * 1024;
@@ -143,11 +152,13 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   // Leftovers of imports a crash or restart interrupted: their empty trees and uploads.
   library.sweepInterruptedImports();
   void sweepStaleUploads();
+  const importLimits = resolveImportLimits(options.importLimits);
   const deps: Deps = {
     library,
     jobs,
     importer: options.importer,
-    uploadLimit: options.uploadLimit ?? DEFAULT_UPLOAD_LIMIT,
+    uploadLimit: options.uploadLimit ?? importLimits.maxBytes,
+    archiveUploadLimit: options.archiveUploadLimit ?? importLimits.maxArchiveBytes,
     mediaUploadLimit: options.mediaUploadLimit ?? DEFAULT_MEDIA_UPLOAD_LIMIT,
     thumbnails: new ThumbnailQueue(),
   };

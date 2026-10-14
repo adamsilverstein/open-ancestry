@@ -23,8 +23,10 @@ export interface Deps {
   library: Library;
   jobs: JobManager;
   importer: Importer | undefined;
-  /** Largest accepted import upload, in bytes. */
+  /** Largest accepted GEDCOM (.ged, .gedcom) upload, in bytes. */
   uploadLimit: number;
+  /** Largest accepted GEDZIP (.zip, .gdz) upload, in bytes. */
+  archiveUploadLimit: number;
   /** Largest media (gallery) upload, in bytes. */
   mediaUploadLimit: number;
   /** Background WebP thumbnails for media. */

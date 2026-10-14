@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { Worker, type ResourceLimits } from 'node:worker_threads';
+import type { ImportLimits } from '@open-ancestry/import';
 import type { Importer } from './jobs';
 import type { WorkerInput, WorkerMessage } from './import-worker';
 
@@ -19,6 +20,8 @@ const SAVING_PHASES: ReadonlySet<string> = new Set(['finalize', 'commit', 'done'
 
 export interface WorkerImporterOptions {
   resourceLimits?: ResourceLimits;
+  /** The importer's size caps (default IMPORT_LIMITS); give the server the same ones. */
+  limits?: Partial<ImportLimits>;
   /** Wait this long for a cooperative cancel before terminating (default 2000ms). */
   graceMs?: number;
 }
@@ -27,6 +30,7 @@ export function workerImporter(
   script: URL | string,
   {
     resourceLimits = IMPORT_RESOURCE_LIMITS,
+    limits = {},
     graceMs = 2000,
     execArgv,
   }: WorkerImporterOptions & {
@@ -36,7 +40,7 @@ export function workerImporter(
   return (path, store, { onProgress, signal }) =>
     new Promise((resolve, reject) => {
       if (!store.dir) return reject(new Error('Imports need a tree on disk'));
-      const workerData: WorkerInput = { path, treeDir: store.dir };
+      const workerData: WorkerInput = { path, treeDir: store.dir, limits };
       const worker = new Worker(script, {
         workerData,
         resourceLimits,

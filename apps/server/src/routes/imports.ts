@@ -3,6 +3,7 @@ import { createWriteStream } from 'node:fs';
 import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
+import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { FastifyRequest } from 'fastify';
 import type { Api, Deps } from '../context';
@@ -11,6 +12,7 @@ import { TooManyJobsError, type JobEvent } from '../jobs';
 import { JobParams, TreeParams } from '../schemas';
 
 export const IMPORT_EXTENSIONS = new Set(['.ged', '.gedcom', '.zip', '.gdz']);
+const ARCHIVE_EXTENSIONS = new Set(['.zip', '.gdz']);
 
 export const UPLOAD_PREFIX = 'oa-upload-';
 /** Upload folders older than this are left over from a crash and swept on startup. */
@@ -32,7 +34,7 @@ export async function sweepStaleUploads(now = Date.now(), dir = tmpdir()): Promi
 
 /** Import uploads (multipart, streamed to a temp file) and job status over JSON and SSE. */
 export function importRoutes(app: Api, deps: Deps): void {
-  const { library, jobs, importer, uploadLimit, thumbnails } = deps;
+  const { library, jobs, importer, uploadLimit, archiveUploadLimit, thumbnails } = deps;
 
   /** Streams the one uploaded file to a private temp folder. */
   async function receive(request: FastifyRequest) {
@@ -48,7 +50,9 @@ export function importRoutes(app: Api, deps: Deps): void {
     if (!request.isMultipart()) {
       throw new ApiError(415, 'unsupported_media_type', 'Upload the file as multipart/form-data');
     }
-    const file = await request.file({ limits: { fileSize: uploadLimit, files: 1, fields: 0 } });
+    const file = await request.file({
+      limits: { fileSize: Math.max(uploadLimit, archiveUploadLimit), files: 1, fields: 0 },
+    });
     if (!file) throw badRequest('Attach a GEDCOM or GEDZIP file');
     const extension = extname(file.filename).toLowerCase();
     if (!IMPORT_EXTENSIONS.has(extension)) {
@@ -59,15 +63,31 @@ export function importRoutes(app: Api, deps: Deps): void {
         `Expected a ${[...IMPORT_EXTENSIONS].join(', ')} file`,
       );
     }
+    // A GEDZIP carries its photos, so it may be larger; the importer caps the
+    // GEDCOM inside it like a plain file.
+    const limit = ARCHIVE_EXTENSIONS.has(extension) ? archiveUploadLimit : uploadLimit;
+    const tooLarge = () =>
+      new ApiError(
+        413,
+        'payload_too_large',
+        `Uploads of ${extension} files are limited to ${limit} bytes`,
+      );
+    // Past the limit, stop writing but keep reading (up to the larger cap,
+    // where the parser stops), so the request ends cleanly with a 413.
+    let received = 0;
+    const cap = new Transform({
+      transform(chunk: Buffer, _encoding, done) {
+        received += chunk.length;
+        done(null, received > limit ? undefined : chunk);
+      },
+    });
     // The upload is untrusted: only its extension is used in the temp path.
     const dir = await mkdtemp(join(tmpdir(), UPLOAD_PREFIX));
     const cleanup = () => rm(dir, { recursive: true, force: true });
     const path = join(dir, `upload${extension}`);
     try {
-      await pipeline(file.file, createWriteStream(path, { flags: 'wx' }));
-      if (file.file.truncated) {
-        throw new ApiError(413, 'payload_too_large', `Uploads are limited to ${uploadLimit} bytes`);
-      }
+      await pipeline(file.file, cap, createWriteStream(path, { flags: 'wx' }));
+      if (file.file.truncated || received > limit) throw tooLarge();
     } catch (error) {
       await cleanup();
       throw error;

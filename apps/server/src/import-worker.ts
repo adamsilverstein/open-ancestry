@@ -1,6 +1,6 @@
 import { parentPort, workerData } from 'node:worker_threads';
 import { openTree } from '@open-ancestry/db';
-import { importGedcom, ImportError } from '@open-ancestry/import';
+import { importGedcom, ImportError, type ImportLimits } from '@open-ancestry/import';
 
 /*
  * Worker thread entry for one import (see import-runner.ts). It opens its own
@@ -11,6 +11,7 @@ import { importGedcom, ImportError } from '@open-ancestry/import';
 export interface WorkerInput {
   path: string;
   treeDir: string;
+  limits: Partial<ImportLimits>;
 }
 
 export type WorkerMessage =
@@ -19,7 +20,7 @@ export type WorkerMessage =
   | { type: 'error'; code: string | null; message: string };
 
 const port = parentPort!;
-const { path, treeDir } = workerData as WorkerInput;
+const { path, treeDir, limits } = workerData as WorkerInput;
 const controller = new AbortController();
 port.on('message', (message) => {
   if (message === 'cancel') controller.abort();
@@ -30,6 +31,7 @@ const store = openTree(treeDir);
 try {
   const report = await importGedcom({ path }, store, {
     signal: controller.signal,
+    limits,
     onProgress: (phase, done, total) =>
       post({ type: 'progress', progress: { phase, done, total } }),
   });

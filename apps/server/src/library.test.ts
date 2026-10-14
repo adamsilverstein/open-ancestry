@@ -1,8 +1,8 @@
-import { chmodSync, existsSync, statSync } from 'node:fs';
+import { chmodSync, existsSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readdir } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Library, defaultLibraryRoot, treeNameProblem } from './library';
 import { testApi, type TestApi } from './test/helpers';
 
@@ -154,9 +154,19 @@ describe('tree routes', () => {
 
 describe.skipIf(process.platform === 'win32')('library permissions', () => {
   const mode = (path: string) => statSync(path).mode & 0o777;
+  const temps: string[] = [];
+  const temp = async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'oa-lib-'));
+    temps.push(dir);
+    return dir;
+  };
+  afterEach(() => {
+    for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
 
   it('creates the library folder private to its owner', async () => {
-    const root = join(await mkdtemp(join(tmpdir(), 'oa-lib-')), 'Library');
+    const root = join(await temp(), 'Library');
     const library = new Library(root);
     library.create('Vale');
     expect(mode(root)).toBe(0o700);
@@ -165,7 +175,7 @@ describe.skipIf(process.platform === 'win32')('library permissions', () => {
   });
 
   it('tightens an existing library folder and its trees on open', async () => {
-    const root = join(await mkdtemp(join(tmpdir(), 'oa-lib-')), 'Library');
+    const root = join(await temp(), 'Library');
     new Library(root).create('Vale');
     chmodSync(root, 0o755);
     chmodSync(new Library(root).dirOf('Vale'), 0o755);
@@ -176,8 +186,34 @@ describe.skipIf(process.platform === 'win32')('library permissions', () => {
     library.closeAll();
   });
 
+  it('leaves a shared folder that holds more than trees alone, with a warning', async () => {
+    // e.g. `--library ~` or a group-shared folder: chmod would lock others out.
+    const root = await temp();
+    chmodSync(root, 0o775);
+    writeFileSync(join(root, 'notes.txt'), 'not a tree');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const library = new Library(root);
+    library.create('Vale');
+    expect(mode(root)).toBe(0o775);
+    expect(mode(library.dirOf('Vale'))).toBe(0o700);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]![0])).toMatch(/other accounts can see/);
+    library.list();
+    expect(warn).toHaveBeenCalledTimes(1);
+    library.closeAll();
+  });
+
+  it('leaves an existing empty folder alone too, with a warning', async () => {
+    const root = await temp();
+    chmodSync(root, 0o755);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    new Library(root).list();
+    expect(mode(root)).toBe(0o755);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the trash private', async () => {
-    const root = join(await mkdtemp(join(tmpdir(), 'oa-lib-')), 'Library');
+    const root = join(await temp(), 'Library');
     const library = new Library(root);
     library.create('Gone');
     library.delete('Gone');

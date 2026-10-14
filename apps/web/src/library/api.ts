@@ -30,6 +30,22 @@ export const getJob = (id: string, signal?: AbortSignal) =>
 
 export const jobEventsUrl = (id: string) => `/api/jobs/${seg(id)}/events`;
 
+/**
+ * Cancels a queued or running job (any kind: import, reimport). The server
+ * aborts it and cleans up its upload and any empty tree it created; the job's
+ * event stream then reports it failed with `cancelled: true`. Resolves false
+ * when the job had already finished (409), so its own final state stands.
+ */
+export async function cancelJob(id: string): Promise<boolean> {
+  try {
+    await apiSend<{ job: ImportJob }>('DELETE', `/jobs/${seg(id)}`);
+    return true;
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 409) return false;
+    throw error;
+  }
+}
+
 /** The import report (packages/import ImportReport), as much as the UI shows. */
 export interface ImportReportView {
   format: string;
@@ -69,6 +85,8 @@ export interface ImportJob {
   progress: ImportProgress | null;
   result: ImportReportView | null;
   error: string | null;
+  /** Stopped by a cancel rather than an error. */
+  cancelled: boolean;
 }
 
 // ---------------------------------------------------------------- current tree

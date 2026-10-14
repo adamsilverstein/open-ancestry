@@ -11,6 +11,8 @@ import {
   type ImportJob,
   type ImportProgress,
 } from '../../library/api';
+import { useToast } from '../../components/Toast/Toast';
+import { CancelImportButton } from './CancelImportButton';
 import { ImportReport } from './ImportReport';
 import styles from './Import.module.css';
 
@@ -68,15 +70,24 @@ export function ImportPage() {
   const { jobId } = useParams({ from: '/import/$jobId' });
   const { job, missing } = useImportJob(jobId);
   const queryClient = useQueryClient();
+  const toast = useToast();
   const settled = useRef(false);
 
   useEffect(() => {
     if (!job || !finished(job) || settled.current) return;
     settled.current = true;
+    if (job.cancelled) {
+      toast({
+        title: 'Import cancelled',
+        description: job.createdTree
+          ? `The partial tree for ${job.fileName} was removed.`
+          : `Nothing was imported from ${job.fileName}.`,
+      });
+    }
     // Display only: a failed import's tree is the server's to clean up.
     if (job.state === 'completed') void setCurrentTree(queryClient, job.tree);
     else void queryClient.invalidateQueries({ queryKey: treesQuery.queryKey });
-  }, [job, queryClient]);
+  }, [job, queryClient, toast]);
 
   if (missing) {
     return (
@@ -95,6 +106,21 @@ export function ImportPage() {
 
   if (job?.state === 'completed' && job.result) {
     return <ImportReport job={job} report={job.result} />;
+  }
+
+  if (job?.state === 'failed' && job.cancelled) {
+    return (
+      <div className={styles.page}>
+        <h1 className={styles.title}>Import cancelled</h1>
+        <p className={styles.note}>
+          Nothing was imported from {job.fileName}.
+          {job.createdTree && ' The tree made for it was removed, and the uploaded file deleted.'}
+        </p>
+        <Link to="/" className={cx(buttonStyles.button, buttonStyles.secondary, buttonStyles.md)}>
+          Import a file
+        </Link>
+      </div>
+    );
   }
 
   if (job?.state === 'failed') {
@@ -133,6 +159,11 @@ export function ImportPage() {
             ? `${PHASES[progress.phase]}${progress.phase === 'map' ? ` (${progress.done.toLocaleString()} of ${progress.total.toLocaleString()} records)` : ''}`
             : 'Uploading'}
       </p>
+      {job && !finished(job) && (
+        <div className={styles.actions}>
+          <CancelImportButton jobId={job.id} />
+        </div>
+      )}
     </div>
   );
 }

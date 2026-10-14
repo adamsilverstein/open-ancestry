@@ -1,6 +1,13 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   citationLinks,
+  createTree,
+  names,
+  openTree,
+  undoLast,
   citations,
   events,
   families,
@@ -316,6 +323,37 @@ describe('listPeople', () => {
     expect(listPeople(store, { tagId }).items.map((p) => p.given)).toEqual(['Quill']);
     expect(listPeople(store, { living: ['dead'] }).items.map((p) => p.given)).toEqual(['Orrin']);
     expect(listPeople(store, { sort: 'death' }).items[0]?.given).toBe('Tamsin');
+    store.close();
+  });
+
+  it('reflects edits, undo and other connections between pages', () => {
+    const store = memoryTree();
+    const f = seedSmallFamily(store);
+    const order = () => listPeople(store, { sort: 'given' }).items.map((p) => p.given);
+    expect(order()[0]).toBe('Briony');
+    const nameId = names.list(store, f.kid)[0]!.id;
+    store.transact('rename', (tx) => names.update(tx, nameId, { given: 'Aster' }));
+    expect(order()[0]).toBe('Aster');
+    undoLast(store);
+    expect(order()[0]).toBe('Briony');
+    store.transact('birth', (tx) =>
+      events.create(tx, { type: 'BIRT', date_sort: 10000101, roles: [{ person_id: f.kid }] }),
+    );
+    expect(listPeople(store, { sort: 'birth', limit: 1 }).items[0]?.given).toBe('Quill');
+    store.close();
+  });
+
+  it('sees writes made through another connection to the same tree', () => {
+    const dir = join(mkdtempSync(join(tmpdir(), 'oa-list-')), 'a.oatree');
+    const store = createTree(dir);
+    seedSmallFamily(store);
+    expect(listPeople(store, { sort: 'given' }).total).toBe(9);
+    const other = openTree(dir);
+    other.transact('add', (tx) => persons.create(tx, { names: [{ given: 'Aaron' }] }));
+    other.close();
+    const after = listPeople(store, { sort: 'given' });
+    expect(after.total).toBe(10);
+    expect(after.items[0]?.given).toBe('Aaron');
     store.close();
   });
 });

@@ -24,6 +24,7 @@ import {
   OTHER_DEATH_FACTS,
   SINGULAR_EVENTS,
   childRelationship,
+  morePrivate,
   nameType,
   privacy,
   relationshipStatus,
@@ -485,8 +486,8 @@ export class Mapper {
           break;
         case 'RESN': {
           const level = privacy(c.value);
-          if (level && person.privacy === 'public') {
-            person.privacy = level;
+          if (level) {
+            person.privacy = morePrivate(person.privacy, level);
             this.use(c);
           }
           break;
@@ -692,8 +693,8 @@ export class Mapper {
         }
         case 'RESN': {
           const level = privacy(c.value);
-          if (level && row.privacy == null) {
-            row.privacy = level;
+          if (level) {
+            row.privacy = morePrivate(row.privacy, level);
             this.use(c);
           }
           break;
@@ -1212,8 +1213,8 @@ export class Mapper {
         }
         case 'RESN': {
           const level = privacy(c.value);
-          if (level && family.privacy === 'public') {
-            family.privacy = level;
+          if (level) {
+            family.privacy = morePrivate(family.privacy, level);
             this.use(c);
           }
           break;

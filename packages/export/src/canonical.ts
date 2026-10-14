@@ -272,9 +272,12 @@ export class RecordWriter {
   }
 
   source(source: SourceRow, xref: string): GedcomNode {
-    const repo = source.repository_id
-      ? p('REPO', this.ctx.ref('repository', source.repository_id), [v('CALN', source.call_number)])
-      : null;
+    const repo =
+      source.repository_id && !this.ctx.isWithheld(source.repository_id)
+        ? p('REPO', this.ctx.ref('repository', source.repository_id), [
+            v('CALN', source.call_number),
+          ])
+        : null;
     const record = n('SOUR', undefined, [
       v('TITL', source.title),
       v('AUTH', source.author),
@@ -520,7 +523,11 @@ export class RecordWriter {
     const links = this.data.citationLinks.get(ownerKey(type, id)) ?? [];
     return links.flatMap((l) => {
       const citation = this.data.citation.get(l.citation_id);
-      return citation && this.data.source.has(citation.source_id) ? [this.citation(citation)] : [];
+      return citation &&
+        this.data.source.has(citation.source_id) &&
+        !this.ctx.isWithheld(citation.source_id)
+        ? [this.citation(citation)]
+        : [];
     });
   }
 

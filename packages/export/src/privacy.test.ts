@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildGedcomExport, buildGedzipExport } from './index';
-import { TODAY, gedcom7Problems, importInto } from './test-helpers';
+import { TODAY, ged, gedcom7Problems, importInto } from './test-helpers';
 
 /*
  * Privatize beyond living people (security review 2026-10-14): records marked
@@ -221,13 +221,7 @@ const tricky = [
   ...dead('@I6@', 'Unknownword /Canarysix/', '1 RESN restricted'),
   // Nested RESN: the guarded name, citation, media link, or record.
   ...dead('@I7@', 'Guardedname /Canaryseven/', '2 RESN confidential'),
-  ...dead(
-    '@I8@',
-    'Citer /Plainone/',
-    '1 SOUR @S1@',
-    '2 PAGE Canarypage',
-    '2 RESN confidential',
-  ),
+  ...dead('@I8@', 'Citer /Plainone/', '1 SOUR @S1@', '2 PAGE Canarypage', '2 RESN confidential'),
   ...dead('@I9@', 'Linker /Plaintwo/', '1 OBJE @O1@', '2 RESN privacy'),
   ...dead('@I10@', 'Noter /Plainthree/', '1 NOTE @N1@', '1 SOUR @S2@', '1 OBJE @O2@'),
   // A public person with a spaced pointer to a living one, and an escaped xref in a note.
@@ -237,6 +231,7 @@ const tricky = [
     '1 ASSO  @ZELDASPACED@ ',
     '2 RELA Canaryrela',
     '1 NOTE See @@ZELDASPACED@@ and @@ZELDAOTHER@@',
+    '1 SOUR @S1@',
   ),
   '0 @ZELDASPACED@ INDI',
   '1 NAME Zelda /Canaryliving/',
@@ -275,12 +270,32 @@ describe('privatized exports read RESN and pointers the way the strictest reader
       // Plain records and the public person stay.
       expect(out.text, version).toContain('Petra /Publicwell/');
       expect(out.text, version).toContain('Plain source');
+      // The escaped xrefs in Petra's note are gone, and the padded ASSO pointed at someone withheld.
+      expect(out.text, version).toMatch(/NOTE See \[reference removed\] and \[reference removed\]/);
+      expect(out.text, version).not.toMatch(/ASSO|RELA|ROLE/);
+      expect(out.warnings, version).toContain(
+        '@I11@: an imported record id in its text was removed',
+      );
     }
     const zip = buildGedzipExport(store, { privatizeLiving: true, now: TODAY });
     const files = unzipSync(zip.bytes);
     expect(canaries(Object.keys(files).join('\n'))).toEqual([]);
     expect(canaries(new TextDecoder().decode(files['gedcom.ged']))).toEqual([]);
     expect(canaries(zip.warnings.join('\n'))).toEqual([]);
+    store.close();
+  });
+
+  it('keeps a record whose nested RESN only locks it', async () => {
+    const store = await importInto(
+      ged(
+        ...dead('@I1@', 'Locked /Namekeeper/', '2 RESN locked', '1 SOUR @S1@', '2 RESN LOCKED'),
+        '0 @S1@ SOUR',
+        '1 TITL Kept',
+      ),
+    );
+    const out = buildGedcomExport(store, { version: '7', privatizeLiving: true, now: TODAY }).text;
+    expect(out).toContain('Locked /Namekeeper/');
+    expect(out).toContain('1 TITL Kept');
     store.close();
   });
 

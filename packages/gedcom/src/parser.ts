@@ -236,8 +236,12 @@ class TreeBuilder {
     if (token.nonCanonical) node.source = text;
     const raw = token.value;
     if (raw !== undefined) {
-      if (isPointer(raw)) {
-        node.pointer = raw;
+      // Some tools pad a pointer with spaces (`1 ASSO  @I1@ `); lenient readers trim it,
+      // so reading it as text would let it keep pointing somewhere this file cannot see.
+      const trimmed = raw.trim();
+      if (isPointer(trimmed)) {
+        node.pointer = trimmed;
+        if (trimmed !== raw) node.source ??= text;
       } else {
         const value = decodeEscapes(raw, this.major);
         node.value = value;

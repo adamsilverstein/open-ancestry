@@ -6,7 +6,13 @@ import {
   type RawRecordRow,
   type TreeStore,
 } from '@open-ancestry/db';
-import { analyzeHeader, parseGedcom, serializeNode, type GedcomNode } from '@open-ancestry/gedcom';
+import {
+  analyzeHeader,
+  parseGedcom,
+  resnRestrictions,
+  serializeNode,
+  type GedcomNode,
+} from '@open-ancestry/gedcom';
 import {
   RecordWriter,
   canonicalize,
@@ -136,6 +142,8 @@ class GedcomWriter implements WriterContext, MergeContext {
   /** Xrefs the output defines, once every record is planned. */
   private written: Set<string> | undefined;
   private importedXrefs: Map<string, { kind: RecordKind; id: string } | null> | undefined;
+  /** Imported xrefs, upper-cased, for scrubbing text in privatized exports. */
+  private importedIds: Set<string> | undefined;
   private readonly generated = new Map<string, GedcomNode>();
   private readonly slots: Slot[] = [];
   private readonly slotByKey = new Map<string, Slot>();
@@ -157,6 +165,7 @@ class GedcomWriter implements WriterContext, MergeContext {
       for (const person of this.data.persons) {
         if (isLiving(person.living) || withheldPrivacy(person.privacy)) this.living.add(person.id);
       }
+      this.findNestedRestrictions();
       for (const f of this.data.families) {
         if (
           withheldPrivacy(f.privacy) ||
@@ -212,6 +221,31 @@ class GedcomWriter implements WriterContext, MergeContext {
 
   isWithheld(id: string): boolean {
     return this.withheld.has(id);
+  }
+
+  /**
+   * RESN the importer does not map (under a name, a citation or a media link,
+   * on a source, note or media record, or a second RESN line in an older
+   * import) stays in unmapped_line. Its owner is withheld whole, failing
+   * closed: anything but a plain `locked` counts as private.
+   */
+  private findNestedRestrictions(): void {
+    for (const rows of this.data.unmapped.values()) {
+      for (const [i, row] of rows.entries()) {
+        if (!row.path.endsWith('.RESN')) continue;
+        let text = row.line.replace(/^\s*\d+\s+(?:@[^@]+@\s+)?RESN/, '');
+        for (const next of rows.slice(i + 1)) {
+          if (!next.path.startsWith(`${row.path}.`)) break;
+          text += ` ${next.line.replace(/^\s*\d+\s+CON[CT]\s?/, '')}`;
+        }
+        if (resnRestrictions(text).every((r) => r === 'LOCKED')) continue;
+        const id = row.owner_id!;
+        if (row.owner_type === 'person') this.living.add(id);
+        else if (row.owner_type === 'family') this.privateFamilies.add(id);
+        else if (row.owner_type === 'event') this.hiddenEvents.add(id);
+        else this.withheld.add(id);
+      }
+    }
   }
 
   /**
@@ -565,8 +599,38 @@ class GedcomWriter implements WriterContext, MergeContext {
       if (hidden) allowlist(node);
       else
         mergeUnmapped(this, node, this.slotByKey.get(key)?.raw, this.data.unmapped.get(key), xref);
+      if (this.privatize && this.scrubXrefs(node)) {
+        this.warn(`${xref}: an imported record id in its text was removed`);
+      }
       this.generated.set(key, node);
     }
+  }
+
+  /**
+   * Imported xrefs are renumbered when privatizing, and can spell a name
+   * (`@ZELDAQUIXBY@`): text that mentions one (`See @@I12@@`, or a pointer a
+   * strict reader took for text) loses it. Returns whether anything changed.
+   */
+  private scrubXrefs(node: GedcomNode): boolean {
+    if (!this.importedIds) {
+      this.importedIds = new Set();
+      for (const r of this.data.rawRecords) if (r.xref) this.importedIds.add(r.xref.toUpperCase());
+    }
+    const ids = this.importedIds;
+    let changed = false;
+    if (node.value?.includes('@')) {
+      const value = node.value.replace(/@+([^@\s]+)@+/g, (token, id: string) =>
+        ids.has(`@${id.toUpperCase()}@`) ? '[reference removed]' : token,
+      );
+      if (value !== node.value) {
+        node.value = value;
+        delete node.rawValue;
+        delete node.source;
+        changed = true;
+      }
+    }
+    for (const c of node.children) changed = this.scrubXrefs(c) || changed;
+    return changed;
   }
 
   // ------------------------------------------------------------ MergeContext

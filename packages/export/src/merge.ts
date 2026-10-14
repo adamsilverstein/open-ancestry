@@ -1,5 +1,10 @@
 import type { RawRecordRow, UnmappedLineRow } from '@open-ancestry/db';
-import { parseGedcom, serializeNode, type GedcomNode } from '@open-ancestry/gedcom';
+import {
+  parseGedcom,
+  resnRestrictions,
+  serializeNode,
+  type GedcomNode,
+} from '@open-ancestry/gedcom';
 import { canonicalize, n, setLevels } from './canonical';
 
 /** What merging needs from the export. */
@@ -269,6 +274,15 @@ class Merger {
     }
     const copy = canonicalize({ ...node, children: [] });
     if (pointer) copy.pointer = pointer;
+    if (node.tag === 'RESN' && this.ctx.v7) {
+      // GEDCOM 7 RESN is an upper-case, comma-separated enumeration.
+      const restrictions = resnRestrictions(node.value);
+      if (!restrictions.length) {
+        this.lost(node, path, 'it restricts nothing');
+        return undefined;
+      }
+      copy.value = restrictions.join(', ');
+    }
     for (const c of node.children) {
       const child = this.prepare(c, `${path}.${c.tag}`);
       if (child) copy.children.push(child);

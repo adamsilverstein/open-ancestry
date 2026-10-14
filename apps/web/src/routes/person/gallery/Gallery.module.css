@@ -68,17 +68,25 @@
 
 .preview {
   display: grid;
+  position: relative;
   flex: none;
   place-items: center;
   height: 160px;
+  overflow: hidden;
   background: var(--oa-surface-sunken);
   color: var(--oa-text-muted);
 }
 
+/* Out of flow, so the image's own size (a 120x160 portrait thumbnail) never
+   sizes the grid row and pushes past the box onto the caption. */
 .preview img {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
+  /* Portraits keep the head in frame. */
+  object-position: 50% 30%;
 }
 
 .placeholder {

@@ -65,7 +65,14 @@ Tests (`src/roundtrip.test.ts`) run every fixture through:
 
 ## Privatize living
 
-Every record is generated (never copied, since raw text can mention anyone). A living person is `NAME Private`, `SEX`, `FAMC` and `FAMS`, nothing else: no events, notes, citations, media, tags, child relationship types or unmapped lines. A family with a living partner keeps only `HUSB`, `WIFE` and `CHIL`. `HEAD` has no `_HOME` pointing at a privatized home person. Shared records (sources, notes, media, tags, repositories) are written only if something still written points at them, or nothing in the tree uses them at all, so a source cited only for a living person disappears with the citation. The submitter record (usually the user) is replaced by a generic one. Tests search the whole output for every word that appears only in living people's data.
+Privatize is an allowlist, not a filter. Every record is generated (never copied, since raw text can mention anyone), and a privatized record is cut down after generation to:
+
+- a living person: `NAME Private`, `SEX`, `FAMC`, `FAMS` (nothing under them);
+- a family with a living partner: `HUSB`, `WIFE`, `CHIL`.
+
+No unmapped or extension line is merged into either. Notes and media are personal, so one attached anywhere to a living person or a private family (directly, or through their names, events, child links or citations) is left out of the whole export, even where a deceased relative shares it, and an unmapped pointer to it is reported, not written. Sources, repositories and tags are written only if something still written points at them, or nothing in the tree uses them at all. The submitter (usually the user) is replaced by a generic one, and `HEAD` has no `_HOME` pointing at a privatized home person.
+
+Tests put a unique canary in every kind of line a living person and their family can have (names, events, places, notes, citations with `_APID`, inline and shared media, `_PHOTO`, tags, top-level and nested extension lines, `ASSO`, child-link notes, family events and extensions) and assert none reaches 5.5.1, 7 or GEDZIP output, edited or not. Every fixture is also searched for every word that appears only in living people's data, raw and unmapped lines included.
 
 ## GEDZIP
 

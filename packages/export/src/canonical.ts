@@ -33,6 +33,8 @@ export interface WriterContext {
   isPrivateFamily(id: string): boolean;
   /** Whether a note is written as its own record (shared) rather than inline. */
   isNoteRecord(note: NoteRow): boolean;
+  /** A note or media item attached anywhere to a privatized person or family: never written. */
+  isWithheld(id: string): boolean;
   /** FILE value for a media row. */
   filePath(media: MediaRow): string | undefined;
 }
@@ -222,14 +224,15 @@ export class RecordWriter {
       const links = this.mediaLinks('person', person.id);
       // Ancestry marks the profile photo's link with _PRIM Y as well as _PHOTO.
       const primary =
-        person.primary_media_id && this.ctx.includeMedia
+        person.primary_media_id &&
+        this.ctx.includeMedia &&
+        !this.ctx.isWithheld(person.primary_media_id)
           ? this.ctx.ref('media', person.primary_media_id)
           : undefined;
       for (const link of links) if (link.pointer === primary) link.children.push(n('_PRIM', 'Y'));
       children.push(...links);
       const photo = person.primary_media_id && this.data.media.get(person.primary_media_id);
-      if (photo && this.ctx.includeMedia)
-        children.push(p('_PHOTO', this.ctx.ref('media', photo.id)));
+      if (photo && primary) children.push(p('_PHOTO', primary));
       children.push(...this.tagLinks('person', person.id));
     }
     return setLevels(record);
@@ -527,7 +530,7 @@ export class RecordWriter {
     const links = this.data.noteLinks.get(ownerKey(type, id)) ?? [];
     return links.flatMap((l) => {
       const note = this.data.note.get(l.note_id);
-      if (!note) return [];
+      if (!note || this.ctx.isWithheld(note.id)) return [];
       if (this.ctx.isNoteRecord(note)) {
         return [p(this.v7 ? 'SNOTE' : 'NOTE', this.ctx.ref('note', note.id))];
       }
@@ -539,7 +542,9 @@ export class RecordWriter {
     if (!this.ctx.includeMedia) return [];
     const links = this.data.mediaLinks.get(ownerKey(type, id)) ?? [];
     return links.flatMap((l) =>
-      this.data.media.has(l.media_id) ? [p('OBJE', this.ctx.ref('media', l.media_id))] : [],
+      this.data.media.has(l.media_id) && !this.ctx.isWithheld(l.media_id)
+        ? [p('OBJE', this.ctx.ref('media', l.media_id))]
+        : [],
     );
   }
 

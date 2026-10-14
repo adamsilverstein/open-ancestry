@@ -57,6 +57,23 @@ const EXTENSION_TAG = /^[ \t]*\d+[ \t]+(?:@[^@\s]+@[ \t]+)?(_[A-Za-z0-9_]+)/gm;
 
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 
+/** The only lines a privatized person or family may have; anything else is a leak. */
+const PRIVATE_LINES: Record<string, ReadonlySet<string>> = {
+  INDI: new Set(['NAME', 'SEX', 'FAMC', 'FAMS']),
+  FAM: new Set(['HUSB', 'WIFE', 'CHIL']),
+};
+
+/**
+ * Cuts a privatized record down to its allowlist, as a last line of defence
+ * after generation: the name is "Private" and no line carries anything below it.
+ */
+function allowlist(record: GedcomNode): void {
+  const allowed = PRIVATE_LINES[record.tag]!;
+  record.children = record.children
+    .filter((c) => allowed.has(c.tag))
+    .map((c) => ({ ...c, ...(c.tag === 'NAME' && { value: 'Private' }), children: [] }));
+}
+
 /** Options only the GEDZIP writer uses. */
 export interface InternalOptions extends GedcomExportOptions {
   /** FILE value for a media row; also tells the caller which media were written. */
@@ -100,6 +117,7 @@ class GedcomWriter implements WriterContext, MergeContext {
   private readonly privatize: boolean;
   private readonly living = new Set<string>();
   private readonly privateFamilies = new Set<string>();
+  private readonly withheld = new Set<string>();
   private readonly xrefs = new Map<string, string>();
   private readonly used = new Set<string>();
   private readonly counters = new Map<string, number>();
@@ -133,6 +151,7 @@ class GedcomWriter implements WriterContext, MergeContext {
           this.privateFamilies.add(f.id);
         }
       }
+      this.findWithheld();
     }
     this.writer = new RecordWriter(this);
   }
@@ -154,6 +173,78 @@ class GedcomWriter implements WriterContext, MergeContext {
 
   isPrivateFamily(id: string): boolean {
     return this.privateFamilies.has(id);
+  }
+
+  isWithheld(id: string): boolean {
+    return this.withheld.has(id);
+  }
+
+  /**
+   * Notes and media are personal: one attached anywhere to a privatized
+   * person or family (directly, or through their names, events, child links
+   * or citations) is left out of the whole export, even where someone else
+   * shares it, since its text or image is about them.
+   */
+  private findWithheld(): void {
+    const d = this.data;
+    const memo = new Map<string, boolean>();
+    const owned = (type: string, id: string): boolean => {
+      const key = ownerKey(type, id);
+      const known = memo.get(key);
+      if (known !== undefined) return known;
+      memo.set(key, false);
+      let result = false;
+      switch (type) {
+        case 'person':
+          result = this.living.has(id);
+          break;
+        case 'person_name':
+          result = this.living.has(d.nameOwner.get(id)!);
+          break;
+        case 'family':
+          result = this.privateFamilies.has(id);
+          break;
+        case 'family_child': {
+          const link = d.familyChild.get(id);
+          result =
+            !!link && (this.living.has(link.child_id) || this.privateFamilies.has(link.family_id));
+          break;
+        }
+        case 'event':
+          result = (d.rolesByEvent.get(id) ?? []).some(
+            (r) =>
+              (r.person_id && this.living.has(r.person_id)) ||
+              (r.family_id && this.privateFamilies.has(r.family_id)),
+          );
+          break;
+        case 'citation':
+          result = (d.citationLinksByCitation.get(id) ?? []).some((l) =>
+            owned(l.owner_type, l.owner_id),
+          );
+          break;
+        case 'media':
+          result = this.withheld.has(id);
+          break;
+      }
+      memo.set(key, result);
+      return result;
+    };
+    for (const m of d.mediaRows) {
+      const users = d.mediaLinksByMedia.get(m.id) ?? [];
+      const photoOf = d.primaryOf.get(m.id) ?? [];
+      if (
+        users.some((l) => owned(l.owner_type, l.owner_id)) ||
+        photoOf.some((p) => this.living.has(p.id))
+      ) {
+        this.withheld.add(m.id);
+      }
+    }
+    memo.clear();
+    for (const note of d.notes) {
+      if ((d.noteLinksByNote.get(note.id) ?? []).some((l) => owned(l.owner_type, l.owner_id))) {
+        this.withheld.add(note.id);
+      }
+    }
   }
 
   isNoteRecord(note: NoteRow): boolean {
@@ -365,6 +456,7 @@ class GedcomWriter implements WriterContext, MergeContext {
       if (this.planned.has(key)) return;
       const slot = this.slotByKey.get(key);
       if (slot?.mode === 'verbatim') this.planned.set(key, 'verbatim');
+      else if (this.withheld.has(id)) return;
       else if (always || (slot && !this.privatize)) this.ref(kind, id);
     };
     for (const person of this.data.persons) plan('person', person.id, true);
@@ -422,10 +514,9 @@ class GedcomWriter implements WriterContext, MergeContext {
       const hidden =
         (kind === 'person' && this.isPrivatePerson(id)) ||
         (kind === 'family' && this.isPrivateFamily(id));
-      // A privatized record leaves its unmapped lines out on purpose.
-      if (!hidden) {
+      if (hidden) allowlist(node);
+      else
         mergeUnmapped(this, node, this.slotByKey.get(key)?.raw, this.data.unmapped.get(key), xref);
-      }
       this.generated.set(key, node);
     }
   }
@@ -451,6 +542,7 @@ class GedcomWriter implements WriterContext, MergeContext {
       }
     }
     const target = this.importedXrefs.get(raw);
+    if (target && this.withheld.has(target.id)) return undefined;
     if (target) return this.ref(target.kind, target.id);
     // A raw-only record (SUBM) keeps its xref when it is written.
     const kept = this.slots.some(

@@ -20,3 +20,14 @@ export function project(nodes: GedcomNode[]): Projected[] {
     children: project(n.children),
   }));
 }
+
+/**
+ * CPU milliseconds `fn` takes in this worker. Budgets in tests use CPU, not
+ * wall time, which swings with whatever else the machine is running.
+ */
+export function cpuMs(fn: () => unknown): number {
+  const start = process.cpuUsage();
+  fn();
+  const { user, system } = process.cpuUsage(start);
+  return (user + system) / 1000;
+}

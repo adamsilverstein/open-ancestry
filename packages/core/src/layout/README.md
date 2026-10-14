@@ -90,7 +90,8 @@ themselves loses the second slot, repeated children are dropped and cycles termi
   more than one parent set. The switcher's choice wins, then the `preferred` set, then the most
   biological one.
 
-`layoutFan` returns `segments` instead: `startAngle`/`endAngle` in radians (screen space, 0 to
+`layoutFan` returns `segments` instead (and `emptySlots`, the next ring's slots for unknown
+parents of shown ancestors, for drawing them empty): `startAngle`/`endAngle` in radians (screen space, 0 to
 the right, clockwise, `3*PI/2` is up), `innerRadius`/`outerRadius`, and the Ahnentafel number.
 
 ## The family view
@@ -158,7 +159,9 @@ card when they are not (`sp3`) and from the person's card when the partner is un
 connector whose children are off to one side jogs sideways on its own level: families whose
 children lie to the right stack with the rightmost highest, those to the left with the leftmost
 highest, so no two families' lines cross or overlap (checked by a property test). Families of
-the same couple share its trunk. Lanes to further spouses nest above nearer ones, evenly spaced at least 8px apart with a margin
+the same couple share its trunk. When many families' connectors jog in one gap (ten aunts' cousins in the focus row), the space
+between generations grows for every row so jog levels stay at least 8px apart. Lanes to further
+spouses nest above nearer ones, evenly spaced at least 8px apart with a margin
 from the card tops and from the sibling bar above; when a block has too many spouses for the
 default `generation` gap, every row moves apart to make room. Sideways jogs under 4px are drawn as
 straight drops.

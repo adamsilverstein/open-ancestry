@@ -178,6 +178,7 @@ const TreeCard = memo(function TreeCard({
       ) : (
         <PersonCard
           person={person}
+          size={node.width < 120 ? 'compact' : 'regular'}
           focusPerson={node.isFocus}
           duplicate={node.isDuplicate}
           className={styles.card}
@@ -276,9 +277,24 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     const gutter = gutterRef.current;
     // Rows closer than a label's height would overlap: hide them when zoomed far out.
     if (gutter) gutter.hidden = t.scale < 0.15;
-    for (const el of gutter?.children ?? []) {
-      const label = el as HTMLElement;
-      label.style.transform = `translateY(${Number(label.dataset.y) * t.scale + t.y}px) translateY(-50%)`;
+    const labels = [...(gutter?.children ?? [])] as HTMLElement[];
+    // A label's right edge never changes (its key includes its text), so
+    // measure it once, and all reads before any writes: this runs on every pan
+    // frame and re-focus. A hidden gutter has no size to measure yet.
+    if (gutter && !gutter.hidden) {
+      const offset = gutter.offsetLeft;
+      for (const label of labels) {
+        label.dataset.right ||= String(offset + label.offsetLeft + label.offsetWidth + 8);
+      }
+    }
+    for (const label of labels) {
+      // Beside the row while the row's cards start right of the label; once a
+      // wide row slides under the gutter, up in the gap above it instead, so
+      // the label never covers a card.
+      const under = Number(label.dataset.left) * t.scale + t.x < Number(label.dataset.right);
+      const y = under ? Number(label.dataset.gapY) : Number(label.dataset.y);
+      label.style.transform = `translateY(${y * t.scale + t.y}px) translateY(-50%)`;
+      label.toggleAttribute('data-above', under);
     }
   };
   const transform = useRef<Transform>({ x: 0, y: 0, scale: 1 });
@@ -556,9 +572,43 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       }
       return { x, y, scale };
     }
+    const pad = 32;
+    // Clear of the floating toolbar on the left.
+    const toolbar = 80;
+    const fitScale = (w: number, h: number) =>
+      Math.max(
+        LOD_SCALE + 0.05,
+        Math.min(
+          1,
+          w / Math.max(1, current!.bounds.width),
+          h / Math.max(1, current!.bounds.height),
+        ),
+      );
+    if (focus && current && latest.current.kind === 'pedigree') {
+      // Focus at the left, ancestors spreading right, the whole chart down the screen.
+      // Room above the chart for the two-line column heads.
+      const heads = 48;
+      const scale = fitRows
+        ? fitScale(width - toolbar - 2 * pad, height - 2 * pad - heads)
+        : t.scale;
+      const b = current.bounds;
+      return {
+        x: toolbar + pad - focus.x * scale,
+        y: (height + heads) / 2 - (b.minY + b.height / 2) * scale,
+        scale,
+      };
+    }
+    if (focus && current && latest.current.kind === 'descendants') {
+      // Focus at the top center, descendants below.
+      const scale = fitRows ? fitScale(width - 2 * pad, height - 2 * pad - 28) : t.scale;
+      const centered = centerOn({ ...t, scale }, focus.x + focus.width / 2, 0, width, height);
+      return { x: centered.x, y: pad + 14 - focus.y * scale, scale };
+    }
     if (focus)
       return centerOn(t, focus.x + focus.width / 2, focus.y + focus.height / 2, width, height);
     if (currentFan) {
+      // The whole fan, as large as fits.
+      if (fitRows) return fitBounds(currentFan.bounds, width, height, FIT_PADDING);
       const b = currentFan.bounds;
       return centerOn(t, b.minX + b.width / 2, b.minY + b.height / 2, width, height);
     }
@@ -1026,6 +1076,27 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     focusGiven ? `${focusGiven}’s ${text.toLowerCase()}` : text;
 
   const shown = visible.source === layout && layout ? visible : null;
+  // Per labelled row: its leftmost card, and the middle of the gap above it.
+  const rowExtent = useMemo(() => {
+    const extent = new Map<number, { 'data-left': number; 'data-gap-y': number }>();
+    if (!layout) return extent;
+    const rows = new Map<number, { left: number; top: number }>();
+    for (const n of layout.nodes) {
+      const row = rows.get(n.generation);
+      if (!row) rows.set(n.generation, { left: n.x, top: n.y });
+      else row.left = Math.min(row.left, n.x);
+    }
+    for (const [generation, row] of rows) {
+      const above = rows.get(generation - 1);
+      const height = layout.nodes[0]!.height;
+      // Chevrons sit on the cards' top edges: keep the label clear of them.
+      const gapY = above ? (above.top + height + row.top) / 2 - 7 : row.top - 28;
+      extent.set(generation, { 'data-left': row.left, 'data-gap-y': gapY });
+    }
+    return extent;
+  }, [layout]);
+  // Column heads (pedigree) wrap within a card and most of the gap after it.
+  const columnLabelWidth = (layout?.nodes[0]?.width ?? 120) + 48;
   const cardIndexes = useMemo(() => {
     if (!shown || !layout) return [];
     const list = shown.nodes.slice();
@@ -1089,7 +1160,12 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         {layout?.labels
           .filter((l) => l.anchor !== 'right-middle')
           .map((l) => (
-            <div key={l.generation} className={styles.labelColumn} style={{ left: l.x, top: l.y }}>
+            <div
+              key={l.generation}
+              className={styles.labelColumn}
+              // Wrap within the column, so long labels never run into the next one.
+              style={{ left: l.x, top: l.y, width: columnLabelWidth }}
+            >
               <GenerationLabel>{relativeLabel(l.text)}</GenerationLabel>
             </div>
           ))}
@@ -1134,7 +1210,13 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         {layout?.labels
           .filter((l) => l.anchor === 'right-middle')
           .map((l) => (
-            <div key={l.generation} className={styles.labelGutter} data-y={l.y}>
+            <div
+              key={`${l.generation}:${l.text}`}
+              className={styles.labelGutter}
+              data-testid="tree-row-label"
+              data-y={l.y}
+              {...rowExtent.get(l.generation)}
+            >
               <GenerationLabel>{relativeLabel(l.text)}</GenerationLabel>
             </div>
           ))}

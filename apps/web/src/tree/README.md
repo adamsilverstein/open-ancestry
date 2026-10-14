@@ -32,8 +32,13 @@ URL focus ──> TreeView ──fetchQuery──> GET /api/trees/:tree/neighbor
   card text is unreadable, so cards and edges are painted on one canvas each frame and nothing
   mounts while panning; only the keyboard's active card stays in the DOM, and clicking a painted
   card zooms in on it.
-- **Framing.** The first view centers the focus card across and frames grandparents to children
-  down the screen (zooming out to fit them).
+- **Framing.** The first view of each layout frames it the way it reads. Family view: the focus
+  card centered across, grandparents to children down the screen (zooming out to fit them).
+  Pedigree: the focus person at the left, clear of the toolbar, with the whole chart fitted, on
+  compact cards so four generations of ancestors fit. Descendants: the focus person at the top
+  center, the generations below fitted. Fan: the whole fan fitted. Re-focusing keeps the zoom.
+- **Fan.** Unknown parents of shown ancestors (within the generations shown) are drawn as empty
+  dashed slots, so the fan reads as complete; they are decorative and hidden from screen readers.
 - **Pointer.** Drag pans. A mouse wheel or pinch (ctrl + wheel, Safari gestures) zooms around the
   pointer; a trackpad's two-finger scroll and Shift + wheel pan (`wheelKind` in `viewport.ts`).
 - **Re-focus.** The view jumps so the new focus card sits where it was, then tweens 180ms to the

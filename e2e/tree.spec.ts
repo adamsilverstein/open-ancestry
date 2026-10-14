@@ -603,6 +603,108 @@ test.describe('family view', () => {
   }
 });
 
+test.describe('pedigree, descendant and fan views', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  /** True when the locator's box lies inside the tree canvas. */
+  async function inView(page: Page, locator: Locator) {
+    const view = await box(canvas(page));
+    const b = await box(locator);
+    return (
+      b.x >= view.x - 1 &&
+      b.y >= view.y - 1 &&
+      b.x + b.width <= view.x + view.width + 1 &&
+      b.y + b.height <= view.y + view.height + 1
+    );
+  }
+
+  test('the pedigree opens with the focus person at the left and every generation on screen', async ({
+    page,
+  }) => {
+    await open(page, 'ada', '&layout=pedigree');
+    await settled(page);
+    const view = await box(canvas(page));
+    const ada = await box(card(page, 'Ada Vale'));
+    expect(ada.x - view.x).toBeLessThan(view.width / 4);
+    // Compact cards, so four generations of ancestors fit.
+    expect(ada.width).toBeLessThan(100);
+    for (const name of ['Bram Vale', 'Elsa Hale', 'Otto Vale', 'Abel Vale', 'Lena Frost']) {
+      expect(await inView(page, card(page, name).first())).toBe(true);
+    }
+    // Column heads never run into each other.
+    const heads = [];
+    for (const text of [
+      /^Ada.s parents$/,
+      /^Ada.s grandparents$/,
+      /^Ada.s great-grandparents$/,
+      /^Ada.s 2nd great-grandparents$/,
+    ]) {
+      heads.push(await box(world(page).getByText(text).first()));
+    }
+    for (let i = 1; i < heads.length; i++) {
+      expect(heads[i]!.x).toBeGreaterThanOrEqual(heads[i - 1]!.x + heads[i - 1]!.width);
+    }
+  });
+
+  test('the descendant chart opens with the focus person near the top', async ({ page }) => {
+    await open(page, 'bram', '&layout=descendants');
+    await settled(page);
+    const view = await box(canvas(page));
+    const bram = await box(card(page, 'Bram Vale'));
+    expect(bram.y - view.y).toBeLessThan(view.height / 4);
+    for (const name of ['Hugo Vale', 'Ada Vale', 'Ilsa Vale', 'Wren Ash']) {
+      expect(await inView(page, card(page, name))).toBe(true);
+    }
+  });
+
+  test('row labels move clear of cards when a wide row slides under them', async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 700 });
+    await open(page, 'bram', '&layout=descendants');
+    await settled(page);
+    const intersects = (a: { x: number; y: number; width: number; height: number }, b: typeof a) =>
+      a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+    const labels = page.getByTestId('tree-row-label');
+    const cards = canvas(page).getByRole('button', { name: /, (male|female)/ });
+    // Pan right so the rows run under the label column, then check every pair.
+    for (const dx of [0, 300]) {
+      if (dx) {
+        await page.mouse.move(600, 400);
+        await page.mouse.down();
+        await page.mouse.move(600 + dx, 400, { steps: 5 });
+        await page.mouse.up();
+        await settled(page);
+      }
+      const labelBoxes = [];
+      for (const label of await labels.all())
+        if (await label.isVisible()) labelBoxes.push(await box(label));
+      expect(labelBoxes.length).toBeGreaterThan(0);
+      for (const card of await cards.all()) {
+        const c = await card.boundingBox();
+        if (!c) continue;
+        for (const l of labelBoxes) expect(intersects(l, c)).toBe(false);
+      }
+    }
+  });
+
+  test('the fan chart fits the screen and marks unknown parents as empty slots', async ({
+    page,
+  }) => {
+    await open(page, 'ada', '&layout=fan');
+    await settled(page);
+    const fan = page.getByTestId('tree-fan');
+    expect(await inView(page, fan)).toBe(true);
+    // Its segments stay buttons inside a labelled group (an img role would flatten them).
+    await expect(page.getByRole('group', { name: 'Fan chart' })).toBeVisible();
+    await expect(
+      page.getByRole('group', { name: 'Fan chart' }).getByRole('button', { name: /^Bram Vale/ }),
+    ).toBeVisible();
+    // Rhea Lund's parents are unknown: their two slots are drawn empty, not left as a gap.
+    const empty = page.getByTestId('fan-empty-slot');
+    await expect(empty).not.toHaveCount(0);
+    await expect(empty.first()).toHaveAttribute('aria-hidden', 'true');
+  });
+});
+
 test.describe('visual snapshots', () => {
   // Baselines are Linux Chromium only, like design.spec.ts.
   test.skip(

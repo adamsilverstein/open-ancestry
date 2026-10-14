@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { treePaths } from '@open-ancestry/db';
+import { prepareReimport } from '@open-ancestry/import';
 import type { FastifyRequest } from 'fastify';
 import type { Api, Deps } from '../context';
 import { ApiError, badRequest, notFound } from '../errors';
@@ -33,7 +34,7 @@ export async function sweepStaleUploads(now = Date.now(), dir = tmpdir()): Promi
 
 /** Import uploads (multipart, streamed to a temp file) and job status over JSON and SSE. */
 export function importRoutes(app: Api, deps: Deps): void {
-  const { library, jobs, importer, uploadLimit, thumbnails } = deps;
+  const { library, jobs, importer, uploadLimit, thumbnails, reimports } = deps;
 
   /** Streams the one uploaded file to a private temp folder. */
   async function receive(request: FastifyRequest) {
@@ -129,6 +130,38 @@ export function importRoutes(app: Api, deps: Deps): void {
       const upload = await receive(request);
       const job = start(tree, upload, null);
       return reply.code(202).send({ jobId: job.id, job });
+    },
+  );
+
+  // Compare an updated export with an existing tree; the review is a re-import session.
+  app.post(
+    '/api/trees/:tree/reimport',
+    { schema: { params: TreeParams } },
+    async (request, reply) => {
+      const { tree } = request.params;
+      library.open(tree);
+      const upload = await receive(request);
+      try {
+        const job = jobs.enqueue(
+          { tree, fileName: upload.fileName, kind: 'reimport' },
+          async (signal, onProgress) => {
+            const session = await prepareReimport(
+              library.open(tree),
+              { path: upload.path },
+              { signal, onProgress: (phase, done, total) => onProgress({ phase, done, total }) },
+            );
+            const stored = reimports.add(tree, upload.fileName, session);
+            return { reimportId: stored.id, counts: session.diff.counts };
+          },
+          upload.cleanup,
+        );
+        return reply.code(202).send({ jobId: job.id, job });
+      } catch (error) {
+        await upload.cleanup();
+        if (error instanceof TooManyJobsError)
+          throw new ApiError(429, 'too_many_jobs', error.message);
+        throw error;
+      }
     },
   );
 

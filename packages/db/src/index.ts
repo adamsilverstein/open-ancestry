@@ -54,6 +54,8 @@ export {
   redoLast,
   undo,
   undoLast,
+  undoLatest,
+  touchesMergedRows,
 } from './undo';
 export { BULK_TABLE_ORDER, BulkWriter, bulkInsert, type BulkCounts, type BulkData } from './bulk';
 export {

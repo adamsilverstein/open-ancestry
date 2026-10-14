@@ -47,6 +47,30 @@ export function touchesMergedRows(
   );
 }
 
+/**
+ * Tables that point at a row by `owner_type` + `owner_id`. SQLite cannot
+ * enforce these references, so undo checks them before removing a row.
+ */
+const OWNER_LINK_TABLES = [
+  'citation_link',
+  'media_link',
+  'note_link',
+  'tag_link',
+  'raw_record',
+  'unmapped_line',
+] as const;
+
+/** The first table that still links to a row by owner, or null. */
+function linkedByOwner(store: TreeStore, table: string, id: string): string | null {
+  for (const links of OWNER_LINK_TABLES) {
+    const found = store
+      .stmt(`SELECT 1 FROM ${links} WHERE owner_type = ? AND owner_id = ? LIMIT 1`)
+      .get(table, id);
+    if (found) return links;
+  }
+  return null;
+}
+
 /** Tables whose rows the change log may touch. Anything else in `entity` is refused. */
 export const REPLAYABLE_TABLES: ReadonlySet<string> = new Set<string>(DATA_TABLES);
 
@@ -159,6 +183,7 @@ function replay(
   const now = store.clock();
   const tx = new Tx(store, batch.id, now, false);
   const run = store.db.transaction(() => {
+    const removed: { table: string; id: string }[] = [];
     for (const entry of log) {
       const [from, to] =
         direction === 'undo'
@@ -184,6 +209,17 @@ function replay(
         );
       }
       tx.restore(entry.entity, entry.entity_id, rederive(entry.entity, target));
+      if (target === null) removed.push({ table: entry.entity, id: entry.entity_id });
+    }
+    // Foreign keys catch rows a later change still needs, but owner links cannot:
+    // removing a person a later note still links to would leave the link dangling.
+    for (const { table, id } of removed) {
+      const links = linkedByOwner(store, table, id);
+      if (links) {
+        throw new UndoConflictError(
+          `Cannot ${direction} "${batch.label}": a later change still links to the ${table.replaceAll('_', ' ')} it would remove (${links.replaceAll('_', ' ')}). Undo that change first.`,
+        );
+      }
     }
     tx.flush();
     store
@@ -236,16 +272,34 @@ export function redo(store: TreeStore, batchId: string): ChangeBatchRow {
  * NFC upgrade made un-undoable. Returns null when there is nothing to undo.
  */
 export function undoLast(store: TreeStore): ChangeBatchRow | null {
+  return undoLatest(store).batch;
+}
+
+/**
+ * `undoLast`, also returning the newer batches it stepped over because the
+ * NFC upgrade made them un-undoable, so the UI can say so.
+ */
+export function undoLatest(store: TreeStore): {
+  batch: ChangeBatchRow | null;
+  skipped: ChangeBatchRow[];
+} {
   const merged = mergedAway(store);
   const batches = store
     .stmt(
-      `SELECT id FROM change_batch WHERE state = 'applied' ORDER BY seq DESC${merged.length ? '' : ' LIMIT 1'}`,
+      `SELECT * FROM change_batch WHERE state = 'applied' ORDER BY seq DESC${merged.length ? '' : ' LIMIT 1'}`,
     )
-    .all() as { id: string }[];
+    .all() as ChangeBatchRow[];
   // A batch the NFC upgrade made permanently un-undoable is stepped over, so Cmd-Z
   // still reaches the older ones (each is still checked for conflicts by undo).
-  const next = batches.find((b) => !touchesMergedRows(store, b.id, merged));
-  return next ? undo(store, next.id) : null;
+  const skipped: ChangeBatchRow[] = [];
+  for (const batch of batches) {
+    if (touchesMergedRows(store, batch.id, merged)) {
+      skipped.push(batch);
+      continue;
+    }
+    return { batch: undo(store, batch.id), skipped };
+  }
+  return { batch: null, skipped };
 }
 
 /** Redoes the oldest undone batch, i.e. the last one undone. Returns null when there is nothing to redo. */

@@ -18,6 +18,7 @@ import {
   redo,
   undo,
   undoLast,
+  undoLatest,
   UndoConflictError,
   type TreeStore,
 } from './index';
@@ -103,7 +104,10 @@ describe('schema v3: NFC normalization of existing trees', () => {
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
   /** A v1-era tree whose text was stored NFD (bulk import bypasses Tx normalization). */
-  function legacyTree(): { path: string; ids: Record<string, string> } {
+  function legacyTree(more?: (store: TreeStore, ids: Record<string, string>) => void): {
+    path: string;
+    ids: Record<string, string>;
+  } {
     dir = mkdtempSync(join(tmpdir(), 'oa-nfc-'));
     const path = join(dir, 'legacy.oatree');
     const store = createTree(path);
@@ -179,6 +183,7 @@ describe('schema v3: NFC normalization of existing trees', () => {
     ids.placeEdit = store.transact('Set type', (tx) =>
       tx.update('place', ids.nfdChild!, { type: 'District' }),
     ).batchId;
+    more?.(store, ids);
     // Pretend this tree and its history were written by version 2.
     store.db.prepare("UPDATE meta SET value = '2' WHERE key = 'schema_version'").run();
     store.db.prepare('UPDATE change_log SET schema_version = 2').run();
@@ -292,6 +297,35 @@ describe('schema v3: NFC normalization of existing trees', () => {
     expect(undoLast(store)?.id).toBe(ids.edit);
     expect(store.getRow('person_name', ids.name!)?.nickname).toBeNull();
     expect(undoLast(store)).toBeNull();
+    store.close();
+  });
+
+  it('Cmd-Z refuses to step over into an edit a skipped one still links to (no orphans)', () => {
+    // review-22's case: B1 adds Pat; B2 notes the merged place and Pat. B2 can no longer be
+    // undone, and undoing B1 would delete Pat while B2's note_link still points at Pat.
+    const { path, ids } = legacyTree((store, ids) => {
+      ids.addPat = store.transact('Add Pat', (tx) => {
+        ids.pat = persons.create(tx, { names: [{ given: 'Pat', surname: 'Ash' }] }).id;
+      }).batchId;
+      ids.addNote = store.transact('Add note', (tx) => {
+        const note = tx.insert('note', { text: 'Seen in Zurich' });
+        tx.insert('note_link', { note_id: note.id, owner_type: 'place', owner_id: ids.nfdPlace! });
+        tx.insert('note_link', { note_id: note.id, owner_type: 'person', owner_id: ids.pat! });
+      }).batchId;
+    });
+    const store = openTree(path);
+    expect(() => undoLatest(store)).toThrow(/still links to the person it would remove/);
+    expect(store.getRow('person', ids.pat!)).toBeDefined();
+    expect(listBatches(store).find((b) => b.id === ids.addPat)?.state).toBe('applied');
+    store.close();
+  });
+
+  it('reports the batches Cmd-Z stepped over', () => {
+    const { path, ids } = legacyTree();
+    const store = openTree(path);
+    const { batch, skipped } = undoLatest(store);
+    expect(batch?.id).toBe(ids.edit);
+    expect(skipped.map((b) => b.id)).toEqual([ids.placeEdit, ids.eventEdit]);
     store.close();
   });
 

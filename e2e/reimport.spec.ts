@@ -244,6 +244,41 @@ test('a fact deleted here is offered back unticked, and stays deleted by default
   await expect(restore).not.toBeChecked();
 });
 
+test('a partner dropped from the export adds no parent family by default', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const parentFamilies = async (given: string) => {
+    const id = (await personByName(request, seeded.tree, given))!;
+    const detail = (await (
+      await request.get(`/api/trees/${encodeURIComponent(seeded.tree)}/people/${id}`)
+    ).json()) as { parentFamilies: unknown[] };
+    return detail.parentFamilies.length;
+  };
+  const before = { george: await parentFamilies('George'), iris: await parentFamilies('Iris') };
+  // Ancestry no longer lists Leopold as Edith's husband.
+  const leopold = /0 @I16@ INDI\n(?:[1-9].*\n)+/.exec(SAMPLE)![0];
+  const text = SAMPLE.replace(leopold, leopold.replace('1 FAMS @F7@\n', ''))
+    .replace('0 @F7@ FAM\n1 HUSB @I16@\n', '0 @F7@ FAM\n')
+    // And one ordinary change, so there is something to apply.
+    .replace('2 DATE Abt. 1842', '2 DATE 12 MAR 1842')
+    .replace(/@([A-Z]+)(\d+)@/g, (_, p: string, n: string) => `@${p}${Number(n) + 100}@`);
+  await startReimport(page, seeded, text);
+  await expect(page.getByRole('checkbox', { name: /Child of/ })).toHaveCount(0);
+  await expect(page.getByText(/Not in the new export: partner Leopold Hollowell/)).toHaveCount(1);
+  await page.getByRole('button', { name: 'Apply 1 change' }).click();
+  await expect(
+    page
+      .getByRole('region', { name: /Notifications/ })
+      .getByRole('listitem')
+      .filter({ hasText: /Applied 1 change/ }),
+  ).toBeVisible({ timeout: 30_000 });
+  expect(await parentFamilies('George')).toBe(before.george);
+  expect(await parentFamilies('Iris')).toBe(before.iris);
+});
+
 test('discarding a review changes nothing', async ({ page, request, baseURL }, testInfo) => {
   const seeded = await seed(request, baseURL!, testInfo);
   await startReimport(page, seeded);

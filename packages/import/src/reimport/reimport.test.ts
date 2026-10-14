@@ -835,7 +835,11 @@ describe('review findings (#72)', () => {
       const kinds = s2.diff.people.flatMap((p) =>
         p.changes.map((c) => [p.name, c.kind, c.applicable]),
       );
-      expect(kinds).toContainEqual(['Edith Ashgrove', 'family.missing', false]);
+      // Listed once per couple, not on both partners' cards.
+      const missing = kinds.filter(([, kind]) => kind === 'family.missing');
+      expect(missing).toHaveLength(1);
+      expect(['Edith Ashgrove', 'Leopold Hollowell']).toContain(missing[0]![0]);
+      expect(missing[0]![2]).toBe(false);
       expect(kinds).toContainEqual(['Iris Hollowell', 'child.missing', false]);
     } finally {
       closeReimport(s2);
@@ -1141,6 +1145,74 @@ describe('re-review (#72): matching and bookkeeping', () => {
     }
     expect(value<number>(store, "SELECT count(*) FROM meta WHERE key LIKE 'export.stale:%'")).toBe(
       1,
+    );
+  });
+});
+
+describe('UX QA (#72): a partner the export dropped', () => {
+  /** The sample with Leopold no longer Edith's husband, every xref renumbered. */
+  function withoutLeopold(extra = '') {
+    const leopold = recordOf(SAMPLE, '@I16@').join('\n');
+    return renumber(
+      SAMPLE.replace(leopold, leopold.replace('\n1 FAMS @F7@', ''))
+        .replace('0 @F7@ FAM\n1 HUSB @I16@\n', '0 @F7@ FAM\n')
+        .replace('0 TRLR', `${extra}0 TRLR`),
+    );
+  }
+  const parentFamilies = (xref: string) =>
+    value<number>(store, 'SELECT count(*) FROM family_child WHERE child_id = ?', pid(store, xref));
+
+  it('adds no family or parent link, and lists the dropped partnership once', async () => {
+    const george = parentFamilies('@I15@');
+    const iris = parentFamilies('@I17@');
+    const families = value<number>(store, 'SELECT count(*) FROM family');
+    const s2 = await prepareReimport(store, { bytes: withoutLeopold() }, { today: TODAY });
+    try {
+      const changes = s2.diff.people.flatMap((p) => p.changes.map((c) => [p.name, c.kind]));
+      expect(changes.filter(([, k]) => k === 'child.add' || k === 'family.add')).toEqual([]);
+      expect(changes.filter(([, k]) => k === 'child.missing')).toEqual([]);
+      expect(changes.filter(([, k]) => k === 'family.missing')).toEqual([
+        ['Edith Ashgrove', 'family.missing'],
+      ]);
+      applyReimport(store, s2, defaults(s2), 'Re-import');
+    } finally {
+      closeReimport(s2);
+    }
+    expect(parentFamilies('@I15@')).toBe(george);
+    expect(parentFamilies('@I17@')).toBe(iris);
+    expect(value<number>(store, 'SELECT count(*) FROM family')).toBe(families);
+  });
+
+  it('offers a new child of that family unticked, joining the existing family', async () => {
+    const text = withoutLeopold()
+      .replace('0 @F107@ FAM\n', '0 @F107@ FAM\n1 CHIL @I190@\n')
+      .replace(
+        '0 TRLR',
+        '0 @I190@ INDI\n1 NAME Ada /Hollowell/\n1 BIRT\n2 DATE 1932\n1 FAMC @F107@\n0 TRLR',
+      );
+    const families = value<number>(store, 'SELECT count(*) FROM family');
+    const s2 = await prepareReimport(store, { bytes: text }, { today: TODAY });
+    try {
+      const ada = s2.diff.people.find((p) => p.name === 'Ada Hollowell')!;
+      expect(ada.changes.map((c) => [c.kind, c.defaultAccept])).toEqual([
+        ['person.new', true],
+        ['child.add', false],
+      ]);
+      applyReimport(store, s2, new Set(ada.changes.map((c) => c.id)), 'Re-import');
+    } finally {
+      closeReimport(s2);
+    }
+    expect(value<number>(store, 'SELECT count(*) FROM family')).toBe(families);
+    const adaFamily = value<string>(
+      store,
+      "SELECT fc.family_id FROM family_child fc JOIN person_name n ON n.person_id = fc.child_id WHERE n.given = 'Ada'",
+    );
+    expect(adaFamily).toBe(
+      value<string>(
+        store,
+        'SELECT family_id FROM family_child WHERE child_id = ?',
+        pid(store, '@I17@'),
+      ),
     );
   });
 });

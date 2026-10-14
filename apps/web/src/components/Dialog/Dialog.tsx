@@ -17,6 +17,8 @@ export interface DialogProps {
   /** Buttons rendered in the footer, right aligned. */
   footer?: ReactNode;
   size?: 'sm' | 'md' | 'lg';
+  /** Override where focus lands on open (call `event.preventDefault()` and focus yourself). */
+  onOpenAutoFocus?: (event: Event) => void;
   className?: string;
   children?: ReactNode;
 }
@@ -31,6 +33,7 @@ export function Dialog({
   trigger,
   footer,
   size = 'md',
+  onOpenAutoFocus,
   className,
   children,
 }: DialogProps) {
@@ -41,6 +44,7 @@ export function Dialog({
         <RadixDialog.Overlay className={styles.overlay} />
         <RadixDialog.Content
           className={cx(styles.content, styles[size], className)}
+          onOpenAutoFocus={onOpenAutoFocus}
           // Radix wires aria-describedby to the Description; opt out when there is none.
           {...(description ? {} : { 'aria-describedby': undefined })}
         >

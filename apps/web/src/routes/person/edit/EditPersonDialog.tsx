@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2 } from 'lucide-react';
@@ -105,6 +105,8 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
   const [living, setLiving] = useState<LivingChoice>(livingChoice(detail.person.living));
   const [links, setLinks] = useState<ParentLink[]>(() => parentLinks(detail));
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Given names is what people edit most, so focus starts there.
+  const firstGiven = useRef<HTMLInputElement>(null);
   const name = fullName(detail.summary);
 
   const setName = (index: number, patch: Partial<NameDraft>) =>
@@ -148,7 +150,7 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
 
     onOpenChange(false);
     if (operations.length === 0) return;
-    const label = `Edit ${name}`;
+    const label = `Edit person: ${name}`;
     edit.mutate({
       label,
       optimistic: {
@@ -181,6 +183,10 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
         onOpenChange={onOpenChange}
         title="Edit person"
         size="lg"
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          firstGiven.current?.focus();
+        }}
         footer={
           <div className={styles.footer}>
             <Button
@@ -222,6 +228,7 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
                 />
                 <Input
                   label="Given names"
+                  ref={index === 0 ? firstGiven : undefined}
                   value={draft.given}
                   onChange={(e) => setName(index, { given: e.currentTarget.value })}
                 />

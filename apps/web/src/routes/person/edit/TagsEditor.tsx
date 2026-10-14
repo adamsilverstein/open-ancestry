@@ -11,6 +11,7 @@ import { Button } from '../../../components/Button/Button';
 import { Checkbox } from '../../../components/Checkbox/Checkbox';
 import { Input } from '../../../components/Input/Input';
 import { Popover, PopoverContent, PopoverTrigger } from '../../../components/Popover/Popover';
+import { fullName } from '../../../lib/person';
 import { removeTag } from './optimistic';
 import styles from './Edit.module.css';
 
@@ -67,7 +68,7 @@ export function TagsEditor({ tree, detail }: { tree: string; detail: PersonDetai
       // Created and attached in one batch, so one undo removes both.
       send: async () => {
         const { results } = await apiSend<{ results: [TagRow] }>('POST', `${base}/batch`, {
-          label: `Tag ${tagName}`,
+          label: `Tag ${fullName(detail.summary)}: ${tagName}`,
           operations: [{ op: 'tag.create', tag: { name: tagName }, attachTo: id }],
         });
         remember(results[0]);

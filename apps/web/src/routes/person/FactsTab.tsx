@@ -48,7 +48,11 @@ function Entry({
       actions={
         onEdit && (
           <IconButton
-            label={`Edit ${entry.title}`}
+            label={
+              variant === 'alternate'
+                ? `Edit alternate ${entry.title}${entry.date ? ` (${entry.date})` : ''}`
+                : `Edit ${entry.title}`
+            }
             size="sm"
             icon={<Pencil size={14} aria-hidden />}
             onClick={onEdit}

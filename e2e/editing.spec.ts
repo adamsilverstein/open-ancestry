@@ -60,7 +60,9 @@ test.describe('person', () => {
 
     // Each dialog save is one undo step: the added name, then name and sex together.
     await page.keyboard.press(`${mod}+z`);
-    await expect(toasts(page).filter({ hasText: 'Undid Edit Rowan James Ashdown' })).toBeVisible();
+    await expect(
+      toasts(page).filter({ hasText: 'Undid Edit person: Rowan James Ashdown' }),
+    ).toBeVisible();
     dialog = await editPerson(page);
     await expect(dialog.getByRole('group', { name: 'Name 2' })).toHaveCount(0);
     await dialog.getByRole('button', { name: 'Cancel' }).click();
@@ -90,6 +92,26 @@ test.describe('person', () => {
     await page.keyboard.press(`${mod}+z`);
     await expect(page).toHaveURL(new RegExp(`/person/${seeded.rowan}$`));
     await expect(toasts(page).filter({ hasText: 'Tobias is no longer in the tree' })).toBeVisible();
+  });
+
+  test('Cmd/Ctrl-Z does nothing while a dialog is open', async ({ page }) => {
+    await openSeeded(page, seeded);
+    let dialog = await editPerson(page);
+    // Focus starts in Given names, the field people edit most.
+    await expect(dialog.getByRole('textbox', { name: 'Given names' }).first()).toBeFocused();
+    await dialog.getByRole('textbox', { name: 'Given names' }).first().fill('Rowan James');
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect(h1(page)).toHaveText('Rowan James Ashdown');
+
+    dialog = await editPerson(page);
+    await dialog.getByRole('button', { name: 'Cancel' }).focus();
+    await page.keyboard.press(`${mod}+z`);
+    await expect(dialog.getByRole('textbox', { name: 'Given names' }).first()).toHaveValue(
+      'Rowan James',
+    );
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(toasts(page).filter({ hasText: 'Undid' })).toHaveCount(0);
+    await expect(h1(page)).toHaveText('Rowan James Ashdown');
   });
 
   test('Cmd/Ctrl-Z inside a text field is left to the field', async ({ page }) => {
@@ -292,12 +314,57 @@ test.describe('history and errors', () => {
 
     await page.getByRole('banner').getByRole('button', { name: 'History' }).click();
     const history = page.getByRole('dialog', { name: 'History' });
-    await expect(history.getByRole('listitem').first()).toContainText('Edit Rowan Ashdown');
+    await expect(history.getByRole('listitem').first()).toContainText('Edit person: Rowan Ashdown');
     await history.getByRole('button', { name: 'Undo' }).click();
     await expect(page.locator('h1')).toHaveText('Rowan Ashdown');
     await expect(history.getByRole('listitem').first()).toContainText('undone');
     await history.getByRole('button', { name: 'Redo' }).click();
     await expect(page.locator('h1')).toHaveText('Rowan Ashdowne');
+  });
+
+  test('keeps nothing and says why when the session token is refused twice', async ({ page }) => {
+    await openSeeded(page, seeded);
+    let sessions = 0;
+    await page.route('**/api/session', async (route) => {
+      sessions++;
+      await route.fallback();
+    });
+    await page.route(/\/api\/trees\/[^/]+\/batch$/, (route) =>
+      route.fulfill({
+        status: 403,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: { code: 'forbidden', message: 'Missing or invalid token' } }),
+      }),
+    );
+    const dialog = await editPerson(page);
+    await dialog.getByRole('textbox', { name: 'Given names' }).first().fill('Roan');
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect(toasts(page).filter({ hasText: 'Could not save' })).toContainText(
+      'Missing or invalid token',
+    );
+    await expect(h1(page)).toHaveText('Rowan Ashdown');
+    // The token is fetched for the first write, then once more before giving up.
+    expect(sessions).toBe(2);
+    await page.unroute(/\/api\/trees\/[^/]+\/batch$/);
+    await page.reload();
+    await expect(h1(page)).toHaveText('Rowan Ashdown');
+  });
+
+  test('refreshes the relationship line after a relationship edit', async ({ page }) => {
+    // Wendell starts unrelated to the home person, Rowan.
+    await openSeeded(page, seeded, seeded.wendell);
+    await expect(h1(page)).toHaveText('Wendell Quarrier');
+    await expect(page.getByTestId('relationship')).toHaveText('');
+    await relationships(page).getByRole('button', { name: 'Add family member' }).click();
+    await page.getByRole('menuitem', { name: 'Add child' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Add child' });
+    await dialog.getByRole('radio', { name: 'Existing person' }).check();
+    await dialog.getByRole('combobox', { name: 'Person' }).click();
+    await page.keyboard.type('Rowan');
+    await page.getByRole('option', { name: /Rowan Ashdown/ }).click();
+    await dialog.getByRole('button', { name: 'Add' }).click();
+    // The cached ancestor slices are refetched, so the line updates in place.
+    await expect(page.getByTestId('relationship')).toHaveText('father of Rowan Ashdown');
   });
 
   test('shows edits immediately and rolls back when the server fails', async ({ page }) => {

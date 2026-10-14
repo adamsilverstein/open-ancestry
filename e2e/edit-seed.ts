@@ -57,7 +57,9 @@ export async function seedTree(
   label: string,
 ): Promise<SeededTree> {
   const s = await session(request, baseURL);
-  const tree = `edit ${label.replace(/[^\w ]/g, '')} ${Date.now()}`.slice(0, 100);
+  // Unique part first: long titles are cut to the 100-character limit.
+  const unique = `${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
+  const tree = `edit ${unique} ${label.replace(/[^\w ]/g, '')}`.slice(0, 100);
   await send(request, s, 'post', '/api/trees', { name: tree });
   const base = `/api/trees/${encodeURIComponent(tree)}`;
 

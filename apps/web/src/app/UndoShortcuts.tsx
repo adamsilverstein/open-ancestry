@@ -13,6 +13,18 @@ function isEditable(target: EventTarget | null): boolean {
   );
 }
 
+/**
+ * An open dialog or popover owns the keyboard: undoing behind an edit form
+ * would leave it showing stale values that its Save would write back.
+ */
+function dialogOpen(): boolean {
+  return (
+    document.querySelector(
+      '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
+    ) !== null
+  );
+}
+
 /** Which history action a key press asks for: Cmd/Ctrl-Z, Shift-Cmd/Ctrl-Z or Ctrl-Y. */
 export function historyShortcut(event: KeyboardEvent): 'undo' | 'redo' | null {
   if (!(event.metaKey || event.ctrlKey) || event.altKey) return null;
@@ -30,7 +42,7 @@ export function UndoShortcuts() {
     let busy = false;
     async function onKeyDown(event: KeyboardEvent) {
       const action = historyShortcut(event);
-      if (!action || isEditable(event.target)) return;
+      if (!action || isEditable(event.target) || dialogOpen()) return;
       event.preventDefault();
       // One at a time: rapid presses queue up rather than race.
       while (busy) await new Promise((resolve) => setTimeout(resolve, 20));

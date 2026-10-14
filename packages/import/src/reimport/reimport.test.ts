@@ -1264,8 +1264,8 @@ describe('name conflict wording (#160)', () => {
   it('gives a name type only when the export states one', async () => {
     const typed = renumber(
       SAMPLE.replace(
-        '1 NAME Mercy /Bellweather/\n',
-        '1 NAME Mercy /Bellweather/\n1 NAME Mercy /Ashgrove/\n2 TYPE married\n1 NAME Merry /Bellweather/\n',
+        '2 GIVN Mercy\n2 SURN Bellweather\n',
+        '2 GIVN Mercy\n2 SURN Bellweather\n1 NAME Mercy /Ashgrove/\n2 TYPE married\n1 NAME Merry /Bellweather/\n',
       ),
     );
     const s2 = await prepareReimport(store, { bytes: typed }, { today: TODAY });

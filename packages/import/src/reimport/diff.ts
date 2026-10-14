@@ -27,7 +27,13 @@ export interface FactView {
 export type ReimportChange =
   | { kind: 'person.new'; incomingId: string }
   | { kind: 'sex'; before: string; after: string }
-  | { kind: 'name.add'; incomingNameId: string; name: string; nameType: string }
+  | {
+      kind: 'name.add';
+      incomingNameId: string;
+      name: string;
+      /** Only when the export states it; otherwise null (the importer's default is not news). */
+      nameType: string | null;
+    }
   | {
       kind: 'fact.add';
       incomingEventId: string;
@@ -344,6 +350,7 @@ function foldMerged(
     r: PersonReview,
     defaults: Partial<ReviewChange>,
   ) => (change: ReimportChange, extra?: Partial<ReviewChange>) => ReviewChange,
+  typedNames: Set<string>,
 ) {
   const confident = m.confidence >= HIGH_CONFIDENCE;
   const add = adder(r, confident ? {} : { defaultAccept: false });
@@ -368,7 +375,12 @@ function foldMerged(
     const key = `name|${norm(full)}`;
     if (names.has(key) || offered.has(key)) continue;
     offered.add(key);
-    add({ kind: 'name.add', incomingNameId: n.id, name: full, nameType: n.type });
+    add({
+      kind: 'name.add',
+      incomingNameId: n.id,
+      name: full,
+      nameType: typedNames.has(n.id) ? n.type : null,
+    });
   }
   for (const ie of i.events) {
     const same = e.events.find((ee) => sameFact(ee, ie));
@@ -519,6 +531,7 @@ export function diffTrees(
   matches: Map<string, PersonMatch>,
   local: LocalHistory,
   nearMisses: Map<string, string> = new Map(),
+  typedNames: Set<string> = new Set(),
 ): ReimportDiff {
   const { edited } = local;
   const gone = local.removed;
@@ -574,6 +587,7 @@ export function diffTrees(
         incoming.people.get(m.incomingId)!,
         m,
         adder,
+        typedNames,
       );
       if (folded.changes.length && !reviews.has(folded.key)) {
         reviews.set(folded.key, folded);
@@ -614,7 +628,7 @@ export function diffTrees(
           kind: 'name.add',
           incomingNameId: n.id,
           name: fullName(n),
-          nameType: n.type,
+          nameType: typedNames.has(n.id) ? n.type : null,
         },
         removedNames?.has(norm(fullName(n)))
           ? DELETED

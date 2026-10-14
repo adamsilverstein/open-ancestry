@@ -20,7 +20,7 @@ import {
   type ReimportReview,
   type ReviewChange,
 } from './api';
-import { describeChange } from './labels';
+import { conflictText, describeChange } from './labels';
 import styles from './Reimport.module.css';
 
 /** People shown per page of the review. */
@@ -101,13 +101,8 @@ function PersonCard({
                 checked={active.has(change.id)}
                 disabled={waiting}
                 description={
-                  change.conflict === 'local-edit'
-                    ? 'Edited in this tree since the last import; your edit is kept unless you tick this.'
-                    : change.conflict === 'local-delete'
-                      ? 'You deleted this in this tree; it stays deleted unless you tick this.'
-                      : waiting
-                        ? 'Needs the new person above.'
-                        : undefined
+                  conflictText(change, person.name) ??
+                  (waiting ? 'Needs the new person above.' : undefined)
                 }
                 onChange={(event) => onToggle(change, event.target.checked)}
               />

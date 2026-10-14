@@ -4,7 +4,7 @@ import type { ImportInput, ImportOptions, ImportReport } from '../types';
 import { treeRevision } from './apply';
 import { diffTrees, localHistory, type ReimportDiff } from './diff';
 import { matchPeople, type PersonMatch } from './match';
-import { snapshot } from './snapshot';
+import { snapshot, statedNameTypes } from './snapshot';
 
 /** An updated export read and compared with a tree, waiting for the user's review. */
 export interface ReimportSession {
@@ -36,7 +36,14 @@ export async function prepareReimport(
     const incomingSnap = snapshot(incoming);
     const nearMisses = new Map<string, string>();
     const matches = matchPeople(existingSnap, incomingSnap, nearMisses);
-    const diff = diffTrees(existingSnap, incomingSnap, matches, localHistory(store), nearMisses);
+    const diff = diffTrees(
+      existingSnap,
+      incomingSnap,
+      matches,
+      localHistory(store),
+      nearMisses,
+      statedNameTypes(incoming),
+    );
     return {
       incoming,
       report,

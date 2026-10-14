@@ -247,3 +247,30 @@ export function snapshot(store: TreeStore): Snapshot {
 
   return { people, families, familyChildren, familyEvents, importXrefs };
 }
+
+/**
+ * Name ids whose export gave a name type (`2 TYPE` under the NAME). Others
+ * get the importer's default, which the review should not present as fact.
+ */
+export function statedNameTypes(store: TreeStore): Set<string> {
+  const stated = new Set<string>();
+  const typed = new Set<string>();
+  for (const r of all<{ owner_id: string; raw_text: string }>(
+    store,
+    "SELECT owner_id, raw_text FROM raw_record WHERE owner_type = 'person' AND owner_id IS NOT NULL",
+  )) {
+    let name: string | null = null;
+    for (const line of r.raw_text.split('\n')) {
+      if (line.startsWith('1 ')) name = line.startsWith('1 NAME') ? line.slice(7).trim() : null;
+      else if (name !== null && line.startsWith('2 TYPE')) typed.add(`${r.owner_id}|${name}`);
+    }
+  }
+  if (!typed.size) return stated;
+  for (const n of all<{ id: string; person_id: string; full_text: string | null }>(
+    store,
+    'SELECT id, person_id, full_text FROM person_name',
+  )) {
+    if (typed.has(`${n.person_id}|${(n.full_text ?? '').trim()}`)) stated.add(n.id);
+  }
+  return stated;
+}

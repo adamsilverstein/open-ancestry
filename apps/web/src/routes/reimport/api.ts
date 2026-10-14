@@ -18,7 +18,7 @@ export type ReviewChange = {
 } & (
   | { kind: 'person.new'; incomingId: string }
   | { kind: 'sex'; before: string; after: string }
-  | { kind: 'name.add'; name: string; nameType: string }
+  | { kind: 'name.add'; name: string; nameType: string | null }
   | { kind: 'fact.add'; fact: FactView; owner: 'person' | 'family' }
   | { kind: 'fact.change'; before: FactView; after: FactView }
   | { kind: 'fact.missing'; fact: FactView }

@@ -10,6 +10,12 @@ export interface MergeContext {
   /** FILE value in the output's form (GEDCOM 7 percent-encodes local paths). */
   fileValue(raw: string): string;
   warn(message: string): void;
+  /**
+   * Whether warnings may quote the lines they are about. A privatized export
+   * names only the record and the tag path: a dropped line may be about
+   * someone withheld.
+   */
+  readonly quoteLines: boolean;
 }
 
 /** Tags the writer produces from domain columns: an unmapped copy would contradict the edited value. */
@@ -115,7 +121,11 @@ export function mergeUnmapped(
   if (!rows?.length) return;
   for (const row of rows) {
     if (row.path.endsWith('(unparsed)')) {
-      ctx.warn(`${label}: unparseable line "${row.line}" was not carried over`);
+      ctx.warn(
+        ctx.quoteLines
+          ? `${label}: unparseable line "${row.line}" was not carried over`
+          : `${label}: an unparseable line was not carried over`,
+      );
     }
   }
   const lines = rows.filter((r) => !r.path.includes('('));
@@ -162,6 +172,10 @@ class Merger {
   }
 
   private lost(node: GedcomNode, path: string, why: string) {
+    if (!this.ctx.quoteLines) {
+      this.ctx.warn(`${this.label}: a ${node.tag} line (${path}) was not carried over`);
+      return;
+    }
     const line = `${node.tag}${node.pointer ? ` ${node.pointer}` : node.value ? ` ${node.value.split('\n')[0]}` : ''}`;
     this.ctx.warn(`${this.label}: "${line}" (${path}) was not carried over: ${why}`);
   }
@@ -313,7 +327,9 @@ function fallback(ctx: MergeContext, record: GedcomNode, lines: UnmappedLineRow[
     } else {
       base = null;
       ctx.warn(
-        `${label}: "${line.line.trim()}" (${line.path}) was not carried over: no imported text to place it by`,
+        ctx.quoteLines
+          ? `${label}: "${line.line.trim()}" (${line.path}) was not carried over: no imported text to place it by`
+          : `${label}: a line (${line.path}) was not carried over`,
       );
     }
   }

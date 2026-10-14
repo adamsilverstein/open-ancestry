@@ -118,6 +118,7 @@ class GedcomWriter implements WriterContext, MergeContext {
   private readonly living = new Set<string>();
   private readonly privateFamilies = new Set<string>();
   private readonly withheld = new Set<string>();
+  private readonly hiddenEvents = new Set<string>();
   private nameStates: Map<string, NameTextState> | undefined;
   private readonly xrefs = new Map<string, string>();
   private readonly used = new Set<string>();
@@ -145,12 +146,22 @@ class GedcomWriter implements WriterContext, MergeContext {
     this.includeMedia = options.includeMedia ?? true;
     this.privatize = options.privatizeLiving ?? false;
     if (this.privatize) {
-      for (const person of this.data.persons)
-        if (isLiving(person.living)) this.living.add(person.id);
+      // Withheld like living people: anyone marked private, confidential or locked
+      // (GEDCOM RESN), and families or events so marked.
+      for (const person of this.data.persons) {
+        if (isLiving(person.living) || person.privacy !== 'public') this.living.add(person.id);
+      }
       for (const f of this.data.families) {
-        if (this.living.has(f.partner1_id!) || this.living.has(f.partner2_id!)) {
+        if (
+          f.privacy !== 'public' ||
+          this.living.has(f.partner1_id!) ||
+          this.living.has(f.partner2_id!)
+        ) {
           this.privateFamilies.add(f.id);
         }
+      }
+      for (const [id, event] of this.data.event) {
+        if (event.privacy !== 'public') this.hiddenEvents.add(id);
       }
       this.findWithheld();
     }
@@ -179,6 +190,18 @@ class GedcomWriter implements WriterContext, MergeContext {
   nameTextState(nameId: string): NameTextState | undefined {
     this.nameStates ??= nameTextStates(this.store);
     return this.nameStates.get(nameId);
+  }
+
+  isHiddenEvent(id: string): boolean {
+    return this.hiddenEvents.has(id);
+  }
+
+  get quoteLines(): boolean {
+    return !this.privatize;
+  }
+
+  get treeName(): string | null {
+    return this.privatize ? null : this.data.treeName;
   }
 
   isWithheld(id: string): boolean {
@@ -217,11 +240,13 @@ class GedcomWriter implements WriterContext, MergeContext {
           break;
         }
         case 'event':
-          result = (d.rolesByEvent.get(id) ?? []).some(
-            (r) =>
-              (r.person_id && this.living.has(r.person_id)) ||
-              (r.family_id && this.privateFamilies.has(r.family_id)),
-          );
+          result =
+            this.hiddenEvents.has(id) ||
+            (d.rolesByEvent.get(id) ?? []).some(
+              (r) =>
+                (r.person_id && this.living.has(r.person_id)) ||
+                (r.family_id && this.privateFamilies.has(r.family_id)),
+            );
           break;
         case 'citation':
           result = (d.citationLinksByCitation.get(id) ?? []).some((l) =>
@@ -244,6 +269,14 @@ class GedcomWriter implements WriterContext, MergeContext {
       ) {
         this.withheld.add(m.id);
       }
+    }
+    // The importer stores identical files once: a file shared with a withheld item is
+    // withheld too, or its name (often the person's) would still be exported.
+    const withheldPaths = new Set(
+      d.mediaRows.filter((m) => this.withheld.has(m.id) && m.local_path).map((m) => m.local_path),
+    );
+    for (const m of d.mediaRows) {
+      if (m.local_path && withheldPaths.has(m.local_path)) this.withheld.add(m.id);
     }
     memo.clear();
     for (const note of d.notes) {
@@ -406,6 +439,9 @@ class GedcomWriter implements WriterContext, MergeContext {
 
   /** Keeps every xref the import used: verbatim records still point at them. */
   private reserveXrefs(): void {
+    // A privatized export numbers every record afresh: imported ids can spell names
+    // (@ZELDAQUIXBY@), and keeping only some would show which records were withheld.
+    if (this.privatize) return;
     const owner = new Map<string, string>();
     for (const slot of this.slots) {
       const xref = slot.raw.xref;
@@ -548,7 +584,15 @@ class GedcomWriter implements WriterContext, MergeContext {
       }
     }
     const target = this.importedXrefs.get(raw);
-    if (target && this.withheld.has(target.id)) return undefined;
+    // Imported lines (an ASSO and its RELA) never point at someone withheld.
+    if (
+      target &&
+      (this.withheld.has(target.id) ||
+        (target.kind === 'person' && this.living.has(target.id)) ||
+        (target.kind === 'family' && this.privateFamilies.has(target.id)))
+    ) {
+      return undefined;
+    }
     if (target) return this.ref(target.kind, target.id);
     // A raw-only record (SUBM) keeps its xref when it is written.
     const kept = this.slots.some(
@@ -662,7 +706,7 @@ class GedcomWriter implements WriterContext, MergeContext {
     const head = n('HEAD', undefined, [
       gedc,
       schema.length > 0 && n('SCHMA', undefined, schema),
-      n('SOUR', 'open-ancestry', [n('NAME', 'open-ancestry'), n('DATA', this.data.treeName)]),
+      n('SOUR', 'open-ancestry', [n('NAME', 'open-ancestry'), n('DATA', this.treeName)]),
       n('DATE', date, [n('TIME', time)]),
       submitter && p('SUBM', submitter),
       !this.v7 && n('CHAR', 'UTF-8'),

@@ -37,7 +37,7 @@ describe('associations (ASSO)', () => {
     expect(recordText(back.text, '@I1@')).toContain('1 ASSO @I2@\n2 RELA Godfather');
     const mirelle = recordText(back.text, '@I3@')!;
     expect(mirelle).toContain('1 ASSO @I2@\n2 RELA Lodge brother');
-    expect(mirelle).toMatch(/1 ASSO @I1@\n(?!2 RELA)/);
+    expect(mirelle).toMatch(/1 ASSO @I1@(?!\n2 RELA)/);
     // And to GEDCOM 7 again, unchanged.
     const again = buildGedcomExport(await importInto(back.text), { version: '7', now: TODAY });
     expect(recordText(again.text, '@I1@')).toBe(recordText(seven, '@I1@'));

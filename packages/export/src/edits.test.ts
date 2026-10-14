@@ -120,9 +120,11 @@ describe('edited records', () => {
     store.transact('Nick', (tx) =>
       names.update(tx, primaryName(store, '@I1@'), { nickname: 'Taddy' }),
     );
-    expect(exportGedcom(store, { now: TODAY })).toContain(
-      '1 NAME Thaddeus "Tad" /Ashgrove/\n2 GIVN Thaddeus\n2 NICK Taddy',
-    );
+    const nicked = exportGedcom(store, { now: TODAY });
+    expect(nicked).toContain('1 NAME Thaddeus "Tad" /Ashgrove/\n2 GIVN Thaddeus\n2 NICK Taddy');
+    expect(rows(await importInto(nicked), 'SELECT nickname, full_text FROM person_name')).toEqual([
+      { nickname: 'Taddy', full_text: 'Thaddeus "Tad" /Ashgrove/' },
+    ]);
     // Setting the text itself makes it current again.
     store.transact('Retype', (tx) =>
       names.update(tx, primaryName(store, '@I1@'), { full_text: 'Theo "Ted" /Ashby/' }),

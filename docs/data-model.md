@@ -1,6 +1,6 @@
 # open-ancestry data model
 
-Current schema version: **3**
+Current schema version: **4**
 
 This is the reference for the local data format: the SQLite schema inside every tree, the rules the code keeps on top of it, and the JSON interchange format. It is owned by `packages/db`. `packages/db/src/data-model-doc.test.ts` fails if a table or column exists in the live database but not here (or the other way round), or if an enum value is missing, so this document cannot drift from the DDL.
 
@@ -71,6 +71,7 @@ erDiagram
   import_batch ||--o{ raw_record : "preserved"
   import_batch ||--o{ unmapped_line : "preserved"
   import_batch |o--o{ person : "imported"
+  person ||--o{ person_alias : "absorbed by merging"
   change_batch ||--o{ change_log : "groups"
   person ||--|| search_doc : "indexed as"
   search_doc ||--|| person_search : "FTS row"
@@ -412,6 +413,22 @@ Lines the mapper did not understand. With `raw_record` this guarantees every inp
 | `path` | TEXT | no | Tag path, e.g. `INDI.BIRT._XYZ`. Blank and unparseable lines end in `.(blank)` / `.(unparsed)`; text before `HEAD` has the path `(preamble)`. |
 | `line_no` | INTEGER | no | 1-based line number in the file. |
 | `line` | TEXT | no | The line as read. |
+
+### `person_alias`
+
+One row per person merged into another (tree checker, #57). The merge deletes the merged person; this row says who absorbed them, so re-import (#72) can map their old record to the kept person. Ancestry renumbers xrefs between exports, so `apids_json` is the sturdier key; `merged_xref` matches only within the same export. The row is written in the merge's change batch (undo removes it), moves to the new kept person when the kept person is merged again, is deleted with the kept person, and travels with the JSON interchange.
+
+The merged person's `raw_record` and `unmapped_line` rows also move to the kept person, so GEDCOM export still places their unmapped lines (a person can then own several raw records); `person_alias` is the explicit mapping, raw_record ownership is not relied on for it.
+
+| Column | Type | Null | Meaning |
+|---|---|---|---|
+| `id` | TEXT | no | ULID. |
+| `person_id` | TEXT | no | FK `person.id`: the kept person. |
+| `merged_person_id` | TEXT | no | Id of the person merged away. No foreign key: that row is deleted by the merge. |
+| `merged_xref` | TEXT | yes | The merged person's GEDCOM xref (`@I2@`): their `external_id`, or their first raw record's xref. Null for people created in the app. |
+| `import_batch_id` | TEXT | yes | FK `import_batch.id`: the import the merged person came from. |
+| `apids_json` | TEXT | no | JSON array of the Ancestry record ids (`citation.apid`) cited on the merged person, their names or the facts they are the principal of, sorted. `[]` when none. |
+| `merged_at` | TEXT | no | When the merge happened (ISO 8601). |
 
 ### `change_batch`
 

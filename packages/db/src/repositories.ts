@@ -152,6 +152,12 @@ export const persons = {
    */
   delete(tx: Tx, id: string) {
     if (!tx.store.getRow('person', id)) throw new NotFoundError('person', id);
+    // Aliases record who was merged into this person; they go with the person.
+    const aliases = tx.store
+      .stmt('SELECT id FROM person_alias WHERE person_id = ?')
+      .pluck()
+      .all(id) as string[];
+    for (const alias of aliases) tx.delete('person_alias', alias);
     for (const n of names.list(tx.store, id)) {
       deleteOwned(tx, 'person_name', n.id);
       tx.delete('person_name', n.id);

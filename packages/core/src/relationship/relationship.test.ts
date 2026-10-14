@@ -113,6 +113,9 @@ describe('relationship names (A is B’s ...)', () => {
     ['husSisH', 'me', 'husband’s sister’s husband'],
     ['me', 'uncleW', 'husband’s niece'],
     ['gson', 'hus', 'grandson'],
+    ['dadStep', 'gf', 'step-grandson'],
+    ['fosterkid', 'cousin1', 'foster sister'],
+    ['halfnephew', 'nephew', 'half 1st cousin'],
   ])('%s is %s’s %s', (a, b, expected) => {
     expect(name(family, a, b)).toBe(expected);
   });
@@ -216,6 +219,8 @@ describe('paths and pedigree collapse', () => {
     expect(relationship(deep, 'p25', 'p0', { maxGenerations: 30 }).name).toBe(
       '23rd great-grandfather',
     );
+    expect(name(deep, 'p13', 'p0')).toBe('11th great-grandfather');
+    expect(name(deep, 'p0', 'p4')).toBe('2nd great-grandson');
   });
 
   it('is symmetric in whether people are related, and terminates on random trees', () => {
@@ -236,5 +241,48 @@ describe('paths and pedigree collapse', () => {
       }),
       { numRuns: 300 },
     );
+  });
+});
+
+describe('marriage chains', () => {
+  const g = kinshipGraph(
+    new GraphBuilder()
+      .person('a', 'M')
+      .person('b', 'F')
+      .person('bro', 'M')
+      .person('broW', 'F')
+      .person('broWsis', 'F')
+      .person('wp', 'M')
+      .person('x', 'F')
+      .person('kid', 'M')
+      .person('other', 'M')
+      .person('p', 'M')
+      .person('q', 'F')
+      .family('F_p', 'p', 'q', ['bro', 'b'])
+      .family('F_bro', 'bro', 'broW', [])
+      .family('F_w', 'wp', null, ['broW', 'broWsis'])
+      .family('F_x', 'a', 'x', [])
+      .family('F_kid', null, 'x', ['kid'])
+      .family('F_other', 'other', null, ['kid'])
+      .build(),
+  );
+
+  it('names longer marriage paths as a possessive chain', () => {
+    expect(name(g, 'broWsis', 'b')).toBe('brother’s wife’s sister');
+    // x's son by a different, unpartnered father.
+    expect(name(g, 'a', 'other')).toBe('son’s mother’s husband');
+  });
+
+  it('calls unmarried partners partners and respects the depth bound', () => {
+    const partners = kinshipGraph({
+      people: {
+        a: { id: 'a', sex: 'F', name: 'a', living: false },
+        b: { id: 'b', sex: 'F', name: 'b', living: false },
+      },
+      families: [{ id: 'F', partners: ['a', 'b'], children: [], relationship: 'partners' }],
+    });
+    expect(name(partners, 'a', 'b')).toBe('partner');
+    expect(relationship(g, 'broWsis', 'b', { maxGenerations: 0 }).name).toBe('unrelated');
+    expect(relationship(g, 'broWsis', 'b', { maxNodes: 3 }).name).toBe('unrelated');
   });
 });

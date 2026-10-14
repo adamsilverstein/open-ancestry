@@ -5,6 +5,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -243,6 +244,13 @@ describe('storing media in a tree', () => {
   });
   afterEach(() => {
     rmSync(root, { recursive: true, force: true });
+  });
+
+  it.skipIf(process.platform === 'win32')('writes media private to the owner (0600)', () => {
+    const enc = new TextEncoder().encode('bytes');
+    const stored = storeMediaFile(root, 'p/private.jpg', enc, hash);
+    expect(statSync(join(root, 'p', 'private.jpg')).mode & 0o777).toBe(0o600);
+    expect(stored.written).toBe(true);
   });
 
   it('never overwrites: same bytes are reused, different bytes get a suffix', () => {

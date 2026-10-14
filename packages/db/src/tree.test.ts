@@ -1,8 +1,25 @@
-import { chmodSync, existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTree, meta, openMemoryTree, openTree, persons, treePaths } from './index';
+import {
+  createTree,
+  ensurePrivateDir,
+  meta,
+  openMemoryTree,
+  openTree,
+  persons,
+  treePaths,
+} from './index';
 
 let root: string;
 beforeEach(() => {
@@ -38,6 +55,43 @@ describe.skipIf(process.platform === 'win32')('tree permissions', () => {
     for (const folder of [dir, paths.media, paths.thumbs]) expect(mode(folder), folder).toBe(0o700);
     expect(mode(paths.database)).toBe(0o600);
     store.close();
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('tightening never follows links or widens', () => {
+  it('leaves the target of a symlinked folder alone', () => {
+    const dir = join(root, 'Linked.oatree');
+    createTree(dir).close();
+    const outside = join(root, 'elsewhere');
+    mkdirSync(outside, { mode: 0o755 });
+    chmodSync(outside, 0o755);
+    const paths = treePaths(dir);
+    rmSync(paths.thumbs, { recursive: true });
+    symlinkSync(outside, paths.thumbs);
+    openTree(dir).close();
+    expect(mode(outside)).toBe(0o755);
+  });
+
+  it('only removes access, never adds it', () => {
+    const dir = join(root, 'ReadOnly.oatree');
+    createTree(dir).close();
+    const paths = treePaths(dir);
+    chmodSync(paths.thumbs, 0o500);
+    openTree(dir).close();
+    expect(mode(paths.thumbs)).toBe(0o500);
+    chmodSync(paths.thumbs, 0o700);
+  });
+
+  it('ensurePrivateDir tightens an existing folder without widening it', () => {
+    const open = join(root, 'open');
+    mkdirSync(open);
+    chmodSync(open, 0o755);
+    ensurePrivateDir(open);
+    expect(mode(open)).toBe(0o700);
+    chmodSync(open, 0o500);
+    ensurePrivateDir(open);
+    expect(mode(open)).toBe(0o500);
+    chmodSync(open, 0o700);
   });
 });
 

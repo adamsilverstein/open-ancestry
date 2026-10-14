@@ -994,6 +994,865 @@
     },
     "additionalProperties": false
   },
+  "BatchBody": {
+    "type": "object",
+    "required": ["label", "operations"],
+    "properties": {
+      "label": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "operations": {
+        "type": "array",
+        "items": {
+          "anyOf": [
+            {
+              "type": "object",
+              "required": ["op", "id", "patch"],
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "const": "person.update"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[0-9A-Za-z_-]+$"
+                },
+                "patch": {
+                  "type": "object",
+                  "properties": {
+                    "sex": {
+                      "enum": ["M", "F", "X", "U"]
+                    },
+                    "living": {
+                      "enum": ["living", "dead", "inferred_living", "inferred_dead", "unknown"]
+                    },
+                    "privacy": {
+                      "enum": ["public", "private", "confidential", "locked"]
+                    },
+                    "primary_media_id": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[0-9A-Za-z_-]+$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["op", "personId", "name"],
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "const": "name.add"
+                },
+                "personId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[0-9A-Za-z_-]+$"
+                },
+                "name": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "enum": [
+                        "birth",
+                        "married",
+                        "maiden",
+                        "aka",
+                        "immigrant",
+                        "professional",
+                        "religious",
+                        "other"
+                      ]
+                    },
+                    "given": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 200
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "surname": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 200
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "surname_prefix": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 50
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "prefix": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 50
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "suffix": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 50
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "nickname": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 100
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "is_primary": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["op", "id", "name"],
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "const": "name.update"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[0-9A-Za-z_-]+$"
+                },
+                "name": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "enum": [
+                        "birth",
+                        "married",
+                        "maiden",
+                        "aka",
+                        "immigrant",
+                        "professional",
+                        "religious",
+                        "other"
+                      ]
+                    },
+                    "given": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 200
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "surname": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 200
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "surname_prefix": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 50
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "prefix": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 50
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "suffix": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 50
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "nickname": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 100
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "is_primary": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["op", "id"],
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "const": "name.delete"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[0-9A-Za-z_-]+$"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["op", "id", "patch"],
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "const": "familyChild.update"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[0-9A-Za-z_-]+$"
+                },
+                "patch": {
+                  "type": "object",
+                  "properties": {
+                    "partner1_rel": {
+                      "enum": [
+                        "biological",
+                        "adopted",
+                        "step",
+                        "foster",
+                        "related",
+                        "guardian",
+                        "private",
+                        "unknown"
+                      ]
+                    },
+                    "partner2_rel": {
+                      "enum": [
+                        "biological",
+                        "adopted",
+                        "step",
+                        "foster",
+                        "related",
+                        "guardian",
+                        "private",
+                        "unknown"
+                      ]
+                    },
+                    "sort_order": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 10000
+                    },
+                    "is_preferred": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["op", "tag"],
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "const": "tag.create"
+                },
+                "tag": {
+                  "type": "object",
+                  "required": ["name"],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100
+                    },
+                    "category": {
+                      "type": "string",
+                      "maxLength": 100
+                    },
+                    "color": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 32,
+                          "pattern": "^[#A-Za-z0-9(),.% -]+$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "attachTo": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[0-9A-Za-z_-]+$"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["op", "personId", "tagId"],
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "const": "person.tag"
+                },
+                "personId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[0-9A-Za-z_-]+$"
+                },
+                "tagId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[0-9A-Za-z_-]+$"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["op", "personId", "tagId"],
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "const": "person.untag"
+                },
+                "personId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[0-9A-Za-z_-]+$"
+                },
+                "tagId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[0-9A-Za-z_-]+$"
+                }
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "minItems": 1,
+        "maxItems": 100
+      }
+    },
+    "additionalProperties": false
+  },
+  "BatchOperation": {
+    "anyOf": [
+      {
+        "type": "object",
+        "required": ["op", "id", "patch"],
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "person.update"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[0-9A-Za-z_-]+$"
+          },
+          "patch": {
+            "type": "object",
+            "properties": {
+              "sex": {
+                "enum": ["M", "F", "X", "U"]
+              },
+              "living": {
+                "enum": ["living", "dead", "inferred_living", "inferred_dead", "unknown"]
+              },
+              "privacy": {
+                "enum": ["public", "private", "confidential", "locked"]
+              },
+              "primary_media_id": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[0-9A-Za-z_-]+$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": ["op", "personId", "name"],
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "name.add"
+          },
+          "personId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[0-9A-Za-z_-]+$"
+          },
+          "name": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "enum": [
+                  "birth",
+                  "married",
+                  "maiden",
+                  "aka",
+                  "immigrant",
+                  "professional",
+                  "religious",
+                  "other"
+                ]
+              },
+              "given": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "surname": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "surname_prefix": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 50
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "prefix": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 50
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "suffix": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 50
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "nickname": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "is_primary": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": ["op", "id", "name"],
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "name.update"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[0-9A-Za-z_-]+$"
+          },
+          "name": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "enum": [
+                  "birth",
+                  "married",
+                  "maiden",
+                  "aka",
+                  "immigrant",
+                  "professional",
+                  "religious",
+                  "other"
+                ]
+              },
+              "given": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "surname": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "surname_prefix": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 50
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "prefix": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 50
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "suffix": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 50
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "nickname": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 100
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "is_primary": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": ["op", "id"],
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "name.delete"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[0-9A-Za-z_-]+$"
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": ["op", "id", "patch"],
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "familyChild.update"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[0-9A-Za-z_-]+$"
+          },
+          "patch": {
+            "type": "object",
+            "properties": {
+              "partner1_rel": {
+                "enum": [
+                  "biological",
+                  "adopted",
+                  "step",
+                  "foster",
+                  "related",
+                  "guardian",
+                  "private",
+                  "unknown"
+                ]
+              },
+              "partner2_rel": {
+                "enum": [
+                  "biological",
+                  "adopted",
+                  "step",
+                  "foster",
+                  "related",
+                  "guardian",
+                  "private",
+                  "unknown"
+                ]
+              },
+              "sort_order": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10000
+              },
+              "is_preferred": {
+                "type": "boolean",
+                "const": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": ["op", "tag"],
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "tag.create"
+          },
+          "tag": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "category": {
+                "type": "string",
+                "maxLength": 100
+              },
+              "color": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 32,
+                    "pattern": "^[#A-Za-z0-9(),.% -]+$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "attachTo": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[0-9A-Za-z_-]+$"
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": ["op", "personId", "tagId"],
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "person.tag"
+          },
+          "personId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[0-9A-Za-z_-]+$"
+          },
+          "tagId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[0-9A-Za-z_-]+$"
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": ["op", "personId", "tagId"],
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "person.untag"
+          },
+          "personId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[0-9A-Za-z_-]+$"
+          },
+          "tagId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[0-9A-Za-z_-]+$"
+          }
+        },
+        "additionalProperties": false
+      }
+    ]
+  },
   "ChildRel": {
     "enum": ["biological", "adopted", "step", "foster", "related", "guardian", "private", "unknown"]
   },

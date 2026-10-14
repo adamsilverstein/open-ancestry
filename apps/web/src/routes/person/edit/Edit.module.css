@@ -1,0 +1,100 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-4);
+}
+
+.fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-3);
+  margin: 0;
+  padding: var(--oa-space-3) var(--oa-space-4) var(--oa-space-4);
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-md);
+}
+
+.legend {
+  padding: 0 var(--oa-space-1);
+  font: var(--oa-text-sm);
+  font-weight: var(--oa-weight-semibold);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
+  gap: var(--oa-space-3);
+  align-items: start;
+}
+
+.nameActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--oa-space-2);
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oa-space-2);
+  width: 100%;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oa-space-4);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.choice label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oa-space-2);
+  cursor: pointer;
+}
+
+.choice input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--oa-accent);
+}
+
+.noteForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-2);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oa-space-2);
+}
+
+.tagList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-2);
+  max-height: 240px;
+  overflow: auto;
+}
+
+.newTag {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--oa-space-2);
+  padding-top: var(--oa-space-3);
+  border-top: 1px solid var(--oa-border);
+}
+
+.newTag > :first-child {
+  flex: 1;
+}

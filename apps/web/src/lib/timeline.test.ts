@@ -175,6 +175,25 @@ describe('lifetime window', () => {
     expect(entries.some((e) => e.title === 'Death of son Arthur Ashdown')).toBe(true);
   });
 
+  it('gives no age for events after the death or at age zero', () => {
+    const partner = detail.partnerFamilies[0]!;
+    const child = partner.children[0]!;
+    const [family] = detail.parentFamilies;
+    const entries = buildTimeline({
+      ...withSummary('ABT 1880', '1955'),
+      partnerFamilies: [
+        {
+          ...partner,
+          children: [{ ...child, person: { ...child.person, birth: brief('FEB 1956', 19560215) } }],
+        },
+      ],
+      parentFamilies: [{ ...family!, siblings: [sibling('1880', 18800701)] }],
+    });
+    // Posthumous child: no age. Same-year sibling: not "about 0".
+    expect(entries.find((e) => e.title === 'Birth of daughter Lena Ashdown')!.age).toBeUndefined();
+    expect(entries.find((e) => e.title === 'Birth of sister Sib Ashdown')!.age).toBeUndefined();
+  });
+
   it('keeps a child born after the death', () => {
     const partner = detail.partnerFamilies[0]!;
     const child = partner.children[0]!;

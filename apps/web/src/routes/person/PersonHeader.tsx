@@ -1,16 +1,18 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { Network } from 'lucide-react';
+import { Network, Pencil } from 'lucide-react';
 import { ancestorsQuery, mediaUrl, treeQuery } from '../../api/queries';
 import type { PersonDetail } from '../../api/types';
 import { Avatar } from '../../components/Avatar/Avatar';
-import { Button } from '../../components/Button/Button';
 import { Popover, PopoverContent, PopoverTrigger } from '../../components/Popover/Popover';
 import { RelationshipChart } from '../../components/RelationshipChart/RelationshipChart';
 import type { RelationshipChartCell } from '../../components/RelationshipChart/RelationshipChart';
 import buttonStyles from '../../components/Button/Button.module.css';
+import { Button } from '../../components/Button/Button';
 import { TagBadge } from '../../components/TagBadge/TagBadge';
+import { EditPersonDialog } from './edit/EditPersonDialog';
+import { TagsEditor } from './edit/TagsEditor';
 import { cx } from '../../lib/cx';
 import { fullName, isLivingStatus, toPersonSummary } from '../../lib/person';
 import type { TagColor } from '../../lib/person';
@@ -106,6 +108,7 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
   const name = fullName(summary);
   const relationship = useRelationshipToHome(tree, detail);
   const sex = summary.sex === 'M' || summary.sex === 'F' ? summary.sex : 'U';
+  const [editing, setEditing] = useState(false);
   return (
     <header className={styles.header} data-surface="canvas" data-testid="person-header">
       <Avatar
@@ -143,17 +146,28 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
             </Popover>
           )}
         </div>
-        {detail.tags.length > 0 && (
-          <ul className={styles.tags} aria-label="Tags">
-            {detail.tags.map((tag) => (
-              <li key={tag.id}>
-                <TagBadge label={tag.name} color={tagColor(tag.id)} />
-              </li>
-            ))}
-          </ul>
-        )}
+        <div className={styles.tagRow}>
+          {detail.tags.length > 0 && (
+            <ul className={styles.tags} aria-label="Tags">
+              {detail.tags.map((tag) => (
+                <li key={tag.id}>
+                  <TagBadge label={tag.name} color={tagColor(tag.id)} />
+                </li>
+              ))}
+            </ul>
+          )}
+          <TagsEditor tree={tree} detail={detail} />
+        </div>
       </div>
       <div className={styles.headerActions}>
+        <Button
+          size="sm"
+          variant="secondary"
+          iconStart={<Pencil size={14} aria-hidden />}
+          onClick={() => setEditing(true)}
+        >
+          Edit person
+        </Button>
         <Link
           to="/tree/$personId"
           params={{ personId: summary.id }}
@@ -163,6 +177,14 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
           View in tree
         </Link>
       </div>
+      {editing && (
+        <EditPersonDialog
+          tree={tree}
+          detail={detail}
+          open
+          onOpenChange={(open) => !open && setEditing(false)}
+        />
+      )}
     </header>
   );
 }

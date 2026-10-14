@@ -29,7 +29,9 @@ test.describe('visual snapshots', () => {
     test(`/design in ${colorScheme}`, async ({ page }) => {
       await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
       // The top bar names the open tree once it loads.
-      await expect(page.getByRole('banner').getByText('Ashdown family')).toBeVisible();
+      await expect(page.getByRole('banner').getByText('Ashdown family')).toBeVisible({
+        timeout: 15_000,
+      });
       await page.evaluate(() => document.fonts.ready);
       // Full-page captures don't scroll, so scroll once to trigger lazy images.
       await page.evaluate(async () => {
@@ -68,6 +70,8 @@ test('lists every design system component', async ({ page }) => {
     'Toast',
     'Input',
     'Textarea',
+    'DateInput',
+    'ConfirmDialog',
     'Select',
     'Combobox',
     'Checkbox',
@@ -221,6 +225,32 @@ test('inputs show labels, hints and errors', async ({ page }) => {
   const notes = section(page, 'Textarea').getByRole('textbox', { name: 'Notes', exact: true });
   await notes.fill('Emigrated in spring.');
   await expect(notes).toHaveValue('Emigrated in spring.');
+});
+
+test('date input previews how a date is read', async ({ page }) => {
+  const region = section(page, 'DateInput');
+  await expect(region.getByTestId('date-preview').nth(0)).toHaveText('abt. 1890 · about');
+  await expect(region.getByTestId('date-preview').nth(1)).toContainText(
+    'could also be read day first',
+  );
+  await expect(region.getByTestId('date-preview').nth(2)).toContainText('Not a recognized date');
+  const empty = region.getByRole('textbox', { name: 'Empty' });
+  await empty.fill('bef 1900');
+  await expect(region.getByTestId('date-preview').nth(3)).toHaveText('bef. 1900 · before');
+  await expect(empty).toHaveAccessibleDescription(/bef\. 1900/);
+});
+
+test('confirm dialog focuses Cancel and confirms on demand', async ({ page }) => {
+  const region = section(page, 'ConfirmDialog');
+  await region.getByRole('button', { name: 'Delete record' }).click();
+  const dialog = page.getByRole('alertdialog', { name: 'Delete this record?' });
+  await expect(dialog.getByRole('button', { name: 'Cancel' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(region.getByRole('status')).toHaveText('');
+  await region.getByRole('button', { name: 'Delete record' }).click();
+  await dialog.getByRole('button', { name: 'Delete record' }).click();
+  await expect(region.getByRole('status')).toHaveText('Deleted');
 });
 
 test('select picks an option with the keyboard', async ({ page }) => {

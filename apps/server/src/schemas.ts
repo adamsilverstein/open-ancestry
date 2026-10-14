@@ -46,6 +46,8 @@ export const {
   PersonTagBody,
   PersonTagParams,
   MediaThumbParams,
+  BatchOperation,
+  BatchBody,
 } = schemas;
 
 export type NameBody = Source.NameBody;
@@ -54,3 +56,4 @@ export type EventPatch = Source.EventPatch;
 export type PersonBody = Source.PersonBody;
 export type AddParentBody = Source.AddParentBody;
 export type RelativeBody = Source.RelativeBody;
+export type BatchOperation = Source.BatchOperation;

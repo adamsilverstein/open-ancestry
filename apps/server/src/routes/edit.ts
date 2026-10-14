@@ -3,11 +3,9 @@ import {
   familyChildren,
   getPersonSummary,
   events,
-  names,
   noteLinks,
   notes,
   persons,
-  tagLinks,
   tags,
   type FamilyRow,
   type TableName,
@@ -19,17 +17,39 @@ import {
   createEvent,
   createPerson,
   edit,
+  eventPeople,
   eventRow,
-  nameRow,
+  bodyLabel,
+  eventOwnerLabel,
+  eventTypeLabel,
+  familyLabel,
+  familyMembers,
+  noteLabel,
+  ownerLabel,
+  personLabel,
+  refreshLiving,
+  relativesOf,
   requireRow,
   resolveRelative,
 } from '../edits';
 import { badRequest, conflict, notFound } from '../errors';
 import {
+  addName,
+  createTag,
+  deleteName,
+  runOperation,
+  tagPerson,
+  untagPerson,
+  updateFamilyChild,
+  updateName,
+  updatePerson,
+} from '../operations';
+import {
   AddChildBody,
   AddParentBody,
   AddSiblingBody,
   AddSpouseBody,
+  BatchBody,
   EventBody,
   EventPatch,
   FamilyChildPatch,
@@ -112,7 +132,9 @@ export function editRoutes(app: Api, { library }: Deps): void {
     { schema: { params: TreeParams, body: PersonBody } },
     async (request, reply) => {
       const store = open(request.params.tree);
-      const { batchId, result } = edit(store, 'Add person', (tx) => createPerson(tx, request.body));
+      const { batchId, result } = edit(store, `Add person: ${bodyLabel(request.body)}`, (tx) =>
+        createPerson(tx, request.body),
+      );
       return reply.code(201).send({ batchId, person: summary(store, result.id) });
     },
   );
@@ -124,16 +146,22 @@ export function editRoutes(app: Api, { library }: Deps): void {
       const store = open(request.params.tree);
       const { id } = request.params;
       requireRow(store, 'person', id);
-      const { primary_media_id } = request.body;
-      if (primary_media_id) ownerExists(store, 'media', primary_media_id);
-      const { batchId } = edit(store, 'Edit person', (tx) => persons.update(tx, id, request.body));
+      const { batchId } = edit(store, `Edit person: ${personLabel(store, id)}`, (tx) =>
+        updatePerson(tx, id, request.body),
+      );
       return { batchId, person: summary(store, id) };
     },
   );
 
   app.delete('/api/trees/:tree/people/:id', ids, async (request) => {
     const store = open(request.params.tree);
-    const { batchId } = edit(store, 'Delete person', (tx) => persons.delete(tx, request.params.id));
+    const { id } = request.params;
+    const { batchId } = edit(store, `Delete person: ${personLabel(store, id)}`, (tx) => {
+      // Relatives' inferred status can rest on this person's dates.
+      const relatives = relativesOf(tx.store, id);
+      persons.delete(tx, id);
+      refreshLiving(tx, relatives, { relatives: false });
+    });
     return { batchId };
   });
 
@@ -146,8 +174,8 @@ export function editRoutes(app: Api, { library }: Deps): void {
       const store = open(request.params.tree);
       const { id } = request.params;
       requireRow(store, 'person', id);
-      const { batchId, result } = edit(store, 'Add name', (tx) =>
-        names.add(tx, id, nameRow(request.body)),
+      const { batchId, result } = edit(store, `Add name: ${personLabel(store, id)}`, (tx) =>
+        addName(tx, id, request.body),
       );
       return reply.code(201).send({ batchId, name: result });
     },
@@ -159,10 +187,9 @@ export function editRoutes(app: Api, { library }: Deps): void {
     async (request) => {
       const store = open(request.params.tree);
       const { id } = request.params;
-      requireRow(store, 'person_name', id);
-      const { batchId, result } = edit(store, 'Edit name', (tx) =>
-        names.update(tx, id, nameRow(request.body)),
-      );
+      const name = requireRow(store, 'person_name', id);
+      const label = `Edit name: ${personLabel(store, name.person_id)}`;
+      const { batchId, result } = edit(store, label, (tx) => updateName(tx, id, request.body));
       return { batchId, name: result };
     },
   );
@@ -170,15 +197,8 @@ export function editRoutes(app: Api, { library }: Deps): void {
   app.delete('/api/trees/:tree/names/:id', ids, async (request) => {
     const store = open(request.params.tree);
     const name = requireRow(store, 'person_name', request.params.id);
-    const count = (
-      store
-        .stmt('SELECT count(*) AS n FROM person_name WHERE person_id = ?')
-        .get(name.person_id) as {
-        n: number;
-      }
-    ).n;
-    if (count === 1) throw conflict('Cannot delete the only name of a person');
-    const { batchId } = edit(store, 'Delete name', (tx) => names.delete(tx, name.id));
+    const label = `Delete name: ${personLabel(store, name.person_id)}`;
+    const { batchId } = edit(store, label, (tx) => deleteName(tx, request.params.id));
     return { batchId };
   });
 
@@ -191,9 +211,12 @@ export function editRoutes(app: Api, { library }: Deps): void {
       const store = open(request.params.tree);
       const { id } = request.params;
       requireRow(store, 'person', id);
-      const { batchId, result } = edit(store, 'Add event', (tx) =>
-        createEvent(tx, request.body, { person_id: id }),
-      );
+      const label = `Add ${eventTypeLabel(request.body.type, request.body.custom_type)}: ${personLabel(store, id)}`;
+      const { batchId, result } = edit(store, label, (tx) => {
+        const event = createEvent(tx, request.body, { person_id: id });
+        refreshLiving(tx, [id]);
+        return event;
+      });
       return reply.code(201).send({ batchId, event: result });
     },
   );
@@ -205,7 +228,8 @@ export function editRoutes(app: Api, { library }: Deps): void {
       const store = open(request.params.tree);
       const { id } = request.params;
       requireRow(store, 'family', id);
-      const { batchId, result } = edit(store, 'Add family event', (tx) =>
+      const label = `Add ${eventTypeLabel(request.body.type, request.body.custom_type)}: ${familyLabel(store, id)}`;
+      const { batchId, result } = edit(store, label, (tx) =>
         createEvent(tx, request.body, { family_id: id }),
       );
       return reply.code(201).send({ batchId, event: result });
@@ -218,17 +242,28 @@ export function editRoutes(app: Api, { library }: Deps): void {
     async (request) => {
       const store = open(request.params.tree);
       const { id } = request.params;
-      requireRow(store, 'event', id);
-      const { batchId, result } = edit(store, 'Edit event', (tx) =>
-        events.update(tx, id, eventRow(tx, request.body)),
-      );
+      const existing = requireRow(store, 'event', id);
+      const label = `Edit ${eventTypeLabel(existing.type, existing.custom_type)}: ${eventOwnerLabel(store, id)}`;
+      const { batchId, result } = edit(store, label, (tx) => {
+        const event = events.update(tx, id, eventRow(tx, request.body));
+        refreshLiving(tx, eventPeople(tx.store, id));
+        return event;
+      });
       return { batchId, event: result };
     },
   );
 
   app.delete('/api/trees/:tree/events/:id', ids, async (request) => {
     const store = open(request.params.tree);
-    const { batchId } = edit(store, 'Delete event', (tx) => events.delete(tx, request.params.id));
+    const existing = store.getRow('event', request.params.id);
+    const label = existing
+      ? `Delete ${eventTypeLabel(existing.type, existing.custom_type)}: ${eventOwnerLabel(store, existing.id)}`
+      : 'Delete event';
+    const { batchId } = edit(store, label, (tx) => {
+      const people = eventPeople(tx.store, request.params.id);
+      events.delete(tx, request.params.id);
+      refreshLiving(tx, people);
+    });
     return { batchId };
   });
 
@@ -241,9 +276,11 @@ export function editRoutes(app: Api, { library }: Deps): void {
       const store = open(request.params.tree);
       const { id } = request.params;
       requireRow(store, 'person', id);
-      const { batchId, result } = edit(store, 'Add parent', (tx) =>
-        addParent(tx, id, request.body),
-      );
+      const { batchId, result } = edit(store, `Add parent: ${personLabel(store, id)}`, (tx) => {
+        const added = addParent(tx, id, request.body);
+        refreshLiving(tx, [id, added.parentId]);
+        return added;
+      });
       return reply.code(201).send({ batchId, ...result });
     },
   );
@@ -255,7 +292,7 @@ export function editRoutes(app: Api, { library }: Deps): void {
       const store = open(request.params.tree);
       const { id } = request.params;
       requireRow(store, 'person', id);
-      const { batchId, result } = edit(store, 'Add spouse', (tx) => {
+      const { batchId, result } = edit(store, `Add spouse: ${personLabel(store, id)}`, (tx) => {
         const spouseId = resolveRelative(tx, request.body);
         notSelf(id, spouseId);
         const family = families.create(tx, {
@@ -265,6 +302,7 @@ export function editRoutes(app: Api, { library }: Deps): void {
             ? { relationship_type: request.body.relationship_type }
             : {}),
         });
+        refreshLiving(tx, [id, spouseId]);
         return { family, spouseId };
       });
       return reply.code(201).send({ batchId, ...result });
@@ -284,7 +322,7 @@ export function editRoutes(app: Api, { library }: Deps): void {
         if (family.partner1_id !== id && family.partner2_id !== id)
           throw badRequest(`Person ${id} is not a partner in family ${familyId}`);
       }
-      const { batchId, result } = edit(store, 'Add child', (tx) => {
+      const { batchId, result } = edit(store, `Add child: ${personLabel(store, id)}`, (tx) => {
         const childId = resolveRelative(tx, request.body);
         notSelf(id, childId);
         const rels = {
@@ -300,6 +338,7 @@ export function editRoutes(app: Api, { library }: Deps): void {
           sort_order: familyChildren.listForFamily(tx.store, family.id).length,
           ...rels,
         });
+        refreshLiving(tx, [id, childId]);
         return { family, childId, link };
       });
       return reply.code(201).send({ batchId, ...result });
@@ -313,7 +352,7 @@ export function editRoutes(app: Api, { library }: Deps): void {
       const store = open(request.params.tree);
       const { id } = request.params;
       requireRow(store, 'person', id);
-      const { batchId, result } = edit(store, 'Add sibling', (tx) => {
+      const { batchId, result } = edit(store, `Add sibling: ${personLabel(store, id)}`, (tx) => {
         const siblingId = resolveRelative(tx, request.body);
         notSelf(id, siblingId);
         const links = familyChildren.listForChild(tx.store, id);
@@ -326,6 +365,7 @@ export function editRoutes(app: Api, { library }: Deps): void {
           child_id: siblingId,
           sort_order: familyChildren.listForFamily(tx.store, familyId).length,
         });
+        refreshLiving(tx, [id, siblingId]);
         return { familyId, siblingId, link };
       });
       return reply.code(201).send({ batchId, ...result });
@@ -343,8 +383,15 @@ export function editRoutes(app: Api, { library }: Deps): void {
       for (const partner of [partner1_id, partner2_id])
         if (partner) requireRow(store, 'person', partner);
       if (partner1_id && partner1_id === partner2_id) throw badRequest('Partners must differ');
-      const { batchId, result } = edit(store, 'Edit relationship', (tx) =>
-        families.update(tx, id, request.body),
+      const { batchId, result } = edit(
+        store,
+        `Edit relationship: ${familyLabel(store, id)}`,
+        (tx) => {
+          const before = familyMembers(tx.store, id);
+          const updated = families.update(tx, id, request.body);
+          refreshLiving(tx, [...before, ...familyMembers(tx.store, id)], { relatives: false });
+          return updated;
+        },
       );
       return { batchId, family: result };
     },
@@ -352,9 +399,12 @@ export function editRoutes(app: Api, { library }: Deps): void {
 
   app.delete('/api/trees/:tree/families/:id', ids, async (request) => {
     const store = open(request.params.tree);
-    const { batchId } = edit(store, 'Delete family', (tx) =>
-      families.delete(tx, request.params.id),
-    );
+    const { id } = request.params;
+    const { batchId } = edit(store, `Delete family: ${familyLabel(store, id)}`, (tx) => {
+      const members = familyMembers(tx.store, id);
+      families.delete(tx, id);
+      refreshLiving(tx, members, { relatives: false });
+    });
     return { batchId };
   });
 
@@ -364,21 +414,26 @@ export function editRoutes(app: Api, { library }: Deps): void {
     async (request) => {
       const store = open(request.params.tree);
       const { id } = request.params;
-      requireRow(store, 'family_child', id);
-      const { is_preferred, ...rest } = request.body;
-      const { batchId, result } = edit(store, 'Edit child relationship', (tx) => {
-        if (is_preferred) familyChildren.setPreferred(tx, id);
-        return familyChildren.update(tx, id, rest);
-      });
+      const link = requireRow(store, 'family_child', id);
+      const label = `Edit child relationship: ${personLabel(store, link.child_id)}`;
+      const { batchId, result } = edit(store, label, (tx) =>
+        updateFamilyChild(tx, id, request.body),
+      );
       return { batchId, link: result };
     },
   );
 
   app.delete('/api/trees/:tree/family-children/:id', ids, async (request) => {
     const store = open(request.params.tree);
-    const { batchId } = edit(store, 'Remove child from family', (tx) =>
-      familyChildren.delete(tx, request.params.id),
-    );
+    const link = store.getRow('family_child', request.params.id);
+    const label = link
+      ? `Remove from family: ${personLabel(store, link.child_id)}`
+      : 'Remove child';
+    const { batchId } = edit(store, label, (tx) => {
+      const members = link ? familyMembers(tx.store, link.family_id) : [];
+      familyChildren.delete(tx, request.params.id);
+      refreshLiving(tx, members, { relatives: false });
+    });
     return { batchId };
   });
 
@@ -391,7 +446,8 @@ export function editRoutes(app: Api, { library }: Deps): void {
       const store = open(request.params.tree);
       const { text, owner_type, owner_id } = request.body;
       ownerExists(store, owner_type, owner_id);
-      const { batchId, result } = edit(store, 'Add note', (tx) => {
+      const label = `Add note: ${ownerLabel(store, owner_type, owner_id)}`;
+      const { batchId, result } = edit(store, label, (tx) => {
         const note = tx.insert('note', { text });
         const count = noteLinks.listFor(tx.store, owner_type, owner_id).length;
         noteLinks.create(tx, { note_id: note.id, owner_type, owner_id, sort_order: count });
@@ -408,7 +464,7 @@ export function editRoutes(app: Api, { library }: Deps): void {
       const store = open(request.params.tree);
       const { id } = request.params;
       requireRow(store, 'note', id);
-      const { batchId, result } = edit(store, 'Edit note', (tx) =>
+      const { batchId, result } = edit(store, `Edit note: ${noteLabel(store, id)}`, (tx) =>
         notes.update(tx, id, { text: request.body.text }),
       );
       return { batchId, note: result };
@@ -417,7 +473,8 @@ export function editRoutes(app: Api, { library }: Deps): void {
 
   app.delete('/api/trees/:tree/notes/:id', ids, async (request) => {
     const store = open(request.params.tree);
-    const { batchId } = edit(store, 'Delete note', (tx) => notes.delete(tx, request.params.id));
+    const label = `Delete note: ${noteLabel(store, request.params.id)}`;
+    const { batchId } = edit(store, label, (tx) => notes.delete(tx, request.params.id));
     return { batchId };
   });
 
@@ -428,8 +485,8 @@ export function editRoutes(app: Api, { library }: Deps): void {
     { schema: { params: TreeParams, body: TagBody } },
     async (request, reply) => {
       const store = open(request.params.tree);
-      const { batchId, result } = edit(store, 'Add tag', (tx) =>
-        tags.create(tx, { ...request.body, category: request.body.category ?? '' }),
+      const { batchId, result } = edit(store, `Add tag: ${request.body.name}`, (tx) =>
+        createTag(tx, request.body),
       );
       return reply.code(201).send({ batchId, tag: result });
     },
@@ -441,8 +498,8 @@ export function editRoutes(app: Api, { library }: Deps): void {
     async (request) => {
       const store = open(request.params.tree);
       const { id } = request.params;
-      requireRow(store, 'tag', id);
-      const { batchId, result } = edit(store, 'Edit tag', (tx) =>
+      const tag = requireRow(store, 'tag', id);
+      const { batchId, result } = edit(store, `Edit tag: ${tag.name}`, (tx) =>
         tags.update(tx, id, request.body),
       );
       return { batchId, tag: result };
@@ -451,7 +508,9 @@ export function editRoutes(app: Api, { library }: Deps): void {
 
   app.delete('/api/trees/:tree/tags/:id', ids, async (request) => {
     const store = open(request.params.tree);
-    const { batchId } = edit(store, 'Delete tag', (tx) => tags.delete(tx, request.params.id));
+    const tag = store.getRow('tag', request.params.id);
+    const label = `Delete tag: ${tag?.name ?? request.params.id}`;
+    const { batchId } = edit(store, label, (tx) => tags.delete(tx, request.params.id));
     return { batchId };
   });
 
@@ -463,9 +522,8 @@ export function editRoutes(app: Api, { library }: Deps): void {
       const { id } = request.params;
       requireRow(store, 'person', id);
       requireRow(store, 'tag', request.body.tagId);
-      const { batchId, result } = edit(store, 'Tag person', (tx) =>
-        tagLinks.create(tx, { tag_id: request.body.tagId, owner_type: 'person', owner_id: id }),
-      );
+      const label = `Tag ${personLabel(store, id)}: ${store.getRow('tag', request.body.tagId)!.name}`;
+      const { batchId, result } = edit(store, label, (tx) => tagPerson(tx, id, request.body.tagId));
       return reply.code(201).send({ batchId, link: result });
     },
   );
@@ -476,10 +534,25 @@ export function editRoutes(app: Api, { library }: Deps): void {
     async (request) => {
       const store = open(request.params.tree);
       const { id, tagId } = request.params;
-      const link = tagLinks.listFor(store, 'person', id).find((l) => l.tag_id === tagId);
-      if (!link) throw notFound(`Person ${id} does not have tag ${tagId}`);
-      const { batchId } = edit(store, 'Untag person', (tx) => tagLinks.delete(tx, link.id));
+      const label = `Untag ${personLabel(store, id)}: ${store.getRow('tag', tagId)?.name ?? tagId}`;
+      const { batchId } = edit(store, label, (tx) => untagPerson(tx, id, tagId));
       return { batchId };
+    },
+  );
+
+  // ------------------------------------------------------------ batch
+
+  /** Several edits as one change batch, so a dialog save is one undo step. */
+  app.post(
+    '/api/trees/:tree/batch',
+    { schema: { params: TreeParams, body: BatchBody } },
+    async (request) => {
+      const store = open(request.params.tree);
+      const { label, operations } = request.body;
+      const { batchId, result } = edit(store, label, (tx) =>
+        operations.map((operation) => runOperation(tx, operation)),
+      );
+      return { batchId, results: result };
     },
   );
 }

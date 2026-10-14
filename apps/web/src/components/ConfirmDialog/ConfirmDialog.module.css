@@ -1,0 +1,8 @@
+/* Stacks above a dialog it is opened from (overlay 30, content 31). */
+.overlay {
+  z-index: 32;
+}
+
+.content {
+  z-index: 33;
+}

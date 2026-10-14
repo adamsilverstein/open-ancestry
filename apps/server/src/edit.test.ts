@@ -369,7 +369,7 @@ describe('undo, redo and history', () => {
     const history = (await api.get(`${s.base}/history?limit=2`)).json();
     expect(history.items[0]).toMatchObject({
       id: created.batchId,
-      label: 'Add person',
+      label: 'Add person: Lea',
       state: 'applied',
     });
     expect(history.items).toHaveLength(2);

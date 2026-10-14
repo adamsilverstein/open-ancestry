@@ -8,7 +8,7 @@ import {
   RELATIONSHIP_TYPES,
   SEXES,
 } from '@open-ancestry/db';
-import { Type, type Static } from 'typebox';
+import { Type, type Static, type TProperties } from 'typebox';
 
 /*
  * Request schemas. Fastify validates every route's params, query and body
@@ -205,3 +205,30 @@ export const MediaThumbParams = Type.Object({
   id: Id,
   size: Type.String({ maxLength: 16 }),
 });
+
+// ---------------------------------------------------------------- batch
+
+const op = <K extends string, P extends TProperties>(name: K, props: P) =>
+  Type.Object({ op: Type.Literal(name), ...props }, strict);
+
+/** Edits that can be grouped into one change batch (one undo step). */
+export const BatchOperation = Type.Union([
+  op('person.update', { id: Id, patch: PersonPatch }),
+  op('name.add', { personId: Id, name: NameBody }),
+  op('name.update', { id: Id, name: NameBody }),
+  op('name.delete', { id: Id }),
+  op('familyChild.update', { id: Id, patch: FamilyChildPatch }),
+  op('tag.create', { tag: TagBody, attachTo: Type.Optional(Id) }),
+  op('person.tag', { personId: Id, tagId: Id }),
+  op('person.untag', { personId: Id, tagId: Id }),
+]);
+export type BatchOperation = Static<typeof BatchOperation>;
+
+export const BatchBody = Type.Object(
+  {
+    /** Shown in history and undo toasts, e.g. `Edit Ada Vale`. */
+    label: Type.String({ minLength: 1, maxLength: 100 }),
+    operations: Type.Array(BatchOperation, { minItems: 1, maxItems: 100 }),
+  },
+  strict,
+);

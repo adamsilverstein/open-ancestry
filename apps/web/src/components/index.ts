@@ -8,6 +8,8 @@ export {
   type PaletteAction,
   type PaletteGroup,
 } from './CommandPalette/CommandPalette';
+export { ConfirmDialog, type ConfirmDialogProps } from './ConfirmDialog/ConfirmDialog';
+export { DateInput, type DateInputProps } from './DateInput/DateInput';
 export { Dialog, DialogClose, type DialogProps } from './Dialog/Dialog';
 export { EmptyState, type EmptyStateProps } from './EmptyState/EmptyState';
 export { GenerationLabel, type GenerationLabelProps } from './GenerationLabel/GenerationLabel';

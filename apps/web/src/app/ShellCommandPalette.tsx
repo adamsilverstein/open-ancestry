@@ -38,8 +38,13 @@ export default function ShellCommandPalette({ open, onOpenChange }: ShellCommand
 
   const toPerson = (personId: string) => () =>
     void navigate({ to: '/person/$personId', params: { personId } });
+  // From the tree, keep its view (tree, layout, generations) while re-focusing.
   const toTree = (personId: string) => () =>
-    void navigate({ to: '/tree/$personId', params: { personId } });
+    void navigate({
+      to: '/tree/$personId',
+      params: { personId },
+      search: (prev: Record<string, unknown>) => (onTree ? prev : {}),
+    });
 
   const people: PaletteAction[] = hits.map((hit) => {
     const summary = toPersonSummary(hit.person);

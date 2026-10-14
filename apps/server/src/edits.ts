@@ -58,6 +58,9 @@ export function gedcomName(name: Partial<NameParts>): string | null {
 }
 
 /**
+ * TODO(#16, F14 export): names edited after an import must export from these
+ * columns (and this full_text), not from the stale raw_record NAME line.
+ *
  * Name body to row. `existing` is the stored row on an edit, so derived
  * columns are computed from the name as it will be after the patch.
  */
@@ -270,4 +273,119 @@ export function eventPeople(store: TreeStore, eventId: string): string[] {
       )
       .all(eventId) as { id: string }[]
   ).map((r) => r.id);
+}
+
+// ---------------------------------------------------------------- labels
+
+/*
+ * Change batch labels name who and what changed ("Edit name: Ada Vale",
+ * "Add Census: Ada Vale"), so history and undo toasts are self-explanatory.
+ */
+
+const EVENT_LABELS: Record<string, string> = {
+  BIRT: 'Birth',
+  CHR: 'Christening',
+  BAPM: 'Baptism',
+  DEAT: 'Death',
+  BURI: 'Burial',
+  CREM: 'Cremation',
+  MARR: 'Marriage',
+  DIV: 'Divorce',
+  ENGA: 'Engagement',
+  RESI: 'Residence',
+  OCCU: 'Occupation',
+  EDUC: 'Education',
+  CENS: 'Census',
+  EMIG: 'Emigration',
+  IMMI: 'Immigration',
+  NATU: 'Naturalization',
+  MILI: 'Military',
+  RELI: 'Religion',
+  RETI: 'Retirement',
+  GRAD: 'Graduation',
+  PROB: 'Probate',
+  WILL: 'Will',
+};
+
+export function eventTypeLabel(type: string, customType?: string | null): string {
+  return (
+    EVENT_LABELS[type.toUpperCase()] ??
+    (customType?.trim() || type.charAt(0) + type.slice(1).toLowerCase())
+  );
+}
+
+/** `Ada Vale` from a person's primary name, or `unnamed person`. */
+export function personLabel(store: TreeStore, personId: string | null | undefined): string {
+  if (!personId) return 'unknown person';
+  const name = store
+    .stmt(
+      `SELECT prefix, given, surname_prefix, surname, suffix FROM person_name
+       WHERE person_id = ? ORDER BY is_primary DESC, sort_order, id LIMIT 1`,
+    )
+    .get(personId) as Partial<NameParts> | undefined;
+  const text = [name?.prefix, name?.given, name?.surname_prefix, name?.surname, name?.suffix]
+    .filter((p) => p?.trim())
+    .join(' ');
+  return text || 'unnamed person';
+}
+
+/** `Ada Vale and Dan Reed` for a family. */
+export function familyLabel(store: TreeStore, familyId: string): string {
+  const family = store.getRow('family', familyId);
+  if (!family) return 'family';
+  const partners = [family.partner1_id, family.partner2_id].filter((p): p is string => !!p);
+  return partners.length > 0 ? partners.map((p) => personLabel(store, p)).join(' and ') : 'family';
+}
+
+/** Whose event it is: its principal person, else its family. */
+export function eventOwnerLabel(store: TreeStore, eventId: string): string {
+  const role = store
+    .stmt(
+      `SELECT person_id, family_id FROM event_role WHERE event_id = ?
+       ORDER BY role = 'principal' DESC, sort_order LIMIT 1`,
+    )
+    .get(eventId) as { person_id: string | null; family_id: string | null } | undefined;
+  if (role?.person_id) return personLabel(store, role.person_id);
+  if (role?.family_id) return familyLabel(store, role.family_id);
+  return 'unlinked event';
+}
+
+/** `Ada Vale` from a create body's first name. */
+export function bodyLabel(body: { names?: { given?: string | null; surname?: string | null }[] }) {
+  const [name] = body.names ?? [];
+  return [name?.given, name?.surname].filter((p) => p?.trim()).join(' ') || 'unnamed person';
+}
+
+/** Parents, spouses and children of a person, whose inferred status can depend on them. */
+export function relativesOf(store: TreeStore, personId: string): string[] {
+  const kin = kinOf(store, personId);
+  return [...kin.parents, ...kin.spouses, ...kin.children];
+}
+
+/** Everyone linked to a family: partners and children. */
+export function familyMembers(store: TreeStore, familyId: string): string[] {
+  const family = store.getRow('family', familyId);
+  const children = (
+    store.stmt('SELECT child_id AS id FROM family_child WHERE family_id = ?').all(familyId) as {
+      id: string;
+    }[]
+  ).map((r) => r.id);
+  return [family?.partner1_id, family?.partner2_id, ...children].filter((id): id is string => !!id);
+}
+
+/** Who or what a note is attached to, for labels. */
+export function ownerLabel(store: TreeStore, ownerType: string, ownerId: string): string {
+  if (ownerType === 'person') return personLabel(store, ownerId);
+  if (ownerType === 'family') return familyLabel(store, ownerId);
+  if (ownerType === 'event') return eventOwnerLabel(store, ownerId);
+  return ownerType;
+}
+
+export function noteLabel(store: TreeStore, noteId: string): string {
+  const link = store
+    .stmt(
+      'SELECT owner_type, owner_id FROM note_link WHERE note_id = ? ORDER BY sort_order LIMIT 1',
+    )
+    .get(noteId) as { owner_type: string; owner_id: string } | undefined;
+  return link ? ownerLabel(store, link.owner_type, link.owner_id) : 'unlinked note';
 }

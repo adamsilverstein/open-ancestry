@@ -98,3 +98,49 @@ describe('inferred living status', () => {
     expect((await detail(id)).person.living).toBe('inferred_dead');
   });
 });
+
+describe('batch labels', () => {
+  const labels = async (n = 1) =>
+    ((await api.get(`${s.base}/history?limit=${n}`)).json().items as { label: string }[]).map(
+      (b) => b.label,
+    );
+
+  it('name the person and the event type', async () => {
+    const [name] = (await detail(s.ada)).names;
+    await api.patch(`${s.base}/names/${name!.id}`, { given: 'Adeline' });
+    // Named as the person was known when the edit was made.
+    expect(await labels()).toEqual(['Edit name: Ada Vale']);
+    const event = await api.post(`${s.base}/people/${s.ada}/events`, {
+      type: 'CENS',
+      date_text: '1951',
+    });
+    expect(await labels()).toEqual(['Add Census: Adeline Vale']);
+    await api.patch(`${s.base}/events/${event.json().event.id}`, { date_text: '1952' });
+    expect(await labels()).toEqual(['Edit Census: Adeline Vale']);
+    await api.post(`${s.base}/people/${s.ada}/parents`, { person: { names: [{ given: 'Ida' }] } });
+    expect(await labels()).toEqual(['Add parent: Adeline Vale']);
+    await api.post(`${s.base}/notes`, { text: 'n', owner_type: 'person', owner_id: s.ada });
+    expect(await labels()).toEqual(['Add note: Adeline Vale']);
+    await api.del(`${s.base}/people/${s.eve}`);
+    expect(await labels()).toEqual(['Delete person: Eve Reed']);
+  });
+});
+
+describe('living after unlinking', () => {
+  it('re-infers relatives when a person they depended on is deleted', async () => {
+    const created = await api.post(`${s.base}/people`, {
+      names: [{ given: 'Lone', surname: 'Reed' }],
+    });
+    const id = created.json().person.id as string;
+    const parent = await api.post(`${s.base}/people/${id}/parents`, {
+      person: { names: [{ given: 'P' }], events: [{ type: 'BIRT', date_text: '1700' }] },
+    });
+    await api.post(`${s.base}/people/${id}/children`, {
+      person: { names: [{ given: 'C' }], events: [{ type: 'BIRT', date_text: '1760' }] },
+    });
+    expect((await detail(id)).person.living).toBe('inferred_dead');
+    // With only one dated relative left, there is not enough evidence: living again.
+    await api.del(`${s.base}/people/${parent.json().parentId}`);
+    expect((await detail(id)).person.living).toBe('inferred_living');
+  });
+});

@@ -74,7 +74,7 @@ test('happy path: create a tree, add a family, browse, search, undo', async ({
   expect(search.items).toHaveLength(2);
 
   const undo = await (await request.post(`${base}/undo`, { headers })).json();
-  expect(undo.batch.label).toBe('Add parent');
+  expect(undo.batch.label).toMatch(/^Add parent: /);
   expect((await (await request.get(`${base}/people?limit=10`)).json()).total).toBe(1);
 
   expect((await request.delete(base, { headers })).status()).toBe(204);

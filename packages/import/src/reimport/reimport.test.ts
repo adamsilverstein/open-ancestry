@@ -771,10 +771,9 @@ describe('review findings (#72)', () => {
     store.transact('Rename', (tx) => tx.update('person_name', name, { given: 'LocalName' }));
     const s2 = await prepareReimport(store, { bytes: renumber(SAMPLE) }, { today: TODAY });
     try {
-      const mercy = s2.diff.people.find((p) => p.existingId === pid(store, '@I2@'))!;
-      expect(mercy.changes).toEqual([
-        expect.objectContaining({ kind: 'name.add', conflict: 'local-edit', defaultAccept: false }),
-      ]);
+      // The export still has the name the user changed: nothing to bring back (#185).
+      const mercy = s2.diff.people.find((p) => p.existingId === pid(store, '@I2@'));
+      expect(mercy?.changes ?? []).toEqual([]);
     } finally {
       closeReimport(s2);
     }
@@ -848,10 +847,14 @@ describe('review findings (#72)', () => {
 });
 
 describe('re-review (#72): what the user deleted stays deleted', () => {
-  /** Re-imports the unchanged sample (renumbered) and returns one person's changes. */
-  async function changesFor(xref: string) {
+  /**
+   * Re-imports the sample (renumbered; unchanged unless `text` says otherwise)
+   * and returns one person's changes. Since #185 an export that still has what
+   * the user deleted offers nothing: only a changed one asks.
+   */
+  async function changesFor(xref: string, text = SAMPLE) {
     const id = pid(store, xref);
-    const s2 = await prepareReimport(store, { bytes: renumber(SAMPLE) }, { today: TODAY });
+    const s2 = await prepareReimport(store, { bytes: renumber(text) }, { today: TODAY });
     try {
       return s2.diff.people
         .filter((p) => p.existingId === id)
@@ -892,7 +895,11 @@ describe('re-review (#72): what the user deleted stays deleted', () => {
         tx.delete('event_role', r.id);
       tx.delete('event', birth);
     });
-    expect(await changesFor('@I1@')).toEqual([deleted('fact.add', 'BIRT')]);
+    expect(await changesFor('@I1@')).toEqual([]);
+    // Ancestry changed the birth the user deleted: that is a conflict to decide.
+    expect(
+      await changesFor('@I1@', SAMPLE.replace('2 DATE Abt. 1842', '2 DATE 12 MAR 1842')),
+    ).toEqual([deleted('fact.add', 'BIRT')]);
   });
 
   it('a deleted name', async () => {
@@ -907,7 +914,7 @@ describe('re-review (#72): what the user deleted stays deleted', () => {
         is_primary: 1,
       } as never);
     });
-    expect(await changesFor('@I2@')).toEqual([deleted('name.add')]);
+    expect(await changesFor('@I2@')).toEqual([]);
   });
 
   it('a deleted citation', async () => {
@@ -918,7 +925,7 @@ describe('re-review (#72): what the user deleted stays deleted', () => {
       death,
     );
     store.transact('Remove source', (tx) => tx.delete('citation_link', link));
-    expect(await changesFor('@I1@')).toEqual([deleted('citation.add')]);
+    expect(await changesFor('@I1@')).toEqual([]);
   });
 
   it('a deleted media link', async () => {
@@ -932,14 +939,14 @@ describe('re-review (#72): what the user deleted stays deleted', () => {
       ))
         tx.delete('media_link', l.id);
     });
-    expect(await changesFor('@I1@')).toEqual([deleted('media.add')]);
+    expect(await changesFor('@I1@')).toEqual([]);
   });
 
   it('a deleted parent link', async () => {
     const josiah = pid(store, '@I3@');
     const link = value<string>(store, 'SELECT id FROM family_child WHERE child_id = ?', josiah);
     store.transact('Unlink parents', (tx) => tx.delete('family_child', link));
-    expect(await changesFor('@I3@')).toEqual([deleted('child.add')]);
+    expect(await changesFor('@I3@')).toEqual([]);
   });
 
   it('a deleted partnership', async () => {
@@ -967,11 +974,9 @@ describe('re-review (#72): what the user deleted stays deleted', () => {
         tx.delete('family_child', c.id);
       tx.delete('family', family);
     });
-    const changes = await changesFor('@I1@');
-    expect(changes).toContainEqual(deleted('family.add'));
-    expect(changes.every((c) => !c.defaultAccept)).toBe(true);
+    expect(await changesFor('@I1@')).toEqual([]);
     // The children's links to that family were deleted with it.
-    expect(await changesFor('@I3@')).toEqual([deleted('child.add')]);
+    expect(await changesFor('@I3@')).toEqual([]);
   });
 
   it('only offers a deleted person back as "deleted here" when the birth year agrees too', async () => {
@@ -1366,5 +1371,98 @@ describe('trustworthy confidence and reasons (#159)', () => {
       closeReimport(s2);
       tree.close();
     }
+  });
+});
+
+describe('three-way re-import (#185)', () => {
+  const josiahDeath = () =>
+    value<string>(
+      store,
+      "SELECT e.date_text FROM event e JOIN event_role r ON r.event_id = e.id WHERE r.person_id = ? AND e.type = 'DEAT'",
+      pid(store, '@I3@'),
+    );
+  const josiahChanges = (s: ReimportSession) =>
+    s.diff.people
+      .filter((p) => p.existingId === pid(store, '@I3@'))
+      .flatMap((p) => p.changes)
+      .filter((c) => c.kind === 'fact.change');
+
+  it('follows a later export for a value an earlier re-import set', async () => {
+    // First re-import: Josiah's death 1939 -> 1940, accepted.
+    const first = await prepareReimport(
+      store,
+      { bytes: renumber(updatedSample()) },
+      { today: TODAY },
+    );
+    applyReimport(store, first, defaults(first), 'Re-import 1');
+    closeReimport(first);
+    expect(josiahDeath()).toBe('1940');
+    // Second re-import: Ancestry now says 1941. Nobody edited it here.
+    const updated = updatedSample();
+    const later = renumber(
+      replaceRecord(
+        updated,
+        '@I3@',
+        recordOf(updated, '@I3@').map((l) => (l === '2 DATE 1940' ? '2 DATE 1941' : l)),
+      ),
+      300,
+    );
+    const second = await prepareReimport(store, { bytes: later }, { today: TODAY });
+    try {
+      expect(josiahChanges(second)).toEqual([
+        expect.objectContaining({ conflict: undefined, defaultAccept: true }),
+      ]);
+      applyReimport(store, second, defaults(second), 'Re-import 2');
+    } finally {
+      closeReimport(second);
+    }
+    expect(josiahDeath()).toBe('1941');
+  });
+
+  it('offers nothing for a local edit when the export did not change that value', async () => {
+    const death = value<string>(
+      store,
+      "SELECT e.id FROM event e JOIN event_role r ON r.event_id = e.id WHERE r.person_id = ? AND e.type = 'DEAT'",
+      pid(store, '@I3@'),
+    );
+    store.transact('Edit', (tx) => tx.update('event', death, { date_text: '3 MAY 1939' }));
+    const s2 = await prepareReimport(store, { bytes: renumber(SAMPLE) }, { today: TODAY });
+    try {
+      expect(josiahChanges(s2)).toEqual([]);
+    } finally {
+      closeReimport(s2);
+    }
+    // When Ancestry changes it too, both differ: a conflict, unticked.
+    const s3 = await prepareReimport(store, { bytes: renumber(updatedSample()) }, { today: TODAY });
+    try {
+      expect(josiahChanges(s3)).toEqual([
+        expect.objectContaining({ conflict: 'local-edit', defaultAccept: false }),
+      ]);
+    } finally {
+      closeReimport(s3);
+    }
+  });
+
+  it('does not count its own applied changes, or an added alternate name, as local edits', async () => {
+    const first = await prepareReimport(
+      store,
+      { bytes: renumber(updatedSample()) },
+      { today: TODAY },
+    );
+    applyReimport(store, first, defaults(first), 'Re-import 1');
+    closeReimport(first);
+    const mercy = pid(store, '@I2@');
+    store.transact('Add aka', (tx) =>
+      tx.insert('person_name', {
+        person_id: mercy,
+        given: 'Mercie',
+        surname: 'Bellweather',
+        type: 'aka',
+        is_primary: 0,
+      } as never),
+    );
+    const history = localHistory(store);
+    expect(history.edited.size).toBe(1);
+    expect(history.renamed.has(mercy)).toBe(false);
   });
 });

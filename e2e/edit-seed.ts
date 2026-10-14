@@ -15,16 +15,16 @@ export interface SeededTree {
   wendell: string;
 }
 
-interface Session {
+export interface Session {
   headers: Record<string, string>;
 }
 
-async function session(request: APIRequestContext, baseURL: string): Promise<Session> {
+export async function session(request: APIRequestContext, baseURL: string): Promise<Session> {
   const { token } = (await (await request.get('/api/session')).json()) as { token: string };
   return { headers: { origin: baseURL, 'x-oa-token': token } };
 }
 
-async function send<T>(
+export async function send<T>(
   request: APIRequestContext,
   { headers }: Session,
   method: 'post' | 'put' | 'patch',
@@ -36,7 +36,7 @@ async function send<T>(
   return (await res.json()) as T;
 }
 
-const person = (
+export const person = (
   given: string,
   surname: string,
   sex: 'M' | 'F',
@@ -58,15 +58,20 @@ export async function openTree(page: Page, tree: string, path: string) {
   await page.locator('html[data-shell-ready]').waitFor({ state: 'attached' });
 }
 
+/** A tree name no other test (or repeat) uses; the unique part comes first. */
+export function uniqueTreeName(prefix: string, label: string): string {
+  const unique = `${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
+  // Long titles are cut to the 100-character limit, so the unique part leads.
+  return `${prefix} ${unique} ${label.replace(/[^\w ]/g, '')}`.slice(0, 100);
+}
+
 export async function seedTree(
   request: APIRequestContext,
   baseURL: string,
   label: string,
 ): Promise<SeededTree> {
   const s = await session(request, baseURL);
-  // Unique part first: long titles are cut to the 100-character limit.
-  const unique = `${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
-  const tree = `edit ${unique} ${label.replace(/[^\w ]/g, '')}`.slice(0, 100).trimEnd();
+  const tree = uniqueTreeName('edit', label);
   await send(request, s, 'post', '/api/trees', { name: tree });
   const base = `/api/trees/${encodeURIComponent(tree)}`;
 

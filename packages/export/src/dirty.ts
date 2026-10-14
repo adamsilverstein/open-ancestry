@@ -1,4 +1,4 @@
-import type { TreeStore } from '@open-ancestry/db';
+import { toNFC, type TreeStore } from '@open-ancestry/db';
 import { ownerKey, type TreeData } from './load';
 
 /** Columns no GEDCOM line is written from; changing only these leaves a record verbatim. */
@@ -12,6 +12,15 @@ const OWNER_COLUMNS: Record<string, string> = {
   partner1_id: 'person',
   partner2_id: 'person',
 };
+
+const BOOKKEEPING = new Set(['import_batch', 'unmapped_line', 'meta']);
+
+/**
+ * Column values that write the same GEDCOM: equal, or text that differs only
+ * in Unicode form (the NFC upgrade rewrites decomposed text without changing it).
+ */
+const sameValue = (a: unknown, b: unknown) =>
+  a === b || (typeof a === 'string' && typeof b === 'string' && toNFC(a) === toNFC(b));
 
 interface LogRow {
   entity: string;
@@ -93,13 +102,15 @@ export function dirtyRecords(store: TreeStore, data: TreeData): Set<string> {
   };
 
   for (const row of log) {
+    // Import bookkeeping: a re-import adds the new export's text without changing what it describes.
+    if (BOOKKEEPING.has(row.entity) || (row.entity === 'raw_record' && !row.before_json)) continue;
     const before = row.before_json
       ? (JSON.parse(row.before_json) as Record<string, unknown>)
       : null;
     const after = row.after_json ? (JSON.parse(row.after_json) as Record<string, unknown>) : null;
     if (before && after) {
       const changed = Object.keys(after).filter(
-        (c) => !IGNORED_COLUMNS.has(c) && before[c] !== after[c],
+        (c) => !IGNORED_COLUMNS.has(c) && !sameValue(before[c], after[c]),
       );
       if (changed.length === 0) continue;
     }
@@ -111,6 +122,17 @@ export function dirtyRecords(store: TreeStore, data: TreeData): Set<string> {
       }
       if (typeof image.owner_type === 'string') mark(image.owner_type, image.owner_id as string);
     }
+  }
+  // Records a re-import kept the new text of, although the tree says something else.
+  const stale = data.rawBatchId
+    ? (store.db
+        .prepare('SELECT value FROM meta WHERE key = ?')
+        .pluck()
+        .get(`export.stale:${data.rawBatchId}`) as string | undefined)
+    : undefined;
+  for (const key of stale ? (JSON.parse(stale) as string[]) : []) {
+    const [table, id] = key.split('|') as [string, string];
+    mark(table, id);
   }
   return dirty;
 }
@@ -143,8 +165,8 @@ export function nameTextStates(store: TreeStore): Map<string, NameTextState> {
   for (const row of rows) {
     const before = JSON.parse(row.before_json) as Record<string, unknown>;
     const after = JSON.parse(row.after_json) as Record<string, unknown>;
-    if (before.full_text !== after.full_text) states.delete(row.entity_id);
-    else if (NAME_PARTS.some((c) => before[c] !== after[c])) {
+    if (!sameValue(before.full_text, after.full_text)) states.delete(row.entity_id);
+    else if (NAME_PARTS.some((c) => !sameValue(before[c], after[c]))) {
       states.set(row.entity_id, { kind: 'stale' });
     } else if (before.nickname !== after.nickname && !states.has(row.entity_id)) {
       states.set(row.entity_id, {

@@ -16,8 +16,6 @@ export interface GalleryItem {
   owners: MediaOwner[];
 }
 
-export type ThumbSize = 'sm' | 'md' | 'lg';
-
 export const personMediaQuery = (tree: string, personId: string) =>
   queryOptions({
     queryKey: ['person-media', tree, personId],
@@ -28,8 +26,7 @@ export const personMediaQuery = (tree: string, personId: string) =>
       ).then((r) => r.items),
   });
 
-export const thumbUrl = (tree: string, mediaId: string, size: ThumbSize) =>
-  `/api/trees/${seg(tree)}/media/${seg(mediaId)}/thumb/${size}`;
+export { thumbUrl, type ThumbSize } from '../../../lib/media';
 
 export const originalUrl = (tree: string, mediaId: string) =>
   `/api/trees/${seg(tree)}/media/${seg(mediaId)}`;
@@ -53,11 +50,25 @@ export const setProfilePhoto = (tree: string, personId: string, mediaId: string 
     primary_media_id: mediaId,
   });
 
-export type MediaFilter = 'all' | 'photos' | 'documents' | 'av' | 'online';
+export type MediaFilter = 'all' | 'photos' | 'documents' | 'av' | 'online' | 'missing';
+
+/**
+ * Where a media's file is: in the tree, on Ancestry, at some other URL (never
+ * loaded or linked), or nowhere (a FILE that was missing or refused at import).
+ */
+export type MediaSourceKind = 'local' | 'ancestry' | 'remote' | 'missing';
+
+export function mediaSource(media: MediaRow): MediaSourceKind {
+  if (media.local_path) return 'local';
+  if (ancestryLink(media.remote_url)) return 'ancestry';
+  return media.remote_url ? 'remote' : 'missing';
+}
 
 /** Which filter group a media belongs to. */
 export function mediaGroup(media: MediaRow): Exclude<MediaFilter, 'all'> {
-  if (!media.local_path) return 'online';
+  const source = mediaSource(media);
+  if (source === 'missing') return 'missing';
+  if (source !== 'local') return 'online';
   if (media.kind === 'photo') return 'photos';
   if (media.kind === 'audio' || media.kind === 'video') return 'av';
   return 'documents';

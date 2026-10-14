@@ -239,16 +239,18 @@ export function readGedzip(bytes: Uint8Array, options: GedzipOptions = {}): Gedz
       warnings.push(`Skipped unsafe path in archive: ${JSON.stringify(raw.name)}`);
       continue;
     }
-    const first = seen.get(path.toLowerCase());
+    // Composed and decomposed spellings, like case, name one file on macOS and Windows.
+    const folded = path.normalize('NFC').toLowerCase();
+    const first = seen.get(folded);
     if (first !== undefined) {
       warnings.push(
         first === path
           ? `Skipped duplicate entry ${path}; kept the first`
-          : `Skipped ${path}: same name as ${first} ignoring case; kept the first`,
+          : `Skipped ${path}: same name as ${first} ignoring case and Unicode form; kept the first`,
       );
       continue;
     }
-    seen.set(path.toLowerCase(), path);
+    seen.set(folded, path);
     if (raw.flags & 1 || (raw.method !== 0 && raw.method !== 8)) {
       warnings.push(`Skipped ${path}: encrypted or unsupported compression`);
       continue;

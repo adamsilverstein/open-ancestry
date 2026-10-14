@@ -9,6 +9,7 @@ import type {
 import type { Importer, JobManager } from './jobs';
 import type { Library } from './library';
 import type { ThumbnailQueue } from './thumbnails';
+import type { ReimportSessions } from './reimports';
 
 export type Api = FastifyInstance<
   RawServerDefault,
@@ -27,4 +28,6 @@ export interface Deps {
   uploadLimit: number;
   /** Background WebP thumbnails for media. */
   thumbnails: ThumbnailQueue;
+  /** Re-imports waiting for review. */
+  reimports: ReimportSessions;
 }

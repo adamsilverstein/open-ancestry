@@ -17,20 +17,34 @@ export const historyQuery = (tree: string) =>
     queryFn: ({ signal }) => apiGet<History>(`/trees/${seg(tree)}/history?limit=50`, signal),
   });
 
-/**
- * Undoes or redoes the latest change in the open tree and refetches it.
- * Returns the batch acted on, or null when there was nothing to do.
- */
+export interface UndoRedoResult {
+  /** The batch acted on, or null when there was nothing to do. */
+  batch: ChangeBatchRow | null;
+  /** Newer batches undo stepped over: the NFC upgrade made them impossible to undo. */
+  skipped: ChangeBatchRow[];
+}
+
+/** Undoes or redoes the latest change in the open tree and refetches it. */
 export async function undoRedo(
   queryClient: QueryClient,
   direction: 'undo' | 'redo',
-): Promise<ChangeBatchRow | null> {
+): Promise<UndoRedoResult> {
   const tree = await queryClient.ensureQueryData(currentTreeQuery);
-  if (!tree) return null;
-  const { batch } = await apiSend<{ batch: ChangeBatchRow | null }>(
-    'POST',
-    `/trees/${seg(tree)}/${direction}`,
-  );
+  if (!tree) return { batch: null, skipped: [] };
+  const result = await apiSend<Partial<UndoRedoResult>>('POST', `/trees/${seg(tree)}/${direction}`);
   await invalidateTree(queryClient, tree);
-  return batch;
+  return { batch: result.batch ?? null, skipped: result.skipped ?? [] };
+}
+
+/** The toast for an undo or redo: what changed, and what was stepped over. */
+export function undoRedoMessage(
+  action: 'undo' | 'redo',
+  { batch, skipped }: UndoRedoResult,
+): { title: string; description?: string } {
+  const title = batch
+    ? `${action === 'undo' ? 'Undid' : 'Redid'} ${batch.label}`
+    : `Nothing to ${action}`;
+  if (skipped.length === 0) return { title };
+  const names = skipped.map((b) => `"${b.label}"`).join(', ');
+  return { title, description: `Skipped ${names} (can't be undone after the upgrade)` };
 }

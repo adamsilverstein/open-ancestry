@@ -85,6 +85,22 @@ describe('person summaries', () => {
     expect(getPersonSummaries(store, [])).toEqual([]);
     store.close();
   });
+
+  it('says whether the primary photo has a local file', () => {
+    const store = memoryTree();
+    const f = seedSmallFamily(store);
+    store.transact('photos', (tx) => {
+      const local = media.create(tx, { kind: 'photo', local_path: 'photos/a.png' });
+      const remote = media.create(tx, { kind: 'photo', remote_url: 'https://www.ancestry.com/x' });
+      const missing = media.create(tx, { kind: 'photo' });
+      tx.update('person', f.me, { primary_media_id: local.id });
+      tx.update('person', f.dad, { primary_media_id: remote.id });
+      tx.update('person', f.mom, { primary_media_id: missing.id });
+    });
+    const local = (id: string) => getPersonSummaries(store, [id])[0]!.primaryPhotoLocal;
+    expect([f.me, f.dad, f.mom, f.kid].map(local)).toEqual([true, false, false, false]);
+    store.close();
+  });
 });
 
 describe('person detail', () => {

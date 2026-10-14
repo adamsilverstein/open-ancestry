@@ -1,4 +1,5 @@
-import type { FanLayout, FanSlot } from '@open-ancestry/core';
+import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import type { FanLayout, FanSegment, FanSlot } from '@open-ancestry/core';
 import { formatLifespan } from '../lib/lifespan';
 import type { PersonSummary } from '../lib/person';
 import { ancestorTerm } from './relations';
@@ -21,15 +22,74 @@ function arcPath({ startAngle: a0, endAngle: a1, innerRadius: r0, outerRadius: r
 }
 
 /**
+ * The segment an arrow key moves to: up to the parent ring (the father's side,
+ * else the mother's), down toward the center, left and right along the ring.
+ */
+function fanNeighbor(
+  segments: readonly FanSegment[],
+  from: FanSegment,
+  key: string,
+): FanSegment | undefined {
+  const byNumber = new Map(segments.map((s) => [s.ahnentafel, s]));
+  const n = from.ahnentafel;
+  if (key === 'ArrowUp') return byNumber.get(2 * n) ?? byNumber.get(2 * n + 1);
+  if (key === 'ArrowDown') return n > 1 ? byNumber.get(Math.floor(n / 2)) : undefined;
+  if (key === 'Home') return byNumber.get(1);
+  if (key !== 'ArrowLeft' && key !== 'ArrowRight') return undefined;
+  const ring = segments
+    .filter((s) => s.generation === from.generation)
+    .sort((a, b) => a.startAngle - b.startAngle);
+  return ring[ring.indexOf(from) + (key === 'ArrowLeft' ? -1 : 1)];
+}
+
+/**
  * Fan chart: each ancestor a ring segment in their Ahnentafel slot. Click to
  * re-focus. Unknown parents of shown ancestors are drawn as empty dashed slots
- * (decorative: the chart's buttons already say who is shown).
+ * (decorative: the chart's buttons already say who is shown). One Tab stop
+ * (roving tabindex): arrows move by relationship and Home returns to the center.
  */
 export function FanChart({ fan, focusPersonId, person, onRefocus }: FanChartProps) {
   const focusName = person(focusPersonId)?.name ?? '';
+  const svgRef = useRef<SVGSVGElement>(null);
+  // Only drawn segments (their person is loaded) can hold the tab stop.
+  const drawn = useMemo(
+    () => fan.segments.filter((s) => person(s.personId) !== undefined),
+    [fan, person],
+  );
+  const center = drawn.find((s) => s.isFocus)?.key ?? drawn[0]?.key ?? null;
+  // The roving tab stop, by layout key: it survives a rebuild of the same fan
+  // (a reload) and starts at the center for a new focus person.
+  const [roving, setRoving] = useState<{ focus: string; key: string | null }>({
+    focus: focusPersonId,
+    key: center,
+  });
+  const active =
+    roving.focus === focusPersonId && drawn.some((s) => s.key === roving.key) ? roving.key : center;
+
+  function onKeyDown(event: KeyboardEvent<SVGSVGElement>) {
+    const from = drawn.find((s) => s.key === active);
+    if (!from || event.altKey || event.ctrlKey || event.metaKey) return;
+    const next = fanNeighbor(drawn, from, event.key);
+    if (!next) return;
+    event.preventDefault();
+    // Keep the canvas from also handling the key (it pans on arrows).
+    event.stopPropagation();
+    setRoving({ focus: focusPersonId, key: next.key });
+    svgRef.current
+      ?.querySelector<SVGGElement>(`[data-key="${CSS.escape(next.key)}"]`)
+      ?.focus({ preventScroll: true });
+  }
+
   return (
     // A group, not the default img role, which would make the segment buttons presentational.
-    <svg className={styles.fan} data-testid="tree-fan" role="group" aria-label="Fan chart">
+    <svg
+      ref={svgRef}
+      className={styles.fan}
+      data-testid="tree-fan"
+      role="group"
+      aria-label="Fan chart"
+      onKeyDown={onKeyDown}
+    >
       {fan.emptySlots.map((slot) => (
         <path
           key={`empty-${slot.ahnentafel}`}
@@ -60,12 +120,14 @@ export function FanChart({ fan, focusPersonId, person, onRefocus }: FanChartProp
           <g
             key={segment.key}
             role="button"
-            tabIndex={0}
+            tabIndex={segment.key === active ? 0 : -1}
             aria-label={label}
+            data-key={segment.key}
             className={styles.fanSegment}
             data-sex={p.sex}
             data-focus={segment.isFocus || undefined}
             onClick={go}
+            onFocus={() => setRoving({ focus: focusPersonId, key: segment.key })}
             onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();

@@ -2,7 +2,8 @@ import { formatDate, parseDate } from '@open-ancestry/core';
 import type { DateQualifier, LifeDate } from '../lib/lifespan';
 import type { PersonSummary } from '../lib/person';
 import type { LifeEvent } from '../components/QuickViewPopover/QuickViewPopover';
-import { treePath, type ApiEventBrief, type ApiPersonSummary } from './api';
+import { avatarUrl } from '../lib/media';
+import type { ApiEventBrief, ApiPersonSummary } from './api';
 
 const QUALIFIERS = new Set<string>(['abt', 'bef', 'aft', 'est', 'cal']);
 
@@ -29,9 +30,8 @@ export function toPersonSummary(p: ApiPersonSummary, tree: string): PersonSummar
     birth: lifeDate(p.birth),
     death: lifeDate(p.death),
     living: p.living !== 'dead' && p.living !== 'inferred_dead',
-    photoUrl: p.primaryMediaId
-      ? `${treePath(tree)}/media/${encodeURIComponent(p.primaryMediaId)}`
-      : undefined,
+    // A thumbnail, and only for a photo with a local file: no 404s for Ancestry-only media.
+    photoUrl: avatarUrl(tree, p),
   };
 }
 

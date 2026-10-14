@@ -1,17 +1,25 @@
 import {
+  type Privacy,
   isLiving,
   type MediaRow,
   type NoteRow,
   type RawRecordRow,
   type TreeStore,
 } from '@open-ancestry/db';
-import { analyzeHeader, parseGedcom, serializeNode, type GedcomNode } from '@open-ancestry/gedcom';
+import {
+  analyzeHeader,
+  parseGedcom,
+  resnRestrictions,
+  serializeNode,
+  type GedcomNode,
+} from '@open-ancestry/gedcom';
 import {
   RecordWriter,
   canonicalize,
   n,
   p,
   setLevels,
+  v,
   type RecordKind,
   type WriterContext,
 } from './canonical';
@@ -74,6 +82,9 @@ function allowlist(record: GedcomNode): void {
     .map((c) => ({ ...c, ...(c.tag === 'NAME' && { value: 'Private' }), children: [] }));
 }
 
+/** Privacy levels a privatized export withholds (not `locked`, which only guards edits). */
+const withheldPrivacy = (privacy: Privacy) => privacy === 'private' || privacy === 'confidential';
+
 /** Options only the GEDZIP writer uses. */
 export interface InternalOptions extends GedcomExportOptions {
   /** FILE value for a media row; also tells the caller which media were written. */
@@ -84,6 +95,8 @@ export interface InternalOptions extends GedcomExportOptions {
 
 interface Slot {
   raw: RawRecordRow;
+  /** More records mapped to the same row, e.g. both records of two merged people. */
+  also?: RawRecordRow[];
   kind?: RecordKind;
   id?: string;
   /** verbatim: raw text; canonical: the domain row; raw: raw-only record re-parsed. */
@@ -118,6 +131,7 @@ class GedcomWriter implements WriterContext, MergeContext {
   private readonly living = new Set<string>();
   private readonly privateFamilies = new Set<string>();
   private readonly withheld = new Set<string>();
+  private readonly hiddenEvents = new Set<string>();
   private nameStates: Map<string, NameTextState> | undefined;
   private readonly xrefs = new Map<string, string>();
   private readonly used = new Set<string>();
@@ -130,6 +144,8 @@ class GedcomWriter implements WriterContext, MergeContext {
   /** Xrefs the output defines, once every record is planned. */
   private written: Set<string> | undefined;
   private importedXrefs: Map<string, { kind: RecordKind; id: string } | null> | undefined;
+  /** Imported xrefs, upper-cased, for scrubbing text in privatized exports. */
+  private importedIds: Set<string> | undefined;
   private readonly generated = new Map<string, GedcomNode>();
   private readonly slots: Slot[] = [];
   private readonly slotByKey = new Map<string, Slot>();
@@ -145,12 +161,24 @@ class GedcomWriter implements WriterContext, MergeContext {
     this.includeMedia = options.includeMedia ?? true;
     this.privatize = options.privatizeLiving ?? false;
     if (this.privatize) {
-      for (const person of this.data.persons)
-        if (isLiving(person.living)) this.living.add(person.id);
+      // Withheld like living people: anyone marked private or confidential (GEDCOM RESN
+      // privacy/confidential), and families or events so marked. RESN locked means "do not
+      // edit", not private, so a locked record is exported.
+      for (const person of this.data.persons) {
+        if (isLiving(person.living) || withheldPrivacy(person.privacy)) this.living.add(person.id);
+      }
+      this.findNestedRestrictions();
       for (const f of this.data.families) {
-        if (this.living.has(f.partner1_id!) || this.living.has(f.partner2_id!)) {
+        if (
+          withheldPrivacy(f.privacy) ||
+          this.living.has(f.partner1_id!) ||
+          this.living.has(f.partner2_id!)
+        ) {
           this.privateFamilies.add(f.id);
         }
+      }
+      for (const [id, event] of this.data.event) {
+        if (withheldPrivacy(event.privacy)) this.hiddenEvents.add(id);
       }
       this.findWithheld();
     }
@@ -181,8 +209,61 @@ class GedcomWriter implements WriterContext, MergeContext {
     return this.nameStates.get(nameId);
   }
 
+  isHiddenEvent(id: string): boolean {
+    return this.hiddenEvents.has(id);
+  }
+
+  get quoteLines(): boolean {
+    return !this.privatize;
+  }
+
+  get treeName(): string | null {
+    return this.privatize ? null : this.data.treeName;
+  }
+
   isWithheld(id: string): boolean {
     return this.withheld.has(id);
+  }
+
+  /**
+   * RESN the importer does not map (under a name, a citation or a media link,
+   * on a source, note or media record, or a second RESN line in an older
+   * import) stays in unmapped_line. Its owner is withheld whole, failing
+   * closed: anything but a plain `locked` counts as private.
+   */
+  private findNestedRestrictions(): void {
+    for (const rows of this.data.unmapped.values()) {
+      for (const [i, row] of rows.entries()) {
+        if (!row.path.endsWith('.RESN')) continue;
+        let text = row.line.replace(/^\s*\d+\s+(?:@[^@]+@\s+)?RESN/, '');
+        for (const next of rows.slice(i + 1)) {
+          if (!next.path.startsWith(`${row.path}.`)) break;
+          text += ` ${next.line.replace(/^\s*\d+\s+CON[CT]\s?/, '')}`;
+        }
+        if (resnRestrictions(text).every((r) => r === 'LOCKED')) continue;
+        const id = row.owner_id!;
+        if (row.owner_type === 'person') this.living.add(id);
+        else if (row.owner_type === 'family') this.privateFamilies.add(id);
+        else if (row.owner_type === 'event') this.hiddenEvents.add(id);
+        else this.withheld.add(id);
+      }
+    }
+    // Before RESN lines combined, an import stored "locked, privacy" (or locked then
+    // confidential) as locked: re-read those records' own RESN lines.
+    const locked = new Set(
+      [...this.data.persons, ...this.data.families]
+        .filter((r) => r.privacy === 'locked')
+        .map((r) => r.id),
+    );
+    if (!locked.size) return;
+    for (const raw of this.data.rawRecords) {
+      if (!raw.owner_id || !locked.has(raw.owner_id)) continue;
+      const record = parseGedcom(raw.raw_text).records[0];
+      const resn = record?.children.filter((c) => c.tag === 'RESN').map((c) => c.value);
+      if (!resn || resnRestrictions(resn.join(',')).every((r) => r === 'LOCKED')) continue;
+      if (raw.owner_type === 'person') this.living.add(raw.owner_id);
+      else if (raw.owner_type === 'family') this.privateFamilies.add(raw.owner_id);
+    }
   }
 
   /**
@@ -217,11 +298,13 @@ class GedcomWriter implements WriterContext, MergeContext {
           break;
         }
         case 'event':
-          result = (d.rolesByEvent.get(id) ?? []).some(
-            (r) =>
-              (r.person_id && this.living.has(r.person_id)) ||
-              (r.family_id && this.privateFamilies.has(r.family_id)),
-          );
+          result =
+            this.hiddenEvents.has(id) ||
+            (d.rolesByEvent.get(id) ?? []).some(
+              (r) =>
+                (r.person_id && this.living.has(r.person_id)) ||
+                (r.family_id && this.privateFamilies.has(r.family_id)),
+            );
           break;
         case 'citation':
           result = (d.citationLinksByCitation.get(id) ?? []).some((l) =>
@@ -244,6 +327,14 @@ class GedcomWriter implements WriterContext, MergeContext {
       ) {
         this.withheld.add(m.id);
       }
+    }
+    // The importer stores identical files once: a file shared with a withheld item is
+    // withheld too, or its name (often the person's) would still be exported.
+    const withheldPaths = new Set(
+      d.mediaRows.filter((m) => this.withheld.has(m.id) && m.local_path).map((m) => m.local_path),
+    );
+    for (const m of d.mediaRows) {
+      if (m.local_path && withheldPaths.has(m.local_path)) this.withheld.add(m.id);
     }
     memo.clear();
     for (const note of d.notes) {
@@ -370,9 +461,12 @@ class GedcomWriter implements WriterContext, MergeContext {
       const kind = raw.owner_type as RecordKind;
       const key = ownerKey(kind, raw.owner_id);
       const copy = verbatim && !dirty.has(key);
-      if (this.slotByKey.has(key)) {
-        // A second record mapped to the same row (repeated tag records); keep it only verbatim.
+      const first = this.slotByKey.get(key);
+      if (first) {
+        // A second record mapped to the same row (repeated tag records, or two merged
+        // people): copied as is, or its unmapped lines placed in the regenerated record.
         if (copy) this.slots.push({ raw, mode: 'verbatim' });
+        else (first.also ??= []).push(raw);
         continue;
       }
       const slot: Slot = { raw, kind, id: raw.owner_id, mode: copy ? 'verbatim' : 'canonical' };
@@ -406,6 +500,9 @@ class GedcomWriter implements WriterContext, MergeContext {
 
   /** Keeps every xref the import used: verbatim records still point at them. */
   private reserveXrefs(): void {
+    // A privatized export numbers every record afresh: imported ids can spell names
+    // (@ZELDAQUIXBY@), and keeping only some would show which records were withheld.
+    if (this.privatize) return;
     const owner = new Map<string, string>();
     for (const slot of this.slots) {
       const xref = slot.raw.xref;
@@ -521,10 +618,43 @@ class GedcomWriter implements WriterContext, MergeContext {
         (kind === 'person' && this.isPrivatePerson(id)) ||
         (kind === 'family' && this.isPrivateFamily(id));
       if (hidden) allowlist(node);
-      else
-        mergeUnmapped(this, node, this.slotByKey.get(key)?.raw, this.data.unmapped.get(key), xref);
+      else {
+        const slot = this.slotByKey.get(key);
+        const raws = slot ? [slot.raw, ...(slot.also ?? [])] : [];
+        mergeUnmapped(this, node, raws, this.data.unmapped.get(key), xref);
+      }
+      if (this.privatize && this.scrubXrefs(node)) {
+        this.warn(`${xref}: an imported record id in its text was removed`);
+      }
       this.generated.set(key, node);
     }
+  }
+
+  /**
+   * Imported xrefs are renumbered when privatizing, and can spell a name
+   * (`@ZELDAQUIXBY@`): text that mentions one (`See @@I12@@`, or a pointer a
+   * strict reader took for text) loses it. Returns whether anything changed.
+   */
+  private scrubXrefs(node: GedcomNode): boolean {
+    if (!this.importedIds) {
+      this.importedIds = new Set();
+      for (const r of this.data.rawRecords) if (r.xref) this.importedIds.add(r.xref.toUpperCase());
+    }
+    const ids = this.importedIds;
+    let changed = false;
+    if (node.value?.includes('@')) {
+      const value = node.value.replace(/@+([^@\s]+)@+/g, (token, id: string) =>
+        ids.has(`@${id.toUpperCase()}@`) ? '[reference removed]' : token,
+      );
+      if (value !== node.value) {
+        node.value = value;
+        delete node.rawValue;
+        delete node.source;
+        changed = true;
+      }
+    }
+    for (const c of node.children) changed = this.scrubXrefs(c) || changed;
+    return changed;
   }
 
   // ------------------------------------------------------------ MergeContext
@@ -548,7 +678,15 @@ class GedcomWriter implements WriterContext, MergeContext {
       }
     }
     const target = this.importedXrefs.get(raw);
-    if (target && this.withheld.has(target.id)) return undefined;
+    // Imported lines (an ASSO and its RELA) never point at someone withheld.
+    if (
+      target &&
+      (this.withheld.has(target.id) ||
+        (target.kind === 'person' && this.living.has(target.id)) ||
+        (target.kind === 'family' && this.privateFamilies.has(target.id)))
+    ) {
+      return undefined;
+    }
     if (target) return this.ref(target.kind, target.id);
     // A raw-only record (SUBM) keeps its xref when it is written.
     const kept = this.slots.some(
@@ -662,7 +800,7 @@ class GedcomWriter implements WriterContext, MergeContext {
     const head = n('HEAD', undefined, [
       gedc,
       schema.length > 0 && n('SCHMA', undefined, schema),
-      n('SOUR', 'open-ancestry', [n('NAME', 'open-ancestry'), n('DATA', this.data.treeName)]),
+      n('SOUR', 'open-ancestry', [n('NAME', 'open-ancestry'), v('DATA', this.treeName)]),
       n('DATE', date, [n('TIME', time)]),
       submitter && p('SUBM', submitter),
       !this.v7 && n('CHAR', 'UTF-8'),

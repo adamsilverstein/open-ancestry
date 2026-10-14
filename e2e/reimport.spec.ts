@@ -279,6 +279,64 @@ test('a partner dropped from the export adds no parent family by default', async
   expect(await parentFamilies('Iris')).toBe(before.iris);
 });
 
+test('a review the tree moved past offers Compare again, keeping the choices made', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const thaddeus = (await personByName(request, seeded.tree, 'Thaddeus'))!;
+  const josiah = (await personByName(request, seeded.tree, 'Josiah'))!;
+  await startReimport(page, seeded);
+  const birth = card(page, 'Thaddeus Ashgrove').getByRole('checkbox', { name: /Birth:/ });
+  await birth.uncheck();
+  // Someone edits the tree (another tab) while the review is open.
+  const death = await eventDate(request, seeded.tree, josiah, 'DEAT');
+  await request.patch(`/api/trees/${encodeURIComponent(seeded.tree)}/events/${death.id}`, {
+    headers: seeded.headers,
+    data: { date_text: '3 MAY 1939' },
+  });
+  // Coming back to the page notices it.
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  const banner = page.getByRole('alert').filter({ hasText: 'Your tree changed' });
+  await expect(banner).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Apply \d+ changes?$/ })).toBeDisabled();
+  await banner.getByRole('button', { name: 'Compare again' }).click();
+  await expect(banner).toBeHidden();
+  // The choice made before is kept; the edited death is now a local edit, unticked.
+  await expect(birth).not.toBeChecked();
+  await expect(
+    card(page, 'Josiah Ashgrove').getByRole('checkbox', { name: /Death: 3 MAY 1939 → 1940/ }),
+  ).not.toBeChecked();
+  await page.getByRole('button', { name: /^Apply \d+ changes?$/ }).click();
+  await expect(
+    page
+      .getByRole('region', { name: /Notifications/ })
+      .getByRole('listitem')
+      .filter({ hasText: /Applied \d+ change/ }),
+  ).toBeVisible({ timeout: 30_000 });
+  expect((await eventDate(request, seeded.tree, thaddeus, 'BIRT')).date_text).toBe('Abt. 1842');
+  expect((await eventDate(request, seeded.tree, josiah, 'DEAT')).date_text).toBe('3 MAY 1939');
+});
+
+test('applying a review the tree moved past shows Compare again instead', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const josiah = (await personByName(request, seeded.tree, 'Josiah'))!;
+  await startReimport(page, seeded);
+  const death = await eventDate(request, seeded.tree, josiah, 'DEAT');
+  await request.patch(`/api/trees/${encodeURIComponent(seeded.tree)}/events/${death.id}`, {
+    headers: seeded.headers,
+    data: { date_text: '3 MAY 1939' },
+  });
+  await page.getByRole('button', { name: /^Apply \d+ changes?$/ }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'Your tree changed' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Apply \d+ changes?$/ })).toBeDisabled();
+});
+
 test('discarding a review changes nothing', async ({ page, request, baseURL }, testInfo) => {
   const seeded = await seed(request, baseURL!, testInfo);
   await startReimport(page, seeded);

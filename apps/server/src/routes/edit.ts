@@ -420,7 +420,7 @@ export function editRoutes(app: Api, { library }: Deps): void {
   app.delete('/api/trees/:tree/families/:id', ids, async (request) => {
     const store = open(request.params.tree);
     const { id } = request.params;
-    const { batchId } = edit(store, `Delete family: ${familyLabel(store, id)}`, (tx) => {
+    const { batchId } = edit(store, `Remove relationship: ${familyLabel(store, id)}`, (tx) => {
       const members = familyMembers(tx.store, id);
       families.delete(tx, id);
       refreshLiving(tx, members, { relatives: false });

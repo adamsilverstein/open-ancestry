@@ -84,7 +84,10 @@ test('removes a partner link, keeping both people, and undoes it', async ({ page
   await expect(confirm).toContainText('Both people stay in the tree');
   await confirm.getByRole('button', { name: 'Remove partner' }).click();
   await expect(group(page, 'Spouse and children')).toHaveCount(0);
-  await expect.poll(() => latestLabel(page)).toBe('Remove partner: Iris Vale from Rowan Ashdown');
+  // No children: the partnership itself goes, with its events.
+  await expect
+    .poll(() => latestLabel(page))
+    .toBe('Remove relationship: Rowan Ashdown and Iris Vale');
   const iris = await page.request.get(
     `/api/trees/${encodeURIComponent(seeded.tree)}/people/${seeded.iris}`,
   );
@@ -94,6 +97,25 @@ test('removes a partner link, keeping both people, and undoes it', async ({ page
   await expect(
     group(page, 'Spouse and children').getByRole('link', { name: /Iris Vale/ }),
   ).toBeVisible();
+});
+
+test('removing a partner who has children keeps the children with the other parent', async ({
+  page,
+}) => {
+  await openSeeded(page, seeded, seeded.edmund);
+  await groupAction(page, 'Spouse and children', 'Remove partner…');
+  const confirm = page.getByRole('alertdialog', { name: 'Remove Clara Penhallow as partner?' });
+  await expect(confirm).toContainText('no longer be a parent of Rowan Ashdown');
+  await confirm.getByRole('button', { name: 'Remove partner' }).click();
+  const family = group(page, 'Spouse and children');
+  await expect(family.getByRole('link', { name: /Clara Penhallow/ })).toHaveCount(0);
+  await expect(family.getByRole('link', { name: /Rowan Ashdown/ })).toBeVisible();
+  await expect
+    .poll(() => latestLabel(page))
+    .toBe('Remove partner: Clara Penhallow from Edmund Ashdown');
+
+  await page.keyboard.press(`${mod}+z`);
+  await expect(family.getByRole('link', { name: /Clara Penhallow/ })).toBeVisible();
 });
 
 test('removes the link to a set of parents, keeping everyone, and undoes it', async ({ page }) => {

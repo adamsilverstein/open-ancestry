@@ -2,7 +2,13 @@ import { useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2 } from 'lucide-react';
-import type { ChildRelationship, LivingStatus, NameType, Sex } from '@open-ancestry/db';
+import type {
+  ChildRelationship,
+  LivingStatus,
+  NameType,
+  RelationshipType,
+  Sex,
+} from '@open-ancestry/db';
 import { seg } from '../../../api/client';
 import { useEdit } from '../../../api/edits';
 import { apiSend } from '../../../api/client';
@@ -36,6 +42,17 @@ export const SEX_OPTIONS: { value: Sex; label: string }[] = [
   { value: 'X', label: 'Other' },
   { value: 'U', label: 'Unknown' },
 ];
+
+export const RELATIONSHIP_TYPES: { value: RelationshipType; label: string }[] = [
+  { value: 'married', label: 'Married' },
+  { value: 'civil_union', label: 'Civil union' },
+  { value: 'partners', label: 'Partners' },
+  { value: 'unknown', label: 'Unknown' },
+];
+
+/** Shown under a partnership in Relationships; unknown says nothing. */
+export const relationshipTypeLabel = (type: RelationshipType): string | undefined =>
+  type === 'unknown' ? undefined : RELATIONSHIP_TYPES.find((t) => t.value === type)?.label;
 
 export const CHILD_RELATIONSHIPS: { value: ChildRelationship; label: string }[] = [
   { value: 'biological', label: 'Biological' },

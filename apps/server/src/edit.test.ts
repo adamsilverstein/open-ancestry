@@ -161,6 +161,11 @@ describe('relationship history labels', () => {
     );
   });
 
+  it('names a removed partnership', async () => {
+    await api.del(`${s.base}/families/${s.marriage}`);
+    expect(await latest()).toBe('Remove relationship: Ada Vale and Dan Reed');
+  });
+
   it('names a removed child link with the family it left', async () => {
     const d = (await api.get(`${s.base}/people/${s.eve}`)).json();
     const link = d.parentFamilies[0].link.id;

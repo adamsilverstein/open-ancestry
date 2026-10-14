@@ -1,6 +1,6 @@
 import { useDeferredValue, useId, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import type { ChildRelationship, Sex } from '@open-ancestry/db';
+import type { ChildRelationship, RelationshipType, Sex } from '@open-ancestry/db';
 import { seg } from '../../../api/client';
 import { useEdit } from '../../../api/edits';
 import { apiSend } from '../../../api/client';
@@ -14,7 +14,7 @@ import { Input } from '../../../components/Input/Input';
 import { Select } from '../../../components/Select/Select';
 import { formatLifespan } from '../../../lib/lifespan';
 import { fullName, lifeDate } from '../../../lib/person';
-import { CHILD_RELATIONSHIPS, SEX_OPTIONS } from './EditPersonDialog';
+import { CHILD_RELATIONSHIPS, RELATIONSHIP_TYPES, SEX_OPTIONS } from './EditPersonDialog';
 import styles from './Edit.module.css';
 
 export type RelativeKind = 'parent' | 'spouse' | 'child' | 'sibling';
@@ -61,6 +61,7 @@ export function AddRelativeDialog({
   const [query, setQuery] = useState('');
   const [existing, setExisting] = useState<ApiPersonSummary | null>(null);
   const [rel, setRel] = useState<ChildRelationship>('biological');
+  const [relationshipType, setRelationshipType] = useState<RelationshipType>('married');
   const families = detail.partnerFamilies;
   const [familyId, setFamilyId] = useState<string>(families[0]?.family.id ?? 'none');
 
@@ -95,9 +96,11 @@ export function AddRelativeDialog({
     const body =
       kind === 'parent'
         ? { ...relative, rel }
-        : kind === 'child' && familyId !== 'none'
-          ? { ...relative, familyId }
-          : relative;
+        : kind === 'spouse'
+          ? { ...relative, relationship_type: relationshipType }
+          : kind === 'child' && familyId !== 'none'
+            ? { ...relative, familyId }
+            : relative;
     onOpenChange(false);
     edit.mutate({
       label: RELATIVE_TITLES[kind],
@@ -191,6 +194,14 @@ export function AddRelativeDialog({
             value={rel}
             onValueChange={(value) => setRel(value as ChildRelationship)}
             options={CHILD_RELATIONSHIPS}
+          />
+        )}
+        {kind === 'spouse' && (
+          <Select
+            label="Relationship type"
+            value={relationshipType}
+            onValueChange={(value) => setRelationshipType(value as RelationshipType)}
+            options={RELATIONSHIP_TYPES}
           />
         )}
         {kind === 'child' && (

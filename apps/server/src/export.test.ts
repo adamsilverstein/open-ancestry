@@ -1,0 +1,69 @@
+import { openMemoryTree } from '@open-ancestry/db';
+import { parseGedcom, readGedzip } from '@open-ancestry/gedcom';
+import { importGedcom } from '@open-ancestry/import';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createTestTree, seed, testApi, type Seeded, type TestApi } from './test/helpers';
+
+let api: TestApi;
+let s: Seeded;
+beforeEach(async () => {
+  api = await testApi();
+  s = await seed(api);
+});
+afterEach(() => api.close());
+
+const givenNames = async (gedcom: Uint8Array | string) => {
+  const store = openMemoryTree();
+  await importGedcom(typeof gedcom === 'string' ? { bytes: gedcom } : { gedzip: gedcom }, store);
+  return store.db.prepare('SELECT given FROM person_name ORDER BY given').pluck().all() as string[];
+};
+
+describe('GEDCOM export routes', () => {
+  it('downloads GEDCOM 5.5.1 by default, which re-imports', async () => {
+    const res = await api.get(`${s.base}/export.ged`);
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('text/vnd.familysearch.gedcom; charset=utf-8');
+    expect(res.headers['content-disposition']).toBe(
+      `attachment; filename="Test.ged"; filename*=UTF-8''Test.ged`,
+    );
+    expect(parseGedcom(res.body).header.version).toBe('5.5.1');
+    expect(await givenNames(res.body)).toEqual(['Ada', 'Bram', 'Cora', 'Dan', 'Eve']);
+  });
+
+  it('downloads GEDCOM 7 and privatizes living people on request', async () => {
+    await api.patch(`${s.base}/people/${s.bram}`, { living: 'dead' });
+    const res = await api.get(`${s.base}/export.ged?version=7&privatize=true`);
+    expect(res.statusCode).toBe(200);
+    expect(parseGedcom(res.body).header.version).toBe('7.0');
+    expect(res.body).toContain('Bram');
+    for (const living of ['Ada', 'Cora', 'Dan', 'Eve', '1941', 'Harlow']) {
+      expect(res.body).not.toContain(living);
+    }
+  });
+
+  it('downloads GEDZIP', async () => {
+    const res = await api.get(`${s.base}/export.gdz`);
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('application/vnd.familysearch.gedcom+zip');
+    expect(res.headers['content-disposition']).toContain(`filename="Test.gdz"`);
+    const bytes = res.rawPayload;
+    expect(readGedzip(bytes).gedcom).toBeDefined();
+    expect(await givenNames(bytes)).toEqual(['Ada', 'Bram', 'Cora', 'Dan', 'Eve']);
+  });
+
+  it('gives an ASCII fallback file name for any tree name', async () => {
+    const base = await createTestTree(api, 'Vale & Reed "family" ü');
+    const res = await api.get(`${base}/export.ged`);
+    expect(res.headers['content-disposition']).toBe(
+      `attachment; filename="Vale _ Reed _family_ _.ged"; filename*=UTF-8''Vale%20%26%20Reed%20%22family%22%20%C3%BC.ged`,
+    );
+  });
+
+  it('rejects unknown versions and options', async () => {
+    for (const query of ['version=6', 'privatize=maybe', 'format=json']) {
+      const res = await api.get(`${s.base}/export.ged?${query}`);
+      expect(res.statusCode, query).toBe(400);
+    }
+    expect((await api.get('/api/trees/nope/export.ged')).statusCode).toBe(404);
+  });
+});

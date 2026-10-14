@@ -25,6 +25,7 @@ import type {
 } from '@open-ancestry/core';
 import { GenerationLabel } from '../components/GenerationLabel/GenerationLabel';
 import { PersonCard, personCardLabel } from '../components/PersonCard/PersonCard';
+import { useTheme } from '../lib/useTheme';
 import type { TreeLayout as LayoutKind } from '../components/TreeToolbar/TreeToolbar';
 import type { PersonSummary } from '../lib/person';
 import { FanChart } from './FanChart';
@@ -46,8 +47,11 @@ import styles from './TreeView.module.css';
 const CELL = 512;
 /** Screen pixels mounted beyond each viewport edge. */
 const OVERSCAN = 240;
-/** Below this zoom cards drop their photo and text: they are too small to read. */
-const LOD_SCALE = 0.25;
+/**
+ * Below this zoom card text is unreadable, so cards and edges are painted on
+ * one canvas instead of mounted (only the keyboard's active card stays in the DOM).
+ */
+const LOD_SCALE = 0.35;
 const ANIMATION_MS = 180;
 const FIT_PADDING = 64;
 const DRAG_THRESHOLD = 4;
@@ -261,6 +265,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
 ) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const worldRef = useRef<HTMLDivElement>(null);
+  const lodRef = useRef<HTMLCanvasElement>(null);
   const transform = useRef<Transform>({ x: 0, y: 0, scale: 1 });
   const size = useRef({ width: 0, height: 0 });
   const frame = useRef(0);
@@ -289,8 +294,8 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   const relations = useMemo(() => (layout ? buildRelations(layout) : null), [layout]);
 
   // Latest props for callbacks that must stay stable.
-  const latest = useRef({ onInteract, onViewportChange, onPrefetch, layout, fan });
-  latest.current = { onInteract, onViewportChange, onPrefetch, layout, fan };
+  const latest = useRef({ onInteract, onViewportChange, onPrefetch, layout, fan, person });
+  latest.current = { onInteract, onViewportChange, onPrefetch, layout, fan, person };
 
   const measure = useCallback(() => {
     const el = viewportRef.current;
@@ -298,20 +303,101 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     return size.current;
   }, []);
 
+  // Resolved token colors for the canvas layer (tokens are light-dark() pairs).
+  const { theme } = useTheme();
+  const colors = useRef<Record<'surface' | 'M' | 'F' | 'U' | 'line' | 'focus', string> | null>(
+    null,
+  );
+  useEffect(() => {
+    const el = lodRef.current;
+    if (!el) return;
+    const resolve = (token: string) => {
+      el.style.color = `var(${token})`;
+      return getComputedStyle(el).color;
+    };
+    colors.current = {
+      surface: resolve('--oa-surface'),
+      M: resolve('--oa-person-male'),
+      F: resolve('--oa-person-female'),
+      U: resolve('--oa-person-unknown'),
+      line: resolve('--oa-canvas-line'),
+      focus: resolve('--oa-canvas-text'),
+    };
+    lastCells.current = '';
+    if (frame.current === 0) updateVisibleRef.current(true);
+  }, [theme]);
+
+  /** Paints every card and edge in view onto the canvas layer when zoomed far out. */
+  const drawLod = useCallback(
+    (lod: boolean, world: Rect) => {
+      const canvas = lodRef.current;
+      const ctx = canvas?.getContext('2d');
+      const current = latest.current.layout;
+      if (!canvas || !ctx) return 0;
+      const { width, height } = size.current;
+      const dpr = window.devicePixelRatio || 1;
+      if (canvas.width !== Math.round(width * dpr)) canvas.width = Math.round(width * dpr);
+      if (canvas.height !== Math.round(height * dpr)) canvas.height = Math.round(height * dpr);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const nodes = current ? nodeIndex.query(world) : [];
+      const c = colors.current;
+      if (!lod || !current || !c) return nodes.length;
+      const t = transform.current;
+      ctx.setTransform(dpr * t.scale, 0, 0, dpr * t.scale, dpr * t.x, dpr * t.y);
+      ctx.beginPath();
+      for (const i of edgeIndex.query(world)) {
+        const [first, ...rest] = current.edges[i]!.points;
+        if (!first) continue;
+        ctx.moveTo(first[0], first[1]);
+        for (const [x, y] of rest) ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = c.line;
+      ctx.lineWidth = 1.5 / t.scale;
+      ctx.stroke();
+      ctx.fillStyle = c.surface;
+      for (const i of nodes) {
+        const n = current.nodes[i]!;
+        ctx.fillRect(n.x, n.y, n.width, n.height);
+      }
+      // The sex stripe, grouped by color to keep fill style changes few.
+      const stripe = Math.max(12, 4 / t.scale);
+      for (const sex of ['M', 'F', 'U'] as const) {
+        ctx.fillStyle = c[sex];
+        for (const i of nodes) {
+          const n = current.nodes[i]!;
+          const p = latest.current.person(n.personId);
+          if ((p?.sex ?? 'U') === sex) ctx.fillRect(n.x, n.y, n.width, stripe);
+        }
+      }
+      const focus = current.nodes.find((n) => n.isFocus);
+      if (focus) {
+        ctx.strokeStyle = c.focus;
+        ctx.lineWidth = 3 / t.scale;
+        ctx.strokeRect(focus.x, focus.y, focus.width, focus.height);
+      }
+      return nodes.length;
+    },
+    [nodeIndex, edgeIndex],
+  );
+
   const updateVisible = useCallback(
     (force = false) => {
       const { layout: current, fan: currentFan } = latest.current;
       const t = transform.current;
       const { width, height } = size.current;
-      latest.current.onViewportChange(visibleWorld(t, width, height));
       const world = visibleWorld(t, width, height);
+      latest.current.onViewportChange(world);
+      const lod = t.scale < LOD_SCALE && current !== null;
+      const count = drawLod(lod, world);
+      if (worldRef.current) worldRef.current.dataset.visibleCount = String(count);
       const pad = OVERSCAN / t.scale;
       const c0 = Math.floor((world.x - pad) / CELL);
       const r0 = Math.floor((world.y - pad) / CELL);
       const c1 = Math.floor((world.x + world.width + pad) / CELL);
       const r1 = Math.floor((world.y + world.height + pad) / CELL);
-      const lod = t.scale < LOD_SCALE;
-      const key = `${c0},${r0},${c1},${r1},${lod}`;
+      // Far out, nothing mounts while panning: the canvas layer shows it all.
+      const key = lod ? 'lod' : `${c0},${r0},${c1},${r1}`;
       if (!force && key === lastCells.current) return;
       lastCells.current = key;
       const rect = {
@@ -322,13 +408,17 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       };
       setVisible({
         source: current ?? currentFan,
-        nodes: nodeIndex.query(rect),
-        edges: edgeIndex.query(rect),
+        nodes: lod ? [] : nodeIndex.query(rect),
+        edges: lod ? [] : edgeIndex.query(rect),
         lod,
       });
     },
-    [nodeIndex, edgeIndex],
+    [nodeIndex, edgeIndex, drawLod],
   );
+  const updateVisibleRef = useRef(updateVisible);
+  useEffect(() => {
+    updateVisibleRef.current = updateVisible;
+  }, [updateVisible]);
 
   const apply = useCallback(
     (t: Transform) => {
@@ -717,6 +807,22 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     if (node) {
       setActiveKey(node.key);
       onCardClick(node);
+      return;
+    }
+    // Far zoomed out, cards are painted: a click zooms in on the one under the pointer.
+    const t = transform.current;
+    if (layout && t.scale < LOD_SCALE && viewportRef.current) {
+      const box = viewportRef.current.getBoundingClientRect();
+      const x = (event.clientX - box.left - t.x) / t.scale;
+      const y = (event.clientY - box.top - t.y) / t.scale;
+      const hit = nodeIndex.query({ x, y, width: 0, height: 0 })[0];
+      if (hit === undefined) return;
+      const n = layout.nodes[hit]!;
+      const { width, height } = size.current;
+      setActiveKey(n.key);
+      animateTo(
+        centerOn({ ...t, scale: 0.8 }, n.x + n.width / 2, n.y + n.height / 2, width, height),
+      );
     }
   }
 
@@ -845,6 +951,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       onKeyUp={onKeyUp}
       onFocus={onFocus}
     >
+      <canvas ref={lodRef} className={styles.lodLayer} aria-hidden />
       <div
         ref={worldRef}
         className={styles.world}

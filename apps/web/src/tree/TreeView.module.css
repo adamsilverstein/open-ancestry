@@ -35,6 +35,16 @@
   contain: layout paint style;
 }
 
+/* Far zoomed out, every card is painted here instead of mounted. */
+.lodLayer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  pointer-events: none;
+}
+
 /* Far zoomed out: a plain block per person, colored and outlined by sex like the card stripe. */
 .lodCard {
   position: absolute;

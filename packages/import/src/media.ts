@@ -136,11 +136,16 @@ export class MediaSource {
         const full = join(dir, entry.name);
         const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
         if (entry.isDirectory()) walk(full, rel, depth + 1);
-        else if (entry.isFile()) {
+        // A name with a backslash would not survive as a forward-slash relative path.
+        else if (entry.isFile() && safeEntryPath(rel) === rel) {
           files.push({
             path: rel,
             get size() {
-              return statSync(full).size;
+              try {
+                return statSync(full).size;
+              } catch {
+                return 0;
+              }
             },
             read: () => readFileSync(full),
           });

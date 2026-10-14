@@ -1010,14 +1010,23 @@ export class Mapper {
       this.warn('media-too-large', node.line, `Media file "${file.path}" is too large to copy`);
       return;
     }
-    const bytes = file.read();
-    row.byte_size = bytes.length;
-    row.sha256 = sha256(bytes);
-    if (this.options.mediaRoot && !this.copiedMedia.has(file.path)) {
-      writeMediaFile(this.options.mediaRoot, file.path, bytes);
-      this.copiedMedia.add(file.path);
+    try {
+      const bytes = file.read();
+      if (this.options.mediaRoot && !this.copiedMedia.has(file.path)) {
+        writeMediaFile(this.options.mediaRoot, file.path, bytes);
+        this.copiedMedia.add(file.path);
+      }
+      row.byte_size = bytes.length;
+      row.sha256 = sha256(bytes);
+      this.linkedMedia++;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.warn(
+        'media-copy-failed',
+        node.line,
+        `Media file "${file.path}" could not be copied: ${reason}`,
+      );
     }
-    this.linkedMedia++;
   }
 
   // ------------------------------------------------------------ other records

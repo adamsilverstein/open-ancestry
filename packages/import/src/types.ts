@@ -40,6 +40,7 @@ export type ImportWarningCode =
   | 'media-missing'
   | 'media-unsafe-path'
   | 'media-too-large'
+  | 'media-copy-failed'
   | 'home-person'
   | (string & {});
 

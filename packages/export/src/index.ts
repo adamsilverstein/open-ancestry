@@ -5,4 +5,12 @@
  */
 export * from './types';
 export { buildGedcomExport, exportGedcom } from './gedcom';
-export { buildGedzipExport, exportGedzip } from './gedzip';
+export {
+  GedzipTooLargeError,
+  buildGedzipExport,
+  exportGedzip,
+  planGedzipExport,
+  streamGedzip,
+  type GedzipPlan,
+  type GedzipPlanOptions,
+} from './gedzip';

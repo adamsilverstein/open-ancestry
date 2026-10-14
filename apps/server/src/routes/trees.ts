@@ -8,9 +8,15 @@ import {
   undoLatest,
   type TreeStore,
 } from '@open-ancestry/db';
-import { buildGedcomExport, buildGedzipExport } from '@open-ancestry/export';
+import {
+  GedzipTooLargeError,
+  buildGedcomExport,
+  planGedzipExport,
+  streamGedzip,
+} from '@open-ancestry/export';
 import type { Api, Deps } from '../context';
 import { edit } from '../edits';
+import { conflict } from '../errors';
 import { ExportQuery, GedzipQuery, HistoryQuery, HomeBody, TreeBody, TreeParams } from '../schemas';
 
 function treeDetail(deps: Deps, id: string) {
@@ -190,9 +196,19 @@ export function treeRoutes(app: Api, deps: Deps): void {
     { schema: { params: TreeParams, querystring: GedzipQuery } },
     async (request, reply) => {
       const { tree } = request.params;
-      const { bytes, warnings } = buildGedzipExport(library.open(tree), {
-        privatizeLiving: request.query.privatize ?? false,
-      });
+      // The GEDCOM text and media list are taken now, in one snapshot; the
+      // media bytes are streamed one file at a time, so memory stays bounded
+      // and other requests keep being served (#198).
+      let plan;
+      try {
+        plan = planGedzipExport(library.open(tree), {
+          privatizeLiving: request.query.privatize ?? false,
+        });
+      } catch (error) {
+        if (error instanceof GedzipTooLargeError) throw conflict(error.message);
+        throw error;
+      }
+      const { warnings } = plan;
       return reply
         .type('application/vnd.familysearch.gedcom+zip')
         .header(
@@ -200,7 +216,7 @@ export function treeRoutes(app: Api, deps: Deps): void {
           attachment(downloadName(tree, request.query.privatize), 'gdz'),
         )
         .headers(warningHeaders(warnings))
-        .send(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+        .send(streamGedzip(plan));
     },
   );
 }

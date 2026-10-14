@@ -29,11 +29,12 @@ async function watch(page: Page, run: () => Promise<void>) {
 }
 
 test.describe('person header avatar (#126)', () => {
-  test('loads the small thumbnail of a local primary photo, not the original', async ({ page }) => {
+  test('loads a thumbnail of a local primary photo, not the original', async ({ page }) => {
     const { media } = await watch(page, async () => {
       await openPerson(page, MEDIA_IDS.pia);
       const avatar = page.getByTestId('person-header').locator('img').first();
-      await expect(avatar).toHaveAttribute('src', new RegExp(`/media/${MEDIA_IDS.mill}/thumb/sm$`));
+      // 120px avatar, sharp on 2x screens: the 480px thumbnail, never the original.
+      await expect(avatar).toHaveAttribute('src', new RegExp(`/media/${MEDIA_IDS.mill}/thumb/md$`));
       await expect
         .poll(() => avatar.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth))
         .toBeGreaterThan(0);
@@ -59,6 +60,43 @@ test.describe('person header avatar (#126)', () => {
   }
 });
 
+test.describe('tree cards and quick view', () => {
+  async function openTree(page: Page, personId: string) {
+    await page.addInitScript((tree) => localStorage.setItem('oa-tree', tree), MEDIA_TREE);
+    await page.goto(`/tree/${personId}`);
+  }
+
+  test('request only thumbnails for a local primary photo', async ({ page }) => {
+    const { media } = await watch(page, async () => {
+      await openTree(page, MEDIA_IDS.pia);
+      const card = page.getByRole('button', { name: /^Pia Portrait,/ });
+      await expect(card.locator('img')).toHaveAttribute('src', /\/thumb\/sm$/);
+      await card.click();
+      const quick = page.getByRole('dialog', { name: 'Pia Portrait' });
+      await expect(quick.locator('img').first()).toHaveAttribute('src', /\/thumb\//);
+      await page.waitForLoadState('networkidle');
+    });
+    expect(media.length).toBeGreaterThan(0);
+    for (const path of media) expect(path).toMatch(/\/thumb\/(sm|md|lg)$/);
+  });
+
+  for (const [who, id, name] of [
+    ['only on Ancestry', MEDIA_IDS.rhoda, 'Rhoda Remote'],
+    ['a missing file', MEDIA_IDS.mona, 'Mona Missing'],
+  ] as const) {
+    test(`request nothing when the primary photo is ${who}`, async ({ page }) => {
+      const { media, errors } = await watch(page, async () => {
+        await openTree(page, id);
+        await page.getByRole('button', { name: new RegExp(`^${name},`) }).click();
+        await expect(page.getByRole('dialog', { name })).toBeVisible();
+        await page.waitForLoadState('networkidle');
+      });
+      expect(media).toEqual([]);
+      expect(errors).toEqual([]);
+    });
+  }
+});
+
 test.describe('gallery tiles (#127)', () => {
   test('portrait, square, tiny and wide thumbnails stay inside their preview box', async ({
     page,
@@ -80,7 +118,12 @@ test.describe('gallery tiles (#127)', () => {
       expect(box.x + box.width, title).toBeLessThanOrEqual(preview.x + preview.width + 0.5);
       expect(caption.y, title).toBeGreaterThanOrEqual(preview.y + preview.height - 0.5);
       expect(caption.y + caption.height, title).toBeLessThanOrEqual(tileBox.y + tileBox.height);
+      // Sharp on 2x screens: the browser may pick the 480px thumbnail.
+      await expect(image).toHaveAttribute('srcset', /thumb\/sm 160w, .*thumb\/md 480w/);
     }
+    // A tiny image is shown at its own size, centered, not blown up to fill the box.
+    const tiny = gallery.getByRole('button', { name: /Tiny scrap/ }).locator('img');
+    expect(await tiny.evaluate((img) => getComputedStyle(img).objectFit)).toBe('scale-down');
     const results = await new AxeBuilder({ page }).include('[aria-label="Gallery"]').analyze();
     expect(results.violations).toEqual([]);
   });
@@ -103,6 +146,8 @@ test.describe('media labels (#131)', () => {
     await filters.getByRole('button', { name: /Missing/ }).click();
     await expect(tile('Missing wedding photo')).toBeVisible();
     await expect(tile('1911 census page')).toHaveCount(0);
+    // Ancestry and other hosts share the Online filter; the tiles tell them apart.
+    await expect(filters.getByRole('button', { name: /Online/ })).toContainText('2');
     await filters.getByRole('button', { name: /Online/ }).click();
     await expect(tile('1911 census page')).toBeVisible();
     await expect(tile('Evil remote')).toBeVisible();
@@ -134,5 +179,31 @@ test.describe('media labels (#131)', () => {
     await expect(
       page.getByRole('dialog').getByRole('button', { name: 'Set as profile photo' }),
     ).toBeVisible();
+  });
+});
+
+test.describe('profile photo on the server', () => {
+  test('refuses media with no local file or a file that is not a readable image', async ({
+    request,
+    baseURL,
+  }) => {
+    const { token } = (await (await request.get('/api/session')).json()) as { token: string };
+    const headers = { origin: new URL(baseURL!).origin, 'x-oa-token': token };
+    const set = (mediaId: string) =>
+      request.patch(`/api/trees/${MEDIA_TREE}/people/${MEDIA_IDS.pia}`, {
+        headers,
+        data: { primary_media_id: mediaId },
+      });
+    for (const [mediaId, reason] of [
+      [MEDIA_IDS.census, /no file in this tree/],
+      [MEDIA_IDS.missing, /no file in this tree/],
+      [MEDIA_IDS.corrupt, /not a readable image/],
+    ] as const) {
+      const res = await set(mediaId);
+      expect(res.status(), mediaId).toBe(409);
+      expect(((await res.json()) as { error: { message: string } }).error.message).toMatch(reason);
+    }
+    // A real local photo is still accepted (and leaves Pia as the fixture had her).
+    expect((await set(MEDIA_IDS.mill)).ok()).toBe(true);
   });
 });

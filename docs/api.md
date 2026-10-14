@@ -49,7 +49,7 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 | `GET /api/trees/:tree/people/:id/summary` | `PersonSummary`. |
 | `GET /api/trees/:tree/families/:id` | Family with partners, children and events. |
 | `GET /api/trees/:tree/neighborhood?focus&up&down&siblings` | Graph slice for the tree views (focus defaults to the home person; up/down 0-10). |
-| `GET /api/trees/:tree/search?q&limit` | Ranked search; the last word also matches by surname sound. |
+| `GET /api/trees/:tree/search?q&limit` | Ranked search `{ items: [{ person, match, score }] }`: exact words, then prefixes (years within two), then surnames by sound (`match` says which). |
 | `GET`, `PUT /api/trees/:tree/home` `{ personId }` | Home person. |
 | `GET /api/trees/:tree/tags` | Tags with person counts. |
 | `GET /api/trees/:tree/history?limit` | Change batches, `canUndo`, `canRedo`. |

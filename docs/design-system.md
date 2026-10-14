@@ -127,7 +127,7 @@ Code: `apps/web/src/components/<Name>/<Name>.tsx` + `<Name>.module.css`, re-expo
 | `RelationshipList` | `groups: { title, people, onAdd?, addLabel? }[]`, `headingLevel` | Labelled sections with person rows (avatar, name, lifespan) that link to `/person/$id`. |
 | `SourceItem` | `title`, `citation`, `quality` (GEDCOM QUAY 0-3), `externalUrl`, `externalLabel` | Quality chip (dashed when weak), external link opens in a new tab with `rel="noreferrer noopener"`. |
 | `TagBadge` | `label`, `color` (1-8), `variant` (`badge`/`dot`) | Dot variant is a labelled image for dense spots. |
-| `CommandPalette` | `open`, `onOpenChange`, `groups: { heading, items: PaletteAction[] }[]`, `onQueryChange` | Radix dialog + cmdk, substring filtering on label and keywords, "No results" empty state. Restores focus to whatever was focused before it opened. The shell wires Cmd/Ctrl-K and app actions; people search plugs in via `onQueryChange`. |
+| `CommandPalette` | `open`, `onOpenChange`, `groups: { heading, items: PaletteAction[], unfiltered? }[]`, `onQueryChange`, `footer`, `loading` | Radix dialog + cmdk. Local groups filter by substring on label and keywords; `unfiltered` groups (server people search) show as given. Items may have a `description` line and an `onAltSelect` run by Shift+Enter or Alt+Enter. The highlight moves to the first item whenever the list changes. "No results" empty state; restores focus to whatever was focused before it opened. |
 | `Button` | `variant` (primary, secondary, ghost, danger), `size` (sm/md), `loading`, `iconStart`, `iconEnd` | `loading` disables and sets `aria-busy`. |
 | `IconButton` | `label` (required), `icon`, `size`, `variant` (ghost/secondary/canvas), `pressed`, `shortcut`, `tooltip`, `tooltipSide` | Label is the accessible name and the tooltip. `IconButtonBase` is the same button without a tooltip, for initial-bundle code. |
 | `Toolbar` | `label`, `orientation` | ARIA toolbar with roving tabindex: one Tab stop, arrows/Home/End move. |
@@ -164,7 +164,9 @@ Hover and focus can be forced for screenshots with `data-demo-hover` / `data-dem
 
 ## Layout patterns
 
-- **App shell:** skip link, 48px sticky top bar (home link, tree name, Find with the Cmd/Ctrl-K hint, File menu with import/export, theme toggle), then `<main id="main">`. Cmd/Ctrl-K toggles the command palette from anywhere.
+- **App shell:** skip link, 48px sticky top bar (home link, tree name, People link, Find with the Cmd/Ctrl-K hint, File menu with import/export, theme toggle), then `<main id="main">`. Cmd/Ctrl-K toggles the command palette from anywhere; other Find buttons (the tree toolbar's Find in tree) call `usePalette().open()` from `app/palette.ts`.
+- **Command palette people search:** results show avatar, name, lifespan and birthplace. Enter opens the person page and Shift/Alt+Enter shows them in the tree; on `/tree/*` the two swap, so Find in tree re-focuses the tree by default.
+- **People list (`/people`):** full-height page with the title, a live count and Sex / Living / Tag filters (kept in the URL), then an ARIA table (`role="table"`, `aria-rowcount`, `aria-sort` on the sorted column header) whose body is virtualized with `@tanstack/react-virtual` and loads 100-row pages from the server as they scroll into view.
 - **Tree page:** full-bleed canvas, left floating toolbar, bottom-left minimap, quick view popovers anchored to cards.
 - **Person page:** header band on `--oa-canvas` (avatar 120, serif name, birth/death, relationship to home, tags, Edit), tab bar, then the three-column Facts grid (Timeline 1.6fr, Sources 1fr, Relationships 1fr).
 

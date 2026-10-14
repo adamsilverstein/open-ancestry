@@ -5,7 +5,7 @@ import { Plus, Trash2 } from 'lucide-react';
 import type { ChildRelationship, LivingStatus, NameType, Sex } from '@open-ancestry/db';
 import { seg } from '../../../api/client';
 import { useEdit } from '../../../api/edits';
-import { apiSend } from '../../../api/mutations';
+import { apiSend } from '../../../api/client';
 import { personQuery } from '../../../api/queries';
 import type { PersonDetail } from '../../../api/types';
 import { Button } from '../../../components/Button/Button';

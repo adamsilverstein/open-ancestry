@@ -97,7 +97,7 @@ test.describe('axe on edit dialogs', () => {
       await check();
       await page.keyboard.press('Escape');
 
-      await page.getByRole('banner').getByRole('button', { name: 'History' }).click();
+      await page.getByRole('banner').getByRole('button', { name: 'History', exact: true }).click();
       await expect(page.getByRole('dialog', { name: 'History' })).toBeVisible();
       await check();
     });

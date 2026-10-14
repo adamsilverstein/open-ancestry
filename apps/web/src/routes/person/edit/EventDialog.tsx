@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { seg } from '../../../api/client';
 import { useEdit } from '../../../api/edits';
-import { apiSend } from '../../../api/mutations';
+import { apiSend } from '../../../api/client';
 import type { EventDetail } from '../../../api/types';
 import { Button } from '../../../components/Button/Button';
 import { ConfirmDialog } from '../../../components/ConfirmDialog/ConfirmDialog';

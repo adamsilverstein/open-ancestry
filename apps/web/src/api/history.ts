@@ -2,7 +2,7 @@ import { queryOptions, type QueryClient } from '@tanstack/react-query';
 import type { ChangeBatchRow } from '@open-ancestry/db';
 import { apiGet, seg } from './client';
 import { invalidateTree } from './edits';
-import { apiSend } from './mutations';
+import { apiSend } from './client';
 import { currentTreeQuery } from './queries';
 
 export interface History {

@@ -3,7 +3,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import type { ChildRelationship, Sex } from '@open-ancestry/db';
 import { seg } from '../../../api/client';
 import { useEdit } from '../../../api/edits';
-import { apiSend } from '../../../api/mutations';
+import { apiSend } from '../../../api/client';
 import { searchQuery } from '../../../api/search';
 import type { ApiPersonSummary, PersonDetail } from '../../../api/types';
 import { Button } from '../../../components/Button/Button';

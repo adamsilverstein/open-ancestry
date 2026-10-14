@@ -312,7 +312,7 @@ test.describe('history and errors', () => {
     await dialog.getByRole('button', { name: 'Save' }).click();
     await expect(h1(page)).toHaveText('Rowan Ashdowne');
 
-    await page.getByRole('banner').getByRole('button', { name: 'History' }).click();
+    await page.getByRole('banner').getByRole('button', { name: 'History', exact: true }).click();
     const history = page.getByRole('dialog', { name: 'History' });
     await expect(history.getByRole('listitem').first()).toContainText('Edit person: Rowan Ashdown');
     await history.getByRole('button', { name: 'Undo' }).click();

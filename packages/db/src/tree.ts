@@ -1,5 +1,14 @@
 import Database from 'better-sqlite3';
-import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fchmodSync,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+} from 'node:fs';
 import { basename, join } from 'node:path';
 import { TreeStore, type StoreOptions } from './store';
 
@@ -49,15 +58,52 @@ export function ensurePrivateDir(dir: string): void {
  */
 export function restrictMode(path: string, mode: number): void {
   if (process.platform === 'win32') return;
+  let fd: number | undefined;
   try {
-    const stat = lstatSync(path);
-    if (stat.isSymbolicLink()) return;
+    // Open the path itself, never a link's target, and change it through the
+    // descriptor: nothing can swap it between the check and the chmod.
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const stat = fstatSync(fd);
     if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) return;
     const current = stat.mode & 0o777;
     const tightened = current & mode;
-    if (tightened !== current) chmodSync(path, tightened);
+    if (tightened !== current) fchmodSync(fd, tightened);
   } catch {
-    // ENOENT or EPERM: nothing to tighten, or not ours to change.
+    // ELOOP (a symlink), ENOENT or EPERM: nothing to tighten, or not ours.
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+/** Why the app will not open a tree. */
+export class TreeAccessError extends Error {}
+
+/**
+ * Refuses a tree whose folder or database files another account could have
+ * planted in a shared library: a symlink, anything owned by another account,
+ * or a database file with a second hard link (it could be any file of
+ * yours, linked in under the tree's name).
+ */
+function assertOwnTree(paths: TreePaths): void {
+  if (process.platform === 'win32') return;
+  const uid = typeof process.getuid === 'function' ? process.getuid() : undefined;
+  const files = [paths.database, `${paths.database}-wal`, `${paths.database}-shm`];
+  for (const path of [paths.root, ...files]) {
+    let stat;
+    try {
+      stat = lstatSync(path);
+    } catch {
+      continue; // -wal and -shm come and go
+    }
+    if (stat.isSymbolicLink()) {
+      throw new TreeAccessError(`Refusing to open ${path}: it is a symbolic link`);
+    }
+    if (uid !== undefined && stat.uid !== uid) {
+      throw new TreeAccessError(`Refusing to open ${path}: it belongs to another account`);
+    }
+    if (stat.isFile() && stat.nlink > 1) {
+      throw new TreeAccessError(`Refusing to open ${path}: it has another hard link`);
+    }
   }
 }
 
@@ -104,6 +150,7 @@ export function openTree(dir: string, options: StoreOptions = {}): TreeStore {
   assertTreeDir(dir);
   const paths = treePaths(dir);
   if (!existsSync(paths.database)) throw new Error(`Tree not found at ${dir}`);
+  assertOwnTree(paths);
   restrictTree(paths);
   const db = new Database(paths.database, { fileMustExist: true });
   try {

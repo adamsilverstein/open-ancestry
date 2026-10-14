@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
   TREE_EXTENSION,
+  TreeAccessError,
   createTree,
   ensurePrivateDir,
   meta,
@@ -227,7 +228,14 @@ export class Library {
     if (cached) return cached;
     assertTreeName(id);
     if (!this.exists(id)) throw notFound(`Tree "${id}" not found`);
-    const store = openTree(this.dirOf(id));
+    let store: TreeStore;
+    try {
+      store = openTree(this.dirOf(id));
+    } catch (error) {
+      // A planted link or another account's file: say why, not a bare 500.
+      if (error instanceof TreeAccessError) throw new ApiError(403, 'forbidden', error.message);
+      throw error;
+    }
     this.stores.set(id, store);
     return store;
   }

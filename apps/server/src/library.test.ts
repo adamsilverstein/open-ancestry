@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readdir } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -221,6 +221,17 @@ describe.skipIf(process.platform === 'win32')('library permissions', () => {
     new Library(root).list();
     expect(mode(root)).toBe(0o755);
     expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a planted tree link with a clear 403', async () => {
+    const root = join(await temp(), 'Library');
+    const library = new Library(root);
+    library.create('Real');
+    library.closeAll();
+    symlinkSync(library.dirOf('Real'), library.dirOf('Planted'));
+    expect(() => library.open('Planted')).toThrow(
+      expect.objectContaining({ statusCode: 403, message: expect.stringMatching(/symbolic link/) }),
+    );
   });
 
   it('keeps the trash private', async () => {

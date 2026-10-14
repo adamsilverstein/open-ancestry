@@ -9,7 +9,8 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 version="$(node -p "require('$root/node_modules/@playwright/test/package.json').version")"
 image="mcr.microsoft.com/playwright:v${version}-noble"
 
-docker run --rm --ipc=host \
+# amd64 matches the GitHub runner, so font rasterization matches too (emulated on Apple silicon).
+docker run --rm --ipc=host --platform linux/amd64 \
   -v "$root:/src:ro" \
   -v "$root/e2e/__screenshots__:/out" \
   -w /work \

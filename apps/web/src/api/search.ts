@@ -1,5 +1,5 @@
 import { keepPreviousData, queryOptions, useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { SearchMatch, TagRow } from '@open-ancestry/db';
 import { apiGet, seg } from './client';
 import { currentTreeQuery } from './queries';
@@ -32,14 +32,19 @@ export const searchQuery = (tree: string, q: string, limit = PALETTE_RESULTS) =>
     staleTime: 60_000,
   });
 
+/** How long newer text waits for an in-flight search before searching anyway. */
+export const SEARCH_WAIT_LIMIT_MS = 1000;
+
 const searchable = (q: string) => /[\p{L}\p{N}]/u.test(q);
 
 /**
  * People in the open tree matching `query`. There is no debounce: a key
  * typed while no search is running is searched at once, and keys typed while
  * one is running wait for it, then search the latest text only. So a fast
- * server answers each pause in typing within a few ms, and a slow query
- * never queues a request per key behind it.
+ * server answers each pause in typing within a few ms (at the cost of about
+ * one request per key, each a few ms), and a slow query never queues a
+ * request per key behind it. A search that hangs past SEARCH_WAIT_LIMIT_MS
+ * stops holding the latest text back.
  *
  * While the current query's results load, the previous results stay
  * available as `stale` (so the list does not flash) and `pending` is true;
@@ -56,7 +61,15 @@ export function useSearchPeople(query: string, limit = PALETTE_RESULTS) {
     placeholderData: keepPreviousData,
   });
   const busy = enabled && result.isFetching;
-  if (!busy && requested !== current) setRequested(current);
+  // A request that hangs must not hold back newer text for good.
+  const [gaveUp, setGaveUp] = useState<string | null>(null);
+  const waiting = busy && requested !== current && gaveUp !== requested;
+  useEffect(() => {
+    if (!waiting) return;
+    const id = setTimeout(() => setGaveUp(requested), SEARCH_WAIT_LIMIT_MS);
+    return () => clearTimeout(id);
+  }, [waiting, requested]);
+  if (!waiting && requested !== current) setRequested(current);
   const wanted = tree !== null && searchable(current);
   const fresh =
     wanted && requested === current && result.data !== undefined && !result.isPlaceholderData;

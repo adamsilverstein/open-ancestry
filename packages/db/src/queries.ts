@@ -776,9 +776,12 @@ function sortedPeople(
   store: TreeStore,
   { sort, direction, sex, living, tagId }: Omit<ListPeopleOptions, 'limit' | 'offset'>,
 ): string[] {
+  // Inside an open transaction the order may include writes that roll back,
+  // which total_changes() never forgets: compute it, but never cache it.
+  const cacheable = !store.db.inTransaction;
   const cacheKey = JSON.stringify([sort, direction, sex, living, tagId, databaseVersion(store)]);
   let cache = orderCache.get(store);
-  const hit = cache?.get(cacheKey);
+  const hit = cacheable ? cache?.get(cacheKey) : undefined;
   if (hit) {
     // Refresh recency.
     cache!.delete(cacheKey);
@@ -821,6 +824,7 @@ function sortedPeople(
     .pluck()
     .all(...params) as string[];
 
+  if (!cacheable) return ids;
   if (!cache) {
     cache = new Map();
     orderCache.set(store, cache);

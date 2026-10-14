@@ -433,4 +433,18 @@ describe('listPeople', () => {
     expect(after.items[0]?.given).toBe('Aaron');
     store.close();
   });
+
+  it('does not cache an order read inside a transaction that rolls back', () => {
+    const store = memoryTree();
+    seedSmallFamily(store);
+    expect(listPeople(store).total).toBe(9);
+    store.db.exec('BEGIN');
+    store.db
+      .prepare("INSERT INTO person (id, created_at, updated_at) VALUES ('01TEMP', 'x', 'x')")
+      .run();
+    expect(listPeople(store).total).toBe(10);
+    store.db.exec('ROLLBACK');
+    expect(listPeople(store).total).toBe(9);
+    store.close();
+  });
 });

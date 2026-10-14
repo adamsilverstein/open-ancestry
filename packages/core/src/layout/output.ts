@@ -66,14 +66,15 @@ export function nodesFrom(b: Builder, size: CardSize, chevrons: Chevrons): Layou
     const person = index.person(card.personId)!;
     const dup = card.dupOf !== undefined;
     const up = chevrons.up.has(card.role) && !dup && card.upBlocked !== true;
-    const down = chevrons.down.has(card.role) && !dup;
+    const down = chevrons.down.has(card.role) && !dup && card.downBlocked !== true;
     const sibs = chevrons.siblings.has(card.role) && !dup;
     const hasSiblings =
       sibs && (b.siblingCandidates(card.personId).length > 1 || person.hasMoreSiblings === true);
     const families = index.partnerFamilies(card.personId);
-    // The focus person's spouses are always shown, so only children are left to reveal.
+    // The focus person's and siblings' spouses are always shown, so only
+    // children are left to reveal.
     const hasDown =
-      (card.role === 'focus'
+      (card.role === 'focus' || card.role === 'sibling'
         ? families.some((f) => index.children(f).length > 0)
         : families.length > 0) || person.hasMoreChildren === true;
     const hasUp =

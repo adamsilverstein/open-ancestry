@@ -93,7 +93,9 @@ describe('sibling chevrons', () => {
     const older = node(layout, 'older');
     const olderW = node(layout, 'olderW');
     expect(niece.x).toBeLessThan(node(layout, 'kid').x);
-    const drop = layout.edges.find((e) => e.familyId === 'F_older' && e.parents)!;
+    const drop = layout.edges.find(
+      (e) => e.familyId === 'F_older' && e.kind === 'parent-child' && e.parents,
+    )!;
     expect(drop.points[0]).toEqual([(older.x + older.width + olderW.x) / 2, older.height / 2]);
     expect([node(layout, 'me').x, node(layout, 'me').y]).toEqual([0, 0]);
     expect(crossings(layout.edges)).toEqual([]);
@@ -118,6 +120,10 @@ describe('sibling chevrons', () => {
       'cousin3',
     ]);
     expect(node(layout, 'aunt').canCollapseDown).toBe(true);
+    // Only the maternal side expanded: the paternal side keeps its natural place.
+    const one = layoutFamily(siblings, 'me', { expanded: ['uncle:down'] });
+    expect(node(one, 'cousin3').x).toBeGreaterThan(node(one, 'younger').x);
+    expect(crossings(one.edges)).toEqual([]);
     // Cousins sit on the edge of the slice: no further chevrons below the focus row.
     expect(node(layout, 'cousin1').canExpandDown).toBe(false);
     expect([node(layout, 'me').x, node(layout, 'me').y]).toEqual([0, 0]);
@@ -129,7 +135,7 @@ describe('sibling chevrons', () => {
     }
   });
 
-  it('show the children of great-aunts and great-uncles a row up', () => {
+  it("stop at cousins: great-aunts and a spouse's aunts get no chevron", () => {
     const g = makeGraph(
       {
         me: 'M',
@@ -141,17 +147,57 @@ describe('sibling chevrons', () => {
         ggma: 'F',
         gaunt: 'F',
         pc: 'M',
+        sp: 'F',
+        sdad: 'M',
+        smom: 'F',
+        saunt: 'F',
+        sc: 'M',
       },
       [
         ['F1', 'dad', 'mom', ['me']],
         ['F2', 'gpa', 'gma', ['dad']],
         ['F3', 'ggpa', 'ggma', ['gaunt', 'gpa']],
         ['F4', 'gaunt', null, ['pc']],
+        ['F5', 'me', 'sp', []],
+        ['F6', 'sdad', 'smom', ['sp']],
+        ['F7', 'gpa2', null, ['saunt', 'sdad']],
+        ['F8', 'saunt', null, ['sc']],
       ],
     );
-    const layout = layoutFamily(g, 'me', { siblingsDepth: 3, expanded: ['gaunt:down'] });
-    expect(node(layout, 'pc').generation).toBe(-1);
-    expect(node(layout, 'pc').x + 120).toBeLessThanOrEqual(node(layout, 'dad').x);
+    const layout = layoutFamily(g, 'me', {
+      siblingsDepth: 3,
+      expanded: ['gaunt:down', 'sp:up', 'sdad:siblings', 'saunt:down'],
+    });
+    expect(node(layout, 'gaunt').canExpandDown).toBe(false);
+    expect(keys(layout)).not.toContain('pc');
+    expect(keys(layout)).not.toContain('sc');
     expect(crossings(layout.edges)).toEqual([]);
+  });
+
+  it("keep a lone parent's siblings and cousins on one side", () => {
+    const g = makeGraph({ me: 'M', mom: 'F', gma: 'F', aunt: 'F', uncle: 'M', c1: 'M', c2: 'F' }, [
+      ['F1', null, 'mom', ['me']],
+      ['F2', null, 'gma', ['aunt', 'mom', 'uncle']],
+      ['F3', 'aunt', null, ['c1']],
+      ['F4', 'uncle', null, ['c2']],
+    ]);
+    const layout = layoutFamily(g, 'me', { expanded: ['aunt:down', 'uncle:down'] });
+    const row = layout.nodes
+      .filter((n) => n.generation === -1)
+      .sort((a, b) => a.x - b.x)
+      .map((n) => n.key);
+    expect(row).toEqual(['mom', 'aunt', 'uncle']);
+    expect(node(layout, 'c1').x).toBeGreaterThan(0);
+    expect(crossings(layout.edges)).toEqual([]);
+    // A lone father's siblings and their children go on his left.
+    const g2 = makeGraph({ me: 'M', dad: 'M', gpa: 'M', uncle: 'M', c: 'F' }, [
+      ['F1', 'dad', null, ['me']],
+      ['F2', 'gpa', null, ['dad', 'uncle']],
+      ['F3', 'uncle', null, ['c']],
+    ]);
+    const left = layoutFamily(g2, 'me', { expanded: ['uncle:down'] });
+    expect(node(left, 'uncle').x).toBeLessThan(node(left, 'dad').x);
+    expect(node(left, 'c').x).toBeLessThan(0);
+    expect(crossings(left.edges)).toEqual([]);
   });
 });

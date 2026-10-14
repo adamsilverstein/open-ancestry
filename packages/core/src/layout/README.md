@@ -73,13 +73,14 @@ themselves loses the second slot, repeated children are dropped and cycles termi
 
 - `nodes`: one per card, top-left `x, y`, `width, height`, `generation` (-1 parents, 0 focus row,
   1 children), `isFocus`, `isDuplicate` + `duplicateOf`, and `canExpandUp/Down`,
-  `canCollapseUp/Down`, `canExpandSiblings`/`canCollapseSiblings` (on direct-line people) for
-  the chevrons, and `isHalfSibling`. **The focus card is always at (0, 0)**, so expanding or
+  `canCollapseUp/Down` (down also on siblings, aunts and uncles),
+  `canExpandSiblings`/`canCollapseSiblings` (on direct-line people) for the chevrons, and
+  `isHalfSibling`. **The focus card is always at (0, 0)**, so expanding or
   collapsing never moves it. `key` is the person id, or `<id>~n` for the nth duplicate.
 - `edges`: polylines (`points`) of three kinds. `couple` joins partners; `parent-child` is either
   the drop from a couple (`parents`) to the sibling bar or the drop from the bar into a child
-  (`child`, with its `rel` so adoptions can be dashed, and `half` for half siblings);
-  `sibling-bar` is the horizontal bar.
+  (`child`, with its `rel` so adoptions can be dashed; half siblings add `half` and
+  `sharedParentId`, and carry their own family's `familyId`); `sibling-bar` is the horizontal bar.
   Edges of one drawn family share a `group`.
 - `labels`: "Parents", "Grandparents", "Great-grandparents", "2nd great-grandparents",
   "Children"... with an anchor point. The family view puts them in a left gutter
@@ -110,12 +111,30 @@ the right, clockwise, `3*PI/2` is up), `innerRadius`/`outerRadius`, and the Ahne
  gen  1            [kid1]     [kid2]                             Children
 ```
 
-Siblings of a direct-line person, each with their spouses, share that person's sibling bar. A
-father's siblings go on his left and a mother's on her right, so the parents stay side by side;
-the focus person's siblings sit in birth order around the focus couple. Half siblings (other
-children of either parent) join the same bar and are flagged `isHalfSibling` / `half`. Siblings
-show without their parents too, joined by a bar with no drop. Each direct-line person has a
-`<id>:siblings` chevron.
+Full siblings of a direct-line person, each with their spouses, share that person's sibling bar.
+A father's siblings go on his left and a mother's (or any lone mother's) on her right, so the
+parents stay side by side; the focus person's siblings sit in birth order around the focus
+couple. Half siblings sit outside the full ones on their shared parent's side, grouped by family,
+and hang from that parent alone under their own family id (`half`, `sharedParentId`). Next to a
+spouse (a father's or mother's run) half siblings through the far parent are left out, as their
+line would have to cross the parents'. Siblings show without their parents too, joined by one
+bar with no drop. Each direct-line person has a `<id>:siblings` chevron.
+
+Siblings, aunts and uncles have `<id>:down` chevrons. The focus person's siblings reveal nieces
+and nephews (and further, like any descendant) in the children rows. The parents' siblings reveal
+cousins in the focus row, kept on the outer side of their parent:
+
+```
+ gen -1  [aunt]--[husband]  [dad]--[mom]  [uncle]
+               |                |            |
+          +----+----+     +-----+-----+      |
+          |         |     |           |      |
+ gen  0 [cousin] [cousin] [bro]  [ME]--[sp] [cousin]
+```
+
+Cousins stop there (no chevrons of their own), great-aunts and the spouse's aunts get no `down`
+chevron, and when a spouse's parents are shown there are no cousins on that side: in those cases
+the lines could not be drawn without crossing the direct line.
 
 With several spouses the focus block is `[spouse1][ME][spouse2][spouse3]`, in each partner's
 family order. Each family's children form their own group with their own sibling bar spanning
@@ -137,7 +156,8 @@ card when they are not (`sp3`) and from the person's card when the partner is un
 connector whose children are off to one side jogs sideways on its own level: families whose
 children lie to the right stack with the rightmost highest, those to the left with the leftmost
 highest, so no two families' lines cross or overlap (checked by a property test). Families of
-the same couple share its trunk. Lanes to further spouses nest above nearer ones.
+the same couple share its trunk. Lanes to further spouses nest above nearer ones, keeping a margin from the card tops and from the
+sibling bar above.
 
 Only one of the focus person's spouses shows parents at a time, and only an outermost one (a lane
 runs over the middle spouses); the focus person's siblings then move to the other side so the
@@ -146,8 +166,8 @@ two parent families' lines stay apart.
 ## Algorithm
 
 1. **Walk** (`build.ts`). Breadth first from the focus person: the focus block (focus plus
-   spouses), its children and the focus person's siblings, then ancestors (each with their
-   siblings), then deeper descendants. Each person's budget is the
+   spouses), its children, the focus person's siblings and expanded nieces and nephews, then
+   ancestors (each with their siblings and expanded cousins), then deeper descendants. Each person's budget is the
    remaining depth, raised by `expanded` and zeroed by `collapsed`. The first time a person is
    reached they get a primary card; any later time a duplicate card that is never walked, which
    draws pedigree collapse and keeps cyclic data finite.
@@ -155,7 +175,9 @@ two parent families' lines stay apart.
    cards. Bottom-up, each subtree keeps a contour (left and right extent per level). Children are
    packed left to right, each pushed just far enough to clear the accumulated contour on every
    shared level, then the block is centered over its groups. A sibling run is part of its
-   person's block, so grandparents center over the whole run. Contours are arrays indexed by
+   person's block, so grandparents center over the full siblings. Cousins are `downGroups` of
+   their parent's block, growing back towards the root; when a child subtree reaches the block's
+   own level that way, the block is packed in line between the children on its left and right. Contours are arrays indexed by
    absolute level with a lazy offset, and a merge reuses the deeper contour, so it costs only the
    shallower depth (no quadratic blow-up on long chains).
 3. **Merge**. Ancestors and descendants are two trees rooted at the same focus block, packed
@@ -169,8 +191,8 @@ ring, so missing people leave gaps rather than shifting others.
 
 ## Not yet covered
 
-- Siblings' children (nieces, nephews, cousins) are not drawn; re-focus to see them. Siblings and
-  their spouses have no chevrons of their own.
+- Cousins' children, great-aunts' children and a spouse's cousins are not drawn; re-focus to see
+  them.
 - A block with several child groups is centered on their average, so a group can sit to one side
   of its couple; its connector jogs over to it.
 - Only one spouse of the focus person shows parents at a time.

@@ -142,6 +142,8 @@ export interface LayoutEdge {
   rel?: ChildRelation;
   /** The child drop goes to a half sibling: draw it differently. */
   half?: boolean;
+  /** For a half sibling, the parent they share with the direct line. */
+  sharedParentId?: string;
   /** On couple edges, the family's relationship type when known. */
   relationship?: PartnerRelationship;
 }

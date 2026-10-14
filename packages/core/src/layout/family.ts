@@ -33,12 +33,12 @@ import type {
 
 const FAMILY_CHEVRONS: Chevrons = {
   up: new Set<Role>(['focus', 'spouse', 'ancestor']),
-  down: new Set<Role>(['focus', 'descendant']),
+  down: new Set<Role>(['focus', 'descendant', 'sibling', 'cousin']),
   siblings: new Set<Role>(['focus', 'ancestor']),
 };
 const DESCENDANT_CHEVRONS: Chevrons = {
   up: new Set(),
-  down: FAMILY_CHEVRONS.down,
+  down: new Set<Role>(['focus', 'descendant']),
   siblings: new Set(),
 };
 
@@ -104,14 +104,16 @@ function layoutVertical(
         : shown < descRoot.anchor
           ? 'right'
           : 'left';
-    b.addSiblings(descRoot, side);
+    // The spouse's parents take that side of the focus row, so cousins can't.
+    if (side !== 'center') b.spouseParentsSide = side === 'left' ? 'right' : 'left';
+    descQueue.push(...b.addSiblings(descRoot, side, 'up', gaps.sibling));
     const ancRoot = b.unit(descRoot.cards, 0);
     const queue = descRoot.cards.flatMap((card, i) => {
       if ((card.role !== 'focus' && card.role !== 'spouse') || card.upBlocked) return [];
       const base = card === focus ? s.ancestorsDepth : 0;
       return b.addParents(ancRoot, i, b.budget(card.personId, 'up', base), gaps.couple);
     });
-    ancUnits = [ancRoot, ...b.growAncestors(queue, gaps.couple, true)];
+    ancUnits = [ancRoot, ...b.growAncestors(queue, gaps.couple, gaps.sibling), ...b.downUnits];
   }
   const descUnits = [descRoot, ...b.growDescendants(descQueue, gaps.sibling)];
 
@@ -229,10 +231,11 @@ function verticalEdges(
         ],
       });
     }
-    link.children.forEach(({ card, rel, half: isHalf }, i) => {
+    link.children.forEach((child, i) => {
+      const { card, rel } = child;
       const edge: LayoutEdge = {
         kind: 'parent-child',
-        familyId,
+        familyId: child.familyId ?? familyId,
         group,
         points: [
           [xs[i]!, barY],
@@ -241,7 +244,8 @@ function verticalEdges(
         child: card.key,
         rel,
       };
-      if (isHalf) edge.half = true;
+      if (child.half) edge.half = true;
+      if (child.sharedParentId) edge.sharedParentId = child.sharedParentId;
       edges.push(edge);
     });
   };
@@ -263,7 +267,10 @@ function verticalEdges(
         ];
         start = [(l.x + w + r.x) / 2, cy];
       } else {
-        const laneY = l.y - (half * between) / (between + 1);
+        // Lanes fill the band between the card tops and the sibling bar above,
+        // keeping `margin` from both.
+        const margin = Math.min(10, half / 3);
+        const laneY = l.y - margin - (half - 2 * margin) * (1 - 1 / between);
         const sx = l.x + w / 2 + w / 2 / (between + 1);
         // Both ends sit off-centre so drops into the cards' tops stay clear.
         const rx = r.x + w / 2 - w / 2 / (between + 1);

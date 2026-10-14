@@ -319,7 +319,11 @@ describe('siblings in the family view', () => {
     const edges = layout.edges.filter((e) => e.familyId === 'F_me');
     expect(edges.some((e) => e.parents)).toBe(false);
     expect(edges.filter((e) => e.kind === 'sibling-bar')).toHaveLength(1);
-    expect(edges.filter((e) => e.child)).toHaveLength(4);
+    // The half brother shares the bar but keeps his own family on his edge.
+    expect(edges.filter((e) => e.child)).toHaveLength(3);
+    const bar = edges.find((e) => e.kind === 'sibling-bar')!;
+    const half = layout.edges.find((e) => e.child === 'half')!;
+    expect(half.group).toBe(bar.group);
   });
 
   it('orders undated siblings after dated ones, keeping family order', () => {

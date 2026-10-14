@@ -86,7 +86,7 @@ test('mutations need a same-origin Origin header and the session token', async (
 }, testInfo) => {
   const { 'x-oa-token': token } = await session(request, baseURL!);
   const data = { name: uniqueTree(testInfo) };
-  const attempts = [
+  const attempts: Record<string, string>[] = [
     {},
     { origin: baseURL! },
     { origin: 'http://evil.example', 'x-oa-token': token },
@@ -152,7 +152,7 @@ test('the app can mutate same-origin, other origins cannot read the token', asyn
   const name = uniqueTree(testInfo);
   // Same-origin fetch from the page, exactly as the SPA will do it.
   const status = await page.evaluate(async (treeName) => {
-    const { token } = await (await fetch('/api/session')).json();
+    const { token } = (await (await fetch('/api/session')).json()) as { token: string };
     const res = await fetch('/api/trees', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-oa-token': token },

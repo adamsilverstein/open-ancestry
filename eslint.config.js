@@ -44,7 +44,14 @@ export default defineConfig(
   },
   {
     // Temp folders in tests and benches must be cleaned up; makeTempDir does it.
-    files: ['**/*.test.{ts,tsx}', '**/test-helpers.ts', '**/test/**', 'bench/**', 'e2e/**'],
+    files: [
+      '**/*.test.{ts,tsx}',
+      '**/test-helpers.ts',
+      '**/test-utils.ts',
+      '**/test/**',
+      'bench/**',
+      'e2e/**',
+    ],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -54,6 +61,21 @@ export default defineConfig(
           message:
             'Use makeTempDir from fixtures/temp-dir.ts, which removes the folder after the test file.',
         })),
+      ],
+      // The same through a namespace or a dynamic import: fs.mkdtempSync(...),
+      // (await import('node:fs/promises')).mkdtemp(...), const { mkdtemp } = ...
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'MemberExpression[property.name=/^mkdtemp(Sync)?$/]',
+          message:
+            'Use makeTempDir from fixtures/temp-dir.ts, which removes the folder after the test file.',
+        },
+        {
+          selector: 'ObjectPattern > Property[key.name=/^mkdtemp(Sync)?$/]',
+          message:
+            'Use makeTempDir from fixtures/temp-dir.ts, which removes the folder after the test file.',
+        },
       ],
     },
   },

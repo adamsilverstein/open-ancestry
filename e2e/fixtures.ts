@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test as base } from '@playwright/test';
+import { mockApi } from './api-mock';
 import libCoverage, { type CoverageMapData } from 'istanbul-lib-coverage';
 import libSourceMaps from 'istanbul-lib-source-maps';
 
@@ -12,10 +13,18 @@ export { expect } from '@playwright/test';
 const rawCoverageDir = join(import.meta.dirname, '..', 'coverage', 'e2e', 'raw');
 
 /**
- * Playwright `test` with an automatic fixture that saves the instrumented
+ * Playwright `test` with automatic fixtures: `api` answers the tree read API
+ * from the fixture library, and `collectCoverage` saves the instrumented
  * build's `window.__coverage__` after each test when E2E_COVERAGE=1.
  */
-export const test = base.extend<{ collectCoverage: void }>({
+export const test = base.extend<{ collectCoverage: void; api: void }>({
+  api: [
+    async ({ page }, use) => {
+      await mockApi(page);
+      await use();
+    },
+    { auto: true },
+  ],
   collectCoverage: [
     async ({ page }, use) => {
       await use();

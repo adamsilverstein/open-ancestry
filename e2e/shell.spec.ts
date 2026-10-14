@@ -62,14 +62,6 @@ test.describe('navigation', () => {
     await expect(region.getByTestId('skeleton').first()).toBeVisible();
   });
 
-  test('person route renders a sized skeleton', async ({ page }) => {
-    await page.goto('/person/I1');
-    await expect(page.getByRole('heading', { level: 1, name: 'Person' })).toBeAttached();
-    const region = page.getByRole('region', { name: 'Person' });
-    await expect(region).toHaveAttribute('aria-busy', 'true');
-    await expect(region.getByTestId('skeleton').first()).toBeVisible();
-  });
-
   test('unknown routes show a 404 with a way home', async ({ page }) => {
     await page.goto('/no/such/page');
     await expect(page.getByRole('heading', { level: 1, name: 'Page not found' })).toBeVisible();

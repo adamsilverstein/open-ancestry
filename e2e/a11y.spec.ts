@@ -2,6 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { FIXTURE_PEOPLE } from './tree-fixture';
 import { openSeeded, seedTree } from './edit-seed';
 import { expect, test } from './fixtures';
+import { MEDIA_IDS, MEDIA_TREE } from './media-fixture';
 
 const people = FIXTURE_PEOPLE;
 
@@ -30,6 +31,17 @@ for (const colorScheme of ['light', 'dark'] as const) {
       });
     }
 
+    test('person gallery and lightbox have no violations', async ({ page }) => {
+      await page.addInitScript((tree) => localStorage.setItem('oa-tree', tree), MEDIA_TREE);
+      await page.goto(`/person/${MEDIA_IDS.imogen}?tab=gallery`);
+      const gallery = page.getByRole('region', { name: 'Gallery' });
+      await expect(gallery.getByRole('button', { name: /Wedding day/ })).toBeVisible();
+      expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+      await gallery.getByRole('button', { name: /Wedding day/ }).click();
+      await expect(page.getByRole('dialog')).toBeVisible();
+      expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    });
+
     test('import report and tree switcher menu have no violations', async ({ page }, testInfo) => {
       await page.goto('/');
       const ged = '0 HEAD\n0 @I1@ INDI\n1 NAME A /B/\n1 FAMC @F9@\n1 _X y\n0 TRLR\n';
@@ -48,6 +60,15 @@ for (const colorScheme of ['light', 'dark'] as const) {
       expect(
         (await new AxeBuilder({ page }).include('[role="menu"]').analyze()).violations,
       ).toEqual([]);
+    });
+
+    test('open export dialog has no violations', async ({ page }) => {
+      await page.goto('/');
+      await page.getByRole('button', { name: 'File' }).click();
+      await page.getByRole('menuitem', { name: /Export/ }).click();
+      await expect(page.getByRole('dialog', { name: 'Export tree' })).toBeVisible();
+      const results = await new AxeBuilder({ page }).analyze();
+      expect(results.violations).toEqual([]);
     });
 
     test('open command palette has no violations', async ({ page }) => {

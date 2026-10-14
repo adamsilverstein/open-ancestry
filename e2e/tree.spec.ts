@@ -227,8 +227,10 @@ test.describe('family view', () => {
   test('the family view loads in one request, siblings and aunts included', async ({ page }) => {
     const requests: string[] = [];
     page.on('request', (r) => {
-      // API calls only: a JS chunk can be named after the neighborhood module too.
-      if (new URL(r.url()).pathname.match(/^\/api\/.*\/neighborhood$/)) requests.push(r.url());
+      // API calls only: a build chunk can also be named after the neighborhood module.
+      if (new URL(r.url()).pathname.startsWith('/api/') && r.url().includes('/neighborhood')) {
+        requests.push(r.url());
+      }
     });
     await open(page);
     await expect(card(page, 'Fenn Vale')).toBeAttached();

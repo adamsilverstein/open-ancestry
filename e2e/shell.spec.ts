@@ -40,12 +40,12 @@ test.describe('navigation', () => {
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Import your Ancestry GEDCOM');
   });
 
-  test('file menu lists import and export placeholders', async ({ page }) => {
+  test('file menu lists import and export', async ({ page }) => {
     await page.goto('/');
     await page.getByRole('button', { name: 'File' }).click();
     const menu = page.getByRole('menu');
     await expect(menu.getByRole('menuitem', { name: /Import GEDCOM/ })).toBeEnabled();
-    await expect(menu.getByRole('menuitem', { name: /Export GEDCOM/ })).toBeDisabled();
+    await expect(menu.getByRole('menuitem', { name: /Export/ })).toBeEnabled();
     await page.keyboard.press('Escape');
     await expect(menu).toBeHidden();
     await expect(page.getByRole('button', { name: 'File' })).toBeFocused();

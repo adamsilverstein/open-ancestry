@@ -60,7 +60,7 @@ Values edited after parsing are re-encoded: `\n` becomes CONT, `@` is escaped fo
 
 ## GEDZIP
 
-`readGedzip` wants `gedcom.ged` at the root (a single root `.ged` is accepted with a warning). Limits are checked against the central directory before anything inflates, and inflation is bounded by the declared size: `maxEntries` (10,000), `maxEntrySize` (512 MiB), `maxTotalSize` (2 GiB), `maxRatio` (200:1 for entries over 1 MiB). Absolute paths, drive letters, NUL and `..` segments are skipped with a warning.
+`readGedzip` wants `gedcom.ged` at the root (a single root `.ged` is accepted with a warning). It reads the central directory itself and checks `maxEntries` (10,000), `maxEntrySize` (512 MiB), `maxTotalSize` (2 GiB) and `maxRatio` (200:1 for entries over 1 MiB) before inflating anything. Inflation then counts the bytes it actually produces, 4 KiB of input at a time, and aborts with `GedzipError('invalid')` as soon as an entry passes its declared size (or ends short of it), so a header that lies cannot get past the limits. Absolute paths, drive letters, NUL and `..` segments, encrypted entries and unknown compression methods are skipped with a warning. ZIP64 archives are rejected; they would exceed the limits anyway.
 
 ## Performance
 

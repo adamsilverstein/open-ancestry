@@ -5,6 +5,20 @@ import { GedzipError, readGedzip } from './gedzip';
 const GED = strToU8('0 HEAD\n1 GEDC\n2 VERS 7.0\n0 TRLR\n');
 const zip = (files: Zippable, level: 0 | 9 = 9) => zipSync(files, { level });
 
+/** Overwrites a field of the named entry's central directory record (offsets per the zip spec). */
+function patchCentral(archive: Uint8Array, name: string, offset: number, value: number, bytes = 4) {
+  const view = new DataView(archive.buffer, archive.byteOffset, archive.byteLength);
+  for (let p = 0; p + 46 < archive.length; p++) {
+    if (view.getUint32(p, true) !== 0x02014b50) continue;
+    const length = view.getUint16(p + 28, true);
+    if (new TextDecoder().decode(archive.subarray(p + 46, p + 46 + length)) !== name) continue;
+    if (bytes === 4) view.setUint32(p + offset, value, true);
+    else view.setUint16(p + offset, value, true);
+    return archive;
+  }
+  throw new Error(`no central entry ${name}`);
+}
+
 function expectError(fn: () => unknown, code: GedzipError['code']) {
   try {
     fn();
@@ -101,5 +115,72 @@ describe('readGedzip', () => {
 
   it('rejects bytes that are not a zip archive', () => {
     expectError(() => readGedzip(GED), 'invalid');
+  });
+
+  describe('headers that lie about sizes', () => {
+    const SIZE = 24;
+    const COMPRESSED = 20;
+
+    it('aborts inflation as soon as an entry passes its declared size', () => {
+      // 50 MB of zeros declared as 100 bytes passes the up-front checks.
+      const archive = zip({ 'gedcom.ged': GED, 'bomb.bin': new Uint8Array(50_000_000) });
+      patchCentral(archive, 'bomb.bin', SIZE, 100);
+      const start = performance.now();
+      expectError(() => readGedzip(archive), 'invalid');
+      expect(performance.now() - start).toBeLessThan(1000);
+    });
+
+    it('rejects an entry that inflates to less than declared', () => {
+      const archive = patchCentral(zip({ 'gedcom.ged': GED }), 'gedcom.ged', SIZE, GED.length + 5);
+      expectError(() => readGedzip(archive), 'invalid');
+    });
+
+    it('rejects a stored entry whose size does not match', () => {
+      const archive = patchCentral(zip({ 'gedcom.ged': GED }, 0), 'gedcom.ged', SIZE, 3);
+      expectError(() => readGedzip(archive), 'invalid');
+    });
+
+    it('rejects compressed data that runs past the end of the archive', () => {
+      const archive = patchCentral(zip({ 'gedcom.ged': GED }), 'gedcom.ged', COMPRESSED, 1_000_000);
+      expectError(() => readGedzip(archive), 'invalid');
+    });
+
+    it('rejects corrupt deflate data', () => {
+      const archive = zip({ 'gedcom.ged': GED });
+      // Local header (30) + name (10) is where the deflate stream starts.
+      archive.fill(0xff, 40, 44);
+      expectError(() => readGedzip(archive), 'invalid');
+    });
+
+    it('rejects a local header offset that does not point at a local header', () => {
+      const archive = patchCentral(zip({ 'gedcom.ged': GED }), 'gedcom.ged', 42, 5);
+      expectError(() => readGedzip(archive), 'invalid');
+    });
+
+    it('rejects ZIP64 markers', () => {
+      const archive = patchCentral(zip({ 'gedcom.ged': GED }), 'gedcom.ged', SIZE, 0xffffffff);
+      expectError(() => readGedzip(archive), 'invalid');
+    });
+
+    it('skips encrypted entries and unknown compression methods', () => {
+      const archive = zip({
+        'gedcom.ged': GED,
+        'a.jpg': new Uint8Array([1]),
+        'b.jpg': new Uint8Array([2]),
+      });
+      patchCentral(archive, 'a.jpg', 8, 1, 2);
+      patchCentral(archive, 'b.jpg', 10, 12, 2);
+      const result = readGedzip(archive);
+      expect(result.media.size).toBe(0);
+      expect(result.warnings).toHaveLength(2);
+    });
+
+    it('rejects a truncated central directory', () => {
+      const archive = zip({ 'gedcom.ged': GED });
+      const view = new DataView(archive.buffer);
+      // Point the end record at a central directory offset past the data.
+      view.setUint32(archive.length - 22 + 16, archive.length - 30, true);
+      expectError(() => readGedzip(archive), 'invalid');
+    });
   });
 });

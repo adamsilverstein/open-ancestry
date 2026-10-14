@@ -61,3 +61,4 @@ export {
   type OaJsonTables,
 } from './json';
 export { generateSyntheticTree, type SyntheticOptions, type SyntheticTree } from './synthetic';
+export { getRelationship, type RelationshipView } from './kinship';

@@ -2713,6 +2713,24 @@
   "Privacy": {
     "enum": ["public", "private", "confidential", "locked"]
   },
+  "RelationshipQuery": {
+    "type": "object",
+    "required": ["from"],
+    "properties": {
+      "from": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      },
+      "to": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      }
+    }
+  },
   "RelationshipType": {
     "enum": ["married", "civil_union", "partners", "unknown"]
   },

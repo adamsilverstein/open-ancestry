@@ -749,7 +749,7 @@ const vitalSort = (types: readonly string[]) =>
 const ORDER_CACHE_SIZE = 4;
 const orderCache = new WeakMap<TreeStore, Map<string, string[]>>();
 
-function databaseVersion(store: TreeStore): string {
+export function databaseVersion(store: TreeStore): string {
   const { changes } = store.stmt('SELECT total_changes() AS changes').get() as { changes: number };
   return `${changes}:${store.db.pragma('data_version', { simple: true }) as number}`;
 }

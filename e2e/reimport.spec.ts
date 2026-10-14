@@ -337,6 +337,56 @@ test('applying a review the tree moved past shows Compare again instead', async 
   await expect(page.getByRole('button', { name: /^Apply \d+ changes?$/ })).toBeDisabled();
 });
 
+test('an override is not carried onto a newer local value, and a refused compare says why', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const josiah = (await personByName(request, seeded.tree, 'Josiah'))!;
+  const death = await eventDate(request, seeded.tree, josiah, 'DEAT');
+  const edit = (date: string) =>
+    request.patch(`/api/trees/${encodeURIComponent(seeded.tree)}/events/${death.id}`, {
+      headers: seeded.headers,
+      data: { date_text: date },
+    });
+  await edit('3 MAY 1939');
+  await startReimport(page, seeded);
+  // The user overrides their own edit...
+  await card(page, 'Josiah Ashgrove')
+    .getByRole('checkbox', { name: /Death: 3 MAY 1939 → 1940/ })
+    .check();
+  // ...then the date is edited again elsewhere.
+  await edit('4 MAY 1939');
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  const banner = page.getByRole('alert').filter({ hasText: 'Your tree changed' });
+  // A refused comparison (the tree is busy) explains itself and keeps the review.
+  await page.route('**/api/reimports/*/refresh', (route) =>
+    route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: { code: 'conflict', message: 'Tree is busy (an import is running)' },
+      }),
+    }),
+  );
+  await banner.getByRole('button', { name: 'Compare again' }).click();
+  await expect(
+    page
+      .getByRole('region', { name: /Notifications/ })
+      .getByRole('listitem')
+      .filter({ hasText: 'Tree is busy (an import is running)' }),
+  ).toBeVisible();
+  await expect(banner).toBeVisible();
+  await page.unroute('**/api/reimports/*/refresh');
+  await banner.getByRole('button', { name: 'Compare again' }).click();
+  await expect(banner).toBeHidden();
+  // The override was for 3 May; the user hasn't seen 4 May, so it starts unticked again.
+  await expect(
+    card(page, 'Josiah Ashgrove').getByRole('checkbox', { name: /Death: 4 MAY 1939 → 1940/ }),
+  ).not.toBeChecked();
+});
+
 test('discarding a review changes nothing', async ({ page, request, baseURL }, testInfo) => {
   const seeded = await seed(request, baseURL!, testInfo);
   await startReimport(page, seeded);

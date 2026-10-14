@@ -59,6 +59,8 @@ export interface ReimportReview {
   warningCount: number;
   /** The tree changed since the comparison: apply would be refused. */
   stale: boolean;
+  /** Which comparison the change ids belong to; sent back with apply and status. */
+  comparison: number;
   diff: {
     people: PersonReview[];
     counts: {
@@ -85,18 +87,18 @@ export function startReimport(tree: string, file: File): Promise<{ jobId: string
 export const getReimport = (id: string, signal?: AbortSignal) =>
   apiGet<ReimportReview>(`/reimports/${seg(id)}`, signal);
 
-export const getReimportStatus = (id: string, signal?: AbortSignal) =>
-  apiGet<{ stale: boolean }>(`/reimports/${seg(id)}/status`, signal);
+export const getReimportStatus = (id: string, comparison: number, signal?: AbortSignal) =>
+  apiGet<{ stale: boolean }>(`/reimports/${seg(id)}/status?comparison=${comparison}`, signal);
 
 /** Compares the same export again with the tree as it is now. */
 export const refreshReimport = (id: string) =>
   apiSend<ReimportReview>('POST', `/reimports/${seg(id)}/refresh`);
 
-export const applyReimport = (id: string, accept: string[]) =>
+export const applyReimport = (id: string, comparison: number, accept: string[]) =>
   apiSend<{ batchId: string; applied: number; skipped: number; blocked: string[] }>(
     'POST',
     `/reimports/${seg(id)}/apply`,
-    { accept },
+    { accept, comparison },
   );
 
 export const discardReimport = (id: string) => apiSend<void>('DELETE', `/reimports/${seg(id)}`);

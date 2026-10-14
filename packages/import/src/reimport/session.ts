@@ -13,6 +13,11 @@ export interface ReimportSession {
   report: ImportReport;
   matches: Map<string, PersonMatch>;
   diff: ReimportDiff;
+  /**
+   * Which comparison of this export the review shows: 1, then one more per
+   * `refreshReimport`. Change ids are only meaningful within one comparison.
+   */
+  comparison: number;
   /** The tree's revision when compared (see `treeRevision`); apply refuses if it moved. */
   baseRevision: string;
   timings: { import: number; compare: number };
@@ -35,6 +40,7 @@ export async function prepareReimport(
     return {
       incoming,
       report,
+      comparison: 1,
       ...compare(store, incoming),
       timings: {
         import: Math.round(imported - started),
@@ -70,6 +76,7 @@ export function isReimportStale(store: TreeStore, session: ReimportSession): boo
 export function refreshReimport(store: TreeStore, session: ReimportSession): ReimportSession {
   const started = performance.now();
   Object.assign(session, compare(store, session.incoming));
+  session.comparison++;
   session.timings = { ...session.timings, compare: Math.round(performance.now() - started) };
   return session;
 }

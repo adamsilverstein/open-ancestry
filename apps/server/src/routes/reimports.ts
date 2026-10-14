@@ -6,7 +6,7 @@ import {
 } from '@open-ancestry/import';
 import type { Api, Deps } from '../context';
 import { conflict, notFound } from '../errors';
-import { JobParams, ReimportApplyBody } from '../schemas';
+import { JobParams, ReimportApplyBody, ReimportStatusQuery } from '../schemas';
 
 /** Review, apply and discard re-imports started by `POST /api/trees/:tree/reimport`. */
 export function reimportRoutes(app: Api, { library, reimports }: Deps): void {
@@ -28,6 +28,8 @@ export function reimportRoutes(app: Api, { library, reimports }: Deps): void {
       warningCount: report.warningCount,
       lines: report.lines,
       timings: session.timings,
+      /** Which comparison the change ids belong to: send it back with apply and status. */
+      comparison: session.comparison,
       /** The tree changed since the comparison: apply would be refused (#163). */
       stale: isReimportStale(library.open(tree), session),
       // familyMatches is apply's bookkeeping; the review doesn't need it.
@@ -40,10 +42,20 @@ export function reimportRoutes(app: Api, { library, reimports }: Deps): void {
   );
 
   // Cheap enough to ask on every focus of the review page.
-  app.get('/api/reimports/:id/status', { schema: { params: JobParams } }, async (request) => {
-    const { tree, session } = find(request.params.id);
-    return { stale: isReimportStale(library.open(tree), session) };
-  });
+  // Stale too when the client holds an older comparison (another tab compared again).
+  app.get(
+    '/api/reimports/:id/status',
+    { schema: { params: JobParams, querystring: ReimportStatusQuery } },
+    async (request) => {
+      const { tree, session } = find(request.params.id);
+      const { comparison } = request.query;
+      return {
+        stale:
+          (comparison !== undefined && comparison !== session.comparison) ||
+          isReimportStale(library.open(tree), session),
+      };
+    },
+  );
 
   // Compare the same export again with the tree as it is now.
   app.post('/api/reimports/:id/refresh', { schema: { params: JobParams } }, async (request) => {
@@ -59,6 +71,10 @@ export function reimportRoutes(app: Api, { library, reimports }: Deps): void {
     { schema: { params: JobParams, body: ReimportApplyBody } },
     async (request) => {
       const stored = find(request.params.id);
+      // Ids are renumbered by every comparison: never apply ids from another one.
+      if (request.body.comparison !== stored.session.comparison) {
+        throw conflict('This review was compared again elsewhere; reload it before applying');
+      }
       // No :tree param, so the global busy check can't see this write (issue #96).
       library.assertIdle(stored.tree);
       const store = library.open(stored.tree);

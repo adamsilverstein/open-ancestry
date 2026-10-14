@@ -35,6 +35,15 @@ const STATUS: Record<PersonReview['status'], string> = {
   missing: 'Not in the new export',
 };
 
+/** What a change says, without its per-comparison ids: equal only if nothing about it changed. */
+function contentOf(change: ReviewChange): string {
+  const { id: _id, requires: _requires, defaultAccept: _default, ...rest } = change;
+  void _id;
+  void _requires;
+  void _default;
+  return JSON.stringify(rest);
+}
+
 /** Changes that would be applied: chosen, applicable, and with every prerequisite chosen. */
 function effective(review: ReimportReview, selected: Set<string>): Set<string> {
   const chosen = new Set(
@@ -141,9 +150,12 @@ function Review({ review }: { review: ReimportReview }) {
   // Edits elsewhere (another tab) make the review stale: check whenever the page is back in view.
   useEffect(() => {
     let current = true;
+    let last = 0;
     const check = () => {
-      if (document.visibilityState === 'hidden') return;
-      getReimportStatus(review.id)
+      // Focus and visibilitychange usually fire together: ask once.
+      if (document.visibilityState === 'hidden' || Date.now() - last < 250) return;
+      last = Date.now();
+      getReimportStatus(review.id, review.comparison)
         .then((status) => current && setStale(status.stale))
         .catch(() => {});
     };
@@ -154,12 +166,13 @@ function Review({ review }: { review: ReimportReview }) {
       window.removeEventListener('focus', check);
       document.removeEventListener('visibilitychange', check);
     };
-  }, [review.id]);
+  }, [review.id, review.comparison]);
 
   /**
    * Compares the export again and keeps every choice the user made: a change
-   * still there keeps a tick that differs from its old default; anything
-   * else takes its new default (a change that became a conflict starts unticked).
+   * that still says exactly the same thing keeps a tick that differs from its
+   * old default; anything else takes its new default, so a choice never
+   * carries over onto a value the user hasn't seen.
    */
   async function compareAgain() {
     setComparing(true);
@@ -168,12 +181,16 @@ function Review({ review }: { review: ReimportReview }) {
       const chosen = new Map(
         all
           .filter((c) => c.applicable && selected.has(c.id) !== c.defaultAccept)
-          .map((c) => [c.key, selected.has(c.id)]),
+          .map((c) => [c.key, { on: selected.has(c.id), content: contentOf(c) }]),
       );
+      const keep = (c: ReviewChange) => {
+        const before = chosen.get(c.key);
+        return before && before.content === contentOf(c) ? before.on : c.defaultAccept;
+      };
       const next = new Set(
         fresh.diff.people
           .flatMap((p) => p.changes)
-          .filter((c) => c.applicable && (chosen.get(c.key) ?? c.defaultAccept))
+          .filter((c) => c.applicable && keep(c))
           .map((c) => c.id),
       );
       queryClient.setQueryData(['reimport', review.id], fresh);
@@ -215,7 +232,7 @@ function Review({ review }: { review: ReimportReview }) {
   async function apply() {
     setPending(true);
     try {
-      const result = await applyReimport(review.id, [...active]);
+      const result = await applyReimport(review.id, review.comparison, [...active]);
       await invalidateTree(queryClient, review.tree);
       toast({
         title: `Applied ${result.applied} change${result.applied === 1 ? '' : 's'}`,

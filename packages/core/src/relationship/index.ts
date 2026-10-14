@@ -1,5 +1,7 @@
 export { relationship } from './calculate';
-export { kinshipGraph } from './graph';
+export { chartPath } from './chart';
+export type { ChartCell } from './chart';
+export { isVirtualParent, kinshipGraph, VIRTUAL_PARENT } from './graph';
 export type * from './types';
 export { bloodName as relationshipName } from './names';
 export type {

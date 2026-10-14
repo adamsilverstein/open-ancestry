@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { fromNeighborhood } from '../layout';
-import { kinshipGraph, relationship, relationshipName } from './index';
+import { chartPath, kinshipGraph, relationship, relationshipName } from './index';
 import type { KinshipGraph } from './index';
 import {
   bigFamily,
@@ -82,7 +82,8 @@ describe('relationship names (A is B’s ...)', () => {
     // Adoption, foster and step edges
     ['adoptee', 'me', 'adopted son'],
     ['me', 'adoptee', 'adoptive mother'],
-    ['adoptee', 'son', 'adoptive brother'],
+    ['adoptee', 'son', 'adopted brother'],
+    ['son', 'adoptee', 'adoptive brother'],
     ['adoptee', 'dad', 'adopted grandson'],
     ['fosterkid', 'uncle', 'foster daughter'],
     ['uncle', 'fosterkid', 'foster father'],
@@ -112,8 +113,8 @@ describe('relationship names (A is B’s ...)', () => {
     ['sisH', 'bro', 'brother-in-law'],
     ['c1w', 'me', '1st cousin’s wife'],
     ['cousin1', 'hus', 'wife’s 1st cousin'],
-    ['husSisH', 'me', 'husband’s sister’s husband'],
-    ['me', 'uncleW', 'husband’s niece'],
+    ['husSisH', 'me', 'sister-in-law’s husband'],
+    ['me', 'uncleW', 'niece by marriage'],
     ['gson', 'hus', 'grandson'],
     ['dadStep', 'gf', 'step-grandson'],
     ['fosterkid', 'cousin1', 'foster sister'],
@@ -132,6 +133,7 @@ describe('paths and pedigree collapse', () => {
   it('returns the path from A up to the common ancestors and down to B', () => {
     const r = relationship(family, 'cousin1', 'me');
     expect(r.relationships).toHaveLength(1);
+    expect(r.complete).toBe(true);
     const [first] = r.relationships;
     expect(first).toMatchObject({
       kind: 'blood',
@@ -147,6 +149,7 @@ describe('paths and pedigree collapse', () => {
         { kind: 'child', rel: 'unknown' },
         { kind: 'child', rel: 'unknown' },
       ],
+      generations: [2, 2],
     });
   });
 
@@ -353,5 +356,39 @@ describe('relationshipName and neighborhood input', () => {
       half: false,
       commonAncestors: ['dad'],
     });
+  });
+});
+
+describe('chartPath', () => {
+  it('lays a cousin path out as two columns under the common ancestor', () => {
+    const [path] = relationship(family, 'cousin1', 'me').relationships[0]!.paths;
+    expect(chartPath(path!)).toEqual([
+      { id: 'cousin1', row: 2, col: 0 },
+      { id: 'uncle', row: 1, col: 0 },
+      { id: 'gf', row: 0, col: 0 },
+      { id: 'dad', row: 1, col: 1 },
+      { id: 'me', row: 2, col: 1 },
+    ]);
+  });
+
+  it('gives each marriage its own column', () => {
+    const [path] = relationship(family, 'stepsib', 'me').relationships[0]!.paths;
+    expect(chartPath(path!)).toEqual([
+      { id: 'stepsib', row: 1, col: 0 },
+      { id: 'stepmom', row: 0, col: 0 },
+      { id: 'dad', row: 0, col: 1 },
+      { id: 'me', row: 1, col: 1 },
+    ]);
+    // A turn from going down to going up starts a new column.
+    expect(
+      chartPath({
+        ids: ['a', 'kid', 'b'],
+        steps: [{ kind: 'child' }, { kind: 'parent' }],
+      }),
+    ).toEqual([
+      { id: 'a', row: 0, col: 0 },
+      { id: 'kid', row: 1, col: 0 },
+      { id: 'b', row: 0, col: 1 },
+    ]);
   });
 });

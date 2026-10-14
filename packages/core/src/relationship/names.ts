@@ -9,7 +9,8 @@
 import type { PartnerRelationship, Sex } from '../layout/types';
 
 /** A non-biological link on the path that changes the name. */
-export type Modifier = 'step' | 'adopted' | 'foster' | undefined;
+/** `adopted` when A was adopted on the way, `adoptive` when B's side was. */
+export type Modifier = 'step' | 'adopted' | 'adoptive' | 'foster' | undefined;
 
 export const APOSTROPHE = '’s ';
 
@@ -94,7 +95,7 @@ export function bloodName(
     const simple = (isAncestor(shape) && down === 1) || (isDescendant(shape) && up === 1);
     return simple || isSibling(shape) ? `step${word}` : `step-${word}`;
   }
-  if (modifier === 'adopted') return `${isDescendant(shape) ? 'adopted' : 'adoptive'} ${word}`;
+  if (modifier === 'adopted' || modifier === 'adoptive') return `${modifier} ${word}`;
   if (modifier === 'foster') return `foster ${word}`;
   if (half) return style === 'ancestry' || isCousin(shape) ? `half ${word}` : `half-${word}`;
   return word;
@@ -131,6 +132,7 @@ export function relativeOfSpouse(
   relativeName: string,
   sex: Sex | undefined,
   spouse: string,
+  style: NameStyle,
 ): string {
   if (isAncestor(shape)) return `${ancestorWord(shape.down, sex)}-in-law`;
   if (isDescendant(shape)) {
@@ -139,6 +141,8 @@ export function relativeOfSpouse(
       : `step-${descendantWord(shape.up, sex)}`;
   }
   if (isSibling(shape)) return `${pick(sex, 'brother', 'sister', 'sibling')}-in-law`;
+  if (isAuntOrUncle(shape)) return `${auntWord(shape.down, sex, style)} by marriage`;
+  if (isNieceOrNephew(shape)) return `${nieceWord(shape.up, sex, style)} by marriage`;
   return spouse + APOSTROPHE + relativeName;
 }
 

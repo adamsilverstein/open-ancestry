@@ -39,14 +39,18 @@ export interface PathStep {
 export interface RelationshipPath {
   ids: string[];
   steps: PathStep[];
+  /** Blood paths: generations from A up to the common ancestor and down to B. */
+  generations?: [number, number];
 }
 
 export interface Relationship {
   /** English name of what A is to B: "2nd cousin once removed", "sister-in-law". */
   name: string;
   kind: 'self' | 'blood' | 'marriage';
-  /** Every path that gives this name (more than one with pedigree collapse or double cousins). */
+  /** Paths that give this name, at most `maxPaths` (more than one with pedigree collapse). */
   paths: RelationshipPath[];
+  /** All paths found, before `maxPaths`. */
+  pathCount: number;
   /** Blood only: the most recent common ancestors (a couple, or one person when half). */
   commonAncestors?: string[];
   /** Blood only: generations from A and from B up to the common ancestors. */
@@ -57,10 +61,23 @@ export interface Relationship {
 export interface RelationshipResult {
   a: string;
   b: string;
-  /** Shortest relationships first; empty when unrelated within the search bounds. */
+  /**
+   * Closest first, at most `maxRelationships`; empty when unrelated. A one-line
+   * label such as the person page header should use `relationships[0].name`.
+   */
   relationships: Relationship[];
-  /** All names joined, e.g. "2nd cousin and also 3rd cousin once removed", or "unrelated". */
+  /** All relationships found, before `maxRelationships`. */
+  relationshipCount: number;
+  /**
+   * Names joined, e.g. "2nd cousin and also 3rd cousin 1x removed", ending
+   * "and N more" past `maxRelationships`; "unrelated" when none.
+   */
   name: string;
+  /**
+   * False when a search bound (`maxGenerations`, `maxNodes`) stopped the
+   * walk or output was trimmed: "unrelated" then means "none found".
+   */
+  complete: boolean;
 }
 
 export interface RelationshipOptions {
@@ -70,6 +87,10 @@ export interface RelationshipOptions {
   maxNodes?: number;
   /** Marriages allowed on a non-blood path. Default 2 ("wife's brother's wife"). */
   maxMarriages?: number;
+  /** Paths returned per relationship. Default 8. */
+  maxPaths?: number;
+  /** Relationships returned. Default 4. */
+  maxRelationships?: number;
   /**
    * `ancestry` (default) matches Ancestry.com: "granduncle", "grandniece",
    * "1st cousin 1x removed", "half sister". `formal`: "great-uncle",

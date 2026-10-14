@@ -42,7 +42,7 @@ const spanEnd = (first: number) => first + (first % 100 === 0 && first < 2000 ? 
 
 /** Last year of `<right>s` after `<left>s`: a century only when the left side is one. */
 const rightEnd = (left: number, right: number) =>
-  right + (left % 100 === 0 && left < 2000 && right % 100 === 0 ? 99 : 9);
+  right + (left % 100 === 0 && left < 2000 && right % 100 === 0 && right < 2000 ? 99 : 9);
 
 /** A decade (`1850s`, `1850's`, `2000s`) or a century before 2000 (`1700s`). */
 export const arbDecade: fc.Arbitrary<Span> = fc

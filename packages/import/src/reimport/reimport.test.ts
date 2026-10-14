@@ -10,6 +10,7 @@ import {
   applyReimport,
   closeReimport,
   jaroWinkler,
+  localHistory,
   prepareReimport,
   type PersonReview,
   type ReimportSession,
@@ -839,5 +840,254 @@ describe('review findings (#72)', () => {
     } finally {
       closeReimport(s2);
     }
+  });
+});
+
+describe('re-review (#72): what the user deleted stays deleted', () => {
+  /** Re-imports the unchanged sample (renumbered) and returns one person's changes. */
+  async function changesFor(xref: string) {
+    const id = pid(store, xref);
+    const s2 = await prepareReimport(store, { bytes: renumber(SAMPLE) }, { today: TODAY });
+    try {
+      return s2.diff.people
+        .filter((p) => p.existingId === id)
+        .flatMap((p) => p.changes)
+        .map((c) => ({
+          kind: c.kind,
+          conflict: c.conflict,
+          defaultAccept: c.defaultAccept,
+          fact: c.kind === 'fact.add' ? c.fact.type : undefined,
+        }));
+    } finally {
+      closeReimport(s2);
+    }
+  }
+  const deleted = (kind: string, fact?: string) => ({
+    kind,
+    conflict: 'local-delete',
+    defaultAccept: false,
+    fact,
+  });
+  const eventOf = (personId: string, type: string) =>
+    value<string>(
+      store,
+      'SELECT e.id FROM event e JOIN event_role r ON r.event_id = e.id WHERE r.person_id = ? AND e.type = ?',
+      personId,
+      type,
+    );
+
+  it('a deleted fact', async () => {
+    const thaddeus = pid(store, '@I1@');
+    const birth = eventOf(thaddeus, 'BIRT');
+    store.transact('Delete birth', (tx) => {
+      for (const r of rows<{ id: string }>(
+        store,
+        'SELECT id FROM event_role WHERE event_id = ?',
+        birth,
+      ))
+        tx.delete('event_role', r.id);
+      tx.delete('event', birth);
+    });
+    expect(await changesFor('@I1@')).toEqual([deleted('fact.add', 'BIRT')]);
+  });
+
+  it('a deleted name', async () => {
+    const mercy = pid(store, '@I2@');
+    const name = value<string>(store, 'SELECT id FROM person_name WHERE person_id = ?', mercy);
+    store.transact('Replace name', (tx) => {
+      tx.delete('person_name', name);
+      tx.insert('person_name', {
+        person_id: mercy,
+        given: 'Merry',
+        surname: 'Bellweather',
+        is_primary: 1,
+      } as never);
+    });
+    expect(await changesFor('@I2@')).toEqual([deleted('name.add')]);
+  });
+
+  it('a deleted citation', async () => {
+    const death = eventOf(pid(store, '@I1@'), 'DEAT');
+    const link = value<string>(
+      store,
+      "SELECT id FROM citation_link WHERE owner_type = 'event' AND owner_id = ?",
+      death,
+    );
+    store.transact('Remove source', (tx) => tx.delete('citation_link', link));
+    expect(await changesFor('@I1@')).toEqual([deleted('citation.add')]);
+  });
+
+  it('a deleted media link', async () => {
+    const thaddeus = pid(store, '@I1@');
+    store.transact('Remove photo', (tx) => {
+      tx.update('person', thaddeus, { primary_media_id: null });
+      for (const l of rows<{ id: string }>(
+        store,
+        "SELECT id FROM media_link WHERE owner_type = 'person' AND owner_id = ?",
+        thaddeus,
+      ))
+        tx.delete('media_link', l.id);
+    });
+    expect(await changesFor('@I1@')).toEqual([deleted('media.add')]);
+  });
+
+  it('a deleted parent link', async () => {
+    const josiah = pid(store, '@I3@');
+    const link = value<string>(store, 'SELECT id FROM family_child WHERE child_id = ?', josiah);
+    store.transact('Unlink parents', (tx) => tx.delete('family_child', link));
+    expect(await changesFor('@I3@')).toEqual([deleted('child.add')]);
+  });
+
+  it('a deleted partnership', async () => {
+    const thaddeus = pid(store, '@I1@');
+    const family = value<string>(
+      store,
+      'SELECT id FROM family WHERE partner1_id = ? OR partner2_id = ?',
+      thaddeus,
+      thaddeus,
+    );
+    store.transact('Remove partnership', (tx) => {
+      for (const r of rows<{ id: string; event_id: string }>(
+        store,
+        'SELECT id, event_id FROM event_role WHERE family_id = ?',
+        family,
+      )) {
+        tx.delete('event_role', r.id);
+        tx.delete('event', r.event_id);
+      }
+      for (const c of rows<{ id: string }>(
+        store,
+        'SELECT id FROM family_child WHERE family_id = ?',
+        family,
+      ))
+        tx.delete('family_child', c.id);
+      tx.delete('family', family);
+    });
+    const changes = await changesFor('@I1@');
+    expect(changes).toContainEqual(deleted('family.add'));
+    expect(changes.every((c) => !c.defaultAccept)).toBe(true);
+    // The children's links to that family were deleted with it.
+    expect(await changesFor('@I3@')).toEqual([deleted('child.add')]);
+  });
+
+  it('only offers a deleted person back as "deleted here" when the birth year agrees too', async () => {
+    const lily = pid(store, '@I26@');
+    const born = value<string>(
+      store,
+      "SELECT e.date_text FROM event e JOIN event_role r ON r.event_id = e.id WHERE r.person_id = ? AND e.type = 'BIRT'",
+      lily,
+    );
+    store.transact('Delete', (tx) => {
+      for (const r of rows<{ id: string; event_id: string }>(
+        store,
+        'SELECT id, event_id FROM event_role WHERE person_id = ?',
+        lily,
+      )) {
+        tx.delete('event_role', r.id);
+        tx.delete('event', r.event_id);
+      }
+      for (const n of rows<{ id: string }>(
+        store,
+        'SELECT id FROM person_name WHERE person_id = ?',
+        lily,
+      ))
+        tx.delete('person_name', n.id);
+      for (const c of rows<{ id: string }>(
+        store,
+        'SELECT id FROM family_child WHERE child_id = ?',
+        lily,
+      ))
+        tx.delete('family_child', c.id);
+      tx.delete('person', lily);
+    });
+    const year = /\d{4}/.exec(born)![0];
+    const record = recordOf(SAMPLE, '@I26@').join('\n');
+    const other = renumber(SAMPLE.replace(record, record.replace(year, String(Number(year) - 40))));
+    const s2 = await prepareReimport(store, { bytes: other }, { today: TODAY });
+    try {
+      const review = s2.diff.people.find((p) => p.name === 'Lily Mosswood')!;
+      expect(review.changes.map((c) => c.kind)).not.toContain('deleted-here');
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  it('does not count a change that only normalizes Unicode as a local edit', async () => {
+    const tree = openMemoryTree();
+    await importGedcom(
+      { bytes: ged('0 @I1@ INDI', '1 NAME René /Aubert/', '1 BIRT', '2 DATE 1900') },
+      tree,
+      { today: TODAY },
+    );
+    const name = value<string>(tree, 'SELECT id FROM person_name');
+    const given = value<string>(tree, 'SELECT given FROM person_name');
+    tree.transact('Normalize', (tx) =>
+      tx.update('person_name', name, { given: given.normalize('NFC') }),
+    );
+    expect(localHistory(tree).renamed.size).toBe(0);
+    expect(localHistory(tree).edited.size).toBe(0);
+    tree.close();
+  });
+});
+
+describe('re-review (#72): matching and bookkeeping', () => {
+  it('does not pre-tick a pick between indistinguishable twins', async () => {
+    const twins = ged(
+      '0 @I1@ INDI',
+      '1 NAME Adam /Smith/',
+      '1 SEX M',
+      '1 FAMS @F1@',
+      '0 @I2@ INDI',
+      '1 NAME Ann /Smith/',
+      '1 SEX F',
+      '1 FAMS @F1@',
+      '0 @I3@ INDI',
+      '1 NAME John /Smith/',
+      '1 SEX M',
+      '1 BIRT',
+      '2 DATE 1900',
+      '1 FAMC @F1@',
+      '0 @I4@ INDI',
+      '1 NAME John /Smith/',
+      '1 SEX M',
+      '1 BIRT',
+      '2 DATE 1900',
+      '1 FAMC @F1@',
+      '0 @F1@ FAM',
+      '1 HUSB @I1@',
+      '1 WIFE @I2@',
+      '1 CHIL @I3@',
+      '1 CHIL @I4@',
+    );
+    const tree = openMemoryTree();
+    await importGedcom({ bytes: twins }, tree, { today: TODAY });
+    const later = twins.replace('1 FAMC @F1@\n0 @I4@', '1 OCCU Baker\n1 FAMC @F1@\n0 @I4@');
+    for (const text of [later, renumber(later)]) {
+      const s2 = await prepareReimport(tree, { bytes: text }, { today: TODAY });
+      try {
+        const johns = [...s2.matches.values()].filter((m) =>
+          [pid(tree, '@I3@'), pid(tree, '@I4@')].includes(m.existingId),
+        );
+        expect(johns).toHaveLength(2);
+        expect(johns.every((m) => m.confidence < HIGH_CONFIDENCE)).toBe(true);
+        const changes = s2.diff.people.flatMap((p) => p.changes);
+        expect(changes.map((c) => [c.kind, c.defaultAccept])).toEqual([['fact.add', false]]);
+      } finally {
+        closeReimport(s2);
+      }
+    }
+    tree.close();
+  });
+
+  it('keeps one stale-record list, for the newest import', async () => {
+    const changed = renumber(SAMPLE.replace('2 DATE Abt. 1842', '2 DATE 12 MAR 1842'));
+    for (let n = 0; n < 2; n++) {
+      const s2 = await prepareReimport(store, { bytes: changed }, { today: TODAY });
+      applyReimport(store, s2, new Set(), 'Re-import');
+      closeReimport(s2);
+    }
+    expect(value<number>(store, "SELECT count(*) FROM meta WHERE key LIKE 'export.stale:%'")).toBe(
+      1,
+    );
   });
 });

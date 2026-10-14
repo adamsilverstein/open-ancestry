@@ -33,6 +33,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Bundle size (initial JS < 150 kB gzip)
+        run: npm run build -w @open-ancestry/web && npm run size
+
       - name: Unit tests with coverage
         run: npm test
 

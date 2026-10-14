@@ -23,6 +23,8 @@
     "e2e:coverage": "rm -rf coverage/e2e && E2E_COVERAGE=1 npm run e2e",
     "coverage": "npm test && npm run e2e:coverage && npm run coverage:merge",
     "coverage:merge": "tsx scripts/coverage-merge.ts",
+    "size": "tsx scripts/check-bundle-size.ts",
+    "e2e:snapshots": "bash scripts/update-snapshots.sh",
     "bench": "tsx bench/run.ts",
     "fixtures": "tsx fixtures/generate.ts"
   },

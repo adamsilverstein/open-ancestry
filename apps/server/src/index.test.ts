@@ -1,5 +1,6 @@
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { connect } from 'node:net';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { allowedHostsFor, createServer, startServer, type RunningServer } from './index';
@@ -77,5 +78,28 @@ describe('server', () => {
     expect(allowedHostsFor('192.168.1.20')).toEqual(['192.168.1.20']);
     expect(allowedHostsFor('fe80::1')).toEqual(['[fe80::1]']);
     expect(allowedHostsFor('0.0.0.0')).toContain('127.0.0.1');
+  });
+
+  it('answers malformed HTTP with the security headers', async () => {
+    running = await startServer({ port: 0, library: await mkdtemp(join(tmpdir(), 'oa-lib-')) });
+    const { port } = new URL(running.url);
+    const raw = (request: string) =>
+      new Promise<string>((resolve, reject) => {
+        const socket = connect(Number(port), '127.0.0.1', () => socket.write(request));
+        let data = '';
+        socket.on('data', (chunk) => (data += chunk));
+        socket.on('end', () => resolve(data));
+        socket.on('error', reject);
+      });
+    const bad = await raw('NOT HTTP\r\n\r\n');
+    expect(bad).toMatch(/^HTTP\/1\.1 400 /);
+    expect(bad).toContain("content-security-policy: default-src 'self'");
+    expect(bad).toContain('x-content-type-options: nosniff');
+    expect(bad).toContain('"code":"bad_request"');
+    const huge = await raw(
+      `GET / HTTP/1.1\r\nhost: localhost\r\nx-big: ${'a'.repeat(20_000)}\r\n\r\n`,
+    );
+    expect(huge).toMatch(/^HTTP\/1\.1 431 /);
+    expect(huge).toContain('referrer-policy: no-referrer');
   });
 });

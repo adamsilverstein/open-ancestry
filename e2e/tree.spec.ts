@@ -364,6 +364,7 @@ test.describe('family view', () => {
     await page.getByRole('button', { name: 'Go to home person' }).click();
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.ada}\\?`));
     await card(page, 'Ada Vale').focus();
+    await settled(page);
     await card(page, 'Elsa Hale').dblclick();
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.elsa}\\?`));
     // Keyboard focus follows to the new focus card.
@@ -372,7 +373,9 @@ test.describe('family view', () => {
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.ada}\\?`));
 
     // Single-key shortcuts only act while focus is in the tree (WCAG 2.1.4).
-    await card(page, 'Bram Vale').dblclick();
+    await expect(card(page, 'Ada Vale')).toHaveAccessibleName(/focus person/);
+    await card(page, 'Bram Vale').focus();
+    await page.keyboard.press('Enter');
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
     await page.getByRole('banner').getByRole('button', { name: 'File' }).focus();
     await page.keyboard.press('h');

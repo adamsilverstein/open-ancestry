@@ -992,10 +992,12 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
 
   // Keyboard focus landing on a card off screen (Tab, screen reader) brings it into view.
   function onFocus(event: FocusEvent<HTMLDivElement>) {
-    const key = (event.target as HTMLElement).dataset.key;
+    const target = event.target as HTMLElement;
+    const key = target.dataset.key;
     if (key) {
       setActiveKey(key);
-      ensureOnScreen(key);
+      // Only for keyboard focus: a click must not slide the card from under the pointer.
+      if (target.matches(':focus-visible')) ensureOnScreen(key);
     }
   }
 

@@ -64,3 +64,35 @@ describe('bulk load into a fresh tree', () => {
     store.close();
   });
 });
+
+describe('batched inserts', () => {
+  it('buffers rows per table and writes them on flush, in order', () => {
+    const store = memoryTree();
+    const writer = new BulkWriter(store);
+    const ids = Array.from({ length: 70 }, (_, i) =>
+      writer.insert('person', { id: `P${String(i).padStart(3, '0')}` }),
+    );
+    expect(ids[69]).toBe('P069');
+    writer.flush();
+    expect(
+      (store.db.prepare('SELECT id FROM person ORDER BY rowid').all() as { id: string }[]).map(
+        (r) => r.id,
+      ),
+    ).toEqual(ids);
+    writer.insert('person', { id: 'P999' });
+    expect(writer.commit()).toMatchObject({ person: 71 });
+    expect(persons.list(store)).toHaveLength(71);
+    store.close();
+  });
+
+  it('reports a constraint failure in a buffered batch and rolls back', () => {
+    const store = memoryTree();
+    const writer = new BulkWriter(store);
+    writer.insert('person', { id: 'DUP' });
+    writer.insert('person', { id: 'DUP' });
+    expect(() => writer.commit()).toThrow(/UNIQUE constraint failed: person.id/);
+    expect(store.db.inTransaction).toBe(false);
+    expect(persons.list(store)).toEqual([]);
+    store.close();
+  });
+});

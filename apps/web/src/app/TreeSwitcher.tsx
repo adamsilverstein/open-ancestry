@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { useNavigate } from '@tanstack/react-router';
+import { useLocation, useNavigate } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Button } from '../components/Button/Button';
@@ -44,6 +44,23 @@ export default function TreeSwitcher() {
   const [pending, setPending] = useState(false);
 
   const currentName = trees.find((t) => t.id === current)?.name ?? current;
+  const pathname = useLocation({ select: (l) => l.pathname });
+
+  /**
+   * Opens another tree. A page that shows one person (the tree view, a person page)
+   * moves to the new tree's home person: it must never go on showing, or editing,
+   * someone from the tree that was open. Pages about the whole tree (people list,
+   * home) stay where they are and follow the current tree.
+   */
+  async function switchTo(id: string) {
+    // setCurrentTree updates the current tree before it awaits anything, so the
+    // home route below already resolves the new tree.
+    const switched = setCurrentTree(queryClient, id);
+    if (/^\/(tree|person)\//.test(pathname)) {
+      await navigate({ to: '/tree/$personId', params: { personId: 'home' }, search: {} });
+    }
+    await switched;
+  }
 
   function open(next: Mode) {
     setMode(next);
@@ -108,10 +125,7 @@ export default function TreeSwitcher() {
           {trees.length > 0 && (
             <>
               <MenuSeparator />
-              <MenuRadioGroup
-                value={current ?? ''}
-                onValueChange={(id) => void setCurrentTree(queryClient, id)}
-              >
+              <MenuRadioGroup value={current ?? ''} onValueChange={(id) => void switchTo(id)}>
                 {trees.map((tree) => (
                   <MenuRadioItem key={tree.id} value={tree.id}>
                     {tree.name}

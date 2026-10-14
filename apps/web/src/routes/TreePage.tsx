@@ -38,17 +38,6 @@ export function TreePage() {
     queryClient.setQueryData(currentTreeQuery.queryKey, search.tree);
   }, [search.tree, queryClient]);
 
-  // Switching trees from the top bar (current tree moves away from the one on
-  // screen) opens the new tree at its home person.
-  const previousCurrent = useRef(current.data);
-  useEffect(() => {
-    const before = previousCurrent.current;
-    previousCurrent.current = current.data;
-    if (!search.tree || before !== search.tree) return;
-    if (!current.data || current.data === search.tree) return;
-    void navigate({ to: '/tree/$personId', params: { personId: 'home' }, search: {} });
-  }, [current.data, search.tree, navigate]);
-
   useEffect(() => {
     if (!wantsHome || !home.data || !tree) return;
     void navigate({

@@ -1,7 +1,14 @@
 import { mkdir, open, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join, sep } from 'node:path';
 import { treePaths, type TreeStore } from '@open-ancestry/db';
-import sharp from 'sharp';
+import type Sharp from 'sharp';
+
+/**
+ * sharp (and libvips) load on the first image, not with the server: about
+ * 20ms of every cold start otherwise (#54).
+ */
+let sharpModule: Promise<typeof Sharp> | undefined;
+export const loadSharp = () => (sharpModule ??= import('sharp').then((m) => m.default));
 import { resolveMediaPath } from './routes/media';
 
 /*
@@ -81,6 +88,7 @@ async function render(source: string, treeDir: string, mediaId: string): Promise
   const sizes = (Object.entries(THUMB_SIZES) as [ThumbSize, number][]).sort((x, y) => y[1] - x[1]);
   const tmp = (size: ThumbSize) => `${thumbFile(treeDir, mediaId, size)}.${process.pid}.tmp`;
   try {
+    const sharp = await loadSharp();
     // Decode the source once, for the largest size; the smaller ones come from that.
     let previous: Buffer | undefined;
     for (const [size, edge] of sizes) {

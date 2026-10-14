@@ -12,12 +12,11 @@ import {
   type MediaRow,
   type TreeStore,
 } from '@open-ancestry/db';
-import sharp from 'sharp';
 import type { Api, Deps } from '../context';
 import { edit, requireRow } from '../edits';
 import { ApiError, badRequest, notFound } from '../errors';
 import { MediaThumbParams, TreeIdParams, TreeParams } from '../schemas';
-import { THUMB_SIZES, insideTree, isThumbSize, readHead } from '../thumbnails';
+import { THUMB_SIZES, insideTree, isThumbSize, loadSharp, readHead } from '../thumbnails';
 import { MEDIA_CSP, resolveMediaPath, sniffMediaType } from './media';
 
 /*
@@ -139,6 +138,7 @@ async function receive(stream: NodeJS.ReadableStream & { truncated?: boolean }, 
 
 async function dimensions(file: string): Promise<{ width: number | null; height: number | null }> {
   try {
+    const sharp = await loadSharp();
     const meta = await sharp(file, { limitInputPixels: 100_000_000 }).metadata();
     return { width: meta.width ?? null, height: meta.height ?? null };
   } catch {

@@ -66,7 +66,7 @@ Code that writes names or event dates outside an import (API edits) should use t
 
 ## Errors and warnings
 
-Bad data never throws. A failed or cancelled import into a new tree folder removes what it created (database, media it copied), leaving anything already in the folder, so it can be retried.
+A failed or cancelled import into a new tree folder removes what it created (database, media it copied), leaving anything already in the folder, so it can be retried.
 
 Bad data never throws. Broken or wrong-type pointers, duplicate xrefs and links, one-sided links, people who are their own partner, child or ancestor, invalid `SEX`/`QUAY`/coordinates and media problems all become warnings with the line number; the affected lines stay in `unmapped_line`. Parser warnings (encoding, malformed lines) are included.
 

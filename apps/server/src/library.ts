@@ -94,9 +94,34 @@ export class Library {
     this.root = resolve(root);
   }
 
-  /** The library folder, private to the owner (tightened if it already exists). */
-  private ensureRoot(): void {
-    ensurePrivateDir(this.root);
+  private rootChecked = false;
+
+  /**
+   * The library folder, private to the owner. One the app creates is made
+   * 0700, as is an existing one holding nothing but trees. Any other folder
+   * (`--library ~`, a group-shared folder) keeps its mode, since tightening
+   * it would lock others out of their own files: say so once instead.
+   */
+  ensureRoot(): void {
+    if (!existsSync(this.root)) {
+      ensurePrivateDir(this.root);
+      this.rootChecked = true;
+      return;
+    }
+    if (this.rootChecked) return;
+    this.rootChecked = true;
+    if (process.platform === 'win32' || (statSync(this.root).mode & 0o077) === 0) return;
+    const ours = (name: string) =>
+      name.endsWith(TREE_EXTENSION) || name === TRASH_DIR || name === '.DS_Store';
+    const entries = readdirSync(this.root);
+    if (entries.length > 0 && entries.every(ours)) {
+      ensurePrivateDir(this.root);
+    } else {
+      console.warn(
+        `Warning: other accounts can see the library folder ${this.root}; ` +
+          'its trees are private, but consider a folder only you can open.',
+      );
+    }
   }
 
   dirOf(id: string): string {

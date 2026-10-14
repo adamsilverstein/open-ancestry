@@ -83,7 +83,11 @@ export function tokenizeLine(line: string): Token | undefined {
  * chunk is held back until the next chunk shows whether an LF follows.
  */
 export class LineSplitter {
-  private buffer = '';
+  /**
+   * Pieces of the unfinished last line. Each chunk is scanned once and only
+   * joined when its line ends, so a huge line split over many chunks stays linear.
+   */
+  private partial: string[] = [];
   private pendingCR = false;
 
   private readonly onLine: (line: string) => void;
@@ -92,41 +96,46 @@ export class LineSplitter {
     this.onLine = onLine;
   }
 
+  private emit(chunk: string, from: number, to: number) {
+    const piece = chunk.slice(from, to);
+    if (this.partial.length === 0) {
+      this.onLine(piece);
+      return;
+    }
+    this.partial.push(piece);
+    const line = this.partial.join('');
+    this.partial = [];
+    this.onLine(line);
+  }
+
   push(chunk: string): void {
-    let start = 0;
+    const n = chunk.length;
+    let lineStart = 0;
     if (this.pendingCR) {
       this.pendingCR = false;
-      if (chunk.charCodeAt(0) === 0x0a) start = 1;
+      if (chunk.charCodeAt(0) === 0x0a) lineStart = 1;
     }
-    let text = chunk;
-    if (this.buffer) {
-      text = this.buffer + chunk.slice(start);
-      start = 0;
-      this.buffer = '';
-    }
-    const n = text.length;
-    let lineStart = start;
-    for (let i = start; i < n; i++) {
-      const c = text.charCodeAt(i);
+    for (let i = lineStart; i < n; i++) {
+      const c = chunk.charCodeAt(i);
       if (c === 0x0a) {
-        this.onLine(text.slice(lineStart, i));
+        this.emit(chunk, lineStart, i);
         lineStart = i + 1;
       } else if (c === 0x0d) {
-        this.onLine(text.slice(lineStart, i));
+        this.emit(chunk, lineStart, i);
         if (i + 1 === n) {
           this.pendingCR = true;
-        } else if (text.charCodeAt(i + 1) === 0x0a) {
+        } else if (chunk.charCodeAt(i + 1) === 0x0a) {
           i++;
         }
         lineStart = i + 1;
       }
     }
-    if (lineStart < n) this.buffer = text.slice(lineStart);
+    if (lineStart < n) this.partial.push(chunk.slice(lineStart));
   }
 
   end(): void {
-    if (this.buffer) this.onLine(this.buffer);
-    this.buffer = '';
+    if (this.partial.length) this.onLine(this.partial.join(''));
+    this.partial = [];
     this.pendingCR = false;
   }
 }

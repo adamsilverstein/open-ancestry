@@ -117,18 +117,56 @@ describe('fuzz: parser never throws', () => {
 });
 
 describe('fuzz: bounded time on hostile shapes', () => {
-  it.each([
-    ['one 5 MB line', 'x'.repeat(5_000_000)],
-    ['200k blank lines', '\n'.repeat(200_000)],
-    ['deep level staircase', Array.from({ length: 50_000 }, (_, i) => `${i % 100} T`).join('\n')],
-    ['50k bare text lines', '0 HEAD\n1 NOTE a\n' + 'text\n'.repeat(50_000)],
-    ['50k CONC lines', '0 HEAD\n1 NOTE a\n' + '2 CONC b\n'.repeat(50_000)],
-    ['@ storms', '0 HEAD\n1 NOTE ' + '@'.repeat(100_000)],
-  ])('%s', (_, text) => {
+  // Each case is linear work of a few hundred ms at most; anything quadratic in
+  // line length, chunk count or continuation count takes minutes instead.
+  const LIMIT_MS = 5000;
+  const timed = async (fn: () => unknown) => {
     const start = performance.now();
-    const result = parseGedcom(text);
-    serializeGedcom(result);
-    checkInvariants(result);
-    expect(performance.now() - start).toBeLessThan(2000);
+    await fn();
+    return performance.now() - start;
+  };
+  async function* chunked(bytes: Uint8Array, size: number) {
+    for (let i = 0; i < bytes.length; i += size) yield bytes.subarray(i, i + size);
+  }
+
+  it.each([
+    ['one 5 MB line', () => 'x'.repeat(5_000_000)],
+    ['200k blank lines', () => '\n'.repeat(200_000)],
+    [
+      'deep level staircase',
+      () => Array.from({ length: 50_000 }, (_, i) => `${i % 100} T`).join('\n'),
+    ],
+    ['50k bare text lines', () => '0 HEAD\n1 NOTE a\n' + 'text\n'.repeat(50_000)],
+    ['1M CONC lines', () => '0 HEAD\n1 NOTE a\n' + '2 CONC b\n'.repeat(1_000_000)],
+    ['1M CONT lines', () => '0 HEAD\n1 NOTE a\n' + '2 CONT b\n'.repeat(1_000_000)],
+    ['@ storms', () => '0 HEAD\n1 NOTE ' + '@'.repeat(1_000_000)],
+    ['an xref that never closes', () => '0 @' + 'x'.repeat(5_000_000)],
+  ])('%s', async (_, make) => {
+    const text = make();
+    const elapsed = await timed(() => {
+      const result = parseGedcom(text);
+      serializeGedcom(result);
+      checkInvariants(result);
+    });
+    expect(elapsed).toBeLessThan(LIMIT_MS);
+  });
+
+  it('a 50 MB single line streamed in 4 KiB chunks', async () => {
+    const bytes = new Uint8Array(50_000_000).fill(0x78);
+    bytes.set(new TextEncoder().encode('0 HEAD\n1 NOTE '));
+    const elapsed = await timed(async () => {
+      const result = await parseGedcomStream(chunked(bytes, 4096));
+      expect(result.records[0]?.children[0]?.value?.length).toBe(50_000_000 - 14);
+    });
+    expect(elapsed).toBeLessThan(LIMIT_MS);
+  });
+
+  it('1M CONC lines streamed in 7-byte chunks', async () => {
+    const bytes = new TextEncoder().encode('0 HEAD\n1 NOTE a\n' + '2 CONC b\n'.repeat(1_000_000));
+    const elapsed = await timed(async () => {
+      const result = await parseGedcomStream(chunked(bytes, 7));
+      expect(result.records[0]?.children[0]?.value?.length).toBe(1_000_001);
+    });
+    expect(elapsed).toBeLessThan(LIMIT_MS);
   });
 });

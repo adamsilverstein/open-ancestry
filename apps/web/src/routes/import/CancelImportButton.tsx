@@ -6,16 +6,16 @@ import { cancelJob, type ImportJob } from '../../library/api';
 import styles from './Import.module.css';
 
 /**
- * Phases an import can be stopped in. Reading and parsing run without a
- * break on the server today (until imports move to a worker thread), and
- * finalize/commit are past the point of no return.
+ * Phases an import can be stopped in: imports run in a worker thread the
+ * server can terminate while reading, parsing or mapping. Finalize and
+ * commit are past the point of no return.
  */
-const CANCELLABLE_PHASES: ReadonlySet<string> = new Set(['map']);
+const CANCELLABLE_PHASES: ReadonlySet<string> = new Set(['read', 'parse', 'map']);
 
 /** Whether a cancel could stop `job` right now. */
 export function canCancel(job: Pick<ImportJob, 'state' | 'progress'>): boolean {
   if (job.state === 'queued') return true;
-  return job.state === 'running' && CANCELLABLE_PHASES.has(job.progress?.phase ?? '');
+  return job.state === 'running' && CANCELLABLE_PHASES.has(job.progress?.phase ?? 'read');
 }
 
 /**
@@ -27,12 +27,7 @@ export function CancelImportButton({ job }: { job: Pick<ImportJob, 'id' | 'state
   const toast = useToast();
   const hintId = useId();
   const enabled = canCancel(job);
-  const hint =
-    job.progress?.phase === 'finalize' || job.progress?.phase === 'commit'
-      ? 'Saving the tree; this can no longer be cancelled.'
-      : !enabled
-        ? 'Cancel becomes available once records are being mapped.'
-        : undefined;
+  const hint = enabled ? undefined : 'Saving the tree; this can no longer be cancelled.';
   return (
     <>
       <Button

@@ -114,6 +114,41 @@ test.describe('person', () => {
     await expect(h1(page)).toHaveText('Rowan James Ashdown');
   });
 
+  test('Cmd/Ctrl-Z does nothing while a menu is open', async ({ page }) => {
+    await openSeeded(page, seeded);
+    const dialog = await editPerson(page);
+    await dialog.getByRole('textbox', { name: 'Given names' }).first().fill('Rowan James');
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect(h1(page)).toHaveText('Rowan James Ashdown');
+
+    const menus = [
+      {
+        open: () => relationships(page).getByRole('button', { name: 'Add family member' }).click(),
+        item: 'Add sibling',
+      },
+      {
+        open: () => page.getByRole('banner').getByRole('button', { name: 'File' }).click(),
+        item: /Import GEDCOM/,
+      },
+    ];
+    for (const { open, item } of menus) {
+      await open();
+      const menu = page.getByRole('menu');
+      await expect(menu.getByRole('menuitem', { name: item })).toBeVisible();
+      await page.keyboard.press(`${mod}+z`);
+      // The menu keeps the keyboard and nothing is undone.
+      await expect(menu).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(menu).toHaveCount(0);
+      await expect(toasts(page).filter({ hasText: 'Undid' })).toHaveCount(0);
+      await expect(h1(page)).toHaveText('Rowan James Ashdown');
+    }
+
+    // With the menus closed, the same keys undo.
+    await page.keyboard.press(`${mod}+z`);
+    await expect(h1(page)).toHaveText('Rowan Ashdown');
+  });
+
   test('Cmd/Ctrl-Z inside a text field is left to the field', async ({ page }) => {
     await openSeeded(page, seeded);
     const dialog = await editPerson(page);

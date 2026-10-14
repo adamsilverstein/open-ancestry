@@ -8,6 +8,7 @@ import {
   type FamilyRow,
   type Tx,
 } from '@open-ancestry/db';
+import { morePrivate } from '@open-ancestry/import';
 import { dropDismissalsFor } from './checks';
 import { personLabel, refreshLiving, requireRow } from './edits';
 import { badRequest, conflict } from './errors';
@@ -279,6 +280,9 @@ export function mergePeople(tx: Tx, keepId: string, otherId: string, choices: Me
   const patch: Record<string, unknown> = {};
   if (choices.sex === 'other') patch.sex = other.sex;
   if (choices.living === 'other') patch.living = other.living;
+  // The stricter privacy wins, so nothing private becomes public by merging.
+  const privacy = morePrivate(other.privacy, keep.privacy);
+  if (privacy !== keep.privacy) patch.privacy = privacy;
   if (!keep.primary_media_id && other.primary_media_id) {
     patch.primary_media_id = other.primary_media_id;
   }

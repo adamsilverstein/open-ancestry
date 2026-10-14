@@ -86,6 +86,9 @@ function Preview({
     return (
       <img
         src={thumbUrl(tree, media.id, 'sm')}
+        // Tiles are about 190px wide: 2x screens pick the 480px thumbnail.
+        srcSet={`${thumbUrl(tree, media.id, 'sm')} 160w, ${thumbUrl(tree, media.id, 'md')} 480w`}
+        sizes="190px"
         alt=""
         loading="lazy"
         decoding="async"

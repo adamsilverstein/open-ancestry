@@ -116,7 +116,8 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
         name={name}
         sex={sex}
         size={120}
-        src={avatarUrl(tree, summary)}
+        // 120px: the 480px thumbnail keeps it sharp on 2x screens.
+        src={avatarUrl(tree, summary, 'md')}
         className={styles.avatar}
       />
       <div className={styles.identity}>

@@ -93,7 +93,15 @@ interface EditPersonDialogProps {
 }
 
 /** Names (all types), sex, living status, relationship to each parent, and delete. */
-export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPersonDialogProps) {
+export function EditPersonDialog({
+  tree,
+  detail: opened,
+  open,
+  onOpenChange,
+}: EditPersonDialogProps) {
+  // The person as the form opened: a save is a diff against it and carries it as
+  // `expect`, so a change from another tab meanwhile is refused, not overwritten.
+  const [detail] = useState(opened);
   const id = detail.person.id;
   const base = `/trees/${seg(tree)}`;
   const edit = useEdit(tree);
@@ -122,14 +130,15 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
       const row = detail.names.find((n) => n.id === draft.id);
       const body = nameChanges(draft, row);
       if (row && Object.keys(body).length === 0) return [];
+      // `expect`: the row as this form saw it, so the server refuses a save made from old data.
       return [
         row
-          ? { op: 'name.update', id: row.id, name: body }
+          ? { op: 'name.update', id: row.id, name: body, expect: row }
           : { op: 'name.add', personId: id, name: body },
       ];
     });
     // Removed after the adds, so a person never has no name mid-batch.
-    for (const row of removed) operations.push({ op: 'name.delete', id: row.id });
+    for (const row of removed) operations.push({ op: 'name.delete', id: row.id, expect: row });
     const personPatch: { sex?: Sex; living?: LivingStatus } = {};
     if (sex !== detail.person.sex) personPatch.sex = sex;
     // `unknown` asks the server to infer the status from dates again.
@@ -137,16 +146,23 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
       personPatch.living = living === 'infer' ? 'unknown' : living;
     }
     if (Object.keys(personPatch).length > 0) {
-      operations.push({ op: 'person.update', id, patch: personPatch });
+      operations.push({
+        op: 'person.update',
+        id,
+        patch: personPatch,
+        expect: { updated_at: detail.person.updated_at },
+      });
     }
     const before = parentLinks(detail);
-    for (const link of links.filter((l, i) => l.rel !== before[i]?.rel)) {
+    links.forEach((link, i) => {
+      if (link.rel === before[i]?.rel) return;
       operations.push({
         op: 'familyChild.update',
         id: link.linkId,
         patch: { [link.slot]: link.rel },
+        expect: { [link.slot]: before[i]!.rel },
       });
-    }
+    });
 
     onOpenChange(false);
     if (operations.length === 0) return;

@@ -14,6 +14,10 @@ export class ApiError extends Error {
 export const isNotFound = (error: unknown): boolean =>
   error instanceof ApiError && error.status === 404;
 
+/** The edit was made from data that changed since it loaded (another tab, an undo). */
+export const isStale = (error: unknown): boolean =>
+  error instanceof ApiError && error.code === 'stale';
+
 async function errorFrom(response: Response): Promise<ApiError> {
   const body = (await response.json().catch(() => null)) as {
     error?: { code?: string; message?: string };

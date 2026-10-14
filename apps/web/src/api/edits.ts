@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useToast } from '../components/Toast/Toast';
+import { isStale } from './client';
 import { personQuery } from './queries';
 import type { PersonDetail } from './types';
 
@@ -71,11 +72,19 @@ export function useEdit(tree: string) {
     mutationFn: ({ edit }: Run) => edit.send(),
     onError: (error, { edit, rollback }) => {
       if (rollback) queryClient.setQueryData(rollback.key, rollback.previous);
-      toast({
-        title: 'Could not save',
-        description: `${edit.label}: ${error instanceof Error ? error.message : String(error)}`,
-        variant: 'error',
-      });
+      toast(
+        isStale(error)
+          ? {
+              title: 'Not saved',
+              description: `${edit.label}: this changed in another window (or by undo) after you opened it, so nothing was saved. Open it again to start from the latest.`,
+              variant: 'error',
+            }
+          : {
+              title: 'Could not save',
+              description: `${edit.label}: ${error instanceof Error ? error.message : String(error)}`,
+              variant: 'error',
+            },
+      );
     },
     onSuccess: (result, { edit }) => edit.onDone?.(result),
     onSettled: () => invalidateTree(queryClient, tree),

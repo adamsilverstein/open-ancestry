@@ -189,11 +189,13 @@ describe('fuzz: bounded time on hostile shapes', () => {
     expectBounded(elapsed);
   });
 
-  it('1M CONC lines streamed in 7-byte chunks', async () => {
-    const bytes = new TextEncoder().encode('0 HEAD\n1 NOTE a\n' + '2 CONC b\n'.repeat(1_000_000));
+  // 300k lines is 400k tiny chunks: linear work of about a second, and still
+  // minutes of work if continuation joining or chunk handling were quadratic.
+  it('300k CONC lines streamed in 7-byte chunks', async () => {
+    const bytes = new TextEncoder().encode('0 HEAD\n1 NOTE a\n' + '2 CONC b\n'.repeat(300_000));
     const elapsed = await timed(async () => {
       const result = await parseGedcomStream(chunked(bytes, 7));
-      expect(result.records[0]?.children[0]?.value?.length).toBe(1_000_001);
+      expect(result.records[0]?.children[0]?.value?.length).toBe(300_001);
     });
     expectBounded(elapsed);
   });

@@ -288,7 +288,7 @@ test.describe('history and errors', () => {
 
     await page.getByRole('banner').getByRole('button', { name: 'History' }).click();
     const history = page.getByRole('dialog', { name: 'History' });
-    await expect(history.getByRole('listitem').first()).toContainText('Edit name');
+    await expect(history.getByRole('listitem').first()).toContainText('Edit Rowan Ashdown');
     await history.getByRole('button', { name: 'Undo' }).click();
     await expect(page.locator('h1')).toHaveText('Rowan Ashdown');
     await expect(history.getByRole('listitem').first()).toContainText('undone');
@@ -300,8 +300,7 @@ test.describe('history and errors', () => {
     await openSeeded(page, seeded);
     let release: () => void = () => undefined;
     const gate = new Promise<void>((resolve) => (release = resolve));
-    await page.route(/\/api\/trees\/[^/]+\/names\//, async (route) => {
-      if (route.request().method() !== 'PATCH') return route.fallback();
+    await page.route(/\/api\/trees\/[^/]+\/batch$/, async (route) => {
       await gate;
       await route.fulfill({
         status: 500,

@@ -70,10 +70,13 @@ export function TagsEditor({ tree, detail }: { tree: string; detail: PersonDetai
     setName('');
     edit.mutate({
       label: `Create tag ${tagName}`,
+      // Created and attached in one batch, so one undo removes both.
       send: async () => {
-        const { tag } = await apiSend<{ tag: TagRow }>('POST', `${base}/tags`, { name: tagName });
-        remember(tag);
-        await apiSend('POST', `${base}/people/${id}/tags`, { tagId: tag.id });
+        const { results } = await apiSend<{ results: [TagRow] }>('POST', `${base}/batch`, {
+          label: `Tag ${tagName}`,
+          operations: [{ op: 'tag.create', tag: { name: tagName }, attachTo: id }],
+        });
+        remember(results[0]);
       },
     });
   };

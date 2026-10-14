@@ -167,8 +167,9 @@ Hover and focus can be forced for screenshots with `data-demo-hover` / `data-dem
 ### Editing
 
 - Edits go through `useEdit(tree)` (`src/api/edits.ts`). An optimistic update of the cached person detail is applied in the same event as the click; on error the old detail is restored and an error toast names the edit; afterwards every query of the tree is refetched.
-- Each API request is one undoable change batch. Cmd/Ctrl-Z and Shift-Cmd/Ctrl-Z (or Ctrl-Y) undo and redo anywhere except inside text fields, which keep their own undo; a toast names what was undone. The History panel in the top bar lists recent batches, with undone ones struck through and labelled.
+- One user action is one undo step: dialogs that change several records (Edit person, creating and attaching a tag) send them together to `POST /batch` with a label naming the person, e.g. `Edit Ada Vale`. Cmd/Ctrl-Z and Shift-Cmd/Ctrl-Z (or Ctrl-Y) undo and redo anywhere except inside text fields, which keep their own undo; a toast names what was undone. The History panel in the top bar lists recent batches, with undone ones struck through and labelled.
 - Edit dialogs mount only while open, so each opening starts from the saved values.
+- If the person on screen stops existing (undoing their creation, redoing their delete), the page says so in a toast and goes back, or home when there is no previous page.
 
 ## Layout patterns
 

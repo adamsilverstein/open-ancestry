@@ -116,46 +116,47 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
 
   function save() {
     const removed = detail.names.filter((row) => !names.some((n) => n.id === row.id));
-    const nameWrites = names.flatMap((draft) => {
+    const operations: Record<string, unknown>[] = names.flatMap((draft) => {
       const row = detail.names.find((n) => n.id === draft.id);
       const body = nameChanges(draft, row);
       if (row && Object.keys(body).length === 0) return [];
       return [
-        () =>
-          row
-            ? apiSend('PATCH', `${base}/names/${row.id}`, body)
-            : apiSend('POST', `${base}/people/${id}/names`, body),
+        row
+          ? { op: 'name.update', id: row.id, name: body }
+          : { op: 'name.add', personId: id, name: body },
       ];
     });
+    // Removed after the adds, so a person never has no name mid-batch.
+    for (const row of removed) operations.push({ op: 'name.delete', id: row.id });
     const personPatch: { sex?: Sex; living?: LivingStatus } = {};
     if (sex !== detail.person.sex) personPatch.sex = sex;
     // `unknown` asks the server to infer the status from dates again.
     if (living !== livingChoice(detail.person.living)) {
       personPatch.living = living === 'infer' ? 'unknown' : living;
     }
+    if (Object.keys(personPatch).length > 0) {
+      operations.push({ op: 'person.update', id, patch: personPatch });
+    }
     const before = parentLinks(detail);
-    const linkWrites = links.filter((l, i) => l.rel !== before[i]?.rel);
+    for (const link of links.filter((l, i) => l.rel !== before[i]?.rel)) {
+      operations.push({
+        op: 'familyChild.update',
+        id: link.linkId,
+        patch: { [link.slot]: link.rel },
+      });
+    }
 
     onOpenChange(false);
+    if (operations.length === 0) return;
+    const label = `Edit ${name}`;
     edit.mutate({
-      label: 'Edit person',
+      label,
       optimistic: {
         personId: id,
         update: (current) => applyPerson(applyNames(current, names), personPatch),
       },
-      // One change batch per request, so each step can be undone on its own.
-      send: async () => {
-        for (const write of nameWrites) await write();
-        for (const row of removed) await apiSend('DELETE', `${base}/names/${row.id}`);
-        if (Object.keys(personPatch).length > 0) {
-          await apiSend('PATCH', `${base}/people/${id}`, personPatch);
-        }
-        for (const link of linkWrites) {
-          await apiSend('PATCH', `${base}/family-children/${link.linkId}`, {
-            [link.slot]: link.rel,
-          });
-        }
-      },
+      // One request, one change batch: the whole save is a single undo step.
+      send: () => apiSend('POST', `${base}/batch`, { label, operations }),
     });
   }
 

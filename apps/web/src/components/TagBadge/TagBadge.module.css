@@ -1,0 +1,23 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oa-space-1);
+  height: 22px;
+  padding: 0 var(--oa-space-2);
+  border: 1px solid color-mix(in srgb, var(--oa-tag-color) 40%, transparent);
+  border-radius: var(--oa-radius-full);
+  background: color-mix(in srgb, var(--oa-tag-color) 10%, var(--oa-surface));
+  color: var(--oa-text);
+  font: var(--oa-text-xs);
+  font-weight: var(--oa-weight-medium);
+  white-space: nowrap;
+}
+
+.dot {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--oa-tag-color);
+}

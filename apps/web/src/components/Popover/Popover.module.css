@@ -1,0 +1,11 @@
+.content {
+  min-width: 220px;
+  max-width: min(360px, calc(100vw - 16px));
+  padding: var(--oa-space-4);
+  border: 1px solid var(--oa-elevated-border);
+  border-radius: var(--oa-radius-md);
+  background: var(--oa-surface);
+  box-shadow: var(--oa-shadow-2);
+  color: var(--oa-text);
+  z-index: 40;
+}

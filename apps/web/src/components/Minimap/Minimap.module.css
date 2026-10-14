@@ -1,0 +1,25 @@
+.minimap {
+  position: relative;
+  display: inline-block;
+  padding: var(--oa-space-1);
+  border: 1px solid var(--oa-elevated-border);
+  border-radius: var(--oa-radius-md);
+  background: var(--oa-surface);
+  box-shadow: var(--oa-shadow-2);
+}
+
+.surface {
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-canvas);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.dismiss {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  background: var(--oa-surface);
+  border-color: var(--oa-border-strong);
+  border-radius: 50%;
+}

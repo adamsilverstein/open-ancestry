@@ -1,0 +1,40 @@
+.skeleton {
+  display: block;
+  background: linear-gradient(
+      90deg,
+      transparent 0%,
+      light-dark(rgb(255 255 255 / 0.5), rgb(255 255 255 / 0.04)) 50%,
+      transparent 100%
+    )
+    var(--oa-surface-sunken);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+.rect {
+  border-radius: var(--oa-radius-sm);
+}
+
+.text {
+  height: 1em;
+  border-radius: var(--oa-radius-sm);
+}
+
+.circle {
+  border-radius: 50%;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}

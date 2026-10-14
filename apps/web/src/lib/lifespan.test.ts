@@ -23,9 +23,9 @@ describe('formatLifespan', () => {
   });
 
   it('keeps qualifiers', () => {
-    expect(
-      formatLifespan({ birth: { year: 1890, qualifier: 'abt' }, death: { year: 1955 } }),
-    ).toBe('abt. 1890–1955');
+    expect(formatLifespan({ birth: { year: 1890, qualifier: 'abt' }, death: { year: 1955 } })).toBe(
+      'abt. 1890–1955',
+    );
   });
 
   it('uses b. and d. when only one end is known', () => {

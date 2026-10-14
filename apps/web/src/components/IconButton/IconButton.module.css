@@ -1,0 +1,58 @@
+.iconButton {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--oa-radius-md);
+  background: transparent;
+  color: var(--oa-text-muted);
+  cursor: pointer;
+  transition:
+    background-color var(--oa-duration-fast) var(--oa-ease),
+    color var(--oa-duration-fast) var(--oa-ease);
+}
+
+.md {
+  width: 36px;
+  height: 36px;
+}
+
+.sm {
+  width: 28px;
+  height: 28px;
+}
+
+.secondary {
+  background: var(--oa-surface);
+  border-color: var(--oa-border-strong);
+  color: var(--oa-text);
+}
+
+.canvas {
+  background: var(--oa-surface);
+  border-color: var(--oa-elevated-border);
+  box-shadow: var(--oa-shadow-1);
+  color: var(--oa-text);
+}
+
+.iconButton:not(:disabled):is(:hover, [data-demo-hover]) {
+  background: var(--oa-surface-hover);
+  color: var(--oa-text);
+}
+
+.iconButton[aria-pressed='true'] {
+  background: var(--oa-surface-selected);
+  border-color: var(--oa-accent);
+  color: var(--oa-accent);
+}
+
+.iconButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.iconButton[data-demo-focus] {
+  outline: var(--oa-focus-ring);
+  outline-offset: var(--oa-focus-offset);
+}

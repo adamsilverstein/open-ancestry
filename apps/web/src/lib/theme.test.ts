@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { THEME_KEY, nextThemeOverride, readThemeOverride, resolvedTheme, writeThemeOverride } from './theme';
+import {
+  THEME_KEY,
+  nextThemeOverride,
+  readThemeOverride,
+  resolvedTheme,
+  writeThemeOverride,
+} from './theme';
 
 describe('nextThemeOverride', () => {
   it('stores the opposite of the system theme', () => {

@@ -73,6 +73,67 @@ describe('people', () => {
   });
 });
 
+describe('unsafe text (#190)', () => {
+  const error = (res: { json(): { error?: { message: string } } }) => res.json().error?.message;
+
+  it('refuses control characters and bidi overrides in names, places and dates', async () => {
+    const name = await api.post(`${s.base}/people/${s.ada}/names`, { given: 'Evil\u202e' });
+    expect(name.statusCode).toBe(400);
+    expect(error(name)).toContain('given');
+    const created = await api.post(`${s.base}/people`, {
+      names: [{ given: 'Ro\twan', surname: 'Ashdown' }],
+    });
+    expect(created.statusCode).toBe(400);
+    const batch = await api.post(`${s.base}/batch`, {
+      label: 'Edit',
+      operations: [{ op: 'name.add', personId: s.ada, name: { surname: 'Vale\nReed' } }],
+    });
+    expect(batch.statusCode).toBe(400);
+    const place = await api.post(`${s.base}/people/${s.ada}/events`, {
+      type: 'RESI',
+      place: 'Harlow\u202e, Essex',
+    });
+    expect(place.statusCode).toBe(400);
+    expect(error(place)).toContain('place');
+    const date = await api.post(`${s.base}/people/${s.ada}/events`, {
+      type: 'RESI',
+      date_text: '1950\u0000',
+    });
+    expect(date.statusCode).toBe(400);
+    expect(error(date)).toContain('date');
+    // Nothing was written.
+    const detail = (await api.get(`${s.base}/people/${s.ada}`)).json();
+    expect(detail.names).toHaveLength(1);
+    expect(
+      detail.events.filter((e: { event: { type: string } }) => e.event.type === 'RESI'),
+    ).toEqual([]);
+  });
+
+  it('allows balanced isolates, and newlines in notes', async () => {
+    const name = await api.post(`${s.base}/people/${s.ada}/names`, {
+      given: '\u2067שרה\u2069',
+      surname: 'Cohen',
+    });
+    expect(name.statusCode).toBe(201);
+    const note = await api.post(`${s.base}/notes`, {
+      text: 'Line one\nLine two',
+      owner_type: 'person',
+      owner_id: s.ada,
+    });
+    expect(note.statusCode).toBe(201);
+  });
+
+  it('finds a name with a zero-width character by its plain spelling', async () => {
+    const created = await api.post(`${s.base}/people`, {
+      names: [{ given: 'Ro\u200bwan', surname: 'Ashdown' }],
+    });
+    expect(created.statusCode).toBe(201);
+    const id = created.json().person.id;
+    const found = (await api.get(`${s.base}/search?q=rowan`)).json().items;
+    expect(found.map((i: { person: { id: string } }) => i.person.id)).toContain(id);
+  });
+});
+
 describe('names', () => {
   it('adds, edits, makes primary and deletes names', async () => {
     const added = await api.post(`${s.base}/people/${s.ada}/names`, {

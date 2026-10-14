@@ -61,6 +61,7 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 | `GET /api/trees/:tree/export.json` | Full open-ancestry JSON download. |
 | `GET /api/trees/:tree/export.ged?version&privatize` | GEDCOM download (`text/vnd.familysearch.gedcom`); `version` is `5.5.1` (default, Ancestry-compatible) or `7`; `privatize=true` writes living people, and anyone marked private or confidential, as "Private" with only their family links, and names the download `private-tree.ged` instead of after the tree. |
 | `GET /api/trees/:tree/export.gdz?privatize` | GEDZIP download (GEDCOM 7 plus the tree's media files). |
+| `GET /api/limits` | Upload caps in bytes: `{ importUpload: { gedcomBytes, archiveBytes }, mediaUploadBytes }`, so the app can refuse an oversized file before sending it. A 413 names the cap in KB, MB or GB. |
 | `POST /api/import` (multipart `file`: .ged, .gedcom, .zip, .gdz) | Imports into a new tree named after the file (" 2", " 3", ... when taken); 202 `{ jobId, job }` with `job.tree` and `job.createdTree: true`. The server owns that tree: if the import fails or is cancelled it removes it, but only while it is still the empty tree it created. |
 | `POST /api/trees/:tree/import` (multipart `file`) | Starts an import into an existing, empty tree (202 `{ jobId, job }`); that tree is never removed. |
 | `POST /api/trees/:tree/reimport` (multipart `file`) | Compares an updated export with the tree as a job (`kind: 'reimport'`); its `result` is `{ reimportId, counts }`. Nothing is written. |

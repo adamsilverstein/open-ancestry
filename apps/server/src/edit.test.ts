@@ -147,6 +147,28 @@ describe('events', () => {
   });
 });
 
+describe('relationship history labels', () => {
+  const latest = async () =>
+    (await api.get(`${s.base}/history?limit=1`)).json().items[0].label as string;
+
+  it('names what a family edit did', async () => {
+    await api.patch(`${s.base}/families/${s.marriage}`, { relationship_type: 'partners' });
+    expect(await latest()).toBe('Edit relationship type: Ada Vale and Dan Reed');
+
+    await api.patch(`${s.base}/families/${s.marriage}`, { partner2_id: null });
+    expect(await latest()).toMatch(
+      /^Remove partner: (Dan Reed from Ada Vale|Ada Vale from Dan Reed)$/,
+    );
+  });
+
+  it('names a removed child link with the family it left', async () => {
+    const d = (await api.get(`${s.base}/people/${s.eve}`)).json();
+    const link = d.parentFamilies[0].link.id;
+    await api.del(`${s.base}/family-children/${link}`);
+    expect(await latest()).toBe('Remove child link: Eve Reed from Ada Vale and Dan Reed');
+  });
+});
+
 describe('relationships', () => {
   it('fills the preferred parent family before creating a new one', async () => {
     const d = await detail(s.ada);

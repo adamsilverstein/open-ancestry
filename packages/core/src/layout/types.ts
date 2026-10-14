@@ -32,7 +32,13 @@ export interface TreeFamilyChild {
   /** Relationship to partners[0] and partners[1]; missing means 'unknown'. */
   rel1?: ChildRelation;
   rel2?: ChildRelation;
+  /** The child's preferred parent set (db `ChildEdge.isPreferred`); drawn by default. */
+  preferred?: boolean;
+  /** Position among the child's parent families (db `childOrder`). */
+  order?: number;
 }
+
+export type PartnerRelationship = 'married' | 'civil_union' | 'partners' | 'unknown';
 
 export interface TreeFamily {
   id: string;
@@ -40,6 +46,10 @@ export interface TreeFamily {
   partners: readonly [string | null, string | null];
   /** In display order (the server sorts by birth). */
   children: readonly TreeFamilyChild[];
+  /** Position of this family among each partner's families (db `partner1Order`, `partner2Order`). */
+  partnerOrder?: readonly [number, number];
+  /** Passed through to couple edges for styling. */
+  relationship?: PartnerRelationship;
 }
 
 export interface TreeGraph {
@@ -132,6 +142,8 @@ export interface LayoutEdge {
   rel?: ChildRelation;
   /** The child drop goes to a half sibling: draw it differently. */
   half?: boolean;
+  /** On couple edges, the family's relationship type when known. */
+  relationship?: PartnerRelationship;
 }
 
 export interface GenerationLabel {

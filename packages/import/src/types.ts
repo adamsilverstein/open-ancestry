@@ -18,7 +18,7 @@ export interface ImportOptions {
   onProgress?: (phase: ImportPhase, done: number, total: number) => void;
   /** Aborting rolls the import back (and removes a tree folder it created). */
   signal?: AbortSignal;
-  /** Largest GEDCOM or GEDZIP accepted, in bytes (default 256 MiB). */
+  /** Largest GEDCOM or GEDZIP accepted, in bytes (default IMPORT_LIMITS.maxBytes, 64 MiB). */
   maxBytes?: number;
   /** Largest media file copied into the tree, in bytes (default 256 MiB). */
   maxMediaBytes?: number;

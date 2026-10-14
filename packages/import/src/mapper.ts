@@ -70,6 +70,8 @@ interface PersonState {
   nameOrder: number;
   singular: Set<string>;
   fams: { familyId: string; node: GedcomNode }[];
+  /** Family ids in `fams`, for the duplicate check (a person can have thousands). */
+  famsIds: Set<string>;
   famcCount: number;
   marriages: GedcomNode[];
   adoptions: GedcomNode[];
@@ -396,6 +398,7 @@ export class Mapper {
       nameOrder: 0,
       singular: new Set(),
       fams: [],
+      famsIds: new Set(),
       famcCount: 0,
       marriages: [],
       adoptions: [],
@@ -449,10 +452,11 @@ export class Mapper {
         case 'FAMS': {
           const familyId = this.resolve(c, 'FAM');
           if (!familyId) break;
-          if (person.fams.some((f) => f.familyId === familyId)) {
+          if (person.famsIds.has(familyId)) {
             this.warn('duplicate-link', c.line, `FAMS ${c.pointer} is repeated`);
             break;
           }
+          person.famsIds.add(familyId);
           person.fams.push({ familyId, node: c });
           break;
         }
@@ -1465,13 +1469,16 @@ export class Mapper {
     for (const person of this.persons.values()) {
       if (!person.marriages.length) continue;
       const families = this.partnerFamilies.get(person.id) ?? [];
+      // Indexed rather than searched per MARR: one person can have thousands
+      // of families and marriages, which made this quadratic.
+      const index = new MarriageIndex();
+      for (const family of families) for (const m of family.marriages) index.add(m);
+      let unmarried = families.filter((f) => !f.marriages.length);
       for (const node of person.marriages) {
         const date = normalizeDate(text(this.child(node, 'DATE')));
         const placeNode = this.child(node, 'PLAC');
         const place = text(placeNode) ? placeParts(placeNode!.value!).join(', ') : '';
-        const match = families
-          .flatMap((f) => f.marriages)
-          .find((m) => (!date || normalizeDate(m.date) === date) && (!place || m.place === place));
+        const match = index.find(date, place);
         if (match) {
           // Same marriage as the family's: keep one event, moving any citations and notes onto it.
           this.use(node);
@@ -1481,7 +1488,6 @@ export class Mapper {
             this.mapAttachment(c, { type: 'event', id: match.eventId });
           continue;
         }
-        const unmarried = families.filter((f) => !f.marriages.length);
         if (unmarried.length === 1) {
           const family = unmarried[0]!;
           const event = this.mapEvent(
@@ -1490,7 +1496,10 @@ export class Mapper {
             family.eventOrder++,
             true,
           );
-          family.marriages.push(marriage(event));
+          const added = marriage(event);
+          family.marriages.push(added);
+          index.add(added);
+          unmarried = [];
         } else {
           this.mapPersonEvent(node, person);
         }
@@ -1801,6 +1810,34 @@ function countLines(node: GedcomNode): number {
 
 function marriage(event: { id: string; date: string | undefined; place: string }): Marriage {
   return { eventId: event.id, date: event.date ?? '', place: event.place };
+}
+
+/**
+ * A person's family marriages, looked up the way the old linear `find` did:
+ * the first marriage (in family, then marriage order) whose date matches when
+ * a date is given and whose place matches when a place is given.
+ */
+class MarriageIndex {
+  private first: Marriage | undefined;
+  private readonly byDate = new Map<string, Marriage>();
+  private readonly byPlace = new Map<string, Marriage>();
+  private readonly byBoth = new Map<string, Marriage>();
+
+  add(m: Marriage): void {
+    const date = normalizeDate(m.date);
+    this.first ??= m;
+    if (!this.byDate.has(date)) this.byDate.set(date, m);
+    if (!this.byPlace.has(m.place)) this.byPlace.set(m.place, m);
+    const both = `${date}\u0000${m.place}`;
+    if (!this.byBoth.has(both)) this.byBoth.set(both, m);
+  }
+
+  find(date: string, place: string): Marriage | undefined {
+    if (!date && !place) return this.first;
+    if (!date) return this.byPlace.get(place);
+    if (!place) return this.byDate.get(date);
+    return this.byBoth.get(`${date}\u0000${place}`);
+  }
 }
 
 function normalizeDate(date: string | undefined): string {

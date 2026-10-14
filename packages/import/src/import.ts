@@ -23,7 +23,26 @@ import {
 } from './types';
 
 const MiB = 1024 ** 2;
-const DEFAULT_MAX_BYTES = 256 * MiB;
+
+/**
+ * What one import may contain. A real Ancestry export of 100k people is about
+ * 48 MiB with lines under 1 KiB; past these a file is refused before parsing,
+ * since the parsed tree of a hostile file (millions of CONT lines) can need
+ * dozens of times its size in memory.
+ */
+export const IMPORT_LIMITS = {
+  /** Largest GEDCOM or GEDZIP, in bytes. */
+  maxBytes: 64 * MiB,
+  /** Longest physical line, in bytes. */
+  maxLineLength: 64 * 1024,
+  /** Most level-0 records. */
+  maxRecords: 2_000_000,
+  /** Most CONT/CONC lines in one record. */
+  maxContinuations: 100_000,
+} as const;
+
+const DEFAULT_MAX_BYTES = IMPORT_LIMITS.maxBytes;
+const DEFAULT_MAX_MEDIA_BYTES = 256 * MiB;
 /** Records mapped between yields to the event loop (for progress and abort). */
 const CHUNK = 500;
 
@@ -89,7 +108,7 @@ function readInput(input: ImportInput, options: ImportOptions): ReadResult {
   try {
     const archive = readGedzip(raw, {
       maxGedcomSize: maxBytes,
-      maxEntrySize: options.maxMediaBytes ?? DEFAULT_MAX_BYTES,
+      maxEntrySize: options.maxMediaBytes ?? DEFAULT_MAX_MEDIA_BYTES,
     });
     return {
       gedcom: archive.gedcom,
@@ -109,6 +128,71 @@ function readInput(input: ImportInput, options: ImportOptions): ReadResult {
       );
     }
     throw error;
+  }
+}
+
+const NEWLINE = 0x0a;
+const CR = 0x0d;
+const ZERO = 0x30;
+const SPACE = 0x20;
+
+/** True when the line at `start` is a `<level> CONT` or `<level> CONC` line (ASCII-compatible encodings). */
+function isContinuation(bytes: Uint8Array, start: number, end: number): boolean {
+  let i = start;
+  while (i < end && (bytes[i] === SPACE || bytes[i] === 0x09)) i++;
+  const digits = i;
+  while (i < end && bytes[i]! >= ZERO && bytes[i]! <= ZERO + 9) i++;
+  if (i === digits || bytes[i] !== SPACE) return false;
+  i++;
+  return (
+    i + 4 <= end &&
+    bytes[i] === 0x43 && // C
+    bytes[i + 1] === 0x4f && // O
+    bytes[i + 2] === 0x4e && // N
+    (bytes[i + 3] === 0x54 || bytes[i + 3] === 0x43) && // T or C
+    (i + 4 === end || bytes[i + 4] === SPACE || bytes[i + 4] === CR)
+  );
+}
+
+/**
+ * One linear pass over the raw bytes, before decoding or parsing: refuses a
+ * file whose lines, records or continuation runs are past IMPORT_LIMITS.
+ */
+export function checkLimits(input: Uint8Array | string, limits = IMPORT_LIMITS): void {
+  const bytes = typeof input === 'string' ? Buffer.from(input, 'utf8') : input;
+  let line = 1;
+  let records = 0;
+  let continuations = 0;
+  let start = 0;
+  for (
+    let end = bytes.indexOf(NEWLINE);
+    start < bytes.length;
+    end = bytes.indexOf(NEWLINE, start)
+  ) {
+    const stop = end === -1 ? bytes.length : end;
+    if (stop - start > limits.maxLineLength) {
+      throw new ImportError(
+        'too-large',
+        `Line ${line} is longer than ${limits.maxLineLength} bytes`,
+      );
+    }
+    // Skip a UTF-8 byte-order mark on the first line.
+    let first = start;
+    if (line === 1 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) first += 3;
+    if (bytes[first] === ZERO && (bytes[first + 1] === SPACE || bytes[first + 1] === 0x09)) {
+      if (++records > limits.maxRecords) {
+        throw new ImportError('too-large', `The file has more than ${limits.maxRecords} records`);
+      }
+      continuations = 0;
+    } else if (isContinuation(bytes, first, stop) && ++continuations > limits.maxContinuations) {
+      throw new ImportError(
+        'too-large',
+        `The record ending at line ${line} has more than ${limits.maxContinuations} continuation lines`,
+      );
+    }
+    if (end === -1) break;
+    start = end + 1;
+    line++;
   }
 }
 
@@ -187,6 +271,7 @@ export async function importGedcom(
   const readMs = ms(started);
   progress('read', 1, 1);
 
+  checkLimits(read.gedcom);
   progress('parse', 0, 1);
   const parseStart = performance.now();
   const doc = parseGedcom(read.gedcom, { maxWarnings: options.maxWarnings ?? 1000 });
@@ -241,7 +326,7 @@ export async function importGedcom(
       newId: store.newId,
       media: read.media,
       mediaRoot: store.dir ? treePaths(store.dir).media : null,
-      maxMediaBytes: options.maxMediaBytes ?? DEFAULT_MAX_BYTES,
+      maxMediaBytes: options.maxMediaBytes ?? DEFAULT_MAX_MEDIA_BYTES,
       maxWarnings: options.maxWarnings ?? 1000,
       today: options.today ?? new Date(),
     });

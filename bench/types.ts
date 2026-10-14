@@ -13,4 +13,6 @@ export interface BenchCase {
   /** Minimum iterations (default 10) and minimum run time in ms (default 500). */
   iterations?: number;
   time?: number;
+  /** Untimed warmup runs (tinybench default 16); 0 disables warmup for slow cases. */
+  warmupIterations?: number;
 }

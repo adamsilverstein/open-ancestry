@@ -26,6 +26,8 @@ export default defineConfig({
         'packages/**': { lines: 80 },
         // The database package holds every user's data; keep it near-fully tested.
         'packages/db/**': { lines: 90 },
+        // The importer decides what of a user's tree survives; keep it as well tested.
+        'packages/import/**': { lines: 90 },
       },
     },
   },

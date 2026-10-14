@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+*.tsbuildinfo
+.DS_Store
+.env*
+# Real user data must never be committed
+local-data/
+*.oatree/
+*.ged
+*.gdz
+!fixtures/**/*.ged
+!fixtures/**/*.gdz

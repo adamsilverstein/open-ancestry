@@ -82,6 +82,7 @@ test('lists every design system component', async ({ page }) => {
     'TagBadge',
     'TimelineItem',
     'RelationshipList',
+    'RelationshipChart',
     'SourceItem',
     'GenerationLabel',
     'TreeToolbar',
@@ -474,3 +475,13 @@ for (const colorScheme of ['light', 'dark'] as const) {
     expect(selectedStyle).toContain('inset');
   });
 }
+
+test('relationship chart switches between paths', async ({ page }) => {
+  const region = section(page, 'RelationshipChart');
+  const list = () => region.getByRole('list', { name: /^Relationship path/ });
+  await expect(list().getByRole('listitem')).toHaveCount(6);
+  await region.getByRole('combobox', { name: 'Path (2)' }).click();
+  await page.getByRole('option', { name: 'nephew through Thaddeus Marlowe' }).click();
+  await expect(list()).toHaveAccessibleName('Relationship path: nephew through Thaddeus Marlowe');
+  await expect(list().getByRole('listitem')).toHaveCount(4);
+});

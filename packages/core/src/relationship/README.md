@@ -39,6 +39,11 @@ children are still siblings.
 - `complete`: false when a search bound (`maxGenerations`, `maxNodes`) stopped the walk or output
   was trimmed, so "unrelated" can be told apart from "gave up".
 
+`relationshipCalculator(graph, { cacheSize })` returns a `relationship`-like function that caches
+each person's ancestor walk (bounded LRU), for many queries over one graph such as everyone
+against the home person. Its intended caller is the server's home-person relationship endpoint
+(see the TODO above); the person page builds a fresh graph from two ancestor slices instead.
+
 `chartPath(path)` turns a path into grid cells (`{ id, row, col }`, row 0 the highest person) for
 the mini chart; the drawing itself belongs to the person page.
 
@@ -78,8 +83,9 @@ Ancestry phrases relatives by marriage with "of" (`wife of 1st cousin`, `niece o
    a line that runs into B's can be swapped for one that does not (checked against a brute-force
    oracle on random collapsed graphs). Every common ancestor whose two lines meet only at it is
    one relationship. Partners reached by the same two lines are the couple. It is half when the
-   two children below the ancestor have different parents, compared by person (duplicate family
-   records for one couple stay full).
+   two children below the ancestor have different recorded parents, compared by person
+   (duplicate family records for one couple stay full); a child with no recorded parents, only a
+   parentless family, gives nothing to compare and counts as full.
    Several such pairs give several names ("2nd cousin and also 3rd cousin once removed") or one
    name with several paths ("double 1st cousin", or a great-grandparent reached through both
    parents).

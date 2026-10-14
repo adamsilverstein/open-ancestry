@@ -341,6 +341,8 @@ export function applyReimport(
       const f = get('family', incomingFamilyId) as FamilyRow;
       const p1 = f.partner1_id ? (personMap.get(f.partner1_id) ?? null) : null;
       const p2 = f.partner2_id ? (personMap.get(f.partner2_id) ?? null) : null;
+      // A partner who was not added: never mistake the rest for a single-parent family.
+      if ((f.partner1_id && !p1) || (f.partner2_id && !p2)) return null;
       const existing = familiesByPartners.get(familyKey(p1, p2));
       if (existing) {
         familyMap.set(incomingFamilyId, existing);
@@ -482,42 +484,141 @@ export function applyReimport(
 
     // ---------------------------------------------------------- losslessness
     // The new export's text is kept whole under its own import batch, with
-    // owners pointing at the rows they became (or null when not applied).
-    const ownerMap = (type: string | null, id: string | null): string | null => {
-      if (!type || !id) return null;
-      if (type === 'person')
-        return personMap.has(id) && has('person', personMap.get(id)!) ? personMap.get(id)! : null;
-      if (type === 'family') return familyFor(id, false);
-      if (type === 'source') return sourceMap.get(id) ?? null;
-      if (type === 'media') return mediaMap.get(id) ?? null;
-      if (type === 'note') return noteMap.get(id) ?? null;
-      if (type === 'tag') return tagMap.get(id) ?? null;
-      if (type === 'repository') return repoMap.get(id) ?? null;
+    // owners pointing at the rows they are now (looked up, never created).
+    // The exporter copies a record verbatim only while its owner is clean, so
+    // owners whose text no longer matches the tree are listed as stale for it.
+    const stale = new Set<string>();
+    const findRow = (type: string, id: string): string | null => {
+      switch (type) {
+        case 'person': {
+          const mapped = personMap.get(id);
+          return mapped && has('person', mapped) ? mapped : null;
+        }
+        case 'family':
+          return familyFor(id, false);
+        case 'source': {
+          const s = get('source', id);
+          return (
+            sourceMap.get(id) ??
+            (s ? (existingSources.get(sourceKey(s.title, s.apid)) ?? null) : null)
+          );
+        }
+        case 'repository': {
+          const r = get('repository', id);
+          if (repoMap.has(id) || !r) return repoMap.get(id) ?? null;
+          return (
+            (
+              tx.store
+                .stmt('SELECT id FROM repository WHERE name = ? ORDER BY id LIMIT 1')
+                .get(r.name) as { id: string } | undefined
+            )?.id ?? null
+          );
+        }
+        case 'media': {
+          const m = get('media', id);
+          return mediaMap.get(id) ?? (m ? (existingMedia.get(mediaKey(m)) ?? null) : null);
+        }
+        case 'note': {
+          const n = get('note', id);
+          if (noteMap.has(id) || !n) return noteMap.get(id) ?? null;
+          return (
+            (
+              tx.store
+                .stmt('SELECT id FROM note WHERE text = ? ORDER BY id LIMIT 1')
+                .get(n.text) as { id: string } | undefined
+            )?.id ?? null
+          );
+        }
+        case 'tag': {
+          const t = get('tag', id);
+          if (tagMap.has(id) || !t) return tagMap.get(id) ?? null;
+          return (
+            (tx.store.db.prepare('SELECT id, name, category FROM tag').all() as Row<'tag'>[]).find(
+              (x) => norm(x.name) === norm(t.name) && norm(x.category) === norm(t.category),
+            )?.id ?? null
+          );
+        }
+      }
       return null;
     };
+    const ownerRows = new Map<string, string | null>();
+    const ownerOf = (type: string | null, id: string | null): string | null => {
+      if (!type || !id) return null;
+      const key = `${type}|${id}`;
+      if (!ownerRows.has(key)) {
+        const found = findRow(type, id);
+        ownerRows.set(key, found);
+        if (found && type !== 'person' && type !== 'family' && differs(type, id, found)) {
+          stale.add(`${type}|${found}`);
+        }
+      }
+      return ownerRows.get(key)!;
+    };
+    /** Whether a reused source, repository, note, tag or media row says something else. */
+    const differs = (type: string, incomingId: string, existingId: string) => {
+      const a = get(type as TableName, incomingId) as unknown as Writable;
+      const b = tx.store.getRow(type as TableName, existingId) as unknown as Writable;
+      return Object.keys(a).some(
+        (k) => !SAME_ANYWAY.has(k) && !k.endsWith('_id') && (a[k] ?? null) !== (b[k] ?? null),
+      );
+    };
+    // People and families whose new text says something the tree does not
+    // (a rejected or conflicting change, a missing fact or relationship).
+    for (const person of session.diff.people) {
+      if (!person.existingId || !person.changes.length) continue;
+      const pending = person.changes.some((c) => !chosen.has(c.id));
+      if (pending) stale.add(`person|${person.existingId}`);
+      for (const c of person.changes) {
+        if (chosen.has(c.id)) continue;
+        if (c.kind === 'family.missing' || c.kind === 'child.missing') {
+          stale.add(`family|${c.existingFamilyId}`);
+        } else if (c.kind === 'fact.add' && c.familyKey) {
+          stale.add(`family|${c.familyKey}`);
+        }
+      }
+    }
+    for (const c of changes) {
+      if (chosen.has(c.id) || (c.kind !== 'family.add' && c.kind !== 'child.add')) continue;
+      const family = familyFor(c.incomingFamilyId, false);
+      if (family) stale.add(`family|${family}`);
+    }
+
     for (const r of incAll<Row<'raw_record'>>('SELECT * FROM raw_record ORDER BY seq')) {
-      const owner = ownerMap(r.owner_type, r.owner_id);
+      const owner = ownerOf(r.owner_type, r.owner_id);
+      // A record the user did not take (a rejected new person) is not part of the tree.
+      if (r.owner_type && !owner) continue;
       tx.insert('raw_record', {
         ...r,
         id: undefined,
-        owner_type: owner ? r.owner_type : null,
         owner_id: owner,
       } as never);
     }
+    // Unmapped lines replace the tree's for the same owner, unless they are the same.
+    const linesOf = (rows: Row<'unmapped_line'>[]) =>
+      rows.map((u) => `${u.path}\u0000${u.line}`).join('\n');
+    const incomingLines = new Map<string, Row<'unmapped_line'>[]>();
     for (const u of incAll<Row<'unmapped_line'>>('SELECT * FROM unmapped_line ORDER BY line_no')) {
-      const owner = ownerMap(u.owner_type, u.owner_id);
-      tx.insert('unmapped_line', {
-        ...u,
-        id: undefined,
-        owner_type: owner ? u.owner_type : null,
-        owner_id: owner,
-      } as never);
+      const owner = ownerOf(u.owner_type, u.owner_id);
+      if (u.owner_type && !owner) continue;
+      const key = owner ? `${u.owner_type}|${owner}` : '';
+      incomingLines.set(key, [...(incomingLines.get(key) ?? []), { ...u, owner_id: owner }]);
     }
-    // Matched people now trace back to this export's records.
-    for (const m of session.matches.values()) {
-      const p = get('person', m.incomingId)!;
-      tx.update('person', m.existingId, { external_id: p.external_id, import_batch_id: batch.id });
+    for (const [key, lines] of incomingLines) {
+      const [type, id] = key ? key.split('|') : [null, null];
+      const old = (
+        type
+          ? tx.store
+              .stmt(
+                'SELECT * FROM unmapped_line WHERE owner_type = ? AND owner_id = ? ORDER BY line_no',
+              )
+              .all(type, id)
+          : []
+      ) as Row<'unmapped_line'>[];
+      if (type && linesOf(old) === linesOf(lines)) continue;
+      for (const u of old) tx.delete('unmapped_line', u.id);
+      for (const u of lines) tx.insert('unmapped_line', { ...u, id: undefined } as never);
     }
+    recordStale(tx, batch.id, stale);
     return applied;
   }) as { batchId: string; result: number };
 
@@ -528,6 +629,31 @@ export function applyReimport(
     skipped: changes.filter((c) => c.applicable).length - appliedCount,
     blocked,
   };
+}
+
+/** Columns that differ between a reused row and its incoming copy without changing what it says. */
+const SAME_ANYWAY = new Set([
+  'id',
+  'created_at',
+  'updated_at',
+  'external_id',
+  'local_path',
+  'sha256',
+  'width',
+  'height',
+  'byte_size',
+  'mime',
+]);
+
+/** Meta key listing records the exporter must not copy verbatim from an import batch. */
+export const staleKey = (importBatchId: string) => `export.stale:${importBatchId}`;
+
+function recordStale(tx: Tx, importBatchId: string, stale: Set<string>) {
+  if (stale.size)
+    tx.insert('meta', {
+      key: staleKey(importBatchId),
+      value: JSON.stringify([...stale].sort()),
+    } as never);
 }
 
 function localIfPresent(tx: Tx, m: MediaRow): string | null {

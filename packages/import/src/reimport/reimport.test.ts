@@ -522,7 +522,7 @@ describe('apply', () => {
     expect(result.blocked).toEqual([]);
     expect(birth(ids.thaddeus)).toEqual({ date_text: '12 MAR 1842', date_sort: 18420312 });
     const thaddeus = ids.thaddeus;
-    expect(pid(store, '@I101@')).toBe(thaddeus);
+    expect(value(store, "SELECT owner_id FROM raw_record WHERE xref = '@I101@'")).toBe(thaddeus);
     expect(
       rows(
         store,
@@ -615,9 +615,8 @@ describe('apply', () => {
         batches[1]!.id,
       ),
     ).toBe(ids.thaddeus);
-    expect(value(store, 'SELECT external_id FROM person WHERE id = ?', ids.thaddeus)).toBe(
-      '@I101@',
-    );
+    // The person row itself is left alone, so an unchanged person stays unchanged.
+    expect(value(store, 'SELECT external_id FROM person WHERE id = ?', ids.thaddeus)).toBe('@I1@');
   });
 
   it('refuses to apply when the tree changed after the review', () => {

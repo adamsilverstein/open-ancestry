@@ -83,6 +83,8 @@ export class TreeData {
   readonly tagLinksByTag: Map<string, TagLinkRow[]>;
   readonly unmapped: Map<string, UnmappedLineRow[]>;
   readonly rawRecords: RawRecordRow[];
+  /** The import batch `rawRecords` come from. */
+  readonly rawBatchId: string | undefined;
   readonly treeName: string | null;
   readonly homePersonId: string | null;
 
@@ -197,6 +199,7 @@ export class TreeData {
       )
       .pluck()
       .get() as string | undefined;
+    this.rawBatchId = batch;
     this.rawRecords = batch
       ? (store.db
           .prepare('SELECT * FROM raw_record WHERE import_batch_id = ? ORDER BY seq')

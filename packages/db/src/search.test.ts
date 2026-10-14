@@ -95,6 +95,39 @@ describe('searchPeople', () => {
     store.close();
   });
 
+  it('finds names across common spelling equivalents, both ways (#199)', () => {
+    const store = memoryTree();
+    const pairs: [stored: string, queries: string[]][] = [
+      ['Yılmaz', ['Yilmaz', 'YILMAZ', 'yılmaz']],
+      ['Yilmaz', ['Yılmaz']],
+      ['Straße', ['Strasse', 'STRASSE', 'straße']],
+      ['Strasse', ['Straße', 'STRAẞE']],
+      ['כֹּהֵן', ['כהן']],
+      ['כהן', ['כֹּהֵן']],
+      ['عَلِيّ', ['علي']],
+      ['علي', ['عَلِيّ']],
+      ["O'Brien", ['OBrien', 'Obrien', 'O’Brien']],
+      ['OBrien', ["O'Brien"]],
+      ['小明', ['小', '小明']],
+    ];
+    const ids = pairs.map(
+      ([surname]) =>
+        store.transact('add', (tx) => persons.create(tx, { names: [{ given: 'Tester', surname }] }))
+          .result.id,
+    );
+    pairs.forEach(([stored, queries], i) => {
+      for (const query of queries) {
+        expect(
+          searchPeople(store, query).map((r) => r.person.id),
+          `${query} -> ${stored}`,
+        ).toContain(ids[i]);
+      }
+    });
+    // A lone Latin letter still only matches exactly (an initial), not every name it starts.
+    expect(searchPeople(store, 'Y').map((r) => r.person.id)).toEqual([]);
+    store.close();
+  });
+
   it('matches places and years', () => {
     const store = memoryTree();
     const f = seedSmallFamily(store);

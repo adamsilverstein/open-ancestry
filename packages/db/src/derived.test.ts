@@ -100,10 +100,29 @@ describe('derived column refresh', () => {
     store.close();
 
     store = openTree(dir, { log: (m) => messages.push(m) });
-    expect(messages).toEqual(['Recomputed event_date_sort for 2 rows (date parser changed)']);
+    expect(messages).toContain('Recomputed event_date_sort for 2 rows (date parser changed)');
     expect(sorts(store)[2]).toMatchObject({ date_sort: parseDate(HEBREW).sortKey });
     store.close();
 
+    messages.length = 0;
+    openTree(dir, { log: (m) => messages.push(m) }).close();
+    expect(messages).toEqual([]);
+  });
+
+  it('rebuilds the search index on open when the search fold changed (#199)', () => {
+    const dir = join(root, 'search.oatree');
+    let store = createTree(dir);
+    const { result: p } = store.transact('add', (tx) =>
+      persons.create(tx, { names: [{ given: 'Emre', surname: 'Yılmaz' }] }),
+    );
+    store.db.prepare("DELETE FROM derived_state WHERE name = 'search_index'").run();
+    store.close();
+
+    const messages: string[] = [];
+    store = openTree(dir, { log: (m) => messages.push(m) });
+    expect(messages).toEqual(['Recomputed search_index for 1 rows (search fold changed)']);
+    expect(searchPeople(store, 'yilmaz').map((r) => r.person.id)).toEqual([p.id]);
+    store.close();
     messages.length = 0;
     openTree(dir, { log: (m) => messages.push(m) }).close();
     expect(messages).toEqual([]);

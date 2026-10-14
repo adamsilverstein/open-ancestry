@@ -57,6 +57,12 @@ export const MIN_PARENT_AGE = 12;
 export const MAX_PARENT_AGE = 70;
 /** Years either way two dates may differ and still describe the same person. */
 const DUPLICATE_YEARS = 2;
+/**
+ * Widest date range that counts as evidence two people are the same: `BEF
+ * 1965` or `BET 1800 AND 1900` agrees with too much to suggest a duplicate
+ * (though it can still rule one out).
+ */
+const AGREEING_SPAN_YEARS = 10;
 /** Slack for `abt.`, `est.` and `cal.` dates. */
 const APPROXIMATE_YEARS = 2;
 const DISMISSED = 'check.dismissed:';
@@ -94,9 +100,38 @@ function yearRange(
 
 const showYear = (y: Years) => String(Number.isFinite(y[0]) ? y[0] : y[1]);
 
-interface PersonRow {
-  id: string;
-  sex: string;
+/** First and last possible `date_sort` day of an exact Gregorian date, or null. */
+type Days = [number, number];
+
+function daySpan(
+  text: string | null,
+  qualifier: string | null,
+  sort: number | null,
+  calendar: string | null,
+): Days | null {
+  if (qualifier !== 'exact' || sort === null || !text || calendar) return null;
+  const t = text.trim().toUpperCase();
+  // A month or a year alone sorts mid-way through it; widen it back out.
+  if (/^\d{1,2}\s+[A-Z]/.test(t)) return [sort, sort];
+  const month = Math.floor(sort / 100) * 100;
+  if (/^[A-Z]{3,}\.?\s+\d/.test(t)) return [month + 1, month + 31];
+  const year = Math.floor(sort / 10000) * 10000;
+  return [year + 101, year + 1231];
+}
+
+/** A known date, in years (with slack for approximations) and, when exact, in days. */
+interface Dated {
+  years: Years;
+  days: Days | null;
+}
+
+/** Certainly before: the latest `a` could be is earlier than the earliest `b` could be. */
+const before = (a: Dated, b: Dated) =>
+  a.years[1] < b.years[0] || (a.days !== null && b.days !== null && a.days[1] < b.days[0]);
+
+interface NameRow {
+  person_id: string;
+  is_primary: number;
   given: string | null;
   surname: string | null;
   surname_key: string | null;
@@ -107,66 +142,85 @@ interface EventRow {
   event_id: string;
   type: string;
   custom_type: string | null;
+  date_text: string | null;
+  calendar: string | null;
   date_qualifier: string | null;
   date_sort: number | null;
   date_sort_end: number | null;
   is_preferred: number;
+  sort_order: number;
 }
 
 interface Person {
   id: string;
   sex: string;
   name: string;
-  /** Normalized first given name and first surname sound key, for duplicate grouping. */
-  given: string;
-  sound: string;
-  birth: Years | null;
-  death: Years | null;
-  events: { id: string; type: string; custom: string | null; years: Years }[];
+  /** `sound|given` per name: first surname sound key and normalized first given name. */
+  keys: Set<string>;
+  birth: Dated | null;
+  death: Dated | null;
+  events: ({ id: string; type: string; custom: string | null } & Dated)[];
 }
 
 function loadPeople(store: TreeStore): Map<string, Person> {
   const people = new Map<string, Person>();
-  const rows = store
-    .stmt(
-      `SELECT p.id, p.sex, n.given, n.surname, n.surname_key
-       FROM person p LEFT JOIN person_name n ON n.person_id = p.id AND n.is_primary = 1`,
-    )
-    .all() as PersonRow[];
+  const rows = store.stmt('SELECT id, sex FROM person').all() as { id: string; sex: string }[];
   for (const r of rows) {
     people.set(r.id, {
       id: r.id,
       sex: r.sex,
-      name: [r.given, r.surname].filter(Boolean).join(' ') || 'Unnamed person',
-      given: normalizeForSearch(r.given ?? '').split(' ')[0] ?? '',
-      sound: (r.surname_key ?? '').split(' ')[0] ?? '',
+      name: 'Unnamed person',
+      keys: new Set(),
       birth: null,
       death: null,
       events: [],
     });
   }
+  const names = store
+    .stmt('SELECT person_id, is_primary, given, surname, surname_key FROM person_name')
+    .all() as NameRow[];
+  for (const n of names) {
+    const person = people.get(n.person_id);
+    if (!person) continue;
+    if (n.is_primary === 1) {
+      person.name = [n.given, n.surname].filter(Boolean).join(' ') || person.name;
+    }
+    const given = normalizeForSearch(n.given ?? '').split(' ')[0] ?? '';
+    const sound = (n.surname_key ?? '').split(' ')[0] ?? '';
+    if (given && sound) person.keys.add(`${sound}|${given}`);
+  }
   const events = store
     .stmt(
-      `SELECT r.person_id, e.id AS event_id, e.type, e.custom_type, e.date_qualifier,
-              e.date_sort, e.date_sort_end, r.is_preferred
+      `SELECT r.person_id, e.id AS event_id, e.type, e.custom_type, e.date_text, e.calendar,
+              e.date_qualifier,
+              e.date_sort, e.date_sort_end, r.is_preferred, r.sort_order
        FROM event_role r JOIN event e ON e.id = r.event_id
-       WHERE r.role = 'principal' AND r.person_id IS NOT NULL
-       ORDER BY r.is_preferred DESC, r.sort_order`,
+       WHERE r.role = 'principal' AND r.person_id IS NOT NULL`,
     )
     .all() as EventRow[];
+  // Unsorted (sorting every role costs more than the rest of the scan): the
+  // lowest rank wins, so BIRT beats a christening, then preferred facts, then order.
   const birthRank = new Map<string, number>();
+  const deathRank = new Map<string, number>();
   for (const e of events) {
     const person = people.get(e.person_id);
     const years = yearRange(e.date_qualifier, e.date_sort, e.date_sort_end);
     if (!person || !years) continue;
-    person.events.push({ id: e.event_id, type: e.type, custom: e.custom_type, years });
-    // Preferred facts come first; BIRT beats a christening or baptism.
-    const rank = BIRTH_TYPES.indexOf(e.type);
-    if (rank >= 0 && rank < (birthRank.get(person.id) ?? Infinity)) {
-      birthRank.set(person.id, rank);
-      person.birth = years;
+    const dated = {
+      years,
+      days: daySpan(e.date_text, e.date_qualifier, e.date_sort, e.calendar),
+    };
+    person.events.push({ id: e.event_id, type: e.type, custom: e.custom_type, ...dated });
+    const order = (e.is_preferred ? 0 : 1e8) + e.sort_order;
+    const type = BIRTH_TYPES.indexOf(e.type);
+    if (type >= 0 && type * 1e9 + order < (birthRank.get(person.id) ?? Infinity)) {
+      birthRank.set(person.id, type * 1e9 + order);
+      person.birth = dated;
     }
-    if (e.type === 'DEAT' && !person.death) person.death = years;
+    if (e.type === 'DEAT' && order < (deathRank.get(person.id) ?? Infinity)) {
+      deathRank.set(person.id, order);
+      person.death = dated;
+    }
   }
   return people;
 }
@@ -187,25 +241,54 @@ function parentLinks(store: TreeStore): [parent: string, child: string][] {
   return rows.map((r) => [r.parent, r.child]);
 }
 
+/**
+ * People with no citation on themselves, their names, their own facts, or a
+ * family they are a partner in (or its facts, such as the marriage).
+ */
 function unsourced(store: TreeStore): string[] {
-  return (
+  const sourced = new Set(
     store
       .stmt(
-        `SELECT p.id FROM person p
-         WHERE NOT EXISTS (SELECT 1 FROM citation_link cl
-                           WHERE cl.owner_type = 'person' AND cl.owner_id = p.id)
-           AND NOT EXISTS (SELECT 1 FROM event_role r
-                           JOIN citation_link cl ON cl.owner_type = 'event' AND cl.owner_id = r.event_id
-                           WHERE r.person_id = p.id AND r.role = 'principal')
-         ORDER BY p.id`,
+        `SELECT owner_id FROM citation_link WHERE owner_type = 'person'
+         UNION SELECT n.person_id FROM citation_link cl
+           JOIN person_name n ON cl.owner_type = 'person_name' AND n.id = cl.owner_id
+         UNION SELECT r.person_id FROM citation_link cl
+           JOIN event_role r ON cl.owner_type = 'event' AND r.event_id = cl.owner_id
+           WHERE r.role = 'principal' AND r.person_id IS NOT NULL
+         UNION SELECT f.id FROM citation_link cl
+           JOIN family f ON cl.owner_type = 'family' AND f.id = cl.owner_id
+         UNION SELECT r.family_id FROM citation_link cl
+           JOIN event_role r ON cl.owner_type = 'event' AND r.event_id = cl.owner_id
+           WHERE r.family_id IS NOT NULL`,
       )
-      .all() as { id: string }[]
-  ).map((r) => r.id);
+      .pluck()
+      .all() as string[],
+  );
+  // Family ids stand for their partners.
+  const partners = store.stmt('SELECT id, partner1_id, partner2_id FROM family').all() as {
+    id: string;
+    partner1_id: string | null;
+    partner2_id: string | null;
+  }[];
+  for (const f of partners) {
+    if (!sourced.has(f.id)) continue;
+    if (f.partner1_id) sourced.add(f.partner1_id);
+    if (f.partner2_id) sourced.add(f.partner2_id);
+  }
+  return (store.stmt('SELECT id FROM person ORDER BY id').pluck().all() as string[]).filter(
+    (id) => !sourced.has(id),
+  );
 }
 
-const close = (a: Years | null, b: Years | null) =>
-  a !== null && b !== null && a[0] - DUPLICATE_YEARS <= b[1] && b[0] - DUPLICATE_YEARS <= a[1];
-const conflict = (a: Years | null, b: Years | null) => a !== null && b !== null && !close(a, b);
+const close = (a: Years, b: Years) =>
+  a[0] - DUPLICATE_YEARS <= b[1] && b[0] - DUPLICATE_YEARS <= a[1];
+const bounded = (y: Years) => y[1] - y[0] <= AGREEING_SPAN_YEARS;
+/** Both dates are narrow and overlap: evidence for the same person. */
+const agree = (a: Dated | null, b: Dated | null) =>
+  a !== null && b !== null && bounded(a.years) && bounded(b.years) && close(a.years, b.years);
+/** The dates cannot be the same event, open-ended or not. */
+const conflict = (a: Dated | null, b: Dated | null) =>
+  a !== null && b !== null && !close(a.years, b.years);
 const sexesAgree = (a: string, b: string) =>
   a === b || ['U', 'X'].includes(a) || ['U', 'X'].includes(b);
 
@@ -221,16 +304,18 @@ function findIssues(store: TreeStore): Draft[] {
   const drafts: Draft[] = [];
   const name = (id: string) => people.get(id)?.name ?? 'Unknown person';
 
-  // Duplicates: same first given name and surname sound, compatible sex, and
-  // at least one pair of dates that agree with none that disagree.
+  // Duplicates: same first given name and surname sound in any of their names
+  // (a maiden and a married name), compatible sex, and a pair of narrow dates
+  // that agree with none that disagree.
   const groups = new Map<string, Person[]>();
   for (const p of people.values()) {
-    if (!p.given || !p.sound) continue;
-    const key = `${p.sound}|${p.given}`;
-    const group = groups.get(key);
-    if (group) group.push(p);
-    else groups.set(key, [p]);
+    for (const key of p.keys) {
+      const group = groups.get(key);
+      if (group) group.push(p);
+      else groups.set(key, [p]);
+    }
   }
+  const paired = new Set<string>();
   for (const group of groups.values()) {
     for (let i = 0; i < group.length; i++) {
       for (let j = i + 1; j < group.length; j++) {
@@ -238,8 +323,11 @@ function findIssues(store: TreeStore): Draft[] {
         const b = group[j]!;
         if (!sexesAgree(a.sex, b.sex)) continue;
         if (conflict(a.birth, b.birth) || conflict(a.death, b.death)) continue;
-        if (!close(a.birth, b.birth) && !close(a.death, b.death)) continue;
+        if (!agree(a.birth, b.birth) && !agree(a.death, b.death)) continue;
         const ids = [a.id, b.id].sort();
+        const pair = ids.join('+');
+        if (paired.has(pair)) continue;
+        paired.add(pair);
         drafts.push({
           kind: 'possible-duplicate',
           ids,
@@ -250,31 +338,31 @@ function findIssues(store: TreeStore): Draft[] {
   }
 
   for (const p of people.values()) {
-    if (p.birth && p.death && p.death[1] < p.birth[0]) {
+    if (p.birth && p.death && before(p.death, p.birth)) {
       drafts.push({
         kind: 'death-before-birth',
         ids: [p.id],
-        message: `Died in ${showYear(p.death)}, before birth in ${showYear(p.birth)}`,
+        message: `Died in ${showYear(p.death.years)}, before birth in ${showYear(p.birth.years)}`,
       });
     }
     if (p.death) {
       for (const e of p.events) {
         // A birth after death is reported once, as death-before-birth.
         if (AFTER_DEATH_OK.has(e.type) || BIRTH_TYPES.includes(e.type)) continue;
-        if (e.years[0] <= p.death[1]) continue;
+        if (!before(p.death, e)) continue;
         drafts.push({
           kind: 'event-after-death',
           ids: [p.id],
           eventId: e.id,
-          message: `${eventTypeLabel(e.type, e.custom)} in ${showYear(e.years)}, after death in ${showYear(p.death)}`,
+          message: `${eventTypeLabel(e.type, e.custom)} in ${showYear(e.years)}, after death in ${showYear(p.death.years)}`,
         });
       }
     }
   }
 
   for (const [parentId, childId] of parentLinks(store)) {
-    const parent = people.get(parentId)?.birth;
-    const child = people.get(childId)?.birth;
+    const parent = people.get(parentId)?.birth?.years;
+    const child = people.get(childId)?.birth?.years;
     if (!parent || !child) continue;
     if (child[1] < parent[0]) {
       drafts.push({

@@ -3,6 +3,7 @@ import { expandKey, layoutDescendants, layoutFamily } from './index';
 import {
   adoption,
   cousinMarriage,
+  crossings,
   describeLayout,
   halfSiblings,
   makeGraph,
@@ -135,10 +136,15 @@ describe('layoutFamily', () => {
         .points[0]![0];
     const drops = ['F1', 'F4', 'F2', 'F3'].map(dropX);
     expect(drops).toEqual([...drops].sort((p, q) => p - q));
-    // The third wife is not adjacent, so that couple line drops below the row.
+    // The third wife is not adjacent, so that couple line rides a lane above
+    // the row and her children hang from her own card.
     const third = layout.edges.find((e) => e.kind === 'couple' && e.familyId === 'F3')!;
     expect(third.points).toHaveLength(4);
-    expect(third.points[1]![1]).toBeGreaterThan(150);
+    expect(third.points[1]![1]).toBeLessThan(0);
+    const w3 = node(layout, 'w3');
+    const thirdDrop = layout.edges.find((e) => e.familyId === 'F3' && e.kind === 'parent-child')!;
+    expect(thirdDrop.points[0]).toEqual([centerX(w3), 150]);
+    expect(crossings(layout.edges)).toEqual([]);
     // Children with an unknown partner drop from the focus card itself.
     const unknown = layout.edges.find((e) => e.familyId === 'F4' && e.parents)!;
     expect(unknown.points[0]).toEqual([centerX(node(layout, 'me')), 150]);
@@ -323,5 +329,84 @@ describe('siblings in the family view', () => {
     people['c'] = { ...people['c']!, birthSortKey: 1 };
     people['me'] = { ...people['me']!, birthSortKey: 2 };
     expect(row(layoutFamily(g, 'me'), 0)).toEqual(['c', 'me', 'a', 'b']);
+  });
+});
+
+describe('parent sets and spouses', () => {
+  it('draws the preferred parent set first, over biological', () => {
+    const g = makeGraph({ me: 'F', bdad: 'M', adad: 'M' }, [
+      ['F_bio', 'bdad', null, [['me', 'biological']]],
+      ['F_adopt', 'adad', null, [['me', 'adopted']]],
+    ]);
+    const marked = {
+      ...g,
+      families: g.families.map((f) =>
+        f.id === 'F_adopt' ? { ...f, children: [{ ...f.children[0]!, preferred: true }] } : f,
+      ),
+    };
+    expect(layoutFamily(marked, 'me').alternateParentFamilies['me']?.selected).toBe('F_adopt');
+    expect(layoutFamily(g, 'me').alternateParentFamilies['me']?.selected).toBe('F_bio');
+  });
+
+  it("shows one spouse's parents at a time and moves the siblings out of the way", () => {
+    const g = makeGraph(
+      {
+        me: 'M',
+        w1: 'F',
+        w2: 'F',
+        w3: 'F',
+        dad: 'M',
+        mom: 'F',
+        sib: 'M',
+        wd: 'M',
+        wd2: 'M',
+        wd3: 'M',
+      },
+      [
+        ['Fp', 'dad', 'mom', ['me', 'sib']],
+        ['F1', 'me', 'w1', []],
+        ['F2', 'me', 'w2', []],
+        ['F3', 'me', 'w3', []],
+        ['Fw1', 'wd', null, ['w1']],
+        ['Fw2', 'wd2', null, ['w2']],
+        ['Fw3', 'wd3', null, ['w3']],
+      ],
+    );
+    const plain = layoutFamily(g, 'me');
+    // The middle spouse sits under the lane to the third, so it has no chevron.
+    expect(node(plain, 'w2').canExpandUp).toBe(false);
+    expect(node(plain, 'w1').canExpandUp).toBe(true);
+    expect(node(plain, 'w3').canExpandUp).toBe(true);
+
+    const right = layoutFamily(g, 'me', { expanded: ['w3:up', 'w1:up', 'w2:up'] });
+    expect(describeLayout(right)).toMatchSnapshot();
+    // w1 comes first in the block, so only her parents show; the sibling moves right.
+    expect(right.nodes.map((n) => n.key)).toContain('wd');
+    expect(right.nodes.map((n) => n.key)).not.toContain('wd3');
+    expect(node(right, 'w3').canExpandUp).toBe(false);
+    expect(node(right, 'sib').x).toBeGreaterThan(node(right, 'w3').x);
+    expect(crossings(right.edges)).toEqual([]);
+
+    const left = layoutFamily(g, 'me', { expanded: ['w3:up'] });
+    expect(node(left, 'sib').x).toBeLessThan(node(left, 'w1').x);
+    expect(crossings(left.edges)).toEqual([]);
+  });
+
+  it("orders each partner's families by their own partner order", () => {
+    const g = makeGraph({ me: 'M', a: 'F', b: 'F' }, [
+      ['Fa', 'me', 'a', []],
+      ['Fb', 'me', 'b', []],
+    ]);
+    const ordered = {
+      ...g,
+      families: g.families.map((f) => ({
+        ...f,
+        partnerOrder: f.id === 'Fa' ? ([1, 0] as const) : ([0, 0] as const),
+      })),
+    };
+    const row = layoutFamily(ordered, 'me')
+      .nodes.sort((p, q) => p.x - q.x)
+      .map((n) => n.key);
+    expect(row).toEqual(['b', 'me', 'a']);
   });
 });

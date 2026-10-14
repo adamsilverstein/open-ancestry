@@ -3,6 +3,8 @@ import fc from 'fast-check';
 import type {
   ChildRelation,
   FanLayout,
+  LayoutEdge,
+  Point,
   Sex,
   TreeFamily,
   TreeGraph,
@@ -261,6 +263,51 @@ export const arbGraph: fc.Arbitrary<TreeGraph & { ids: string[] }> = fc
       }),
     })),
   }));
+
+/**
+ * Places where edges of different families cross or run along each other.
+ * Edges are axis-aligned polylines; touching at an endpoint is allowed, and
+ * families of the same couple may share their connector.
+ */
+export function crossings(edges: LayoutEdge[]): string[] {
+  type Seg = { a: Point; b: Point; group: string; couple?: string };
+  const segs: Seg[] = edges.flatMap((e) => {
+    const couple = e.parents ? [...e.parents].sort().join('+') : undefined;
+    return e.points.slice(1).map((b, i) => ({ a: e.points[i]!, b, group: e.group, couple }));
+  });
+  const out: string[] = [];
+  const span = (p: number, q: number): [number, number] => [Math.min(p, q), Math.max(p, q)];
+  for (let i = 0; i < segs.length; i++) {
+    for (let j = i + 1; j < segs.length; j++) {
+      const s = segs[i]!;
+      const t = segs[j]!;
+      if (s.group === t.group) continue;
+      // Families of one couple share its connector and trunk.
+      if (s.couple !== undefined && s.couple === t.couple) continue;
+      const sh = s.a[1] === s.b[1];
+      const th = t.a[1] === t.b[1];
+      if (sh === th) {
+        // Colinear overlap: same line, overlapping extent.
+        const same = sh ? s.a[1] === t.a[1] : s.a[0] === t.a[0];
+        const axis = sh ? 0 : 1;
+        const [s1, s2] = span(s.a[axis], s.b[axis]);
+        const [t1, t2] = span(t.a[axis], t.b[axis]);
+        if (same && Math.min(s2, t2) > Math.max(s1, t1)) out.push(`overlap ${s.group} ${t.group}`);
+        continue;
+      }
+      const hz = sh ? s : t;
+      const vt = sh ? t : s;
+      const [h1, h2] = span(hz.a[0], hz.b[0]);
+      const [v1, v2] = span(vt.a[1], vt.b[1]);
+      const x = vt.a[0];
+      const y = hz.a[1];
+      if (x > h1 && x < h2 && y > v1 && y < v2) {
+        out.push(`cross ${hz.group} x ${vt.group} @${x},${y}`);
+      }
+    }
+  }
+  return out;
+}
 
 const round = (n: number) => Math.round(n * 10) / 10;
 

@@ -33,6 +33,7 @@ function familyCase(
 }
 
 let pedigree: ReturnType<typeof syntheticTree>;
+let wide: TreeGraph;
 
 export default [
   familyCase('layout: family view, 500 visible people', [5, 4, 4], 480, 20),
@@ -47,6 +48,22 @@ export default [
       layoutPedigree(pedigree.graph, pedigree.focusId, { ancestorsDepth: 10 });
       layoutFan(pedigree.graph, pedigree.focusId);
     },
+    budgetMs: 50,
+  },
+  {
+    // Child lookups are indexed, so one huge family stays linear.
+    name: 'layout: family view, one couple with 3,000 children',
+    setup: () => {
+      const people = Object.fromEntries(
+        ['me', 'sp', ...Array.from({ length: 3000 }, (_, i) => `k${i}`)].map((id) => [
+          id,
+          { id, sex: 'U' as const, name: id, living: false },
+        ]),
+      );
+      const children = Array.from({ length: 3000 }, (_, i) => ({ id: `k${i}` }));
+      wide = { people, families: [{ id: 'F', partners: ['me', 'sp'], children }] };
+    },
+    fn: () => layoutFamily(wide, 'me'),
     budgetMs: 50,
   },
 ] satisfies BenchCase[];

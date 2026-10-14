@@ -65,7 +65,7 @@ export function nodesFrom(b: Builder, size: CardSize, chevrons: Chevrons): Layou
   return b.cards.map((card: Card) => {
     const person = index.person(card.personId)!;
     const dup = card.dupOf !== undefined;
-    const up = chevrons.up.has(card.role) && !dup;
+    const up = chevrons.up.has(card.role) && !dup && card.upBlocked !== true;
     const down = chevrons.down.has(card.role) && !dup;
     const sibs = chevrons.siblings.has(card.role) && !dup;
     const hasSiblings =

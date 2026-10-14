@@ -14,6 +14,7 @@ import type {
   ExpandKey,
   LayoutOptions,
   ParentFamilyChoice,
+  PartnerRelationship,
 } from './types';
 
 export type Role =
@@ -43,6 +44,8 @@ export interface Card {
   parentsShown: boolean;
   childrenShown: boolean;
   siblingsShown: boolean;
+  /** A middle spouse under another couple's lane: its parents are never shown. */
+  upBlocked?: boolean;
   /** Shown siblings of a direct-line person, birth ordered. */
   siblings?: SiblingEntry[];
   half?: boolean;
@@ -52,14 +55,20 @@ export interface Card {
 
 export interface Unit extends TidyUnit {
   cards: Card[];
+  /** Families hung from this block share it, so their connectors route together. */
+  block: number;
   groups: { anchors: number[]; children: Unit[]; rootGap: number }[];
 }
 
 /** A family drawn once: its parent cards above its child cards. */
 export interface FamilyLink {
   familyId: string;
+  /** The block's own person first, then their partner. */
   parents: Card[];
   children: { card: Card; rel: ChildRelation; half?: boolean }[];
+  /** Families of one block share a number so their connectors can be routed together. */
+  block: number;
+  relationship?: PartnerRelationship;
 }
 
 export interface Settings {
@@ -119,6 +128,7 @@ interface SiblingCandidate {
 export class Builder {
   readonly cards: Card[] = [];
   readonly links: FamilyLink[] = [];
+  private blocks = 0;
   readonly alternates: Record<string, ParentFamilyChoice> = {};
   private readonly primary = new Map<string, string>();
   private readonly dupCount = new Map<string, number>();
@@ -165,7 +175,16 @@ export class Builder {
   }
 
   unit(cards: Card[], level: number): Unit {
-    return { cards, size: cards.length, anchor: 0, level, groups: [], x: 0, rel: 0 };
+    return {
+      cards,
+      size: cards.length,
+      anchor: 0,
+      level,
+      groups: [],
+      x: 0,
+      rel: 0,
+      block: this.blocks++,
+    };
   }
 
   /**
@@ -183,7 +202,7 @@ export class Builder {
       this.alternates[card.personId] = { selected: family.id, families: all.map((f) => f.id) };
     }
     const kids = [
-      { card, rel: childRelation(family, card.personId), half: false },
+      { card, rel: childRelation(this.index, family, card.personId), half: false },
       ...(card.siblings ?? []),
     ];
     let parents: Card[] = [];
@@ -200,7 +219,13 @@ export class Builder {
       pending = units.map((u, i) => ({ unit: u, base: budget - 1, side: sides[i]! }));
     }
     if (parents.length > 0 || kids.length > 1) {
-      this.links.push({ familyId: family.id, parents, children: kids });
+      this.links.push({
+        familyId: family.id,
+        parents,
+        children: kids,
+        block: unit.block,
+        relationship: family.relationship,
+      });
     }
     return pending;
   }
@@ -236,7 +261,7 @@ export class Builder {
       for (const id of this.index.children(f)) {
         if (seen.has(id)) continue;
         seen.add(id);
-        out.push({ id, rel: childRelation(f, id), half, self: id === personId });
+        out.push({ id, rel: childRelation(this.index, f, id), half, self: id === personId });
       }
     };
     add(family, false);
@@ -257,18 +282,17 @@ export class Builder {
     if (card.dupOf !== undefined || !this.showSiblings(card)) return;
     let order = this.siblingCandidates(card.personId);
     if (order.length < 2) return;
-    if (side === 'center') {
-      const key = (c: SiblingCandidate) => this.index.person(c.id)!.birthSortKey;
-      // Stable: undated siblings keep family order after the dated ones.
-      order = [...order].sort((a, b) => {
-        const ka = key(a);
-        const kb = key(b);
-        if (ka === undefined || kb === undefined) {
-          return ka === kb ? 0 : ka === undefined ? 1 : -1;
-        }
-        return ka - kb;
-      });
-    } else {
+    const key = (c: SiblingCandidate) => this.index.person(c.id)!.birthSortKey;
+    // Stable: undated siblings keep family order after the dated ones.
+    order = [...order].sort((a, b) => {
+      const ka = key(a);
+      const kb = key(b);
+      if (ka === undefined || kb === undefined) {
+        return ka === kb ? 0 : ka === undefined ? 1 : -1;
+      }
+      return ka - kb;
+    });
+    if (side !== 'center') {
       const self = order.filter((c) => c.self);
       const others = order.filter((c) => !c.self);
       order = side === 'left' ? [...others, ...self] : [...self, ...others];
@@ -314,7 +338,13 @@ export class Builder {
         const id = spouseOf(this.index, f, person.personId);
         if (id === null) continue;
         const spouse = spouses[spouseIds.indexOf(id)]!;
-        this.links.push({ familyId: f.id, parents: [person, spouse], children: [] });
+        this.links.push({
+          familyId: f.id,
+          parents: [person, spouse],
+          children: [],
+          block: this.blocks++,
+          relationship: f.relationship,
+        });
       }
     }
     if (spouses.length === 1) {
@@ -348,29 +378,35 @@ export class Builder {
 
     const pending: Pending[] = [];
     const groups: { mid: number; group: Unit['groups'][number] }[] = [];
+    const { block } = unit;
     for (const family of families) {
       const spouseId = spouseOf(this.index, family, person.personId);
       const spouse = cards.find((c) => c !== person && c.personId === spouseId);
-      const anchors = spouse ? [unit.anchor, cards.indexOf(spouse)] : [unit.anchor];
+      // Children hang from the couple's midpoint when the partners are side by
+      // side, otherwise from the partner's own card (see family.ts edges).
+      const s = spouse ? cards.indexOf(spouse) : unit.anchor;
+      const anchors = Math.abs(s - unit.anchor) === 1 ? [unit.anchor, s] : [s];
       const children =
         budget > 0
           ? this.index.children(family).map((id) => ({
               card: this.card(id, 'descendant', person.generation + 1),
-              rel: childRelation(family, id),
+              rel: childRelation(this.index, family, id),
             }))
           : [];
       this.links.push({
         familyId: family.id,
         parents: spouse ? [person, spouse] : [person],
         children,
+        block,
+        relationship: family.relationship,
       });
       if (children.length === 0) continue;
       const units = children.map((c) => this.unit([c.card], unit.level + 1));
       for (const u of units) pending.push({ unit: u, base: budget - 1, side: 'center' });
-      const mid = anchors.reduce((a, b) => a + b, 0) / anchors.length;
+      const mid = (anchors[0]! + anchors.at(-1)!) / 2;
       groups.push({ mid, group: { anchors, children: units, rootGap } });
     }
-    // Order groups like their couples so connectors do not cross; stable for ties.
+    // Order groups like their drop points so connectors do not cross; stable for ties.
     groups.sort((a, b) => a.mid - b.mid);
     unit.groups = groups.map((g) => g.group);
     return pending;

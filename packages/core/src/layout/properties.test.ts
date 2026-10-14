@@ -1,7 +1,8 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { layoutDescendants, layoutFamily, layoutFan, layoutPedigree } from './index';
-import { arbGraph, syntheticTree } from './test-graphs';
+import { arbGraph, crossings, makeGraph, syntheticTree } from './test-graphs';
+import type { FamilySpec } from './test-graphs';
 import type { ExpandKey, LayoutNode, Point, TreeLayout } from './types';
 
 const keysOf = (id: string): ExpandKey[] => [`${id}:up`, `${id}:down`, `${id}:siblings`];
@@ -56,8 +57,14 @@ function assertVerticalEdges(layout: TreeLayout) {
         expect(first).toEqual([l!.x + l!.width, l!.y + l!.height / 2]);
         expect(last).toEqual([r!.x, r!.y + r!.height / 2]);
       } else {
-        expect(first).toEqual([l!.x + l!.width / 2, l!.y + l!.height]);
-        expect(last).toEqual([r!.x + r!.width / 2, r!.y + r!.height]);
+        // A lane above the row: from the top of the left card to the top of the right one.
+        expect(first[1]).toBe(l!.y);
+        expect(first[0]).toBeGreaterThan(l!.x + l!.width / 2);
+        expect(first[0]).toBeLessThan(l!.x + l!.width);
+        expect(last[1]).toBe(r!.y);
+        expect(last[0]).toBeGreaterThan(r!.x);
+        expect(last[0]).toBeLessThan(r!.x + r!.width / 2);
+        expect(couple.points[1]![1]).toBeLessThan(l!.y);
       }
     }
     if (!drop) {
@@ -73,9 +80,10 @@ function assertVerticalEdges(layout: TreeLayout) {
     }
     const parents = drop.parents!.map((k) => byKey.get(k)!);
     const start = drop.points[0]!;
-    if (parents.length === 1) {
-      const p = parents[0]!;
-      expect(start).toEqual([p.x + p.width / 2, p.y + p.height]);
+    const bottoms = parents.map((p) => [p.x + p.width / 2, p.y + p.height]);
+    if (parents.length === 1 || couple!.points.length > 2) {
+      // One parent, or partners apart: the drop leaves the bottom of a parent card.
+      expect(bottoms).toContainEqual(start);
     } else {
       const pts = couple!.points;
       expect(pts.slice(1).some((b, i) => onSegment(start, pts[i]!, b))).toBe(true);
@@ -105,12 +113,44 @@ describe('layout properties', () => {
         expect(new Set(layout.nodes.map((n) => n.key)).size).toBe(layout.nodes.length);
         assertNoOverlap(layout.nodes);
         assertVerticalEdges(layout);
+        expect(crossings(layout.edges)).toEqual([]);
         for (const n of layout.nodes) {
           expect(n.y).toBe(n.generation * (150 + 64));
           if (n.isDuplicate) expect(layout.nodes.some((p) => p.key === n.duplicateOf)).toBe(true);
         }
       }),
       { numRuns: 400 },
+    );
+  });
+
+  it('several spouses, each with children, never cross or share connectors', () => {
+    // Up to 6 partners (some unknown) per person, children who remarry too.
+    const arbFamilies = fc.array(
+      fc.record({ known: fc.boolean(), kids: fc.nat({ max: 4 }), kidSpouses: fc.nat({ max: 3 }) }),
+      { minLength: 1, maxLength: 6 },
+    );
+    fc.assert(
+      fc.property(arbFamilies, fc.boolean(), (spec, withParents) => {
+        const people: Record<string, 'M' | 'F'> = { me: 'M', dad: 'M', mom: 'F' };
+        const fams: FamilySpec[] = withParents ? [['Fp', 'dad', 'mom', ['me']]] : [];
+        spec.forEach((f, i) => {
+          const kids = Array.from({ length: f.kids }, (_, j) => `k${i}_${j}`);
+          for (const kid of kids) people[kid] = 'M';
+          if (f.known) people[`w${i}`] = 'F';
+          fams.push([`F${i}`, 'me', f.known ? `w${i}` : null, kids]);
+          const first = kids[0];
+          for (let s = 0; first && s < f.kidSpouses; s++) {
+            people[`${first}s${s}`] = 'F';
+            people[`${first}s${s}k`] = 'M';
+            fams.push([`F${i}_${s}`, first, `${first}s${s}`, [`${first}s${s}k`]]);
+          }
+        });
+        const layout = layoutFamily(makeGraph(people, fams), 'me', { descendantsDepth: 3 });
+        assertNoOverlap(layout.nodes);
+        assertVerticalEdges(layout);
+        expect(crossings(layout.edges)).toEqual([]);
+      }),
+      { numRuns: 300 },
     );
   });
 

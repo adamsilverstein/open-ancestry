@@ -36,9 +36,22 @@ interface TreePerson {
 interface TreeFamily {
   id: string;
   partners: [string | null, string | null];
-  children: { id: string; rel1?: ChildRelation; rel2?: ChildRelation }[]; // display order
+  partnerOrder?: [number, number]; // position among each partner's families
+  relationship?: 'married' | 'civil_union' | 'partners' | 'unknown'; // copied to couple edges
+  children: {
+    id: string;
+    rel1?: ChildRelation;
+    rel2?: ChildRelation;
+    preferred?: boolean; // the child's preferred parent set
+    order?: number; // position among the child's parent families
+  }[]; // display order
 }
 ```
+
+`fromNeighborhood(result)` builds this from the db `getNeighborhood` result: names and
+`LifespanText`-style lifespans, `moreUp`/`moreDown` as the `hasMore*` hints, children by
+`sortOrder`, `isPreferred`, `childOrder`, `partner1Order`/`partner2Order` and the relationship type.
+Its input type is declared structurally in core (core cannot import db) and the db type fits it.
 
 Bad data is tolerated: ids missing from `people` are treated as unknown, a person partnered with
 themselves loses the second slot, repeated children are dropped and cycles terminate.
@@ -73,7 +86,8 @@ themselves loses the second slot, repeated children are dropped and cycles termi
   (`right-middle`); the pedigree heads each column (`bottom-left`).
 - `bounds`: the cards' bounding box.
 - `alternateParentFamilies`: `{ personId: { selected, families } }` for each shown person with
-  more than one parent set. Biological parents are chosen first.
+  more than one parent set. The switcher's choice wins, then the `preferred` set, then the most
+  biological one.
 
 `layoutFan` returns `segments` instead: `startAngle`/`endAngle` in radians (screen space, 0 to
 the right, clockwise, `3*PI/2` is up), `innerRadius`/`outerRadius`, and the Ahnentafel number.
@@ -103,10 +117,31 @@ children of either parent) join the same bar and are flagged `isHalfSibling` / `
 show without their parents too, joined by a bar with no drop. Each direct-line person has a
 `<id>:siblings` chevron.
 
-With several spouses the focus block is `[spouse1][ME][spouse2][spouse3]`. Each couple's children
-form their own group under it, ordered like the couples, and a couple with a card between them
-(`ME` and `spouse3`) is joined by a lane just below the row. Children with an unknown partner hang
-from the focus card itself.
+With several spouses the focus block is `[spouse1][ME][spouse2][spouse3]`, in each partner's
+family order. Each family's children form their own group with their own sibling bar spanning
+only them:
+
+```
+            +-----------------------+              lane above the row (non-adjacent couple)
+            |                       |
+ [sp1]--[ME]--[sp2]              [sp3]
+       |     |    |                 |
+       |     |    +-----+           +------+       connectors jog on their own levels
+  +----+     |          |                  |
+  |          |          |              +---+---+
+ [a1] [a2] [u1]       [b1]            [c1]   [c2]
+```
+
+Children hang from the couple's midpoint when the partners are side by side, from the partner's
+card when they are not (`sp3`) and from the person's card when the partner is unknown (`u1`). A
+connector whose children are off to one side jogs sideways on its own level: families whose
+children lie to the right stack with the rightmost highest, those to the left with the leftmost
+highest, so no two families' lines cross or overlap (checked by a property test). Families of
+the same couple share its trunk. Lanes to further spouses nest above nearer ones.
+
+Only one of the focus person's spouses shows parents at a time, and only an outermost one (a lane
+runs over the middle spouses); the focus person's siblings then move to the other side so the
+two parent families' lines stay apart.
 
 ## Algorithm
 
@@ -136,8 +171,9 @@ ring, so missing people leave gaps rather than shifting others.
 
 - Siblings' children (nieces, nephews, cousins) are not drawn; re-focus to see them. Siblings and
   their spouses have no chevrons of their own.
-- A block with several child groups is centered on their average, so a wide group can sit a little
-  to one side of its couple.
+- A block with several child groups is centered on their average, so a group can sit to one side
+  of its couple; its connector jogs over to it.
+- Only one spouse of the focus person shows parents at a time.
 
 ## Tests and budgets
 

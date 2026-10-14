@@ -2,3 +2,7 @@
 export function appName(): string {
   return 'open-ancestry';
 }
+
+export * from './dates';
+export * from './names';
+export * from './living';

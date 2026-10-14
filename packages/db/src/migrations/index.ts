@@ -19,6 +19,11 @@ export interface Migration {
   name: string;
   sql: string;
   /**
+   * Data step in JS, run after `sql` in the same transaction: for rewrites SQL
+   * cannot express (Unicode normalization). Pair it with `upgradeRow`.
+   */
+  run?: (db: Database) => void;
+  /**
    * Column changes per table. Undo upgrades change_log images recorded under
    * older versions through these, and JSON import upgrades older backups.
    */
@@ -148,6 +153,7 @@ export function migrate(db: Database, options: MigrateOptions = {}): number[] {
     if (migration.version <= current || migration.version > target) continue;
     db.transaction(() => {
       db.exec(migration.sql);
+      migration.run?.(db);
       db.prepare(
         "INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
       ).run(String(migration.version));

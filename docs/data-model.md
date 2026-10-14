@@ -607,7 +607,9 @@ Each result reports its `match` tier. Within a tier, BM25 ranks names 10, phonet
       place: { renamed: { type: 'kind' } },          // old name -> new name
       event: { dropped: ['cause'] },
     },
-    // Optional, when the SQL rewrites existing values (a normalization pass):
+    // Optional JS data step, run after sql in the same transaction (e.g. NFC normalization):
+    run: (db) => { /* rewrite values SQL cannot */ },
+    // Optional, when sql or run rewrites or backfills existing values:
     // the same rewrite for one older row, applied to change_log images and JSON rows.
     upgradeRow: (table, row) => row,
     // Optional, for values computed from other rows (v2 numbers batches this way):
@@ -615,7 +617,8 @@ Each result reports its `match` tier. Within a tier, BM25 ranks names 10, phonet
   }
   ```
 
-  Without `upgradeRow`, a migration that rewrites values would make every earlier edit of a rewritten row look like a conflict to undo.
+  Without `upgradeRow`, a migration that rewrites or backfills values would make every earlier edit of an affected row look like a conflict to undo. `upgradeRow` sees one row at a time, so a backfill must be computable from the row itself; a value computed from other rows belongs in a derived column (see [Dates](#dates)) instead.
+- The `columns` map is checked: for every released migration, a test diffs the frozen schemas of versions N-1 and N and fails unless each added, dropped and renamed column is declared. A rename left out of the map would otherwise make undo restore NULL into the renamed column.
 
   A new table needs no entry: older images and documents simply have no rows for it. Renaming or dropping a whole table is not supported by the column map; add an `upgradeTables` step and keep history replay in mind.
 - `history/oa-vN.json` is a frozen synthetic tree with undo history (including a clock step back) exported by version N. Tests load every fixture both as a database at its version (frozen schema plus rows) and as a JSON backup, upgrade them to the latest version, and undo and redo the whole history. A simulated future migration that adds, renames and drops columns runs the same checks, so every new migration is gated on keeping old history usable.

@@ -283,13 +283,16 @@ describe('a future migration keeps older history working (simulated)', () => {
       kind: 'town',
       name: 'W\u00ebxmoor',
     });
-    expect(store.db.prepare('SELECT display FROM person_name').get()).toEqual({
-      display: 'Hazel Moor',
-    });
     const full = snapshot(store);
     for (let i = STEPS.length - 1; i >= 0; i--) {
       expect(undoLast(store)?.label).toBe(STEPS[i]?.[0]);
       expect(snapshot(store)).toBe(expected[i]);
+      if (STEPS[i]?.[0] === 'Delete') {
+        // The name restored from a pre-upgrade image gets the backfilled column.
+        expect(store.db.prepare('SELECT display FROM person_name').get()).toEqual({
+          display: 'Hazel Moor',
+        });
+      }
     }
     for (let b = redoLast(store); b; b = redoLast(store));
     expect(snapshot(store)).toBe(full);

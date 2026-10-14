@@ -138,9 +138,11 @@ export function importJson(
     );
   }
   if (!isObject(doc.tables)) throw new Error('Document tables must be an object');
-  let tables: TableRowsByName = {};
+  // Table names come from the document: keep them off Object.prototype.
+  let tables: TableRowsByName = Object.create(null) as TableRowsByName;
   let rowCount = 0;
   for (const [name, rows] of Object.entries(doc.tables)) {
+    if (name === '__proto__') throw new Error(`Unknown table ${JSON.stringify(name)} in document`);
     if (!Array.isArray(rows)) throw new Error(`Table ${name} must be an array`);
     rowCount += rows.length;
     if (rowCount > maxRows) throw new Error(`Document has more than the ${maxRows} row limit`);
@@ -202,9 +204,8 @@ export function importJson(
  * in place. change_log images keep their own version; undo upgrades them.
  */
 function upgradeTables(store: TreeStore, from: number, input: TableRowsByName): TableRowsByName {
-  const tables: TableRowsByName = Object.fromEntries(
-    Object.entries(input).map(([name, rows]) => [name, rows.map((row) => ({ ...row }))]),
-  );
+  const tables: TableRowsByName = Object.create(null) as TableRowsByName;
+  for (const [name, rows] of Object.entries(input)) tables[name] = rows.map((row) => ({ ...row }));
   for (const migration of store.migrations) {
     if (migration.version <= from) continue;
     for (const [name, rows] of Object.entries(tables)) {

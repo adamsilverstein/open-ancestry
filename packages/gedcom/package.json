@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@open-ancestry/core": "*",
-    "fflate": "^0.8.2"
+    "fflate": "^0.8.3"
   },
   "devDependencies": {
     "fast-check": "^4.10.2"

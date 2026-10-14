@@ -24,7 +24,14 @@ export {
 } from './tree';
 export * from './repositories';
 export * from './queries';
-export { rebuildSearchIndex, searchPeople, type SearchOptions, type SearchResult } from './search';
+export {
+  YEAR_SLACK,
+  rebuildSearchIndex,
+  searchPeople,
+  type SearchMatch,
+  type SearchOptions,
+  type SearchResult,
+} from './search';
 export {
   REPLAYABLE_TABLES,
   UndoConflictError,

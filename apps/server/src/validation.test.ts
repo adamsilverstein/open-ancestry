@@ -38,3 +38,33 @@ describe('plainSerializerFactory', () => {
     expect(plainSerializerFactory()()({ a: [1, 'b'] })).toBe('{"a":[1,"b"]}');
   });
 });
+
+describe('every route schema', () => {
+  it('compiles with the server Ajv options (lazy compile must not hide a bad schema)', async () => {
+    const { createServer } = await import('./index');
+    const AjvCompiler = (await import('@fastify/ajv-compiler')).default;
+    const app = createServer({ library: '/nonexistent-oa-library' });
+    const routes: { method: string | string[]; url: string; schema?: Record<string, unknown> }[] =
+      [];
+    app.addHook('onRoute', (route) => void routes.push(route));
+    await app.ready();
+    const compile = AjvCompiler()(
+      {},
+      { customOptions: { removeAdditional: false, coerceTypes: 'array' } },
+    ) as unknown as (route: Record<string, unknown>) => unknown;
+    let compiled = 0;
+    for (const route of routes) {
+      for (const httpPart of ['params', 'querystring', 'body', 'headers'] as const) {
+        const schema = route.schema?.[httpPart];
+        if (!schema) continue;
+        expect(
+          () => compile({ schema, method: route.method, url: route.url, httpPart }),
+          `${route.method} ${route.url} ${httpPart}`,
+        ).not.toThrow();
+        compiled++;
+      }
+    }
+    expect(compiled).toBeGreaterThan(40);
+    await app.close();
+  });
+});

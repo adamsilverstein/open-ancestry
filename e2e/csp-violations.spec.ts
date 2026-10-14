@@ -1,40 +1,17 @@
-import type { Page } from '@playwright/test';
 import { openTree, seedTree } from './edit-seed';
 import { expect, test } from './fixtures';
 
 /*
- * Issue #106: nothing the app renders may trip the strict CSP. Every
- * securitypolicyviolation event is recorded from the first script on.
+ * Issue #106: nothing the app renders may trip the strict CSP. The cspGuard
+ * fixture (fixtures.ts) records every securitypolicyviolation event from the
+ * first script on, across navigations, and fails the test at teardown.
  */
-
-interface Violation {
-  directive: string;
-  source: string;
-  sample: string;
-}
-
-async function recordViolations(page: Page): Promise<() => Promise<Violation[]>> {
-  await page.addInitScript(() => {
-    const list: Violation[] = [];
-    (window as unknown as { __cspViolations: Violation[] }).__cspViolations = list;
-    document.addEventListener('securitypolicyviolation', (event) => {
-      list.push({
-        directive: event.violatedDirective,
-        source: `${event.sourceFile}:${event.lineNumber}:${event.columnNumber}`,
-        sample: event.sample,
-      });
-    });
-  });
-  return () =>
-    page.evaluate(() => (window as unknown as { __cspViolations: Violation[] }).__cspViolations);
-}
 
 test('the people list, a Select and the palette open without CSP violations', async ({
   page,
   request,
   baseURL,
 }, testInfo) => {
-  const violations = await recordViolations(page);
   const seeded = await seedTree(request, baseURL!, `${testInfo.project.name} csp`);
   await openTree(page, seeded.tree, '/people');
   await expect(page.getByTestId('people-count')).toHaveText('5 people');
@@ -53,8 +30,6 @@ test('the people list, a Select and the palette open without CSP violations', as
   await page.keyboard.type('Rowan');
   await expect(page.getByRole('option', { name: /Rowan Ashdown/ })).toBeVisible();
   await page.keyboard.press('Escape');
-
-  expect(await violations()).toEqual([]);
 });
 
 test('the tree view and a person page load without CSP violations', async ({
@@ -62,11 +37,40 @@ test('the tree view and a person page load without CSP violations', async ({
   request,
   baseURL,
 }, testInfo) => {
-  const violations = await recordViolations(page);
   const seeded = await seedTree(request, baseURL!, `${testInfo.project.name} csp pages`);
   await openTree(page, seeded.tree, `/person/${seeded.rowan}`);
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Rowan Ashdown');
   await page.goto(`/tree/${seeded.rowan}`);
   await expect(page.getByRole('heading', { level: 1, name: 'Family tree' })).toBeAttached();
-  expect(await violations()).toEqual([]);
+});
+
+test.describe('the CSP guard itself', () => {
+  /** Adds an un-nonced <style> and waits until the browser reports it. */
+  const violate = (page: import('@playwright/test').Page) =>
+    page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          document.addEventListener('securitypolicyviolation', () => resolve(), { once: true });
+          const style = document.createElement('style');
+          style.textContent = 'body { outline: 0 }';
+          document.head.append(style);
+        }),
+    );
+
+  test('fails a test whose violation happened on a page it then left', async ({ page }) => {
+    // Expected to fail: the guard must still see the violation after the navigation.
+    test.fail();
+    await page.goto('/people');
+    await violate(page);
+    await page.goto('/');
+    await expect(page.getByRole('banner')).toBeVisible();
+  });
+
+  test('fails a test whose violation happened before a reload', async ({ page }) => {
+    test.fail();
+    await page.goto('/');
+    await violate(page);
+    await page.reload();
+    await expect(page.getByRole('banner')).toBeVisible();
+  });
 });

@@ -416,7 +416,7 @@ Lines the mapper did not understand. With `raw_record` this guarantees every inp
 
 ### `person_alias`
 
-One row per person merged into another (tree checker, #57). The merge deletes the merged person; this row says who absorbed them, so re-import (#72) can map their old record to the kept person. Ancestry renumbers xrefs between exports, so `apids_json` is the sturdier key; `merged_xref` matches only within the same export. The row is written in the merge's change batch (undo removes it), moves to the new kept person when the kept person is merged again, is deleted with the kept person, and travels with the JSON interchange.
+One row per person merged into another (tree checker, #57). The merge deletes the merged person; this row says who absorbed them, so re-import (#72) can map their old record to the kept person. Ancestry renumbers xrefs between exports, so `apids_json` is the sturdier key; `merged_xref` matches only within the same export. The row is written in the merge's change batch (undo removes it), moves to the new kept person when the kept person is merged again, and travels with the JSON interchange. Deleting the kept person deletes their aliases in the same batch (undo restores them), so a later re-import offers the merged records as new people again: the user deleted them, and a matcher must not count on aliases outliving the person.
 
 The merged person's `raw_record` and `unmapped_line` rows also move to the kept person, so GEDCOM export still places their unmapped lines (a person can then own several raw records); `person_alias` is the explicit mapping, raw_record ownership is not relied on for it.
 

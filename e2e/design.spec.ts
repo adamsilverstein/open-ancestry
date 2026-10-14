@@ -82,6 +82,7 @@ test('lists every design system component', async ({ page }) => {
     'TagBadge',
     'TimelineItem',
     'RelationshipList',
+    'RelationshipChart',
     'SourceItem',
     'GenerationLabel',
     'TreeToolbar',

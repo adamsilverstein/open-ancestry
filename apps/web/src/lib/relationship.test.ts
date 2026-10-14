@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Neighborhood } from '../api/types';
-import { describeRelationship, relationshipName } from './relationship';
+import { describeRelationship, relationshipName, relationshipPath } from './relationship';
 
 describe('relationshipName', () => {
   it('names direct ancestors', () => {
@@ -132,5 +132,30 @@ describe('describeRelationship', () => {
 
   it('returns null when no blood relationship is found', () => {
     expect(describeRelationship(slice('x', {}, {}), slice('y', {}, {}))).toBeNull();
+  });
+});
+
+describe('relationshipPath', () => {
+  const sexes = { gpa: 'M', dad: 'M', uncle: 'M', me: 'M', cousin: 'F' };
+  const both = (id: string, parents: Record<string, string[]>) => slice(id, parents, sexes);
+
+  it('returns chart cells from the person to home, marking the common ancestor', () => {
+    const r = relationshipPath(
+      both('me', { me: ['dad'], dad: ['gpa'] }),
+      both('cousin', { cousin: ['uncle'], uncle: ['gpa'] }),
+    );
+    expect(r?.name).toBe('1st cousin');
+    expect(r?.cells).toEqual([
+      { id: 'cousin', row: 2, col: 0, role: 'person' },
+      { id: 'uncle', row: 1, col: 0, role: 'between' },
+      { id: 'gpa', row: 0, col: 0, role: 'common-ancestor' },
+      { id: 'dad', row: 1, col: 1, role: 'between' },
+      { id: 'me', row: 2, col: 1, role: 'home' },
+    ]);
+  });
+
+  it('is null for the home person and for strangers', () => {
+    expect(relationshipPath(both('me', {}), both('me', {}))).toBeNull();
+    expect(relationshipPath(both('me', {}), both('x', {}))).toBeNull();
   });
 });

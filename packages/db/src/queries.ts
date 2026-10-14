@@ -477,8 +477,9 @@ export interface NeighborhoodOptions {
   /**
    * Ancestor generations whose siblings to include: 0 none, 1 the focus
    * person's siblings (default), 2 also aunts and uncles, and so on, up to
-   * `up`. Siblings come without their partners or descendants; those with
-   * children are listed in `moreDown`.
+   * `up`. Half siblings (through a parent's other partner families, with the
+   * step-parent) count too. Siblings come with their partner families but
+   * not their descendants; those with children are listed in `moreDown`.
    */
   siblingsDepth?: number;
   /** `false` is the same as `siblingsDepth: 0` (kept for older callers). */
@@ -601,7 +602,18 @@ export function getNeighborhood(
     }
     if (generation < siblingsDepth && found.length > 0) {
       const line = new Set(frontier);
-      for (const c of childrenOf(found.map((f) => f.id))) {
+      // Half siblings: the parents' other partner families (with the step-parent).
+      const parentIds = [
+        ...new Set(found.flatMap((f) => [f.partner1_id, f.partner2_id]).filter((p) => p !== null)),
+      ] as string[];
+      const foundIds = new Set(found.map((f) => f.id));
+      const others = partnerFamilies(parentIds).filter((f) => !foundIds.has(f.id));
+      for (const f of others) {
+        addFamily(f);
+        if (f.partner1_id) people.add(f.partner1_id);
+        if (f.partner2_id) people.add(f.partner2_id);
+      }
+      for (const c of childrenOf([...foundIds, ...others.map((f) => f.id)])) {
         addChild(c);
         if (!line.has(c.child_id)) siblingIds.add(c.child_id);
       }
@@ -653,9 +665,15 @@ export function getNeighborhood(
     frontier = next;
   }
 
-  // Siblings are leaves here; flag the ones whose children were not fetched.
+  // Siblings come with their partners (to draw couples) but not their
+  // children; flag the ones whose children were not fetched.
   const leafSiblings = [...siblingIds].filter((id) => !seenDown.has(id) && !seenUp.has(id));
   if (leafSiblings.length > 0) {
+    for (const f of partnerFamilies(leafSiblings)) {
+      addFamily(f);
+      if (f.partner1_id) people.add(f.partner1_id);
+      if (f.partner2_id) people.add(f.partner2_id);
+    }
     const json = JSON.stringify(leafSiblings);
     const withChildren = rows<{ id: string }>(
       store,

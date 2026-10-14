@@ -61,6 +61,13 @@ export default [
     budgetMs: 20,
   },
   {
+    // What the family view asks for: aunts, uncles, half siblings and their partners.
+    name: 'server: GET neighborhood up 4 down 3 siblingsDepth 2 (10k tree)',
+    setup: loaded,
+    fn: () => get(`/api/trees/${TREE}/neighborhood?focus=${nextId()}&up=4&down=3&siblingsDepth=2`),
+    budgetMs: 20,
+  },
+  {
     name: 'server: GET search (10k tree)',
     setup: loaded,
     fn: () => get(`/api/trees/${TREE}/search?q=${['ash', 'bel', 'cor', 'dun', 'ell'][i++ % 5]}`),

@@ -1,9 +1,17 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   citationLinks,
+  createTree,
+  names,
+  openTree,
+  undoLast,
   citations,
   events,
   families,
+  familyChildren,
   getNeighborhood,
   getPersonDetail,
   getPersonSummaries,
@@ -194,6 +202,82 @@ describe('neighborhood', () => {
     store.close();
   });
 
+  it("includes ancestors' siblings down to siblingsDepth", () => {
+    const store = memoryTree();
+    const f = seedSmallFamily(store);
+    const { result: r } = store.transact('aunt', (tx) => {
+      const aunt = persons.create(tx, { names: [{ given: 'Wynne', surname: 'Vale' }] }).id;
+      const cousin = persons.create(tx, { names: [{ given: 'Rook', surname: 'Vale' }] }).id;
+      familyChildren.create(tx, { family_id: f.grandparentsFamily, child_id: aunt });
+      families.create(tx, { partner1_id: aunt, children: [{ child_id: cousin }] });
+      return { aunt, cousin };
+    });
+    const ids = (n: { people: { id: string }[] }) => n.people.map((p) => p.id);
+
+    const two = getNeighborhood(store, f.me, { up: 2, down: 0, siblingsDepth: 2 });
+    expect(ids(two)).toEqual(expect.arrayContaining([f.sister, r.aunt]));
+    expect(ids(two)).not.toContain(r.cousin);
+    expect(two.children).toContainEqual(
+      expect.objectContaining({ familyId: f.grandparentsFamily, childId: r.aunt }),
+    );
+    // The aunt has children that were not fetched.
+    expect(two.moreDown).toContain(r.aunt);
+
+    const one = getNeighborhood(store, f.me, { up: 2, down: 0 });
+    expect(ids(one)).toContain(f.sister);
+    expect(ids(one)).not.toContain(r.aunt);
+    expect(getNeighborhood(store, f.me, { up: 2, down: 0, siblingsDepth: 1 })).toEqual(one);
+
+    const none = getNeighborhood(store, f.me, { up: 2, down: 0, siblingsDepth: 0 });
+    expect(ids(none)).not.toContain(f.sister);
+    expect(getNeighborhood(store, f.me, { up: 2, down: 0, siblings: false })).toEqual(none);
+
+    // Capped at `up`: the grandparents are not fetched, so neither is the aunt.
+    const capped = getNeighborhood(store, f.me, { up: 1, down: 0, siblingsDepth: 5 });
+    expect(ids(capped)).not.toContain(r.aunt);
+    expect(ids(capped)).toContain(f.sister);
+    store.close();
+  });
+
+  it("includes siblings' partners and half siblings", () => {
+    const store = memoryTree();
+    const f = seedSmallFamily(store);
+    const { result: r } = store.transact('extend', (tx) => {
+      const add = (given: string) => persons.create(tx, { names: [{ given, surname: 'Vale' }] }).id;
+      const sisterSpouse = add('Tobin');
+      const niece = add('Iris');
+      const sisterFamily = families.create(tx, {
+        partner1_id: f.sister,
+        partner2_id: sisterSpouse,
+        children: [{ child_id: niece }],
+      }).id;
+      // Dad's second family: a step-mother and a half brother.
+      const stepMother = add('Odette');
+      const halfBrother = add('Pell');
+      const second = families.create(tx, {
+        partner1_id: f.dad,
+        partner2_id: stepMother,
+        children: [{ child_id: halfBrother }],
+      }).id;
+      return { sisterSpouse, niece, sisterFamily, stepMother, halfBrother, second };
+    });
+    const n = getNeighborhood(store, f.me, { up: 1, down: 0 });
+    const ids = n.people.map((p) => p.id);
+    expect(ids).toEqual(expect.arrayContaining([r.sisterSpouse, r.stepMother, r.halfBrother]));
+    expect(ids).not.toContain(r.niece);
+    expect(n.families.map((x) => x.id)).toEqual(expect.arrayContaining([r.sisterFamily, r.second]));
+    expect(n.children).toContainEqual(
+      expect.objectContaining({ familyId: r.second, childId: r.halfBrother }),
+    );
+    expect(n.children.some((c) => c.childId === r.niece)).toBe(false);
+    expect(n.moreDown).toContain(f.sister);
+
+    const none = getNeighborhood(store, f.me, { up: 1, down: 0, siblingsDepth: 0 });
+    for (const id of [r.sisterSpouse, r.stepMother, r.halfBrother])
+      expect(none.people.map((p) => p.id)).not.toContain(id);
+    store.close();
+  });
+
   it('handles pedigree collapse without duplicates', () => {
     const store = memoryTree();
     // Double first cousins marry: both sets of grandparents are shared.
@@ -316,6 +400,51 @@ describe('listPeople', () => {
     expect(listPeople(store, { tagId }).items.map((p) => p.given)).toEqual(['Quill']);
     expect(listPeople(store, { living: ['dead'] }).items.map((p) => p.given)).toEqual(['Orrin']);
     expect(listPeople(store, { sort: 'death' }).items[0]?.given).toBe('Tamsin');
+    store.close();
+  });
+
+  it('reflects edits, undo and other connections between pages', () => {
+    const store = memoryTree();
+    const f = seedSmallFamily(store);
+    const order = () => listPeople(store, { sort: 'given' }).items.map((p) => p.given);
+    expect(order()[0]).toBe('Briony');
+    const nameId = names.list(store, f.kid)[0]!.id;
+    store.transact('rename', (tx) => names.update(tx, nameId, { given: 'Aster' }));
+    expect(order()[0]).toBe('Aster');
+    undoLast(store);
+    expect(order()[0]).toBe('Briony');
+    store.transact('birth', (tx) =>
+      events.create(tx, { type: 'BIRT', date_sort: 10000101, roles: [{ person_id: f.kid }] }),
+    );
+    expect(listPeople(store, { sort: 'birth', limit: 1 }).items[0]?.given).toBe('Quill');
+    store.close();
+  });
+
+  it('sees writes made through another connection to the same tree', () => {
+    const dir = join(mkdtempSync(join(tmpdir(), 'oa-list-')), 'a.oatree');
+    const store = createTree(dir);
+    seedSmallFamily(store);
+    expect(listPeople(store, { sort: 'given' }).total).toBe(9);
+    const other = openTree(dir);
+    other.transact('add', (tx) => persons.create(tx, { names: [{ given: 'Aaron' }] }));
+    other.close();
+    const after = listPeople(store, { sort: 'given' });
+    expect(after.total).toBe(10);
+    expect(after.items[0]?.given).toBe('Aaron');
+    store.close();
+  });
+
+  it('does not cache an order read inside a transaction that rolls back', () => {
+    const store = memoryTree();
+    seedSmallFamily(store);
+    expect(listPeople(store).total).toBe(9);
+    store.db.exec('BEGIN');
+    store.db
+      .prepare("INSERT INTO person (id, created_at, updated_at) VALUES ('01TEMP', 'x', 'x')")
+      .run();
+    expect(listPeople(store).total).toBe(10);
+    store.db.exec('ROLLBACK');
+    expect(listPeople(store).total).toBe(9);
     store.close();
   });
 });

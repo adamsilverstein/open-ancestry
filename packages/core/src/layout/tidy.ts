@@ -10,10 +10,10 @@
  * Bottom-up, every subtree keeps a contour: its leftmost and rightmost extent
  * per level. Child subtrees are packed left to right, each pushed just far
  * enough that its left contour clears the accumulated right contour on every
- * shared level. The block is then centered over its groups. When a child
- * subtree reaches back down to the block's own level (cousins beside the
- * focus row), the block and its `downGroups` are packed in line between the
- * children on its left and right instead, so nothing overlaps.
+ * shared level. The block is then centered over its groups. `downGroups`
+ * (leaves only) stay out of the contours: after placement each block's down
+ * groups slide outward, as one piece, until they clear their row, so cousins
+ * never push their parents' family apart.
  *
  * Contours are arrays indexed by absolute level with a lazy offset, and a
  * merge reuses the larger contour, so it costs the smaller one's depth only.
@@ -37,7 +37,7 @@ export interface TidyUnit {
   level: number;
   groups: TidyGroup[];
   downGroups?: TidyGroup[];
-  /** Keeps `downGroups` entirely left or right (the default) of the anchor card. */
+  /** Keeps `downGroups` left or right (the default) of the anchor card, and slides them that way. */
   reserve?: 'left' | 'right';
   /** Output: breadth position of the block's first card. */
   x: number;
@@ -68,10 +68,6 @@ function single(level: number, width: number): Contour {
   l[level] = 0;
   r[level] = width;
   return { off: 0, l, r, lo: level, hi: level };
-}
-
-function clone(c: Contour): Contour {
-  return { ...c, l: c.l.slice(), r: c.r.slice() };
 }
 
 /** Smallest shift for `b` so it clears `a` on every shared level. */
@@ -135,11 +131,11 @@ export function tidyLayout(units: readonly TidyUnit[], m: TidyMetrics): void {
     );
 
   /** Packs items left to right; returns their positions and the merged contour. */
-  const pack = (items: Item[], rootLevel: number, mutate: boolean) => {
+  const pack = (items: Item[], rootLevel: number) => {
     let acc: Contour | undefined;
     const pos: number[] = [];
     for (const item of items) {
-      const c = mutate ? item.contour : clone(item.contour);
+      const c = item.contour;
       if (!acc) {
         pos.push(0);
         acc = c;
@@ -169,33 +165,32 @@ export function tidyLayout(units: readonly TidyUnit[], m: TidyMetrics): void {
     return (groupCenters - anchorCenters) / groups.length;
   };
 
+  const widthOf = (u: TidyUnit) => u.size * m.card + (u.size - 1) * m.couple;
+
   for (let i = units.length - 1; i >= 0; i--) {
     const u = units[i]!;
-    const width = u.size * m.card + (u.size - 1) * m.couple;
+    const block = single(u.level, widthOf(u));
 
-    // The block with its down groups (cousins below an aunt), in block frame.
-    let block = single(u.level, width);
+    // Down groups (cousins below an aunt) float: they get a position under
+    // their anchors here, clear of the anchor card's column, and are slid
+    // outward past whatever shares their row after placement (see below), so
+    // they never push the block's own family apart.
     const down = u.downGroups ?? [];
     if (down.length) {
       const items = itemsOf(down);
-      const { pos, acc } = pack(items, u.level - 1, true);
+      const { pos, acc } = pack(items, u.level - 1);
       let x = centered(down, pos);
-      {
-        // Slide the down groups clear of the anchor card's column.
-        const left = u.anchor * step;
-        for (let lv = acc.lo; lv <= acc.hi; lv++) {
-          if (u.reserve === 'left') {
-            const over = acc.off - x + acc.r[lv]! + m.sibling - left;
-            if (over > 0) x += over;
-          } else {
-            const under = left + m.card + m.sibling - (acc.off - x + acc.l[lv]!);
-            if (under > 0) x -= under;
-          }
+      const left = u.anchor * step;
+      for (let lv = acc.lo; lv <= acc.hi; lv++) {
+        if (u.reserve === 'left') {
+          const over = acc.off - x + acc.r[lv]! + m.sibling - left;
+          if (over > 0) x += over;
+        } else {
+          const under = left + m.card + m.sibling - (acc.off - x + acc.l[lv]!);
+          if (under > 0) x -= under;
         }
       }
       items.forEach((item, k) => (item.unit.rel = pos[k]! - x));
-      acc.off -= x;
-      block = merge(acc, block, 0);
     }
 
     if (u.groups.length === 0) {
@@ -203,55 +198,11 @@ export function tidyLayout(units: readonly TidyUnit[], m: TidyMetrics): void {
       continue;
     }
     const items = itemsOf(u.groups);
-    const inline = items.some((item) => item.contour.lo <= u.level);
-    if (!inline) {
-      const { pos, acc } = pack(items, u.level + 1, true);
-      const x = centered(u.groups, pos);
-      items.forEach((item, k) => (item.unit.rel = pos[k]! - x));
-      acc.off -= x;
-      u.contour = merge(acc, block, 0);
-      continue;
-    }
-
-    // A child reaches the block's level: pack the block between the children
-    // left and right of its natural, centered spot.
-    const natural = pack(items, u.level + 1, false).pos;
-    const x0 = centered(u.groups, natural);
-    // The block goes after every child whose subtree reaches its level on the
-    // left (an aunt's children beside a father), before the rest.
-    const after = (item: Item, k: number) => {
-      const c = item.contour;
-      const l = c.lo <= u.level ? c.l[u.level] : undefined;
-      if (l === undefined) {
-        return natural[k]! + cardCenter(item.unit.anchor) < x0 + cardCenter(u.anchor);
-      }
-      return c.off + (l + c.r[u.level]!) / 2 < cardCenter(item.unit.anchor);
-    };
-    let split = 0;
-    while (split < items.length && after(items[split]!, split)) split++;
-    let acc: Contour | undefined;
-    /** Places `c` at `at` or further right, clear of everything placed so far. */
-    const place = (c: Contour, at: number, gapAt: (lv: number) => number) => {
-      if (!acc) {
-        c.off += at;
-        acc = c;
-        return at;
-      }
-      const p = Math.max(at, separation(acc, c, gapAt));
-      acc = merge(acc, c, p);
-      return p;
-    };
-    let x = x0;
-    const pos: number[] = [];
-    items.forEach((item, k) => {
-      if (k === split) x = place(block, x0, () => m.sibling);
-      const gapAt = (lv: number) => (lv === u.level + 1 ? item.rootGap : m.sibling);
-      pos.push(place(item.contour, natural[k]!, gapAt));
-    });
-    if (split === items.length) x = place(block, x0, () => m.sibling);
+    const { pos, acc } = pack(items, u.level + 1);
+    const x = centered(u.groups, pos);
     items.forEach((item, k) => (item.unit.rel = pos[k]! - x));
-    acc!.off -= x;
-    u.contour = acc;
+    acc.off -= x;
+    u.contour = merge(acc, block, 0);
   }
 
   const root = units[0];
@@ -263,5 +214,36 @@ export function tidyLayout(units: readonly TidyUnit[], m: TidyMetrics): void {
     for (const group of u.downGroups ?? []) {
       for (const child of group.children) child.x = u.x + child.rel;
     }
+  }
+
+  // Slide each block's down groups, as one piece, away from the anchor until
+  // they clear every other block in their row.
+  const floating = new Set(units.flatMap((u) => (u.downGroups ?? []).flatMap((g) => g.children)));
+  const rows = new Map<number, [number, number][]>();
+  const occupy = (level: number, from: number, to: number) => {
+    const row = rows.get(level);
+    if (row) row.push([from, to]);
+    else rows.set(level, [[from, to]]);
+  };
+  for (const u of units) if (!floating.has(u)) occupy(u.level, u.x, u.x + widthOf(u));
+  for (const u of units) {
+    const children = (u.downGroups ?? []).flatMap((g) => g.children);
+    if (!children.length) continue;
+    const level = u.level - 1;
+    let from = Math.min(...children.map((c) => c.x));
+    let to = Math.max(...children.map((c) => c.x + widthOf(c)));
+    const row = rows.get(level) ?? [];
+    for (let moved = true; moved;) {
+      moved = false;
+      for (const [a, b] of row) {
+        if (from >= b + m.sibling || to <= a - m.sibling) continue;
+        const shift = u.reserve === 'left' ? a - m.sibling - to : b + m.sibling - from;
+        from += shift;
+        to += shift;
+        for (const c of children) c.x += shift;
+        moved = true;
+      }
+    }
+    occupy(level, from, to);
   }
 }

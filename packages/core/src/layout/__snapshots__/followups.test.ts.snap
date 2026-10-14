@@ -1,44 +1,44 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`sibling chevrons > show cousins in the focus row under their parents 1`] = `
-"gpa@-680,-428  gma@-544,-428  mgpa@76,-428  mgma@212,-428
-auntH@-816,-214  aunt@-680,-214[-down]  dad@-544,-214[-up -sibs]  mom@76,-214[-up -sibs]  uncle@212,-214[-down]  uncleW@348,-214
+"gpa@-344,-428  gma@-208,-428  mgpa@-64,-428  mgma@72,-428
+auntH@-480,-214  aunt@-344,-214[-down]  dad@-208,-214[-up -sibs]  mom@-64,-214[-up -sibs]  uncle@72,-214[-down]  uncleW@208,-214
 cousin1@-832,0  cousin2@-688,0  half@-544,0[half]  older@-408,0[+down]  olderW@-272,0  sp@-136,0  me@0,0[focus -up -down -sibs]  younger@136,0  cousin3@280,0
 kid@-68,214
 couple F_sp sp+me : -16,75 0,75
 couple F_older older+olderW : -288,75 -272,75
-couple F_me dad+mom : -424,-139 76,-139
-couple F_aunt auntH+aunt : -696,-139 -680,-139
-couple F_dad gpa+gma : -560,-353 -544,-353
-couple F_uncle uncle+uncleW : 332,-139 348,-139
-couple F_mom mgpa+mgma : 196,-353 212,-353
+couple F_me dad+mom : -88,-139 -64,-139
+couple F_aunt auntH+aunt : -360,-139 -344,-139
+couple F_dad gpa+gma : -224,-353 -208,-353
+couple F_uncle uncle+uncleW : 192,-139 208,-139
+couple F_mom mgpa+mgma : 56,-353 72,-353
 parent-child F_sp sp+me : -8,75 -8,182
 parent-child F_sp kid unknown : -8,182 -8,214
-parent-child F_me dad+mom : -174,-139 -174,-32
+parent-child F_me dad+mom : -76,-139 -76,-32
 sibling-bar F_me  : -348,-32 196,-32
 parent-child F_me me unknown : 60,-32 60,0
 parent-child F_me older unknown : -348,-32 -348,0
 parent-child F_me younger unknown : 196,-32 196,0
-parent-child F_step dad : -484,-64 -484,-32
+parent-child F_step dad : -148,-64 -148,-42.7 -484,-42.7 -484,-32
 parent-child F_step half unknown half : -484,-32 -484,0
-parent-child F_aunt auntH+aunt : -688,-139 -688,-32
+parent-child F_aunt auntH+aunt : -352,-139 -352,-53.3 -700,-53.3 -700,-32
 sibling-bar F_aunt  : -772,-32 -628,-32
 parent-child F_aunt cousin1 unknown : -772,-32 -772,0
 parent-child F_aunt cousin2 unknown : -628,-32 -628,0
-parent-child F_dad gpa+gma : -552,-353 -552,-246
-sibling-bar F_dad  : -620,-246 -484,-246
-parent-child F_dad dad unknown : -484,-246 -484,-214
-parent-child F_dad aunt unknown : -620,-246 -620,-214
-parent-child F_uncle uncle+uncleW : 340,-139 340,-32
+parent-child F_uncle uncle+uncleW : 200,-139 200,-53.3 340,-53.3 340,-32
 parent-child F_uncle cousin3 unknown : 340,-32 340,0
-parent-child F_mom mgpa+mgma : 204,-353 204,-246
-sibling-bar F_mom  : 136,-246 272,-246
-parent-child F_mom mom unknown : 136,-246 136,-214
-parent-child F_mom uncle unknown : 272,-246 272,-214
+parent-child F_dad gpa+gma : -216,-353 -216,-246
+sibling-bar F_dad  : -284,-246 -148,-246
+parent-child F_dad dad unknown : -148,-246 -148,-214
+parent-child F_dad aunt unknown : -284,-246 -284,-214
+parent-child F_mom mgpa+mgma : 64,-353 64,-246
+sibling-bar F_mom  : -4,-246 132,-246
+parent-child F_mom mom unknown : -4,-246 -4,-214
+parent-child F_mom uncle unknown : 132,-246 132,-214
 label -2 "Grandparents" @-832,-353
 label -1 "Parents" @-832,-139
 label 1 "Children" @-832,289
-bounds -832,-428 1300x792"
+bounds -832,-428 1232x792"
 `;
 
 exports[`sibling chevrons > show nieces and nephews in the children row 1`] = `

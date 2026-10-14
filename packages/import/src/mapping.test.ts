@@ -485,7 +485,8 @@ describe('families and links', () => {
       value(store, 'SELECT count(*) FROM family_child WHERE family_id = ?', fid(store, '@F1@')),
     ).toBe(0);
     const c = codes(report.warnings);
-    expect(c.filter((x) => x === 'self-relationship')).toHaveLength(2);
+    expect(c.filter((x) => x === 'self-relationship')).toHaveLength(1);
+    expect(c.filter((x) => x === 'duplicate-partner')).toHaveLength(1);
     expect(c).toContain('relationship-cycle');
     expect(value(store, 'SELECT count(*) FROM family_child')).toBe(2);
   });
@@ -737,7 +738,13 @@ describe('same-sex couples', () => {
         '1 WIFE @I3@',
       ),
     );
-    expect(codes(report.warnings)).toEqual(['self-relationship', 'duplicate-link']);
+    expect(codes(report.warnings)).toEqual(['duplicate-partner', 'duplicate-link']);
+    expect(report.warnings[0]!.message).toBe(
+      '@I1@ is listed twice as a partner of family @F1@; this HUSB line is ignored',
+    );
+    expect(report.warnings[1]!.message).toBe(
+      'Family @F1@ already has two partners; WIFE @I3@ is not added',
+    );
     expect(report.unmapped.map((u) => [u.path, u.count])).toEqual([
       ['FAM.HUSB', 1],
       ['FAM.WIFE', 1],
@@ -764,5 +771,43 @@ describe('attachments an owner cannot take', () => {
       ['SOUR.SOUR', 2],
       ['OBJE.OBJE', 1],
     ]);
+  });
+});
+
+describe('split citations', () => {
+  it('attach their notes and media to every copy', async () => {
+    const { store } = await importInto(
+      ged(
+        '0 @I1@ INDI',
+        '1 BIRT',
+        '2 SOUR @S1@',
+        '3 PAGE Roll 12',
+        '3 _APID 1,7602::111',
+        '3 _APID 1,8054::222',
+        '3 NOTE Two census images',
+        '3 OBJE @O1@',
+        '0 @S1@ SOUR',
+        '1 TITL Census',
+        '0 @O1@ OBJE',
+        '1 FILE https://example.com/a.jpg',
+      ),
+    );
+    const citations = rows<{ id: string; apid: string }>(
+      store,
+      'SELECT id, apid FROM citation ORDER BY apid',
+    );
+    expect(citations.map((c) => c.apid)).toEqual(['1,7602::111', '1,8054::222']);
+    for (const c of citations) {
+      expect(notesOf(store, 'citation', c.id)).toEqual(['Two census images']);
+      expect(
+        value(
+          store,
+          "SELECT count(*) FROM media_link WHERE owner_type = 'citation' AND owner_id = ?",
+          c.id,
+        ),
+      ).toBe(1);
+    }
+    expect(value(store, 'SELECT count(*) FROM note')).toBe(1);
+    expect(value(store, 'SELECT count(*) FROM media')).toBe(1);
   });
 });

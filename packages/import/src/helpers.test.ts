@@ -1,10 +1,17 @@
 import { createTree } from '@open-ancestry/db';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { importGedcom } from './import';
-import { classifyFile, kindFromType, mediaType, MediaSource, writeMediaFile } from './media';
+import {
+  classifyFile,
+  kindFromType,
+  mediaType,
+  MediaSource,
+  storeMediaFile,
+  suffixedPath,
+} from './media';
 import { coordinate, placeParts, Places } from './places';
 import { childRelationship, nameType, privacy, relationshipStatus } from './tags';
 import { dateColumns, surnameKey } from './index';
@@ -134,9 +141,16 @@ describe('media helpers', () => {
   });
 
   it('refuses to write outside the media folder', () => {
-    expect(() => writeMediaFile('/tmp/oa-media-root', '../escape.jpg', new Uint8Array())).toThrow(
-      /unsafe/,
-    );
+    expect(() =>
+      storeMediaFile('/tmp/oa-media-root', '../escape.jpg', new Uint8Array(), () => 'h'),
+    ).toThrow(/unsafe/);
+  });
+
+  it('suffixes names before the extension', () => {
+    expect(suffixedPath('photos/a.jpg', 2)).toBe('photos/a-2.jpg');
+    expect(suffixedPath('photos/README', 3)).toBe('photos/README-3');
+    expect(suffixedPath('a.b/.hidden', 2)).toBe('a.b/.hidden-2');
+    expect(suffixedPath('scan.tar.gz', 2)).toBe('scan.tar-2.gz');
   });
 });
 
@@ -210,5 +224,80 @@ describe('shared derived columns', () => {
       date_sort_end: null,
       calendar: null,
     });
+  });
+});
+
+describe('storing media in a tree', () => {
+  let root: string;
+  const hash = (b: Uint8Array) => Buffer.from(b).toString('hex');
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'oa-store-'));
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('never overwrites: same bytes are reused, different bytes get a suffix', () => {
+    mkdirSync(join(root, 'p'));
+    writeFileSync(join(root, 'p', 'a.jpg'), 'old');
+    writeFileSync(join(root, 'p', 'a-2.jpg'), 'other');
+    const enc = (t: string) => new TextEncoder().encode(t);
+    expect(storeMediaFile(root, 'p/a.jpg', enc('old'), hash)).toEqual({
+      path: 'p/a.jpg',
+      written: false,
+      folder: undefined,
+    });
+    expect(storeMediaFile(root, 'p/a.jpg', enc('new'), hash)).toEqual({
+      path: 'p/a-3.jpg',
+      written: true,
+      folder: undefined,
+    });
+    expect(readFileSync(join(root, 'p', 'a.jpg'), 'utf8')).toBe('old');
+    expect(readFileSync(join(root, 'p', 'a-2.jpg'), 'utf8')).toBe('other');
+    expect(readFileSync(join(root, 'p', 'a-3.jpg'), 'utf8')).toBe('new');
+    expect(storeMediaFile(root, 'q/b.jpg', enc('x'), hash).folder).toBe(join(root, 'q'));
+  });
+
+  it('keeps files already in a tree folder and stores identical content once', async () => {
+    const source = join(root, 'src');
+    mkdirSync(join(source, 'photos'), { recursive: true });
+    writeFileSync(join(source, 'photos', 'portrait.jpg'), 'new portrait');
+    writeFileSync(join(source, 'photos', 'copy.jpg'), 'new portrait');
+    writeFileSync(join(source, 'photos', 'same.jpg'), 'same');
+    const dir = join(root, 't.oatree');
+    const store = createTree(dir);
+    mkdirSync(join(dir, 'media', 'photos'));
+    writeFileSync(join(dir, 'media', 'photos', 'portrait.jpg'), 'someone else');
+    writeFileSync(join(dir, 'media', 'photos', 'same.jpg'), 'same');
+    const report = await importGedcom(
+      {
+        bytes: ged(
+          '0 @O1@ OBJE',
+          '1 FILE photos/portrait.jpg',
+          '0 @O2@ OBJE',
+          '1 FILE photos/copy.jpg',
+          '0 @O3@ OBJE',
+          '1 FILE photos/same.jpg',
+        ),
+      },
+      store,
+      { mediaDir: source },
+    );
+    expect(report.media.linked).toBe(3);
+    const paths = store.db
+      .prepare('SELECT external_id, local_path FROM media ORDER BY external_id')
+      .all();
+    expect(paths).toEqual([
+      { external_id: '@O1@', local_path: 'photos/portrait-2.jpg' },
+      { external_id: '@O2@', local_path: 'photos/portrait-2.jpg' },
+      { external_id: '@O3@', local_path: 'photos/same.jpg' },
+    ]);
+    expect(readFileSync(join(dir, 'media', 'photos', 'portrait.jpg'), 'utf8')).toBe('someone else');
+    expect(readdirSync(join(dir, 'media', 'photos')).sort()).toEqual([
+      'portrait-2.jpg',
+      'portrait.jpg',
+      'same.jpg',
+    ]);
+    store.close();
   });
 });

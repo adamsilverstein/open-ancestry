@@ -76,14 +76,14 @@ export default function ShellCommandPalette({ open, onOpenChange }: ShellCommand
       id: 'home',
       label: 'Go to start page',
       icon: <House size={16} aria-hidden />,
-      keywords: ['home'],
+      keywords: ['home', 'start'],
       onSelect: () => void navigate({ to: '/' }),
     },
     {
       id: 'design',
       label: 'Open design system',
       icon: <Palette size={16} aria-hidden />,
-      keywords: ['components', 'kitchen sink'],
+      keywords: ['design', 'system', 'components', 'kitchen sink'],
       onSelect: () => void navigate({ to: '/design' }),
     },
     {

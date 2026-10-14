@@ -97,6 +97,11 @@ export function encodeValue(value: string, version = 5): string {
   if (version >= 7) return value.startsWith('@') ? '@' + value : value;
   let out = value.replace(/@{2,}/g, (run) => run + run);
   if (out.startsWith('@') && !out.startsWith('@@') && !out.startsWith('@#')) out = '@' + out;
+  // Whitespace then an xref shape reads as a padded pointer: escape its `@`.
+  const lead = out.length - out.trimStart().length;
+  if (lead > 0 && XREF_PATTERN.test(out.trim()) && out[lead + 1] !== '#') {
+    out = out.slice(0, lead) + '@' + out.slice(lead);
+  }
   return out;
 }
 

@@ -61,6 +61,8 @@ export function toApiError(error: FastifyError | Error): ApiError {
       return new ApiError(415, 'unsupported_media_type', fastify.message);
     case 400:
       return badRequest(fastify.message);
+    case 403:
+      return new ApiError(403, 'forbidden', fastify.message);
     case 404:
       return notFound(fastify.message);
   }

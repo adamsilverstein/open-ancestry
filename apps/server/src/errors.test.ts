@@ -38,6 +38,7 @@ describe('error envelope', () => {
     [Object.assign(new Error('bad media'), { statusCode: 415 }), 415, 'unsupported_media_type'],
     [Object.assign(new Error('bad'), { statusCode: 400 }), 400, 'bad_request'],
     [Object.assign(new Error('gone'), { statusCode: 404 }), 404, 'not_found'],
+    [Object.assign(new Error('Forbidden'), { statusCode: 403 }), 403, 'forbidden'],
     [
       Object.assign(new Error('UNIQUE failed'), { code: 'SQLITE_CONSTRAINT_UNIQUE' }),
       409,

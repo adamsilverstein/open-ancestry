@@ -5,7 +5,7 @@
 ## Conventions
 
 - **Errors** are always `{ "error": { "code": "...", "message": "..." } }`. Codes: `bad_request`, `validation_failed`, `forbidden`, `forbidden_host`, `not_found`, `conflict`, `payload_too_large`, `unsupported_media_type`, `range_not_satisfiable`, `too_many_jobs`, `not_implemented`, `internal_error`.
-- **Validation:** params, query strings and bodies are checked against TypeBox schemas (`apps/server/src/schemas.ts`). Unknown body properties are rejected.
+- **Validation:** params, query strings and bodies are checked against JSON Schemas written with TypeBox in `apps/server/src/schemas.source.ts` and loaded at runtime from the generated `schemas.generated.json` (no TypeBox at startup). After editing the source run `npm run generate:schemas -w @open-ancestry/server`; a test fails until you do. Each route's validator is compiled on its first request. Unknown body properties are rejected.
 - **Reads** return database DTOs from `packages/db` (`PersonSummary`, `PersonDetail`, `Neighborhood`, ...). **Write bodies** use the database column names (`date_text`, `relationship_type`, ...); derived columns are computed by the server exactly as the importer computes them: date sort keys and qualifiers, surname phonetic keys, the GEDCOM-form `person_name.full_text`, and inferred living status (person, event and relationship edits re-run living inference for the people involved and their parents, spouses and children; an explicit `living` or `dead` is never overridden, and `living: "unknown"` asks for inference again).
 - **Edits:** each mutation is one undoable change batch and returns `batchId` (null when nothing changed).
 - **Downloads** (`export.*`) send `Content-Disposition: attachment` named after the tree: an ASCII `filename` (other characters become `_`) and the exact name in `filename*`.
@@ -62,6 +62,7 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 | `POST /api/import` (multipart `file`: .ged, .gedcom, .zip, .gdz) | Imports into a new tree named after the file (" 2", " 3", ... when taken); 202 `{ jobId, job }` with `job.tree` and `job.createdTree: true`. The server owns that tree: if the import fails or is cancelled it removes it, but only while it is still the empty tree it created. |
 | `POST /api/trees/:tree/import` (multipart `file`) | Starts an import into an existing, empty tree (202 `{ jobId, job }`); that tree is never removed. |
 | `GET /api/jobs/:id` | Job state, progress, result or error. |
+| `DELETE /api/jobs/:id` | Cancel (202 `{ job }`): a queued job never runs, a running one is aborted. Cleanup removes the upload and any empty tree the import created. 409 once finished. Stopping the server (Ctrl-C or SIGTERM on `open-ancestry serve`) cancels every job the same way. |
 | `GET /api/jobs/:id/events` | Server-sent events: `state` (whole job) and `progress`; ends when the job finishes. |
 | `GET /api/trees/:tree/media/:id` | Original media file with `Range` support. |
 | `GET /api/trees/:tree/media/:id/thumb/:size` | WebP thumbnail, `size` = `sm` (160 px longest edge), `md` (480) or `lg` (1280). Made on demand if missing and cached in the tree's `thumbs/` folder; 404 when the media has no decodable local image (documents, Ancestry placeholders). |

@@ -7,7 +7,7 @@ import { pipeline } from 'node:stream/promises';
 import { treePaths } from '@open-ancestry/db';
 import type { FastifyRequest } from 'fastify';
 import type { Api, Deps } from '../context';
-import { ApiError, badRequest, notFound } from '../errors';
+import { ApiError, badRequest, conflict, notFound } from '../errors';
 import { TooManyJobsError, type JobEvent } from '../jobs';
 import { JobParams, TreeParams } from '../schemas';
 
@@ -136,6 +136,15 @@ export function importRoutes(app: Api, deps: Deps): void {
     const job = jobs.get(request.params.id);
     if (!job) throw notFound(`Job ${request.params.id} not found`);
     return job;
+  });
+
+  // Cancel: a queued job never runs; a running one is aborted, and its cleanup
+  // removes the upload and any empty tree the import created.
+  app.delete('/api/jobs/:id', { schema: { params: JobParams } }, async (request, reply) => {
+    const { id } = request.params;
+    if (!jobs.get(id)) throw notFound(`Job ${id} not found`);
+    if (!jobs.cancel(id)) throw conflict(`Job ${id} has already finished`);
+    return reply.code(202).send({ job: jobs.get(id) });
   });
 
   // Server-sent events: `state` (full job) on connect and on every change,

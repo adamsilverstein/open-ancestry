@@ -8,25 +8,26 @@
   },
   "scripts": {
     "dev": "tsx watch src/dev.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "generate:schemas": "tsx scripts/generate-schemas.ts && prettier --write src/schemas.generated.json"
   },
   "dependencies": {
+    "@fastify/ajv-compiler": "^4.0.7",
     "@fastify/compress": "^9.2.2",
     "@fastify/etag": "^6.2.1",
     "@fastify/multipart": "^10.1.3",
     "@fastify/static": "^10.1.6",
-    "@fastify/type-provider-typebox": "^6.3.0",
     "@open-ancestry/core": "*",
     "@open-ancestry/db": "*",
     "@open-ancestry/export": "*",
     "@open-ancestry/gedcom": "*",
     "@open-ancestry/import": "*",
-    "ajv-formats": "^3.0.1",
     "fastify": "^5.12.7",
-    "sharp": "^0.35.5",
-    "typebox": "^1.3.37"
+    "sharp": "^0.35.5"
   },
   "devDependencies": {
-    "@open-ancestry/import": "*"
+    "@fastify/type-provider-typebox": "^6.3.0",
+    "ajv-formats": "^3.0.1",
+    "typebox": "^1.3.37"
   }
 }

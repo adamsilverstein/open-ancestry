@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, utimes } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, utimes } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -290,6 +290,59 @@ describe('POST /api/import (new tree owned by the server)', () => {
     expect(await waitForJob(api, jobId, 'failed')).toMatchObject({ createdTree: true });
     expect(existsSync(`${api.root}/${job.tree}.oatree`)).toBe(false);
     expect((await api.get('/api/trees')).json().trees).toEqual([]);
+  });
+
+  it('cancels with DELETE /api/jobs/:id and removes the tree it created', async () => {
+    const fake = controllableImporter();
+    api = await testApi({ importer: fake.importer });
+    const { jobId, job } = (await importNew('Cancel me.ged')).json();
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(1));
+    const unauthenticated = await api.inject({
+      method: 'DELETE',
+      url: `/api/jobs/${jobId}`,
+      headers: { host: HOST },
+    });
+    expect(unauthenticated.statusCode).toBe(403);
+
+    const cancelled = await api.del(`/api/jobs/${jobId}`);
+    expect(cancelled.statusCode).toBe(202);
+    expect(cancelled.json().job.id).toBe(jobId);
+    expect(fake.calls[0]!.options.signal.aborted).toBe(true);
+    expect(await waitForJob(api, jobId, 'failed')).toMatchObject({ error: 'aborted' });
+    expect(existsSync(`${api.root}/${job.tree}.oatree`)).toBe(false);
+    expect(existsSync(fake.calls[0]!.path)).toBe(false);
+
+    expect((await api.del(`/api/jobs/${jobId}`)).statusCode).toBe(409);
+    expect((await api.del('/api/jobs/00000000-0000-4000-8000-000000000000')).statusCode).toBe(404);
+  });
+
+  it('aborts imports and cleans up on shutdown, even with an event stream open', async () => {
+    const fake = controllableImporter();
+    api = await testApi(); // keeps afterEach's close happy; this test runs its own server
+    const root = await mkdtemp(join(tmpdir(), 'oa-lib-'));
+    const server = await startServer({ library: root, importer: fake.importer, token: TOKEN });
+    const origin = server.url;
+    const form = new FormData();
+    form.append('file', new Blob(['0 HEAD\n0 TRLR\n']), 'Shutdown.ged');
+    const res = await fetch(`${origin}/api/import`, {
+      method: 'POST',
+      headers: { origin, 'x-oa-token': TOKEN },
+      body: form,
+    });
+    const { jobId, job } = (await res.json()) as { jobId: string; job: { tree: string } };
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(1));
+    const stream = await fetch(`${origin}/api/jobs/${jobId}/events`);
+    const reader = stream.body!.getReader();
+    await reader.read();
+
+    const started = performance.now();
+    await server.close();
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(fake.calls[0]!.options.signal.aborted).toBe(true);
+    expect(existsSync(join(root, `${job.tree}.oatree`))).toBe(false);
+    expect(existsSync(fake.calls[0]!.path)).toBe(false);
+    await reader.cancel().catch(() => {});
+    await rm(root, { recursive: true, force: true });
   });
 
   it('never removes a tree re-created under the same name, or one it did not create', async () => {

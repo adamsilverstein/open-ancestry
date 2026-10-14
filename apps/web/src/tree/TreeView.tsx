@@ -41,6 +41,7 @@ import {
   type NeighborhoodRequest,
 } from './api';
 import { usePalette } from '../app/palette';
+import { FAN_RING_WIDTH } from './fanLabels';
 import { lifeEvent, toPersonSummary } from './format';
 import { onTreeChanged } from '../api/edits';
 import { GraphCache } from './graphCache';
@@ -249,7 +250,12 @@ function layoutOptions(
   view: Pick<ViewState, 'expanded' | 'collapsed' | 'parents'>,
 ): LayoutRequest['options'] {
   return kind === 'fan'
-    ? { generations: up + 1, collapsed: view.collapsed, selectedParentFamilies: view.parents }
+    ? {
+        generations: up + 1,
+        ringWidth: FAN_RING_WIDTH,
+        collapsed: view.collapsed,
+        selectedParentFamilies: view.parents,
+      }
     : {
         ancestorsDepth: up,
         descendantsDepth: down,

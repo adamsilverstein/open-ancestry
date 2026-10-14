@@ -1194,10 +1194,13 @@ describe('UX QA (#72): a partner the export dropped', () => {
     const s2 = await prepareReimport(store, { bytes: text }, { today: TODAY });
     try {
       const ada = s2.diff.people.find((p) => p.name === 'Ada Hollowell')!;
+      // Not added by default either: with its only parent link unticked it would have no parents.
       expect(ada.changes.map((c) => [c.kind, c.defaultAccept])).toEqual([
-        ['person.new', true],
+        ['person.new', false],
         ['child.add', false],
+        ['unlinked-new', false],
       ]);
+      expect(ada.changes.at(-1)!.applicable).toBe(false);
       applyReimport(store, s2, new Set(ada.changes.map((c) => c.id)), 'Re-import');
     } finally {
       closeReimport(s2);

@@ -1,8 +1,8 @@
 /*
  * The whole tree as a relationship graph, for "what is A to B" on the server.
- * Loading every family is a few flat queries (tens of milliseconds on a 10k
- * tree); the graph and its calculator are then reused until the database
- * changes, so most lookups cost about a millisecond.
+ * Loading every person and family is three flat queries (tens of
+ * milliseconds on a 10k tree); the graph and its calculator are then reused
+ * until the database changes, so most lookups cost about a millisecond.
  */
 import { kinshipGraph, relationshipCalculator, isVirtualParent } from '@open-ancestry/core';
 import type {
@@ -68,53 +68,57 @@ function load(store: TreeStore): KinshipGraph {
       ?.children.push({ id: c.child_id, rel1: c.partner1_rel, rel2: c.partner2_rel });
   }
 
-  // Earliest birth-type and death-type dates per person, and marriage and divorce per family.
+  // Dates are only needed for the occasional step check, so they are read
+  // per person or family on demand rather than for the whole tree.
+  const vitals = store.stmt(
+    `SELECT e.type IN (${list(DEATH_TYPES)}) AS death, min(e.date_sort) AS k
+     FROM event_role r JOIN event e ON e.id = r.event_id
+     WHERE r.person_id = ? AND r.role = 'principal' AND e.date_sort IS NOT NULL
+       AND e.type IN (${list([...BIRTH_TYPES, ...DEATH_TYPES])})
+     GROUP BY death`,
+  );
+  const familyDates = store.stmt(
+    `SELECT e.type = 'DIV' AS divorce, min(e.date_sort) AS k
+     FROM event_role r JOIN event e ON e.id = r.event_id
+     WHERE r.family_id = ? AND e.date_sort IS NOT NULL AND e.type IN ('MARR', 'DIV')
+     GROUP BY divorce`,
+  );
   const lives = new Map<string, Span>();
-  const vitals = store
-    .stmt(
-      `SELECT r.person_id AS id, e.type IN (${list(DEATH_TYPES)}) AS death, min(e.date_sort) AS k
-       FROM event_role r JOIN event e ON e.id = r.event_id
-       WHERE r.role = 'principal' AND e.date_sort IS NOT NULL
-         AND e.type IN (${list([...BIRTH_TYPES, ...DEATH_TYPES])})
-       GROUP BY r.person_id, death`,
-    )
-    .all() as { id: string; death: number; k: number }[];
-  for (const v of vitals) {
-    const span = lives.get(v.id) ?? {};
-    if (v.death) span.end = v.k;
-    else span.start = v.k;
-    lives.set(v.id, span);
-  }
+  const lifespan = (id: string): Span => {
+    let span = lives.get(id);
+    if (!span) {
+      span = {};
+      for (const v of vitals.all(id) as { death: number; k: number }[]) {
+        if (v.death) span.end = v.k;
+        else span.start = v.k;
+      }
+      lives.set(id, span);
+    }
+    return span;
+  };
   const unions = new Map<string, Span>();
-  const familyEvents = store
-    .stmt(
-      `SELECT r.family_id AS id, e.type = 'DIV' AS divorce, min(e.date_sort) AS k
-       FROM event_role r JOIN event e ON e.id = r.event_id
-       WHERE r.family_id IS NOT NULL AND e.date_sort IS NOT NULL AND e.type IN ('MARR', 'DIV')
-       GROUP BY r.family_id, divorce`,
-    )
-    .all() as { id: string; divorce: number; k: number }[];
-  for (const e of familyEvents) {
-    const span = unions.get(e.id) ?? {};
-    if (e.divorce) span.end = e.k;
-    else span.start = e.k;
-    unions.set(e.id, span);
-  }
-  // A union also ends when either partner dies.
-  for (const f of families.values()) {
-    const ends = [
-      unions.get(f.id)?.end,
-      ...f.partners.map((p) => (p ? lives.get(p)?.end : undefined)),
-    ];
+  const union = (familyId: string): Span | undefined => {
+    let span = unions.get(familyId);
+    if (span) return span;
+    const family = families.get(familyId);
+    if (!family) return undefined;
+    span = {};
+    for (const e of familyDates.all(familyId) as { divorce: number; k: number }[]) {
+      if (e.divorce) span.end = e.k;
+      else span.start = e.k;
+    }
+    // A union also ends when either partner dies.
+    const ends = [span.end, ...family.partners.map((p) => (p ? lifespan(p).end : undefined))];
     const known = ends.filter((k): k is number => k !== undefined);
-    if (!known.length) continue;
-    unions.set(f.id, { ...unions.get(f.id), end: Math.min(...known) });
-  }
+    if (known.length) span.end = Math.min(...known);
+    unions.set(familyId, span);
+    return span;
+  };
 
   return {
     ...kinshipGraph({ people, families: [...families.values()] }),
-    lifespan: (id) => lives.get(id),
-    union: (id) => unions.get(id),
+    lifespan,
+    union,
   };
 }
 

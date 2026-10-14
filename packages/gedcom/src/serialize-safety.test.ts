@@ -115,6 +115,119 @@ describe('unedited source text', () => {
   });
 });
 
+describe('hand-built parser fields cannot inject lines', () => {
+  const injected = (out: string) => {
+    const doc = parseGedcom(out);
+    expect(doc.index.has('@I9@')).toBe(false);
+    return doc;
+  };
+
+  it('ignores a continuation source that is not its CONC/CONT line', () => {
+    const n = node({
+      level: 1,
+      tag: 'NOTE',
+      rawValue: 'a',
+      value: 'a\nb',
+      continuations: [{ tag: 'CONT', level: 2, line: 0, value: 'b', source: '0 @I9@ INDI' }],
+    });
+    const out = serializeNode(n);
+    expect(out).toBe('1 NOTE a\n2 CONT b\n');
+    injected(out);
+  });
+
+  it('keeps a continuation source that re-tokenizes to the same line', () => {
+    const n = node({
+      level: 1,
+      tag: 'NOTE',
+      rawValue: 'a',
+      value: 'a\nb',
+      continuations: [{ tag: 'CONT', level: 2, line: 0, value: 'b', source: '  2 CONT b' }],
+    });
+    expect(serializeNode(n)).toBe('1 NOTE a\n  2 CONT b\n');
+  });
+
+  it.each(['0 @I9@ INDI', '1 NAME x', '0 @I9@'])('re-encodes broken text %j', (text) => {
+    const n = node({
+      level: 1,
+      tag: 'NOTE',
+      rawValue: 'a',
+      value: `a\n${text}`,
+      continuations: [{ tag: 'CONT', level: 2, line: 0, value: text, broken: true }],
+    });
+    const out = serializeNode(n);
+    expect(out).toBe(`1 NOTE a\n2 CONT ${text}\n`);
+    expect(injected(out).records[0]!.value).toBe(`a\n${text}`);
+  });
+
+  it('re-encodes continuations at the wrong level or on a pointer', () => {
+    const wrongLevel = node({
+      level: 1,
+      tag: 'NOTE',
+      rawValue: 'a',
+      value: 'ab',
+      continuations: [{ tag: 'CONC', level: 0, line: 0, value: 'b' }],
+    });
+    expect(serializeNode(wrongLevel)).toBe('1 NOTE ab\n');
+    const onPointer = node({
+      level: 1,
+      tag: 'NOTE',
+      pointer: '@N1@',
+      value: '\nx',
+      continuations: [{ tag: 'CONT', level: 2, line: 0, value: 'x', broken: true }],
+    });
+    expect(serializeNode(onPointer)).toBe('1 NOTE @N1@\n');
+  });
+
+  it.each(['0 @I9@ INDI', '1 NAME x', '  2 DATE 1900'])('rejects extra line %j', (text) => {
+    const n = node({ level: 1, tag: 'NAME', value: 'x', extra: [{ line: 2, text }] });
+    expectCode(() => serializeNode(n), 'structural-extra');
+    const doc = { records: [], header: { schema: {} }, preamble: [{ line: 1, text }] };
+    expectCode(() => serializeGedcom(doc), 'structural-extra');
+  });
+
+  it('accepts the blank and unparseable extra lines the parser stores', () => {
+    const src = 'junk\n0 HEAD\n0 @I1@ INDI\n1 NAME A\n\n0 @I2@\n1 NAME B\n0 TRLR\n';
+    expect(serializeGedcom(parseGedcom(src))).toBe(src);
+  });
+});
+
+describe('levels', () => {
+  it('rejects a child that would not nest under its parent', () => {
+    const flat = node({
+      level: 0,
+      tag: 'INDI',
+      xref: '@I1@',
+      children: [node({ level: 0, tag: 'INDI' })],
+    });
+    expectCode(() => serializeNode(flat), 'invalid-level');
+  });
+
+  it('rejects a sibling deeper than the one before it, which would nest under it', () => {
+    const parent = node({
+      level: 0,
+      tag: 'INDI',
+      children: [node({ level: 1, tag: 'BIRT' }), node({ level: 2, tag: 'DATE', value: 'x' })],
+    });
+    expectCode(() => serializeNode(parent), 'invalid-level');
+  });
+
+  it('still writes level jumps the parser accepted', () => {
+    const src = '0 @I1@ INDI\n1 BIRT\n3 DATE 1900\n2 PLAC x\n1 SEX M\n';
+    expect(serializeNode(parseGedcom(src).records[0]!)).toBe(src);
+  });
+
+  it('rejects a multi-line value at level 99 and keeps long ones on one line', () => {
+    expectCode(
+      () => serializeNode(node({ level: 99, tag: 'NOTE', value: 'a\nb' })),
+      'invalid-level',
+    );
+    const long = 'x'.repeat(50);
+    expect(
+      serializeNode(node({ level: 99, tag: 'NOTE', value: long }), { maxLineLength: 20 }),
+    ).toBe(`99 NOTE ${long}\n`);
+  });
+});
+
 describe('structure is validated', () => {
   it.each(['', 'NA ME', 'NAME\n0 X', 'A\tB', 'name', 'Ä', 'NAME\r'])('rejects tag %j', (tag) => {
     expectCode(() => serializeNode(node({ level: 1, tag })), 'invalid-tag');
@@ -207,6 +320,63 @@ describe('fuzz: serialize -> parse keeps records and values', () => {
           const parsed = records[0]!;
           expect(parsed.value).toBe(normalized(head));
           expect(parsed.children.map((c) => c.value)).toEqual(kids.map(normalized));
+        },
+      ),
+      { numRuns: Number(process.env.FUZZ_RUNS ?? 500) },
+    );
+  });
+
+  it('for hand-built source, extra and continuation text: a typed error or no injected record', () => {
+    const text = fc.oneof(
+      fc.string({ unit: 'binary', maxLength: 12 }),
+      fc.constantFrom(
+        '0 @I9@ INDI',
+        '1 NAME x',
+        '2 CONT y',
+        '2 CONC y',
+        '  2 CONT b',
+        '',
+        '0 @I9@',
+        'b',
+      ),
+    );
+    const continuation = fc.record({
+      tag: fc.constantFrom('CONC' as const, 'CONT' as const),
+      level: fc.constantFrom(0, 1, 2, 3),
+      line: fc.constant(0),
+      value: text,
+      source: fc.option(text, { nil: undefined }),
+      broken: fc.option(fc.constant(true as const), { nil: undefined }),
+    });
+    fc.assert(
+      fc.property(
+        fc.option(text, { nil: undefined }),
+        fc.option(text, { nil: undefined }),
+        fc.array(continuation, { maxLength: 3 }),
+        fc.array(text, { maxLength: 2 }),
+        (source, rawValue, continuations, extra) => {
+          const record = node({
+            level: 0,
+            tag: 'NOTE',
+            xref: '@N1@',
+            value: 'v',
+            ...(source !== undefined && { source }),
+            ...(rawValue !== undefined && { rawValue }),
+            ...(continuations.length && { continuations }),
+            extra: extra.map((t, i) => ({ line: i, text: t })),
+            children: [node({ level: 1, tag: '_X', value: 'kid' })],
+          });
+          let out: string;
+          try {
+            out = serializeNode(record);
+          } catch (error) {
+            expect(error).toBeInstanceOf(GedcomSerializeError);
+            return;
+          }
+          const doc = parseGedcom(out);
+          expect(doc.records).toHaveLength(1);
+          expect([...doc.index.keys()]).toEqual(['@N1@']);
+          expect(doc.records[0]!.children.map((c) => c.tag)).toEqual(['_X']);
         },
       ),
       { numRuns: Number(process.env.FUZZ_RUNS ?? 500) },

@@ -107,6 +107,22 @@ describe('edited records', () => {
         { given: 'Theo', surname: 'Ashby', full_text: 'Theo /Ashby/' },
       ]);
     }
+    // A nickname edit alone keeps the imported text and its formatting.
+    store.transact('Nickname', (tx) =>
+      names.update(tx, primaryName(store, '@I1@'), {
+        given: 'Thaddeus',
+        surname: 'Ashgrove',
+      }),
+    );
+    store.transact('Retype', (tx) =>
+      names.update(tx, primaryName(store, '@I1@'), { full_text: 'Thaddeus "Tad" /Ashgrove/' }),
+    );
+    store.transact('Nick', (tx) =>
+      names.update(tx, primaryName(store, '@I1@'), { nickname: 'Taddy' }),
+    );
+    expect(exportGedcom(store, { now: TODAY })).toContain(
+      '1 NAME Thaddeus "Tad" /Ashgrove/\n2 GIVN Thaddeus\n2 NICK Taddy',
+    );
     // Setting the text itself makes it current again.
     store.transact('Retype', (tx) =>
       names.update(tx, primaryName(store, '@I1@'), { full_text: 'Theo "Ted" /Ashby/' }),

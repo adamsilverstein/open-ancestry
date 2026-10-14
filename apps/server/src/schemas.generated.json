@@ -1052,20 +1052,7 @@
                 "expect": {
                   "type": "object",
                   "patternProperties": {
-                    "^[a-z0-9_]{1,40}$": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "maxLength": 10000
-                        },
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    }
+                    "^[a-z0-9_]{1,40}$": {}
                   },
                   "maxProperties": 30
                 }
@@ -1280,20 +1267,7 @@
                 "expect": {
                   "type": "object",
                   "patternProperties": {
-                    "^[a-z0-9_]{1,40}$": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "maxLength": 10000
-                        },
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    }
+                    "^[a-z0-9_]{1,40}$": {}
                   },
                   "maxProperties": 30
                 }
@@ -1317,20 +1291,7 @@
                 "expect": {
                   "type": "object",
                   "patternProperties": {
-                    "^[a-z0-9_]{1,40}$": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "maxLength": 10000
-                        },
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    }
+                    "^[a-z0-9_]{1,40}$": {}
                   },
                   "maxProperties": 30
                 }
@@ -1393,20 +1354,7 @@
                 "expect": {
                   "type": "object",
                   "patternProperties": {
-                    "^[a-z0-9_]{1,40}$": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "maxLength": 10000
-                        },
-                        {
-                          "type": "number"
-                        },
-                        {
-                          "type": "null"
-                        }
-                      ]
-                    }
+                    "^[a-z0-9_]{1,40}$": {}
                   },
                   "maxProperties": 30
                 }
@@ -1559,20 +1507,7 @@
           "expect": {
             "type": "object",
             "patternProperties": {
-              "^[a-z0-9_]{1,40}$": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "maxLength": 10000
-                  },
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              }
+              "^[a-z0-9_]{1,40}$": {}
             },
             "maxProperties": 30
           }
@@ -1787,20 +1722,7 @@
           "expect": {
             "type": "object",
             "patternProperties": {
-              "^[a-z0-9_]{1,40}$": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "maxLength": 10000
-                  },
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              }
+              "^[a-z0-9_]{1,40}$": {}
             },
             "maxProperties": 30
           }
@@ -1824,20 +1746,7 @@
           "expect": {
             "type": "object",
             "patternProperties": {
-              "^[a-z0-9_]{1,40}$": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "maxLength": 10000
-                  },
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              }
+              "^[a-z0-9_]{1,40}$": {}
             },
             "maxProperties": 30
           }
@@ -1900,20 +1809,7 @@
           "expect": {
             "type": "object",
             "patternProperties": {
-              "^[a-z0-9_]{1,40}$": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "maxLength": 10000
-                  },
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              }
+              "^[a-z0-9_]{1,40}$": {}
             },
             "maxProperties": 30
           }

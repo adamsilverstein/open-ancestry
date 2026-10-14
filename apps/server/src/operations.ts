@@ -51,12 +51,15 @@ function profilePhotoProblem(store: TreeStore, media: MediaRow): string | null {
   return null;
 }
 
-type Seen = Record<string, string | number | null>;
+type Seen = Record<string, unknown>;
 
 /** Refuses a write made from a copy of the row that no longer matches the stored one. */
 function requireSeen(row: object, seen: Seen | undefined, what: string): void {
   for (const [column, value] of Object.entries(seen ?? {})) {
     if (!(column in row)) throw badRequest(`Unknown column ${column} in expect`);
+    if (value !== null && typeof value !== 'string' && typeof value !== 'number') {
+      throw badRequest(`expect.${column} must be a string, number or null`);
+    }
     if ((row as Record<string, unknown>)[column] !== value) {
       throw stale(`The ${what} changed after it was loaded`);
     }

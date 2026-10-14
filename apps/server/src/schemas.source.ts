@@ -231,7 +231,9 @@ export const MediaThumbParams = Type.Object({
 const Seen = Type.Optional(
   Type.Record(
     Type.String({ pattern: '^[a-z0-9_]{1,40}$' }),
-    Type.Union([Type.String({ maxLength: 10_000 }), Type.Number(), Type.Null()]),
+    // Untyped: coerceTypes would turn a seen 1 into '1' (or '' into null), so
+    // operations.ts checks that each value is a string, number or null.
+    Type.Unknown(),
     { maxProperties: 30 },
   ),
 );

@@ -104,7 +104,8 @@ describe('batch', () => {
   it('refuses operations made from stale data with 409 stale, changing nothing', async () => {
     const seen = await detail(s.ada);
     const name = seen.names[0]!;
-    const sawName = { given: name.given, surname: name.surname };
+    // The whole row, numbers and nulls included, as the Edit person dialog sends it.
+    const sawName = { ...name };
     const sawPerson = { updated_at: seen.person.updated_at };
     // Timestamps have millisecond resolution; make sure the next edit gets a new one.
     await new Promise((resolve) => setTimeout(resolve, 5));
@@ -193,6 +194,10 @@ describe('batch', () => {
       {
         label: 'x',
         operations: [{ op: 'person.update', id: s.ada, patch: {}, expect: { nope: 1 } }],
+      },
+      {
+        label: 'x',
+        operations: [{ op: 'person.update', id: s.ada, patch: {}, expect: { sex: ['M'] } }],
       },
     ]) {
       const res = await api.post(`${s.base}/batch`, body);

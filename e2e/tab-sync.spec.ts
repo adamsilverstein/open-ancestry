@@ -16,6 +16,11 @@ test.beforeEach(async ({ request, baseURL }, testInfo) => {
 });
 
 const h1 = (page: Page) => page.getByRole('heading', { level: 1 });
+const staleToast = (page: Page) =>
+  page
+    .getByRole('region', { name: /Notifications/ })
+    .getByRole('listitem')
+    .filter({ hasText: /changed in another window \(or by undo\) after you opened it/ });
 
 async function rename(page: Page, given: string) {
   await page.getByRole('button', { name: 'Edit person' }).click();
@@ -63,11 +68,31 @@ test('a save made from stale data is refused, not mixed in', async ({ page, requ
   });
 
   await dialog.getByRole('button', { name: 'Save' }).click();
-  await expect(
-    page.getByText(/changed in another window \(or by undo\) after you opened it/),
-  ).toBeVisible();
+  await expect(staleToast(page)).toBeVisible();
   // The page shows what the server has, never "Rowan Ashby" or "Roland Ashby".
   await expect(h1(page)).toHaveText('Roland Ashdown');
   const after = await (await request.get(`${base}/people/${seeded.rowan}`)).json();
   expect(after.names[0]).toMatchObject({ given: 'Roland', surname: 'Ashdown' });
+});
+
+test('an open form does not save over an undo from another tab', async ({ page }) => {
+  const a = page;
+  const b = await page.context().newPage();
+  await openSeeded(a, seeded);
+  await openSeeded(b, seeded);
+  await rename(a, 'Roland');
+  await expect(h1(b)).toHaveText('Roland Ashdown');
+
+  await a.getByRole('button', { name: 'Edit person' }).click();
+  const dialog = a.getByRole('dialog', { name: 'Edit person' });
+  await dialog.getByRole('textbox', { name: 'Surname' }).first().fill('Ashby');
+
+  await b.locator('body').click({ position: { x: 1, y: 1 } });
+  await b.keyboard.press(`${mod}+z`);
+  await expect(h1(b)).toHaveText('Rowan Ashdown');
+
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(staleToast(a)).toBeVisible();
+  await expect(h1(a)).toHaveText('Rowan Ashdown');
+  await expect(h1(b)).toHaveText('Rowan Ashdown');
 });

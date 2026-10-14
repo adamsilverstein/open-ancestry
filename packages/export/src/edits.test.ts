@@ -4,16 +4,20 @@ import {
   events,
   families,
   familyChildren,
+  listBatches,
   names,
   notes,
+  openTree,
   persons,
   sources,
   undoLast,
   type TreeStore,
 } from '@open-ancestry/db';
 import { GedcomSerializeError, parseGedcom } from '@open-ancestry/gedcom';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { importGedcom } from '@open-ancestry/import';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildGedcomExport, exportGedcom } from './index';
 import {
@@ -219,6 +223,75 @@ describe('edited records', () => {
     );
     const out = exportGedcom(store, { version: '5.5.1', now: TODAY });
     expectVerbatimExcept(store, out, []);
+  });
+
+  it('an edit that only changes the Unicode form keeps the record verbatim', async () => {
+    const nfd = (t: string) => t.normalize('NFD');
+    const store = await importInto(
+      ged('0 @I1@ INDI', `1 NAME ${nfd('José /Müller/')}`, '0 @I2@ INDI', '1 NAME Ann /Ash/'),
+    );
+    // Stored NFD (as before #99), then rewritten NFC by a logged edit.
+    store.db
+      .prepare('UPDATE person_name SET given = ?, surname = ? WHERE given = ?')
+      .run(nfd('José'), nfd('Müller'), 'José'.normalize('NFC'));
+    store.transact('Normalize', (tx) =>
+      names.update(tx, primaryName(store, '@I1@'), { given: 'José'.normalize('NFC') }),
+    );
+    expect(listBatches(store)).toHaveLength(1);
+    expectVerbatimExcept(store, exportGedcom(store, { version: '5.5.1', now: TODAY }), []);
+  });
+
+  it('upgrading a tree with NFD text keeps the export byte-identical and History empty', async () => {
+    const nfd = (t: string) => t.normalize('NFD');
+    const dir = join(mkdtempSync(join(tmpdir(), 'oa-nfc-export-')), 'nfd.oatree');
+    try {
+      await importGedcom(
+        {
+          bytes: ged(
+            '0 @I1@ INDI',
+            `1 NAME ${nfd('José /Müller/')}`,
+            '1 BIRT',
+            `2 PLAC ${nfd('Zürich, Schweiz')}`,
+            '0 @I2@ INDI',
+            '1 NAME Ann /Ash/',
+          ),
+        },
+        { dir },
+        { today: TODAY },
+      );
+      // Put the tree back the way an import before #99 stored it, at schema version 2.
+      let store = openTree(dir);
+      for (const [table, column] of [
+        ['person_name', 'given'],
+        ['person_name', 'surname'],
+        ['person_name', 'full_text'],
+        ['place', 'name'],
+        ['place', 'full_name'],
+      ] as const) {
+        for (const r of rows<{ id: string; v: string }>(
+          store,
+          `SELECT id, ${column} AS v FROM ${table}`,
+        )) {
+          store.db.prepare(`UPDATE ${table} SET ${column} = ? WHERE id = ?`).run(nfd(r.v), r.id);
+        }
+      }
+      store.db.prepare("UPDATE meta SET value = '2' WHERE key = 'schema_version'").run();
+      const before = exportGedcom(store, { version: '5.5.1', now: TODAY });
+      store.close();
+
+      store = openTree(dir);
+      expect(value(store, "SELECT value FROM meta WHERE key = 'schema_version'")).toBe(
+        String(store.schemaVersion),
+      );
+      expect(value(store, 'SELECT full_name FROM place WHERE parent_id IS NOT NULL')).toBe(
+        'Zürich, Schweiz'.normalize('NFC'),
+      );
+      expect(exportGedcom(store, { version: '5.5.1', now: TODAY })).toBe(before);
+      expect(listBatches(store)).toEqual([]);
+      store.close();
+    } finally {
+      rmSync(dirname(dir), { recursive: true, force: true });
+    }
   });
 
   it('undoing the edit makes the record verbatim again', async () => {

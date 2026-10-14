@@ -25,6 +25,16 @@ async function open(page: Page, key = 'ada', extra = '') {
 }
 
 /**
+ * The top bar's File button once its menu has loaded: until then a disabled
+ * placeholder stands in, and focus on it is lost when the real one replaces it.
+ */
+async function fileMenu(page: Page) {
+  const file = page.getByRole('banner').getByRole('button', { name: 'File' });
+  await expect(file).not.toHaveAttribute('aria-disabled', 'true');
+  return file;
+}
+
+/**
  * Waits until `name` is the laid-out focus person and the view has stopped
  * moving: the URL changes first, the layout and re-centering come after.
  */
@@ -465,9 +475,32 @@ test.describe('family view', () => {
     await card(page, 'Bram Vale').focus();
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
-    await page.getByRole('banner').getByRole('button', { name: 'File' }).focus();
+    await (await fileMenu(page)).focus();
     await page.keyboard.press('h');
     await page.keyboard.press('0');
+    await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
+  });
+
+  test('a re-focus that lands late does not take focus back from the top bar', async ({ page }) => {
+    await open(page);
+    await settled(page);
+    // Hold Bram's relatives so his layout arrives after focus has moved on.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route(`**/neighborhood?focus=${ids.bram}*`, async (route) => {
+      await held;
+      await route.continue();
+    });
+    await card(page, 'Bram Vale').focus();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
+    const file = await fileMenu(page);
+    await file.focus();
+    release();
+    await focusedOn(page, 'Bram Vale');
+    await expect(file).toBeFocused();
+    // So the tree's single-key shortcuts stay off (WCAG 2.1.4).
+    await page.keyboard.press('h');
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
   });
 

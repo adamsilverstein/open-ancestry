@@ -1,0 +1,167 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`layoutDescendants > shows the focus person, spouses and descendants only 1`] = `
+"m1@-136,0  dad@0,0[focus -down]  m2@136,0
+a@-180,214  b@-36,214  c@108,214[+down]
+couple F1 m1+dad : -16,75 0,75
+parent-child F1 m1+dad : -8,75 -8,182
+sibling-bar F1  : -120,182 24,182
+parent-child F1 a unknown : -120,182 -120,214
+parent-child F1 b unknown : 24,182 24,214
+couple F2 dad+m2 : 120,75 136,75
+parent-child F2 dad+m2 : 128,75 128,182
+sibling-bar F2  : 128,182 168,182
+parent-child F2 c unknown : 168,182 168,214
+label 1 "Children" @-180,289
+bounds -180,0 436x364"
+`;
+
+exports[`layoutFamily > expands a spouse to show their parents next to the focus parents 1`] = `
+"a@-140,-214  b@-4,-214  c@140,-214  d@276,-214
+me@0,0[focus -up]  sp@136,0[-up]
+couple F me+sp : 120,75 136,75
+couple F_me a+b : -20,-139 -4,-139
+parent-child F_me a+b : -12,-139 -12,-32
+sibling-bar F_me  : -12,-32 60,-32
+parent-child F_me me unknown : 60,-32 60,0
+couple F_sp c+d : 260,-139 276,-139
+parent-child F_sp c+d : 268,-139 268,-32
+sibling-bar F_sp  : 196,-32 268,-32
+parent-child F_sp sp unknown : 196,-32 196,0
+label -1 "Parents" @-140,-139
+bounds -140,-214 536x364"
+`;
+
+exports[`layoutFamily > groups children under each spouse for several marriages 1`] = `
+"w1@-136,0  me@0,0[focus -down]  w2@136,0  w3@272,0
+a1@-326,214  a2@-182,214  u1@-38,214  b1@106,214  c1@250,214  c2@394,214
+couple F1 w1+me : -16,75 0,75
+parent-child F1 w1+me : -8,75 -8,182
+sibling-bar F1  : -266,182 -8,182
+parent-child F1 a1 unknown : -266,182 -266,214
+parent-child F1 a2 unknown : -122,182 -122,214
+couple F2 me+w2 : 120,75 136,75
+parent-child F2 me+w2 : 128,75 128,182
+sibling-bar F2  : 128,182 166,182
+parent-child F2 b1 unknown : 166,182 166,214
+couple F3 me+w3 : 60,150 60,166 332,166 332,150
+parent-child F3 me+w3 : 196,166 196,182
+sibling-bar F3  : 196,182 454,182
+parent-child F3 c1 unknown : 310,182 310,214
+parent-child F3 c2 unknown : 454,182 454,214
+parent-child F4 me : 60,150 60,182
+sibling-bar F4  : 22,182 60,182
+parent-child F4 u1 unknown : 22,182 22,214
+label 1 "Children" @-326,289
+bounds -326,0 840x364"
+`;
+
+exports[`layoutFamily > lays out a nuclear family 1`] = `
+"dad@-68,-214  mom@68,-214
+me@0,0[focus -up -down]  sp@136,0
+kid1@-4,214  kid2@140,214
+couple F_me me+sp : 120,75 136,75
+parent-child F_me me+sp : 128,75 128,182
+sibling-bar F_me  : 56,182 200,182
+parent-child F_me kid1 unknown : 56,182 56,214
+parent-child F_me kid2 unknown : 200,182 200,214
+couple F_par dad+mom : 52,-139 68,-139
+parent-child F_par dad+mom : 60,-139 60,-32
+parent-child F_par me unknown : 60,-32 60,0
+label -1 "Parents" @-68,-139
+label 1 "Children" @-68,289
+bounds -68,-214 328x578"
+`;
+
+exports[`layoutFamily > lays out three generations of ancestors, paternal left and maternal right 1`] = `
+"pgf_f@-488,-642  pgf_m@-352,-642  pgm_f@-208,-642  pgm_m@-72,-642  mgf_f@72,-642  mgf_m@208,-642  mgm_f@352,-642  mgm_m@488,-642
+pgf@-420,-428[-up]  pgm@-140,-428[-up]  mgf@140,-428[-up]  mgm@420,-428[-up]
+dad@-280,-214[-up]  mom@280,-214[-up]
+me@0,0[focus -up]
+couple F_me dad+mom : -160,-139 280,-139
+parent-child F_me dad+mom : 60,-139 60,-32
+parent-child F_me me unknown : 60,-32 60,0
+couple F_dad pgf+pgm : -300,-353 -140,-353
+parent-child F_dad pgf+pgm : -220,-353 -220,-246
+parent-child F_dad dad unknown : -220,-246 -220,-214
+couple F_mom mgf+mgm : 260,-353 420,-353
+parent-child F_mom mgf+mgm : 340,-353 340,-246
+parent-child F_mom mom unknown : 340,-246 340,-214
+couple F_pgf pgf_f+pgf_m : -368,-567 -352,-567
+parent-child F_pgf pgf_f+pgf_m : -360,-567 -360,-460
+parent-child F_pgf pgf unknown : -360,-460 -360,-428
+couple F_pgm pgm_f+pgm_m : -88,-567 -72,-567
+parent-child F_pgm pgm_f+pgm_m : -80,-567 -80,-460
+parent-child F_pgm pgm unknown : -80,-460 -80,-428
+couple F_mgf mgf_f+mgf_m : 192,-567 208,-567
+parent-child F_mgf mgf_f+mgf_m : 200,-567 200,-460
+parent-child F_mgf mgf unknown : 200,-460 200,-428
+couple F_mgm mgm_f+mgm_m : 472,-567 488,-567
+parent-child F_mgm mgm_f+mgm_m : 480,-567 480,-460
+parent-child F_mgm mgm unknown : 480,-460 480,-428
+label -3 "Great-grandparents" @-488,-567
+label -2 "Grandparents" @-488,-353
+label -1 "Parents" @-488,-139
+bounds -488,-642 1096x792"
+`;
+
+exports[`layoutFamily > prefers biological parents and exposes the alternates for a switcher 1`] = `
+"bdad@-68,-214  bmom@68,-214
+me@0,0[focus -up -down]
+kid@0,214
+parent-child F_me me : 60,150 60,182
+parent-child F_me kid adopted : 60,182 60,214
+couple F_bio bdad+bmom : 52,-139 68,-139
+parent-child F_bio bdad+bmom : 60,-139 60,-32
+parent-child F_bio me biological : 60,-32 60,0
+label -1 "Parents" @-68,-139
+label 1 "Children" @-68,289
+bounds -68,-214 256x578
+parents me: F_bio of F_adopt,F_bio"
+`;
+
+exports[`layoutFamily > renders pedigree collapse as linked duplicates without recursing 1`] = `
+"ggf@-276,-642  ggm@-140,-642  ggf~1@140,-642[dup-of:ggf]  ggm~1@276,-642[dup-of:ggm]
+pgf@-208,-428[-up]  pgm@-72,-428  mgf@72,-428  mgm@208,-428[-up]
+dad@-140,-214[-up]  mom@140,-214[-up]
+me@0,0[focus -up]
+couple F_me dad+mom : -20,-139 140,-139
+parent-child F_me dad+mom : 60,-139 60,-32
+parent-child F_me me unknown : 60,-32 60,0
+couple F_dad pgf+pgm : -88,-353 -72,-353
+parent-child F_dad pgf+pgm : -80,-353 -80,-246
+parent-child F_dad dad unknown : -80,-246 -80,-214
+couple F_mom mgf+mgm : 192,-353 208,-353
+parent-child F_mom mgf+mgm : 200,-353 200,-246
+parent-child F_mom mom unknown : 200,-246 200,-214
+couple F_gg ggf+ggm : -156,-567 -140,-567
+parent-child F_gg ggf+ggm : -148,-567 -148,-460
+parent-child F_gg pgf unknown : -148,-460 -148,-428
+couple F_gg ggf~1+ggm~1 : 260,-567 276,-567
+parent-child F_gg ggf~1+ggm~1 : 268,-567 268,-460
+parent-child F_gg mgm unknown : 268,-460 268,-428
+label -3 "Great-grandparents" @-276,-567
+label -2 "Grandparents" @-276,-353
+label -1 "Parents" @-276,-139
+bounds -276,-642 672x792"
+`;
+
+exports[`layoutFamily > shows half siblings under their own couples 1`] = `
+"m1@-136,0  dad@0,0[focus -down]  m2@136,0
+a@-180,214  b@-36,214  c@108,214[-down]
+ck@108,428
+couple F1 m1+dad : -16,75 0,75
+parent-child F1 m1+dad : -8,75 -8,182
+sibling-bar F1  : -120,182 24,182
+parent-child F1 a unknown : -120,182 -120,214
+parent-child F1 b unknown : 24,182 24,214
+couple F2 dad+m2 : 120,75 136,75
+parent-child F2 dad+m2 : 128,75 128,182
+sibling-bar F2  : 128,182 168,182
+parent-child F2 c unknown : 168,182 168,214
+parent-child F3 c : 168,364 168,396
+parent-child F3 ck unknown : 168,396 168,428
+label 1 "Children" @-180,289
+label 2 "Grandchildren" @-180,503
+bounds -180,0 436x578"
+`;

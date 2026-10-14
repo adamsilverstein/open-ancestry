@@ -10,7 +10,7 @@ import {
   nuclear,
   threeGenerations,
 } from './test-graphs';
-import type { LayoutNode, TreeLayout } from './types';
+import type { LayoutNode, TreeLayout, TreePerson } from './types';
 
 const node = (layout: TreeLayout, key: string): LayoutNode => {
   const found = layout.nodes.find((n) => n.key === key);
@@ -125,15 +125,15 @@ describe('layoutFamily', () => {
       .sort((a, b) => a.x - b.x)
       .map((n) => n.key);
     expect(order).toEqual(['w1', 'me', 'w2', 'w3']);
-    const mid = (a: string, b: string) => (centerX(node(layout, a)) + centerX(node(layout, b))) / 2;
     // Each couple's children sit in their own group, ordered like the couples.
     const kidsX = (keys: string[]) => keys.map((k) => centerX(node(layout, k)));
-    const [a1, a2] = kidsX(['a1', 'a2']);
-    const [u1, b1, c1] = kidsX(['u1', 'b1', 'c1']);
-    expect(a2!).toBeLessThan(u1!);
-    expect(u1!).toBeLessThan(b1!);
-    expect(b1!).toBeLessThan(c1!);
-    expect(a1! < mid('w1', 'me') && mid('w1', 'me') < a2!).toBe(true);
+    const xs = kidsX(['a1', 'a2', 'u1', 'b1', 'c1', 'c2']);
+    expect(xs).toEqual([...xs].sort((p, q) => p - q));
+    const dropX = (familyId: string) =>
+      layout.edges.find((e) => e.familyId === familyId && e.parents && e.kind === 'parent-child')!
+        .points[0]![0];
+    const drops = ['F1', 'F4', 'F2', 'F3'].map(dropX);
+    expect(drops).toEqual([...drops].sort((p, q) => p - q));
     // The third wife is not adjacent, so that couple line drops below the row.
     const third = layout.edges.find((e) => e.kind === 'couple' && e.familyId === 'F3')!;
     expect(third.points).toHaveLength(4);
@@ -207,7 +207,7 @@ describe('layoutFamily', () => {
 
   it('uses lazy-load hints for people at the edge of the slice', () => {
     const g = makeGraph({ me: 'M' }, []);
-    const people = g.people as Record<string, (typeof g.people)[string]>;
+    const people = g.people as Record<string, TreePerson>;
     people['me'] = { ...people['me']!, hasMoreParents: true, hasMoreChildren: true };
     const n = layoutFamily(g, 'me').nodes[0]!;
     expect([n.canExpandUp, n.canExpandDown]).toEqual([true, true]);

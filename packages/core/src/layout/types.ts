@@ -8,14 +8,7 @@ export type Sex = 'M' | 'F' | 'X' | 'U';
 
 /** Parent-child relationship types, as stored in `family_child`. */
 export type ChildRelation =
-  | 'biological'
-  | 'adopted'
-  | 'step'
-  | 'foster'
-  | 'related'
-  | 'guardian'
-  | 'private'
-  | 'unknown';
+  'biological' | 'adopted' | 'step' | 'foster' | 'related' | 'guardian' | 'private' | 'unknown';
 
 export interface TreePerson {
   id: string;

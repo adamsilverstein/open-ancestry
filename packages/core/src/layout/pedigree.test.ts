@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { layoutFan, layoutPedigree } from './index';
-import { cousinMarriage, describeFan, describeLayout, makeGraph, threeGenerations } from './test-graphs';
+import {
+  cousinMarriage,
+  describeFan,
+  describeLayout,
+  makeGraph,
+  threeGenerations,
+} from './test-graphs';
 
 describe('layoutPedigree', () => {
   it('lays ancestors out to the right, father above mother', () => {
@@ -49,7 +55,14 @@ describe('layoutFan', () => {
     expect(s('dad')).toMatchObject({ ahnentafel: 2, startAngle: Math.PI, endAngle: 1.5 * Math.PI });
     expect(s('mom')).toMatchObject({ ahnentafel: 3, innerRadius: 60, outerRadius: 130 });
     expect(s('mgm_m').ahnentafel).toBe(15);
-    expect(fan.bounds).toEqual({ minX: -270, minY: -270, maxX: 270, maxY: 0, width: 540, height: 270 });
+    expect(fan.bounds).toEqual({
+      minX: -270,
+      minY: -270,
+      maxX: 270,
+      maxY: 0,
+      width: 540,
+      height: 270,
+    });
   });
 
   it('defaults to six generations and stops there', () => {
@@ -60,14 +73,32 @@ describe('layoutFan', () => {
 
   it('marks pedigree collapse duplicates and honours collapse', () => {
     const fan = layoutFan(cousinMarriage, 'me');
-    expect(fan.segments.filter((s) => s.isDuplicate).map((s) => s.duplicateOf)).toEqual(['ggf', 'ggm']);
+    expect(fan.segments.filter((s) => s.isDuplicate).map((s) => s.duplicateOf)).toEqual([
+      'ggf',
+      'ggm',
+    ]);
     const collapsed = layoutFan(cousinMarriage, 'me', { collapsed: ['dad:up'] });
-    expect(collapsed.segments.map((s) => s.key)).toEqual(['me', 'dad', 'mom', 'mgf', 'mgm', 'ggf', 'ggm']);
+    expect(collapsed.segments.map((s) => s.key)).toEqual([
+      'me',
+      'dad',
+      'mom',
+      'mgf',
+      'mgm',
+      'ggf',
+      'ggm',
+    ]);
   });
 
   it('supports a full circle and an unknown focus', () => {
     const fan = layoutFan(threeGenerations, 'me', { sweep: 2 * Math.PI, generations: 2 });
-    expect(fan.bounds).toEqual({ minX: -130, minY: -130, maxX: 130, maxY: 130, width: 260, height: 260 });
+    expect(fan.bounds).toEqual({
+      minX: -130,
+      minY: -130,
+      maxX: 130,
+      maxY: 130,
+      width: 260,
+      height: 260,
+    });
     expect(layoutFan(threeGenerations, 'ghost').segments).toEqual([]);
   });
 });

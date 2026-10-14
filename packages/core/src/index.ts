@@ -6,3 +6,4 @@ export function appName(): string {
 export * from './dates';
 export * from './names';
 export * from './living';
+export * from './layout';

@@ -156,7 +156,10 @@ describe('layout properties', () => {
     fc.assert(
       fc.property(arbGraph, (g) => {
         for (const id of g.ids) {
-          const layout = layoutFamily(g, id, { ancestorsDepth: Infinity, descendantsDepth: Infinity });
+          const layout = layoutFamily(g, id, {
+            ancestorsDepth: Infinity,
+            descendantsDepth: Infinity,
+          });
           // Every person appears at most once as a primary card.
           const primaries = layout.nodes.filter((n) => !n.isDuplicate).map((n) => n.personId);
           expect(new Set(primaries).size).toBe(primaries.length);
@@ -176,9 +179,9 @@ describe('layout properties', () => {
   });
 
   it('lays out a 5,000 person tree', () => {
-    const { graph, focusId } = syntheticTree(8, 6, 3);
-    const layout = layoutFamily(graph, focusId, { ancestorsDepth: 8, descendantsDepth: 6 });
-    expect(layout.nodes.length).toBeGreaterThan(2000);
+    const { graph, focusId } = syntheticTree(8, 7, 3);
+    const layout = layoutFamily(graph, focusId, { ancestorsDepth: 8, descendantsDepth: 7 });
+    expect(layout.nodes.length).toBeGreaterThan(4800);
     assertNoOverlap(layout.nodes);
   });
 });

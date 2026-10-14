@@ -62,9 +62,7 @@ export const threeGenerations = makeGraph(
     ['F_me', 'dad', 'mom', ['me']],
     ['F_dad', 'pgf', 'pgm', ['dad']],
     ['F_mom', 'mgf', 'mgm', ['mom']],
-    ...['pgf', 'pgm', 'mgf', 'mgm'].map(
-      (p): FamilySpec => [`F_${p}`, `${p}_f`, `${p}_m`, [p]],
-    ),
+    ...['pgf', 'pgm', 'mgf', 'mgm'].map((p): FamilySpec => [`F_${p}`, `${p}_f`, `${p}_m`, [p]]),
   ],
 );
 
@@ -132,7 +130,11 @@ export function syntheticTree(ancestors: number, descendants: number, children: 
   for (let n = 1; n < 2 ** (ancestors + 1) / 2; n++) {
     add(`a${2 * n}`, 'M');
     add(`a${2 * n + 1}`, 'F');
-    families.push({ id: `fa${n}`, partners: [`a${2 * n}`, `a${2 * n + 1}`], children: [{ id: `a${n}` }] });
+    families.push({
+      id: `fa${n}`,
+      partners: [`a${2 * n}`, `a${2 * n + 1}`],
+      children: [{ id: `a${n}` }],
+    });
   }
   let generation = ['a1'];
   for (let g = 0; g < descendants; g++) {
@@ -142,7 +144,11 @@ export function syntheticTree(ancestors: number, descendants: number, children: 
       add(spouse, 'F');
       const kids = Array.from({ length: children }, (_, i) => `${id}.${i}`);
       for (const [i, kid] of kids.entries()) add(kid, i % 2 ? 'F' : 'M');
-      families.push({ id: `fd${id}`, partners: [id, spouse], children: kids.map((k) => ({ id: k })) });
+      families.push({
+        id: `fd${id}`,
+        partners: [id, spouse],
+        children: kids.map((k) => ({ id: k })),
+      });
       next.push(...kids);
     }
     generation = next;
@@ -223,7 +229,8 @@ export function describeLayout(layout: TreeLayout): string {
     const ends = [e.parents?.join('+'), e.child, e.rel].filter(Boolean).join(' ');
     lines.push(`${e.kind} ${e.familyId} ${ends} : ${pts}`);
   }
-  for (const l of layout.labels) lines.push(`label ${l.generation} "${l.text}" @${round(l.x)},${round(l.y)}`);
+  for (const l of layout.labels)
+    lines.push(`label ${l.generation} "${l.text}" @${round(l.x)},${round(l.y)}`);
   const b = layout.bounds;
   lines.push(`bounds ${round(b.minX)},${round(b.minY)} ${round(b.width)}x${round(b.height)}`);
   const alts = Object.entries(layout.alternateParentFamilies);

@@ -102,3 +102,7 @@
   font: inherit;
   font-weight: var(--oa-weight-semibold);
 }
+
+.list [cmdk-item][data-disabled='true'] {
+  opacity: 0.5;
+}

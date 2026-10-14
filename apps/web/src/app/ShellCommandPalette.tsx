@@ -34,7 +34,7 @@ export default function ShellCommandPalette({ open, onOpenChange }: ShellCommand
   const { theme, toggle } = useTheme();
   const next = theme === 'dark' ? 'light' : 'dark';
   const [query, setQuery] = useState('');
-  const { tree, hits, isFetching } = useSearchPeople(query);
+  const { tree, hits, stale, pending } = useSearchPeople(query);
 
   const toPerson = (personId: string) => () =>
     void navigate({ to: '/person/$personId', params: { personId } });
@@ -50,6 +50,8 @@ export default function ShellCommandPalette({ open, onOpenChange }: ShellCommand
       icon: <Avatar name={summary.name} sex={summary.sex} size={24} decorative />,
       onSelect: onTree ? toTree(hit.person.id) : toPerson(hit.person.id),
       onAltSelect: onTree ? toPerson(hit.person.id) : toTree(hit.person.id),
+      // Results for the previous query stay visible, dimmed, until fresh ones arrive.
+      disabled: stale,
     };
   });
 
@@ -100,9 +102,10 @@ export default function ShellCommandPalette({ open, onOpenChange }: ShellCommand
       groups={groups}
       onQueryChange={setQuery}
       placeholder={onTree ? 'Find in tree, or search actions' : 'Search people, places, actions'}
-      loading={isFetching && people.length === 0}
+      loading={pending && people.length === 0}
+      pending={pending}
       footer={
-        people.length > 0 ? (
+        people.length > 0 && !stale ? (
           <>
             <span>
               <kbd>Enter</kbd> {onTree ? 'show in tree' : 'open person'}

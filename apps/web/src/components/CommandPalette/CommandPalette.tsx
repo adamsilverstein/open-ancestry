@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import * as RadixDialog from '@radix-ui/react-dialog';
 import { Command } from 'cmdk';
 import { Search } from 'lucide-react';
@@ -19,6 +19,8 @@ export interface PaletteAction {
   onSelect: () => void;
   /** Runs on Shift+Enter or Alt+Enter instead of `onSelect`. */
   onAltSelect?: () => void;
+  /** Shown dimmed and skipped by the keyboard, e.g. results for an older query. */
+  disabled?: boolean;
 }
 
 export interface PaletteGroup {
@@ -39,6 +41,11 @@ export interface CommandPaletteProps {
   footer?: ReactNode;
   /** Announced and shown while results load. */
   loading?: boolean;
+  /**
+   * Results for the current query are still on the way. Enter pressed now,
+   * with nothing selectable highlighted, runs on the first result once they arrive.
+   */
+  pending?: boolean;
 }
 
 /** Item values are ids, so two people with the same name stay distinct. */
@@ -53,6 +60,7 @@ export function CommandPalette({
   placeholder = 'Search people, places, actions',
   footer,
   loading = false,
+  pending = false,
 }: CommandPaletteProps) {
   // Opened by shortcut, not a Radix trigger, so remember where focus was and restore it.
   const returnFocus = useRef<HTMLElement | null>(null);
@@ -68,13 +76,14 @@ export function CommandPalette({
       .filter((g) => g.unfiltered)
       .flatMap((g) => g.items.map((i) => itemValue(i).toLowerCase())),
   );
-  const visible = groups.flatMap((g) =>
-    g.items
-      .filter(
-        (i) => g.unfiltered || !query.trim() || substringFilter(i.label, query, i.keywords) > 0,
-      )
-      .map(itemValue),
+  const visibleItems = groups.flatMap((g) =>
+    g.items.filter(
+      (i) =>
+        !i.disabled &&
+        (g.unfiltered || !query.trim() || substringFilter(i.label, query, i.keywords) > 0),
+    ),
   );
+  const visible = visibleItems.map(itemValue);
   // When the visible list changes (typing, async results), highlight its first item.
   const firstVisible = visible[0] ?? '';
   const visibleKey = visible.join('\n');
@@ -85,6 +94,7 @@ export function CommandPalette({
   }
 
   const close = () => {
+    queued.current = null;
     setQuery('');
     onQueryChange?.('');
     onOpenChange(false);
@@ -95,17 +105,33 @@ export function CommandPalette({
     (alt && item.onAltSelect ? item.onAltSelect : item.onSelect)();
   };
 
+  // Enter pressed before the current query's results arrived.
+  const queued = useRef<{ alt: boolean } | null>(null);
   const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key !== 'Enter' || !(event.shiftKey || event.altKey)) return;
+    if (event.key !== 'Enter') return;
+    const alt = event.shiftKey || event.altKey;
     // cmdk owns the highlighted item; read it from the DOM like its own Enter handler does.
     const selected = (event.currentTarget as HTMLElement)
-      .querySelector('[cmdk-item][aria-selected="true"]')
+      .querySelector('[cmdk-item][aria-selected="true"]:not([aria-disabled="true"])')
       ?.getAttribute('data-value');
     const item = selected ? byValue.get(selected.toLowerCase()) : undefined;
-    if (!item?.onAltSelect) return;
+    if (!item && pending) {
+      event.preventDefault();
+      queued.current = { alt };
+      return;
+    }
+    if (!alt || !item?.onAltSelect) return;
     event.preventDefault();
     run(item, true);
   };
+
+  const firstItem = visibleItems[0];
+  useEffect(() => {
+    if (pending || !queued.current) return;
+    const { alt } = queued.current;
+    queued.current = null;
+    if (firstItem) run(firstItem, alt);
+  });
 
   return (
     <RadixDialog.Root open={open} onOpenChange={(next) => (next ? onOpenChange(true) : close())}>
@@ -167,6 +193,7 @@ export function CommandPalette({
                       key={item.id}
                       value={itemValue(item)}
                       keywords={item.keywords}
+                      disabled={item.disabled}
                       className={selectStyles.item}
                       onSelect={() => run(item, false)}
                     >

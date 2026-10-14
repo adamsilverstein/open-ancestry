@@ -1,5 +1,5 @@
 import { keepPreviousData, queryOptions, useQuery } from '@tanstack/react-query';
-import { useDeferredValue } from 'react';
+import { useEffect, useState } from 'react';
 import type { SearchMatch, TagRow } from '@open-ancestry/db';
 import { apiGet, seg } from './client';
 import { currentTreeQuery } from './queries';
@@ -32,20 +32,40 @@ export const searchQuery = (tree: string, q: string, limit = PALETTE_RESULTS) =>
     staleTime: 60_000,
   });
 
+/** Typing pauses this long before a search request goes out. */
+export const SEARCH_DEBOUNCE_MS = 120;
+
+const searchable = (q: string) => /[\p{L}\p{N}]/u.test(q);
+
 /**
- * People in the open tree matching `query`. Keeps the previous results while
- * the next ones load so the list does not flash empty between keystrokes.
+ * People in the open tree matching `query`, debounced. While the current
+ * query's results load, the previous results stay available as `stale` (so
+ * the list does not flash) and `pending` is true; stale hits must not be
+ * treated as answers to the current query.
  */
 export function useSearchPeople(query: string, limit = PALETTE_RESULTS) {
   const { data: tree = null } = useQuery(currentTreeQuery);
-  const q = useDeferredValue(query.trim());
-  const enabled = tree !== null && /[\p{L}\p{N}]/u.test(q);
+  const current = query.trim();
+  const [debounced, setDebounced] = useState(current);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(current), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(id);
+  }, [current]);
+  const enabled = tree !== null && searchable(debounced);
   const result = useQuery({
-    ...searchQuery(tree ?? '', q, limit),
+    ...searchQuery(tree ?? '', debounced, limit),
     enabled,
     placeholderData: keepPreviousData,
   });
-  return { tree, hits: enabled ? (result.data ?? []) : [], isFetching: result.isFetching };
+  const wanted = tree !== null && searchable(current);
+  const fresh =
+    wanted && debounced === current && result.data !== undefined && !result.isPlaceholderData;
+  return {
+    tree,
+    hits: wanted ? (result.data ?? []) : [],
+    stale: wanted && !fresh,
+    pending: wanted && !fresh && !result.isError,
+  };
 }
 
 // ------------------------------------------------------------ people list

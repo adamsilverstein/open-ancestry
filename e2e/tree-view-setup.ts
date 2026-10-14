@@ -10,7 +10,9 @@ import {
 import { importGedcom } from '../packages/import/src/index';
 import {
   FAMILY_TREE,
+  FAN_NAMES_TREE,
   SAMPLE_TREE,
+  fanNamesGedcom,
   PERF_TREE,
   PERF_TREE_100K,
   SEED_FILE,
@@ -65,9 +67,18 @@ export async function seedTreeViewTrees(library: string): Promise<void> {
   );
   sampleStore.close();
 
+  // Hard names for the fan; Ann Lee (I1) is the focus.
+  const fanStore = fresh(FAN_NAMES_TREE);
+  await importGedcom({ bytes: Buffer.from(fanNamesGedcom()) }, fanStore);
+  const fanFocus = fanStore.db
+    .prepare<[], { person_id: string }>("SELECT person_id FROM person_name WHERE given = 'Ann'")
+    .get()!.person_id;
+  fanStore.close();
+
   const seed: SeedInfo = {
     family: { tree: FAMILY_TREE, ids },
     sample: { tree: SAMPLE_TREE, ids: sampleIds },
+    fanNames: { tree: FAN_NAMES_TREE, focusId: fanFocus },
     perf: perfTree(PERF_TREE, 10_000, 7, 'founder'),
   };
   // Another seed, so its first 10,000 people are not the 10k tree, and the

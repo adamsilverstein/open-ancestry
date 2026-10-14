@@ -1051,6 +1051,31 @@ test.describe('fan labels (#137)', () => {
     expect(withYears.length).toBeGreaterThanOrEqual(3);
   });
 
+  for (const [width, height] of [
+    [1440, 900],
+    [390, 844],
+  ] as const) {
+    test(`hard names fit, whole, at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height });
+      const { tree, focusId } = seed.fanNames;
+      await page.goto(`/tree/${focusId}?tree=${encodeURIComponent(tree)}&layout=fan`);
+      await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+      await page.evaluate(() => document.fonts.ready);
+      await page.getByRole('button', { name: 'Fit to screen' }).click();
+      await settled(page);
+      const all = await labels(page);
+      expect(all.filter((l) => !l.inside).map((l) => l.text)).toEqual([]);
+      const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+      for (const l of all) expect(l.text ?? '').not.toMatch(lone);
+      // The father's long name, in the widest ring, keeps his first name
+      // (and at least the surname's initial), never initials alone.
+      const father = all[1]!.text ?? '';
+      expect(father).toMatch(/^Johann .*(v\.|von)/);
+      // The single-word name is shown, whole or shortened, in every ring.
+      expect(all.filter((l) => l.text?.startsWith('山田')).length).toBeGreaterThan(0);
+    });
+  }
+
   test('Fit on a phone keeps names readable', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await openFan(page);

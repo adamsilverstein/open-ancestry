@@ -4,8 +4,9 @@ import type { FanSlot } from '@open-ancestry/core';
  * Fan chart segment labels. Inner rings are wide arcs, so text runs across
  * them (tangential); outer rings are long and thin, so text runs along the
  * radius. Each person gets the most informative text that fits inside their
- * segment: full name and years, name split over lines, name, first name,
- * initials, or nothing (the segment's accessible name always has everything).
+ * segment: full name and years, name split over lines, name, first name
+ * and surname, given names, initials, a shortened name, or nothing (the
+ * segment's accessible name always has everything).
  */
 
 /**
@@ -48,12 +49,30 @@ export interface FanLabel {
   rotate: number;
 }
 
-/** Text options, most informative first. */
-export function labelCandidates(name: string, lifespan: string): string[][] {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  const given = parts.length > 1 ? parts.slice(0, -1).join(' ') : (parts[0] ?? '');
-  const surname = parts.length > 1 ? parts.at(-1)! : '';
-  const initials = parts.map((p) => `${p[0]}.`).join(' ');
+/** A person's name, as stored: the full display name and its parts. */
+export interface FanName {
+  name: string;
+  given?: string | undefined;
+  surname?: string | undefined;
+}
+
+const graphemes = (text: string) =>
+  [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)].map(
+    (s) => s.segment,
+  );
+
+/**
+ * Text options, most informative first: name and years, name, first given
+ * name with the surname (then its initial), given names, initials, and last
+ * the name cut short. Parts come from the stored given name and surname,
+ * never from splitting on spaces, which would make "Jr." a surname.
+ */
+export function labelCandidates(
+  { name, given = '', surname = '' }: FanName,
+  lifespan: string,
+): string[][] {
+  const first = given.trim().split(/\s+/)[0] ?? '';
+  const initial = (text: string) => (text ? `${graphemes(text)[0]}.` : '');
   const options: string[][] = [];
   const add = (...lines: string[]) => {
     const kept = lines.filter(Boolean);
@@ -61,12 +80,21 @@ export function labelCandidates(name: string, lifespan: string): string[][] {
   };
   if (lifespan) {
     add(name, lifespan);
-    if (surname) add(given, surname, lifespan);
+    if (given && surname) add(given, surname, lifespan);
   }
   add(name);
-  if (surname) add(given, surname);
-  add(given);
-  if (parts.length > 1) add(initials);
+  if (given && surname) {
+    add(given, surname);
+    if (first !== given) add(`${first} ${surname}`);
+    add(first, surname);
+    add(`${first} ${initial(surname)}`);
+  }
+  if (given && first !== given) add(given);
+  add(first || name);
+  if (given && surname) add(`${initial(given)} ${initial(surname)}`);
+  // Last, the first name (or the whole name, for one word) cut short.
+  const word = graphemes(first || name);
+  for (let n = word.length - 1; n >= 1; n--) add(`${word.slice(0, n).join('')}…`);
   return options;
 }
 
@@ -119,7 +147,7 @@ function fits(
 /** The label to draw in a segment, or null when not even initials fit. */
 export function fanLabel(
   slot: FanSlot,
-  name: string,
+  name: FanName,
   lifespan: string,
   measure: Measure,
 ): FanLabel | null {

@@ -97,10 +97,21 @@ describe('fitFan', () => {
     expect(t.y).toBe(450 + 110);
   });
 
-  it('keeps names readable on a phone, the fan’s base at the bottom', () => {
+  it('keeps names readable on a phone, centered down the screen when it fits', () => {
     const t = fitFan(fan, 390, 844, 64);
     expect(t.scale).toBe(READABLE_FAN_SCALE);
     expect(t.x).toBe(195);
+    // The drawn half-disc's middle (y = -110) at the view's middle.
+    expect(t.y).toBeCloseTo(422 + 110 * READABLE_FAN_SCALE);
+  });
+
+  it('keeps the base, where the focus person is, on screen when it is taller', () => {
+    const tall = {
+      segments: [{ outerRadius: 1400 }],
+      bounds: { minX: -1400, minY: -1400, width: 2800, height: 1400 },
+    };
+    const t = fitFan(tall, 390, 844, 64);
+    expect(t.scale).toBe(READABLE_FAN_SCALE);
     expect(t.y).toBe(844 - 64);
   });
 

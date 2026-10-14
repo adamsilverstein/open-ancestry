@@ -107,7 +107,7 @@ export function FanChart({ fan, focusPersonId, person, onRefocus }: FanChartProp
           const p = person(segment.personId);
           return [
             segment.key,
-            p ? fanLabel(segment, p.name, formatLifespan(p), measure) : null,
+            p ? fanLabel(segment, p, formatLifespan(p), measure) : null,
           ] as const;
         }),
       ),

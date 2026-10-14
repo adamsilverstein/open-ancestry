@@ -122,8 +122,7 @@ interface FanExtent {
 /**
  * Frames the fan's drawn rings, not the empty slots and unused rings past
  * them. When that would shrink names below READABLE_FAN_SCALE (a phone),
- * it keeps them readable instead, with the base of the fan, where the focus
- * person sits, at the bottom of the view.
+ * it keeps them readable instead, centered down the view when it fits.
  */
 export function fitFan(fan: FanExtent, width: number, height: number, padding: number): Transform {
   const b = fan.bounds;
@@ -134,9 +133,14 @@ export function fitFan(fan: FanExtent, width: number, height: number, padding: n
   const fit = fitBounds(drawn, width, height, padding);
   if (fit.scale >= READABLE_FAN_SCALE) return fit;
   const scale = READABLE_FAN_SCALE;
+  // Centered down the screen when it fits; otherwise its base, where the
+  // focus person sits, at the bottom.
+  const fits = drawn.height * scale <= height - 2 * padding;
   return {
     x: width / 2 - (drawn.minX + drawn.width / 2) * scale,
-    y: height - padding - (drawn.minY + drawn.height) * scale,
+    y: fits
+      ? height / 2 - (drawn.minY + drawn.height / 2) * scale
+      : height - padding - (drawn.minY + drawn.height) * scale,
     scale,
   };
 }

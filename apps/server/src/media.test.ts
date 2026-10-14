@@ -130,11 +130,11 @@ describe('with a tree', () => {
       expect(res.body).not.toContain('secret');
     });
 
-    it('has no thumbnails yet', async () => {
+    it('accepts only the named thumbnail sizes', async () => {
       const id = addMedia({ local_path: 'photos/portrait.jpg' });
       const res = await api.get(`${base}/media/${id}/thumb/200`);
-      expect(res.statusCode).toBe(404);
-      expect(res.json().error.code).toBe('not_found');
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error.code).toBe('bad_request');
     });
   });
 

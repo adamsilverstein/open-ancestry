@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
-import { BookMarked, BookOpenText, Image } from 'lucide-react';
-import { mediaUrl } from '../../api/queries';
+import { BookMarked, BookOpenText } from 'lucide-react';
 import type { PersonDetail } from '../../api/types';
 import { EmptyState } from '../../components/EmptyState/EmptyState';
 import { Panel } from '../../components/Panel/Panel';
@@ -9,37 +8,7 @@ import { lifeStory } from '../../lib/lifeStory';
 import { collectCitations, groupBySource } from '../../lib/sources';
 import styles from './PersonPage.module.css';
 
-export function GalleryTab({ tree, detail }: { tree: string; detail: PersonDetail }) {
-  const photos = detail.media.filter(({ media }) => media.kind === 'photo' && media.local_path);
-  if (photos.length === 0) {
-    return (
-      <EmptyState
-        icon={<Image size={24} aria-hidden />}
-        title="No photos yet"
-        description="Photos attached to this person in the tree appear here."
-      />
-    );
-  }
-  return (
-    <ul className={styles.gallery}>
-      {photos.map(({ media }) => (
-        <li key={media.id}>
-          <figure className={styles.photo}>
-            <img
-              src={mediaUrl(tree, media.id)}
-              alt={media.title ?? media.description ?? 'Photo'}
-              loading="lazy"
-              decoding="async"
-              width={media.width ?? 200}
-              height={media.height ?? 200}
-            />
-            {media.title && <figcaption>{media.title}</figcaption>}
-          </figure>
-        </li>
-      ))}
-    </ul>
-  );
-}
+export { GalleryTab } from './gallery/GalleryTab';
 
 export function LifeStoryTab({ detail }: { detail: PersonDetail }) {
   const paragraphs = useMemo(() => lifeStory(detail), [detail]);

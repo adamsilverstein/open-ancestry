@@ -60,7 +60,9 @@ describe('GEDCOM export routes', () => {
     expect(res.statusCode).toBe(200);
     expect(parseGedcom(res.body).header.version).toBe('7.0');
     expect(res.body).toContain('Bram');
-    for (const living of ['Ada', 'Cora', 'Dan', 'Eve', '1941', 'Harlow']) {
+    // Cora (born 1912) is inferred deceased since edits re-run living inference.
+    expect(res.body).toContain('Cora');
+    for (const living of ['Ada', 'Dan', 'Eve', '1941', 'Harlow']) {
       expect(res.body).not.toContain(living);
     }
   });

@@ -40,6 +40,11 @@ export interface ParsedDate {
   /** Free text from `INT date (phrase)` or a bare `(phrase)`. */
   phrase?: string;
   /**
+   * Calendar of `end` when it differs from `calendar`, as in an Old Style to
+   * New Style range (`BET @#DJULIAN@ 1751 AND 1753`).
+   */
+  endCalendar?: Calendar;
+  /**
    * Set when a numeric date like `05/06/1960` could be read either way. It is
    * parsed US-style (M/D/Y), or D.M.Y when dotted; the UI may ask the user.
    */

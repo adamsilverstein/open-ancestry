@@ -19,6 +19,7 @@ export {
   TREE_EXTENSION,
   createTree,
   ensurePrivateDir,
+  restrictMode,
   openMemoryTree,
   openTree,
   treePaths,

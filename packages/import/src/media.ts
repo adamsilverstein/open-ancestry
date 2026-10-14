@@ -239,7 +239,8 @@ export function storeMediaFile(
       throw new Error(`media folder for ${relPath} leads outside the tree`);
     }
     // `wx` fails rather than replace a file that appeared since the check.
-    writeFileSync(target, bytes, { flag: 'wx' });
+    // 0600: private to the owner whatever the process umask.
+    writeFileSync(target, bytes, { flag: 'wx', mode: 0o600 });
     return { path: candidate, written: true, folder };
   }
   throw new Error(`no free name for ${relPath}`);

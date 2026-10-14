@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import {
+  PRIVATE_FILE_MODE,
+  restrictMode,
   treePaths,
   type EventRow,
   type MediaKind,
@@ -284,6 +286,8 @@ export function galleryRoutes(app: Api, { library, thumbnails, uploadLimit }: De
           }
           try {
             await copyFile(upload.path, target, constants.COPYFILE_EXCL);
+            // A copy may carry the upload's mode: make it private, as media is.
+            restrictMode(target, PRIVATE_FILE_MODE);
           } catch (error) {
             // Same name and hash prefix: keep the file that is there if it is these bytes
             // (and a real file, not a symlink to somewhere else).

@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { TreeStore, type StoreOptions } from './store';
 
@@ -41,13 +41,21 @@ export function ensurePrivateDir(dir: string): void {
 }
 
 /**
- * Sets a path's mode where the platform has POSIX modes. Best effort: a path
- * that is missing or owned by another account keeps its mode.
+ * Removes access beyond `mode` from a path, where the platform has POSIX
+ * modes. Best effort, and only ever tightens: a symlink is never followed
+ * (chmod would change whatever it points at), access is never added (a
+ * folder made read-only stays so), and a path that is missing or another
+ * account's keeps its mode.
  */
 export function restrictMode(path: string, mode: number): void {
   if (process.platform === 'win32') return;
   try {
-    chmodSync(path, mode);
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink()) return;
+    if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) return;
+    const current = stat.mode & 0o777;
+    const tightened = current & mode;
+    if (tightened !== current) chmodSync(path, tightened);
   } catch {
     // ENOENT or EPERM: nothing to tighten, or not ours to change.
   }

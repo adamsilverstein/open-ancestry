@@ -123,6 +123,18 @@ test.describe('gallery tiles (#127)', () => {
         await expect(image).toHaveAttribute('srcset', /thumb\/sm 160w, .*thumb\/md 480w/);
       }
     }
+    // A 300px original: the md thumbnail is 300px, and the srcset says so, so 2x screens
+    // get it at its real size and nothing is swapped after it loads.
+    for (const title of ['Medium scan', 'Medium, size unknown']) {
+      const medium = gallery.getByRole('button', { name: new RegExp(title) }).locator('img');
+      await expect
+        .poll(() => medium.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth))
+        .toBeGreaterThan(0);
+      await expect(medium, title).toHaveAttribute('srcset', /thumb\/md \d+w/);
+    }
+    await expect(
+      gallery.getByRole('button', { name: /Medium scan/ }).locator('img'),
+    ).toHaveAttribute('srcset', /thumb\/sm 160w, .*thumb\/md 300w/);
     // A tiny image is shown at its own size, centered: not blown up to fill the box,
     // and not shrunk by a srcset that claims a 480px candidate.
     for (const title of ['Tiny scrap', 'Small, size unknown']) {

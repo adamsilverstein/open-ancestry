@@ -36,6 +36,8 @@ export const MEDIA_IDS = {
   missing: fixedId(),
   evilRemote: fixedId(),
   smallUnknown: fixedId(),
+  medium: fixedId(),
+  mediumUnknown: fixedId(),
   outside: fixedId(),
   /** People whose primary photo is local, only on Ancestry, or a missing file. */
   pia: fixedId(),
@@ -67,6 +69,8 @@ export async function buildMediaTree(library: string): Promise<void> {
     ['christening.png', await photo('#4a6fa5', 500, 500)],
     ['baptism.pdf', Buffer.from('%PDF-1.4\n% synthetic baptism record\n')],
     ['tiny.png', await photo('#7a5c99', 40, 40)],
+    // Between the sm (160px) and md (480px) thumbnails.
+    ['medium.png', await photo('#3d7a6b', 300, 300)],
     // Named like a photo but not an image: its thumbnail fails.
     ['notanimage.jpg', Buffer.from('these bytes are not a JPEG')],
   ];
@@ -188,6 +192,25 @@ export async function buildMediaTree(library: string): Promise<void> {
       'person',
       9,
     );
+    for (const [key, title, width] of [
+      ['medium', 'Medium scan', 300],
+      ['mediumUnknown', 'Medium, size unknown', null],
+    ] as const) {
+      add(
+        {
+          id: id[key],
+          kind: 'photo',
+          mime: 'image/png',
+          local_path: 'photos/medium.png',
+          title,
+          width,
+          height: width,
+        },
+        id.imogen,
+        'person',
+        10,
+      );
+    }
     add(
       {
         id: id.outside,

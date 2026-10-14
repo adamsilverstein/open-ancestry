@@ -196,7 +196,9 @@ function spanDate(
  * `FROM` or `TO` a span. A span written as a range (`FROM 1850s-1860s`,
  * `FROM 1850-60`) is the whole period. A single decade or century is read
  * loosely, as with BEF and AFT: from its first year (`FROM 1850s` is
- * `FROM 1850`), to its last (`TO 1850s` is `TO 1859`).
+ * `FROM 1850`), to its last (`TO 1850s` is `TO 1859`). TO a range keeps
+ * only its end (`TO 1850-60` is `TO 1860`): the period ends there, and
+ * where it began is not part of a TO date.
  */
 function periodSpan(
   original: string,
@@ -204,6 +206,8 @@ function periodSpan(
   s: string,
   calendar: Calendar,
 ): ParsedDate | undefined {
+  // `TO 1850s TO 1860s` repeats the keyword; that is no period.
+  if (/(?:^| )(?:FROM|TO) /.test(s)) return undefined;
   const span = yearSpan(s);
   if (!span) return undefined;
   const [start, end] = span;

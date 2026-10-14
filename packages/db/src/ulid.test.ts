@@ -27,4 +27,23 @@ describe('ulid', () => {
     t = 4000;
     expect(next() > a).toBe(true);
   });
+
+  it('re-encodes carries correctly when only the tail changes', () => {
+    // Random digits near 31 force carries across several positions.
+    const digits = [0, 5, 31, 31, 31, 30, 31, 31, 31, 31, 31, 31, 31, 31, 31, 30];
+    let d = 0;
+    const next = createUlidFactory({ now: () => 7, random: () => digits[d++ % 16]! });
+    const toBig = (id: string) =>
+      [...id.slice(10)].reduce(
+        (n, c) => n * 32n + BigInt('0123456789ABCDEFGHJKMNPQRSTVWXYZ'.indexOf(c)),
+        0n,
+      );
+    let previous = next();
+    for (let i = 0; i < 5000; i++) {
+      const id = next();
+      expect(id.slice(0, 10)).toBe(previous.slice(0, 10));
+      expect(toBig(id)).toBe(toBig(previous) + 1n);
+      previous = id;
+    }
+  });
 });

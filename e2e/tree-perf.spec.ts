@@ -17,6 +17,9 @@ import { readSeed, type PerfTree } from './tree-view-fixtures';
  *   (~500+ people painted) and at 35-45% zoom (cards mounted as DOM), each warm
  *   (the keyboard rested on the card past the prefetch dwell, so its layout was
  *   prepared) and cold (Enter at once, as after Find).
+ * - Re-focus after browsing: 50 re-focuses on different people (each merges
+ *   another neighborhood), then the cached round trip, p95 of 20 < 50ms, so a
+ *   long session does not slow re-focus down (#210).
  * - Pan and zoom with 2,000+ laid-out cards, at fit and with cards mounted:
  *   median frame at 58fps or better and under 5% of frames over 33ms. Long
  *   tasks and the longest frame are reported, not asserted: on a loaded machine
@@ -288,6 +291,64 @@ for (const tree of trees) {
         expect(median).toBeLessThan(budget);
       });
     }
+
+    test('re-focus after browsing 50 people stays in budget', async ({ page }) => {
+      await page.goto(url(tree.wideId, '&down=3&up=2'));
+      await ready(page);
+      const refocusOn = async (key: string) => {
+        await canvas(page).locator(`[data-key="${key}"]`).focus();
+        const before = await refocusCount(page);
+        await page.keyboard.press('Enter');
+        await expect.poll(() => refocusCount(page)).toBeGreaterThan(before);
+        await ready(page);
+        await settled(page);
+        return lastRefocus(page);
+      };
+      // Browse: re-focus on 50 different people, each a card on screen that was
+      // not the focus before, so every visit merges another neighborhood.
+      const seen = new Set<string>([tree.wideId]);
+      let current = tree.wideId;
+      for (let visit = 0; visit < 50; visit++) {
+        const keys = await canvas(page)
+          .locator('[data-key]')
+          .evaluateAll((cards) => cards.map((card) => card.getAttribute('data-key')!));
+        const fresh = keys.filter((key) => !key.includes('~') && !seen.has(key));
+        const next =
+          fresh[(visit * 7) % Math.max(1, fresh.length)] ?? keys.find((k) => k !== current);
+        expect(next, `visit ${visit}: a card to move to`).toBeTruthy();
+        seen.add(next!);
+        await refocusOn(next!);
+        current = next!;
+      }
+      // Then the cached round trip of the re-focus checks, on everything merged so far.
+      const other = (await canvas(page)
+        .locator('[data-key]')
+        .evaluateAll(
+          (cards, focus) =>
+            cards
+              .map((card) => card.getAttribute('data-key')!)
+              .find((k) => k !== focus && !k.includes('~')),
+          current,
+        ))!;
+      await refocusOn(other);
+      await refocusOn(current);
+      const durations: number[] = [];
+      for (let i = 0; i < 10; i++) {
+        durations.push(await refocusOn(other));
+        durations.push(await refocusOn(current));
+      }
+      const p95 = percentile(durations, 0.95);
+      const median = percentile(durations, 0.5);
+      const budget = 50 * factor;
+      report(
+        tree,
+        `Re-focus after browsing 50 people (${seen.size} visited), cached, p95 of 20`,
+        `${p95.toFixed(1)}ms (median ${median.toFixed(1)}ms)`,
+        `p95 < ${budget}ms`,
+        p95 < budget,
+      );
+      expect(p95).toBeLessThan(budget);
+    });
 
     for (const scenario of [
       {

@@ -940,6 +940,54 @@ test.describe('fan chart keyboard', () => {
   });
 });
 
+test.describe('phone width', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+  test('the quick view stays on screen with tappable actions for cards in every column', async ({
+    page,
+  }) => {
+    await open(page);
+    await settled(page);
+    const viewport = page.viewportSize()!;
+    // The leftmost, a middle and the rightmost card fully on screen in the focus row.
+    const row = await canvas(page).locator('[data-key][data-generation="0"]').all();
+    const onScreen: { card: Locator; x: number }[] = [];
+    for (const c of row) {
+      const b = await c.boundingBox();
+      if (b && b.x >= 0 && b.x + b.width <= viewport.width) onScreen.push({ card: c, x: b.x });
+    }
+    onScreen.sort((a, b) => a.x - b.x);
+    expect(onScreen.length).toBeGreaterThanOrEqual(2);
+    const picks = [
+      onScreen[0]!.card,
+      onScreen[Math.floor(onScreen.length / 2)]!.card,
+      onScreen.at(-1)!.card,
+    ];
+    for (const target of picks) {
+      const name = (await target.getAttribute('aria-label'))!.split(',')[0]!;
+      await target.tap();
+      const quick = page.getByRole('dialog', { name });
+      await expect(quick).toBeVisible();
+      const b = await box(quick);
+      expect(b.x, name).toBeGreaterThanOrEqual(0);
+      expect(b.x + b.width, name).toBeLessThanOrEqual(viewport.width);
+      expect(b.y + b.height, name).toBeLessThanOrEqual(viewport.height);
+      for (const action of [
+        quick.getByRole('link', { name: 'Profile' }),
+        quick.getByRole('button', { name: 'Make focus' }),
+        quick.getByRole('button', { name: 'Edit' }),
+      ]) {
+        const a = await box(action);
+        expect(a.x + a.width, name).toBeLessThanOrEqual(viewport.width);
+        expect(a.height).toBeGreaterThanOrEqual(44);
+        expect(a.width).toBeGreaterThanOrEqual(44);
+      }
+      await page.keyboard.press('Escape');
+      await expect(quick).toHaveCount(0);
+    }
+  });
+});
+
 test.describe('visual snapshots', () => {
   // Baselines are Linux Chromium only, like design.spec.ts.
   test.skip(

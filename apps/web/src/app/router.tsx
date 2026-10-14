@@ -19,6 +19,10 @@ import { validatePeopleSearch } from '../routes/people/search';
 import { parseGenerations } from '../tree/api';
 
 const rootRoute = createRootRoute({
+  // Nothing at the root: otherwise TanStack Router passes the raw search
+  // through and merges each route's validated keys over it, so a value a
+  // route rejects (?layout=bogus, ?sort=evil) still reaches the views.
+  validateSearch: () => ({}),
   component: AppShell,
   notFoundComponent: NotFoundPage,
 });

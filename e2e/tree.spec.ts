@@ -443,20 +443,17 @@ test.describe('family view', () => {
   });
 
   test('find in tree re-centers on the chosen person', async ({ page }) => {
-    await open(page);
+    await open(page, 'ada', '&layout=pedigree');
     await page.getByRole('button', { name: 'Find in tree' }).click();
-    const dialog = page.getByRole('dialog', { name: 'Find in tree' });
+    const dialog = page.getByRole('dialog', { name: 'Command palette' });
     await expect(dialog).toBeVisible();
     await page.keyboard.type('Tilda');
     await dialog.getByRole('option', { name: /Tilda Hale/ }).click();
-    await expect(page).toHaveURL(new RegExp(`/tree/${ids.tilda}\\?`));
+    // The tree re-focuses and keeps its view settings.
+    await expect(page).toHaveURL(new RegExp(`/tree/${ids.tilda}\\?.*layout=pedigree`));
     await card(page, 'Tilda Hale').focus();
     await page.keyboard.press('f');
-    await expect(page.getByRole('dialog', { name: 'Find in tree' })).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(card(page, 'Tilda Hale')).toBeFocused();
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k');
-    await expect(page.getByRole('dialog', { name: 'Find in tree' })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: 'Command palette' })).toBeVisible();
   });
 
   test('the layout switch shows pedigree, descendants and fan views', async ({ page }) => {

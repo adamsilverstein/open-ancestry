@@ -190,7 +190,8 @@ describe('POST import', () => {
     expect(third.json().error.code).toBe('too_many_jobs');
     fake.release();
     await waitForJob(api, second.json().jobId, 'running');
-    expect(fake.calls).toHaveLength(2);
+    // Running is set before the importer has read its file.
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(2));
     fake.release();
   });
 

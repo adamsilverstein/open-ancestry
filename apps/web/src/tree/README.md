@@ -41,8 +41,8 @@ URL focus ──> TreeView ──fetchQuery──> GET /api/trees/:tree/neighbor
   the layout keeps the focus card at (0, 0).
 - **Keyboard.** One tab stop (the active card, plus its chevrons). Arrows move by relationship
   (`relations.ts`: up a parent, down a child, left/right along the row; reversing a move goes
-  back), Enter re-focuses, Space opens the quick view, `+ - 0` zoom and fit, `H` home, `F` or
-  Cmd/Ctrl-K find, `L` layout menu, `M` minimap. Shortcuts act only while focus is in the tree
+  back), Enter re-focuses, Space opens the quick view, `+ - 0` zoom and fit, `H` home, `F` (or the
+  app's Cmd/Ctrl-K) opens the palette, where Enter re-focuses the tree, `L` layout menu, `M` minimap. Shortcuts act only while focus is in the tree
   (canvas, toolbar, minimap), per WCAG 2.1.4.
 - **Labels.** Generation labels are relative to the focus person ("Ada's grandparents"). Cards are announced as `Name, sex, lifespan, <kinship> of <focus>` where kinship
   is read back from the layout's edges (`father`, `aunt`, `son-in-law`, `2nd great-grandmother`).

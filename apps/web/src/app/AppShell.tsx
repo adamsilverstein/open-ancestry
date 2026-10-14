@@ -1,6 +1,7 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { Outlet } from '@tanstack/react-router';
 import { ToastProvider } from '../components/Toast/Toast';
+import { PaletteContext } from './palette';
 import { TopBar } from './TopBar';
 import styles from './AppShell.module.css';
 
@@ -17,10 +18,15 @@ export function AppShell() {
   // The palette chunk loads on first use, then stays mounted so it opens instantly.
   const [paletteLoaded, setPaletteLoaded] = useState(false);
 
-  const openPalette = () => {
-    setPaletteLoaded(true);
-    setPaletteOpen(true);
-  };
+  const palette = useMemo(
+    () => ({
+      open: () => {
+        setPaletteLoaded(true);
+        setPaletteOpen(true);
+      },
+    }),
+    [],
+  );
 
   // Fetch the palette chunk once the page is idle so Cmd-K never waits on the network.
   useEffect(() => {
@@ -45,19 +51,21 @@ export function AppShell() {
   }, []);
 
   return (
-    <ToastProvider>
-      <a className={styles.skipLink} href="#main">
-        Skip to content
-      </a>
-      <TopBar onFind={openPalette} />
-      <main id="main" className={styles.main} tabIndex={-1}>
-        <Outlet />
-      </main>
-      {paletteLoaded && (
-        <Suspense fallback={null}>
-          <ShellCommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
-        </Suspense>
-      )}
-    </ToastProvider>
+    <PaletteContext value={palette}>
+      <ToastProvider>
+        <a className={styles.skipLink} href="#main">
+          Skip to content
+        </a>
+        <TopBar onFind={palette.open} />
+        <main id="main" className={styles.main} tabIndex={-1}>
+          <Outlet />
+        </main>
+        {paletteLoaded && (
+          <Suspense fallback={null}>
+            <ShellCommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+          </Suspense>
+        )}
+      </ToastProvider>
+    </PaletteContext>
   );
 }

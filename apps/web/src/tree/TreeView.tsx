@@ -23,7 +23,7 @@ import type { PersonSummary } from '../lib/person';
 import { TreeToolbar, type TreeLayout as LayoutKind } from '../components/TreeToolbar/TreeToolbar';
 import { Skeleton } from '../components/Skeleton/Skeleton';
 import { ApiError, fetchHome, fetchNeighborhood, treeKeys, type NeighborhoodRequest } from './api';
-import { FindDialog } from './FindDialog';
+import { usePalette } from '../app/palette';
 import { lifeEvent, toPersonSummary } from './format';
 import { GraphCache } from './graphCache';
 import { LayoutClient, type LayoutRequest } from './layoutClient';
@@ -172,7 +172,7 @@ export function TreeView({
   const [result, setResult] = useState<Result | null>(null);
   const [rendered, setRendered] = useState<Result | null>(null);
   const [popoverKey, setPopoverKey] = useState<string | null>(null);
-  const [findOpen, setFindOpen] = useState(false);
+  const palette = usePalette();
   const [menuOpen, setMenuOpen] = useState(false);
   const [minimapVisible, setMinimapVisible] = useState(true);
   const viewKey = `${personId}|${kind}`;
@@ -428,25 +428,13 @@ export function TreeView({
 
   const onInteract = useCallback(() => setPopoverKey(null), []);
 
-  // Shortcuts: + - 0 zoom, H home, F and Cmd/Ctrl-K find, L layout, M minimap. Only while
+  // Shortcuts: + - 0 zoom, H home, F find (the app palette, which re-focuses the
+  // tree), L layout, M minimap. Only while
   // focus is in the tree (canvas, toolbar, minimap), so typing elsewhere never triggers them
   // (WCAG 2.1.4).
   useEffect(() => {
     const inTree = (event: KeyboardEvent) =>
       (event.target as HTMLElement).closest?.('[data-tree-region]') !== null;
-    const onCapture = (event: KeyboardEvent) => {
-      if (
-        inTree(event) &&
-        (event.metaKey || event.ctrlKey) &&
-        !event.altKey &&
-        event.key.toLowerCase() === 'k'
-      ) {
-        // Inside the tree, Cmd-K finds people in it rather than opening the app palette.
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        setFindOpen((open) => !open);
-      }
-    };
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
       if (!inTree(event)) return;
@@ -464,7 +452,7 @@ export function TreeView({
         _: () => canvas.current?.zoomBy(1 / ZOOM_STEP),
         '0': () => canvas.current?.fit(),
         h: () => void goHome(),
-        f: () => setFindOpen(true),
+        f: palette.open,
         l: () => setMenuOpen(true),
         m: () => setMinimapVisible((v) => !v),
       };
@@ -473,13 +461,11 @@ export function TreeView({
       event.preventDefault();
       action();
     };
-    window.addEventListener('keydown', onCapture, true);
     window.addEventListener('keydown', onKey);
     return () => {
-      window.removeEventListener('keydown', onCapture, true);
       window.removeEventListener('keydown', onKey);
     };
-  }, [goHome]);
+  }, [goHome, palette]);
 
   const anchor = useMemo<QuickViewAnchor | null>(
     () =>
@@ -597,7 +583,7 @@ export function TreeView({
         }
         layoutMenuOpen={menuOpen}
         onLayoutMenuOpenChange={setMenuOpen}
-        onFind={() => setFindOpen(true)}
+        onFind={palette.open}
         onHome={() => void goHome()}
         onZoomIn={() => canvas.current?.zoomBy(ZOOM_STEP)}
         onZoomOut={() => canvas.current?.zoomBy(1 / ZOOM_STEP)}
@@ -625,12 +611,6 @@ export function TreeView({
         }}
         onMakeFocus={(p) => goTo(p.id)}
         onEdit={(p) => void navigate({ to: '/person/$personId', params: { personId: p.id } })}
-      />
-      <FindDialog
-        tree={tree}
-        open={findOpen}
-        onOpenChange={setFindOpen}
-        onSelect={(id) => goTo(id)}
       />
     </>
   );

@@ -18,6 +18,7 @@ describe('server', () => {
     const res = await app.inject({ method: 'GET', url: '/api/health' });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ ok: true });
+    expect(res.headers['server-timing']).toMatch(/^app;dur=\d+\.\d{2}$/);
   });
 
   it('returns the typed JSON error for unknown API routes', async () => {

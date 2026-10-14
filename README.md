@@ -27,6 +27,13 @@ node apps/cli/dist/cli.js import ~/Downloads/family.ged --name "Vale family" [--
 
 Trees are folders in your library (`~/OpenAncestry`, or `--library` / `$OA_LIBRARY`); switch, create, rename and delete them from the tree menu in the top bar. The server binds to `127.0.0.1` only.
 
+### One person per computer account
+
+Open Ancestry assumes the account that runs it is the only one that should see the library:
+
+- The library, its trees and everything in them are created readable by your account alone (folders `0700`, files `0600`), and existing ones are tightened when they open.
+- While the server runs, any program on this computer can reach it at `127.0.0.1`, including programs run by other accounts. Binding to loopback keeps other machines out, not other users of this one. On a shared computer, stop the server (Ctrl+C) when you're done.
+
 ## Development
 
 ```sh

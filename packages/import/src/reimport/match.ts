@@ -230,9 +230,36 @@ export function matchPeople(existing: Snapshot, incoming: Snapshot): Map<string,
     }
   }
 
+  // Close runners-up: another tree person for this record, or another record for this person.
+  const byKey = { e: new Map<string, Candidate[]>(), i: new Map<string, Candidate[]>() };
+  for (const c of candidates) {
+    for (const key of ['e', 'i'] as const) {
+      const list = byKey[key].get(c[key]);
+      if (list) list.push(c);
+      else byKey[key].set(c[key], [c]);
+    }
+  }
+  const best = (key: 'e' | 'i', id: string, except: Candidate) => {
+    let top = -Infinity;
+    for (const x of byKey[key].get(id) ?? []) {
+      if (x !== except && (key === 'i' ? x.e !== except.e : x.i !== except.i)) {
+        top = Math.max(top, x.score - x.hint);
+      }
+    }
+    return top;
+  };
+  /** Whether another candidate for either side of the pair is as likely, on evidence alone. */
+  const tied = (c: Candidate, merged: boolean) =>
+    Math.max(best('i', c.i, c), merged ? -Infinity : best('e', c.e, c)) >=
+    c.score - c.hint - TIE_MARGIN;
+
   // Second pass: relatives that were matched to each other confirm (or tell apart) a pair.
+  // A relative whose own match was a coin toss proves nothing, or identical
+  // families would confirm whichever pairing happened to come first.
   const first = assign(candidates, capacityOf);
-  const toExisting = new Map([...first.values()].map((c) => [c.i, c.e]));
+  const toExisting = new Map(
+    [...first.values()].filter((c) => !tied(c, capacityOf(c.e) > 1)).map((c) => [c.i, c.e]),
+  );
   for (const c of candidates) {
     const e = existing.people.get(c.e)!;
     const i = incoming.people.get(c.i)!;
@@ -259,24 +286,6 @@ export function matchPeople(existing: Snapshot, incoming: Snapshot): Map<string,
     }
   }
   const final = assign(candidates, capacityOf);
-  // Close runners-up: another tree person for this record, or another record for this person.
-  const byKey = { e: new Map<string, Candidate[]>(), i: new Map<string, Candidate[]>() };
-  for (const c of candidates) {
-    for (const key of ['e', 'i'] as const) {
-      const list = byKey[key].get(c[key]);
-      if (list) list.push(c);
-      else byKey[key].set(c[key], [c]);
-    }
-  }
-  const best = (key: 'e' | 'i', id: string, except: Candidate) => {
-    let top = -Infinity;
-    for (const x of byKey[key].get(id) ?? []) {
-      if (x !== except && (key === 'i' ? x.e !== except.e : x.i !== except.i)) {
-        top = Math.max(top, x.score - x.hint);
-      }
-    }
-    return top;
-  };
   const perExisting = new Map<string, number>();
   for (const c of final.values()) perExisting.set(c.e, (perExisting.get(c.e) ?? 0) + 1);
   const result = new Map<string, PersonMatch>();
@@ -289,9 +298,8 @@ export function matchPeople(existing: Snapshot, incoming: Snapshot): Map<string,
       confidence = Math.min(confidence, CHECK_CONFIDENCE);
       c.reasons = [...c.reasons, 'little evidence beyond the name'];
     }
-    const rival = Math.max(best('i', c.i, c), merged ? -Infinity : best('e', c.e, c));
     // Evidence alone decides a tie: two people the export can't tell apart are the user's call.
-    if (rival >= c.score - c.hint - TIE_MARGIN) {
+    if (tied(c, merged)) {
       confidence = Math.min(confidence, CHECK_CONFIDENCE);
       c.reasons = [...c.reasons, 'another person is as likely'];
     }

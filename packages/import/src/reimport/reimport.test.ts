@@ -1079,6 +1079,59 @@ describe('re-review (#72): matching and bookkeeping', () => {
     tree.close();
   });
 
+  it('does not pre-tick a pick between cousins whose fathers are identical too', async () => {
+    const lines = [
+      '0 @I1@ INDI',
+      '1 NAME Adam /Smith/',
+      '1 SEX M',
+      '1 BIRT',
+      '2 DATE 1870',
+      '1 FAMS @F1@',
+      '0 @I2@ INDI',
+      '1 NAME Adam /Smith/',
+      '1 SEX M',
+      '1 BIRT',
+      '2 DATE 1870',
+      '1 FAMS @F2@',
+      '0 @I3@ INDI',
+      '1 NAME John /Smith/',
+      '1 SEX M',
+      '1 BIRT',
+      '2 DATE 1900',
+      '1 FAMC @F1@',
+      '0 @I4@ INDI',
+      '1 NAME John /Smith/',
+      '1 SEX M',
+      '1 BIRT',
+      '2 DATE 1900',
+      '1 FAMC @F2@',
+      '0 @F1@ FAM',
+      '1 HUSB @I1@',
+      '1 CHIL @I3@',
+      '0 @F2@ FAM',
+      '1 HUSB @I2@',
+      '1 CHIL @I4@',
+    ];
+    const cousins = ged(...lines);
+    const tree = openMemoryTree();
+    await importGedcom({ bytes: cousins }, tree, { today: TODAY });
+    const later = cousins.replace(
+      '2 DATE 1900\n1 FAMC @F2@',
+      '2 DATE 1900\n1 OCCU Baker\n1 FAMC @F2@',
+    );
+    for (const text of [later, renumber(later)]) {
+      const s2 = await prepareReimport(tree, { bytes: text }, { today: TODAY });
+      try {
+        expect([...s2.matches.values()].every((m) => m.confidence < HIGH_CONFIDENCE)).toBe(true);
+        const changes = s2.diff.people.flatMap((p) => p.changes);
+        expect(changes.map((c) => [c.kind, c.defaultAccept])).toEqual([['fact.add', false]]);
+      } finally {
+        closeReimport(s2);
+      }
+    }
+    tree.close();
+  });
+
   it('keeps one stale-record list, for the newest import', async () => {
     const changed = renumber(SAMPLE.replace('2 DATE Abt. 1842', '2 DATE 12 MAR 1842'));
     for (let n = 0; n < 2; n++) {

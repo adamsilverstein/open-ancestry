@@ -41,6 +41,23 @@ export function errorBody(code: ErrorCode, message: string): ErrorBody {
   return { error: { code, message } };
 }
 
+/** A plain sentence for a constraint failure, e.g. `UNIQUE constraint failed: tag.name`. */
+function constraintMessage(error: { code?: string; message: string }): string {
+  if (/UNIQUE constraint failed: tag\./.test(error.message)) {
+    return 'A tag with that name already exists';
+  }
+  if (/UNIQUE constraint failed: family_child\.family_id/.test(error.message)) {
+    return 'That child is already in this family';
+  }
+  if (error.code === 'SQLITE_CONSTRAINT_UNIQUE' || error.code === 'SQLITE_CONSTRAINT_PRIMARYKEY') {
+    return 'That is already in the tree';
+  }
+  if (error.code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
+    return 'Something this change refers to is no longer in the tree';
+  }
+  return 'That change does not fit the data already in the tree';
+}
+
 /** Maps Fastify, database and API errors onto the typed JSON envelope. */
 export function toApiError(error: FastifyError | Error): ApiError {
   if (error instanceof ApiError) return error;
@@ -56,7 +73,8 @@ export function toApiError(error: FastifyError | Error): ApiError {
   }
   const fastify = error as FastifyError;
   // Unique, foreign key and CHECK failures: the request contradicts stored data.
-  if (fastify.code?.startsWith('SQLITE_CONSTRAINT')) return conflict(fastify.message);
+  // The SQLite text names tables and columns; say what it means instead.
+  if (fastify.code?.startsWith('SQLITE_CONSTRAINT')) return conflict(constraintMessage(fastify));
   if (fastify.validation) return new ApiError(400, 'validation_failed', fastify.message);
   switch (fastify.statusCode) {
     case 413:

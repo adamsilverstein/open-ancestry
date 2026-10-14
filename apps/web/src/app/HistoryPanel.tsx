@@ -1,4 +1,5 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useIsMutating, useQuery, useQueryClient } from '@tanstack/react-query';
+import { editKey } from '../api/edits';
 import { Redo2, Undo2 } from 'lucide-react';
 import { historyQuery, undoRedo } from '../api/history';
 import { currentTreeQuery } from '../api/queries';
@@ -34,6 +35,8 @@ export default function HistoryPanel({ open, onOpenChange }: HistoryPanelProps) 
   const toast = useToast();
   const { data: tree } = useQuery(currentTreeQuery);
   const { data: history } = useQuery({ ...historyQuery(tree ?? ''), enabled: !!tree });
+  // While an edit is on its way the list is about to change; undo waits for it anyway.
+  const saving = useIsMutating({ mutationKey: editKey(tree ?? '') }) > 0;
 
   const run = async (direction: 'undo' | 'redo') => {
     try {
@@ -58,6 +61,7 @@ export default function HistoryPanel({ open, onOpenChange }: HistoryPanelProps) 
           <Button
             iconStart={<Undo2 size={16} aria-hidden />}
             disabled={!history?.canUndo}
+            loading={saving}
             onClick={() => void run('undo')}
           >
             Undo
@@ -65,6 +69,7 @@ export default function HistoryPanel({ open, onOpenChange }: HistoryPanelProps) 
           <Button
             iconStart={<Redo2 size={16} aria-hidden />}
             disabled={!history?.canRedo}
+            loading={saving}
             onClick={() => void run('redo')}
           >
             Redo

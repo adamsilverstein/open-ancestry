@@ -37,6 +37,22 @@ export function invalidateTree(queryClient: QueryClient, tree: string) {
   return queryClient.invalidateQueries({ predicate: (q) => q.queryKey[1] === tree });
 }
 
+/** Every edit to `tree` shares this key, so they can be counted and awaited. */
+export const editKey = (tree: string) => ['edit', tree] as const;
+
+/** Resolves once no edit to `tree` is pending or queued. */
+export function editsSettled(queryClient: QueryClient, tree: string): Promise<void> {
+  const pending = () => queryClient.isMutating({ mutationKey: editKey(tree) }) > 0;
+  if (!pending()) return Promise.resolve();
+  return new Promise((resolve) => {
+    const unsubscribe = queryClient.getMutationCache().subscribe(() => {
+      if (pending()) return;
+      unsubscribe();
+      resolve();
+    });
+  });
+}
+
 interface Run {
   edit: Edit;
   /** The detail before the optimistic update, for rollback. */
@@ -47,6 +63,10 @@ export function useEdit(tree: string) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const mutation = useMutation({
+    mutationKey: editKey(tree),
+    // One at a time, in the order they were made: a slow request can never land
+    // after a later one (TanStack runs mutations sharing a scope serially).
+    scope: { id: `edit:${tree}` },
     mutationFn: ({ edit }: Run) => edit.send(),
     onError: (error, { edit, rollback }) => {
       if (rollback) queryClient.setQueryData(rollback.key, rollback.previous);
@@ -57,7 +77,13 @@ export function useEdit(tree: string) {
       });
     },
     onSuccess: (result, { edit }) => edit.onDone?.(result),
-    onSettled: () => invalidateTree(queryClient, tree),
+    // Refetch once the queue drains: a refetch between queued edits would show
+    // server state without them and overwrite their optimistic updates.
+    // (This edit still counts as pending while onSettled runs.)
+    onSettled: () =>
+      queryClient.isMutating({ mutationKey: editKey(tree) }) > 1
+        ? undefined
+        : invalidateTree(queryClient, tree),
   });
 
   /**

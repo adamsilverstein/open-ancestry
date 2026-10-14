@@ -1,7 +1,7 @@
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
 import type { ChangeBatchRow } from '@open-ancestry/db';
 import { apiGet, seg } from './client';
-import { invalidateTree } from './edits';
+import { editsSettled, invalidateTree } from './edits';
 import { apiSend } from './client';
 import { currentTreeQuery } from './queries';
 
@@ -27,6 +27,8 @@ export async function undoRedo(
 ): Promise<ChangeBatchRow | null> {
   const tree = await queryClient.ensureQueryData(currentTreeQuery);
   if (!tree) return null;
+  // Undo acts on the latest change on the server, so let edits on their way land first.
+  await editsSettled(queryClient, tree);
   const { batch } = await apiSend<{ batch: ChangeBatchRow | null }>(
     'POST',
     `/trees/${seg(tree)}/${direction}`,

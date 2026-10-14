@@ -102,16 +102,21 @@ export function createTag(tx: Tx, body: Static<typeof TagBody>, attachTo?: strin
   return tag;
 }
 
+/** Tags a person; tagging them again changes nothing (so a retried request is harmless). */
 export function tagPerson(tx: Tx, personId: string, tagId: string) {
   requireRow(tx.store, 'person', personId);
   requireRow(tx.store, 'tag', tagId);
-  return tagLinks.create(tx, { tag_id: tagId, owner_type: 'person', owner_id: personId });
+  const existing = tagLinks.listFor(tx.store, 'person', personId).find((l) => l.tag_id === tagId);
+  return (
+    existing ?? tagLinks.create(tx, { tag_id: tagId, owner_type: 'person', owner_id: personId })
+  );
 }
 
+/** Untags a person; a tag they do not have is already gone, so that changes nothing. */
 export function untagPerson(tx: Tx, personId: string, tagId: string) {
+  requireRow(tx.store, 'person', personId);
   const link = tagLinks.listFor(tx.store, 'person', personId).find((l) => l.tag_id === tagId);
-  if (!link) throw notFound(`Person ${personId} does not have tag ${tagId}`);
-  tagLinks.delete(tx, link.id);
+  if (link) tagLinks.delete(tx, link.id);
 }
 
 /** Runs one batch operation; the result is what the single route would return. */

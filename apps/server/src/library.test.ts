@@ -7,12 +7,18 @@ import { Library, defaultLibraryRoot, treeNameProblem } from './library';
 import { testApi, type TestApi } from './test/helpers';
 
 describe('treeNameProblem', () => {
-  it.each(['Vale Family', 'Familie Müller', "O'Brien 2", 'a', 'x'.repeat(100)])(
-    'accepts %j',
-    (name) => {
-      expect(treeNameProblem(name)).toBeNull();
-    },
-  );
+  it.each([
+    'Vale Family',
+    'Familie Müller',
+    "O'Brien 2",
+    'a',
+    'x'.repeat(100),
+    'Conway',
+    'console',
+    'COM10',
+  ])('accepts %j', (name) => {
+    expect(treeNameProblem(name)).toBeNull();
+  });
 
   it.each([
     '',
@@ -29,6 +35,13 @@ describe('treeNameProblem', () => {
     'tab\there',
     'what?',
     'x'.repeat(101),
+    'CON',
+    'nul.txt',
+    'Com1',
+    'lpt9.oatree',
+    'AUX',
+    'prn',
+    '100%',
   ])('rejects %j', (name) => {
     expect(treeNameProblem(name)).not.toBeNull();
   });

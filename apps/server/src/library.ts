@@ -25,9 +25,12 @@ export function defaultLibraryRoot(env: NodeJS.ProcessEnv = process.env): string
   return resolve(env.OA_LIBRARY || join(homedir(), 'OpenAncestry'));
 }
 
-// Path separators, Windows-reserved characters and control characters.
+// Path separators, Windows-reserved characters, control characters, and `%`
+// (the API refuses encoded `%` in paths, so such a tree could not be addressed).
 // eslint-disable-next-line no-control-regex
-const FORBIDDEN = /[/\\:*?"<>|\u0000-\u001f\u007f]/;
+const FORBIDDEN = /[/\\:*?"<>|%\u0000-\u001f\u007f]/;
+/** Windows device names, reserved with any extension and in any case. */
+const WINDOWS_DEVICE = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$/i;
 
 /** Why `name` cannot be a tree folder name, or null when it can. */
 export function treeNameProblem(name: string): string | null {
@@ -38,6 +41,7 @@ export function treeNameProblem(name: string): string | null {
   if (name.startsWith('.')) return 'Tree name cannot start with a dot';
   if (name.endsWith('.')) return 'Tree name cannot end with a dot';
   if (FORBIDDEN.test(name)) return 'Tree name contains a path separator or reserved character';
+  if (WINDOWS_DEVICE.test(name)) return 'Tree name is reserved on Windows';
   return null;
 }
 

@@ -1,3 +1,10 @@
+/*
+ * Property test: random edit, undo and redo sequences on the sample tree,
+ * checked after every step against a stack model of the JSON export.
+ * UNDO_RUNS sets the number of sequences (default 25). To replay a CI failure,
+ * run with FC_SEED=<seed> FC_PATH=<path> from the failure message.
+ */
+import { arbDateText } from '@open-ancestry/core/testing/dates';
 import {
   events,
   exportJsonString,
@@ -21,6 +28,9 @@ import { exportGedcom } from './index';
 import { FIXTURES, TODAY, importInto } from './test-helpers';
 
 const RUNS = Number(process.env.UNDO_RUNS ?? 25);
+const replay = process.env.FC_SEED
+  ? { seed: Number(process.env.FC_SEED), path: process.env.FC_PATH, endOnFailure: true }
+  : {};
 const SAMPLE = readFileSync(join(FIXTURES, 'ancestry-sample.ged'));
 
 /** The whole tree as the JSON interchange writes it, without the history tables. */
@@ -58,9 +68,13 @@ const step = fc.record({
     'undo',
     'redo',
     'redo',
+    // Several undos then several redos: the order redo replays batches in matters.
+    'burst',
+    'burst',
   ),
   a: fc.nat(),
   b: fc.nat(),
+  date: fc.option(arbDateText, { nil: null }),
   text: fc.oneof(
     fc.string({ maxLength: 8 }),
     fc.constantFrom('Zoë', 'Zoë', 'דוד', '😀', 'Ann "Nan"', ''),
@@ -68,7 +82,18 @@ const step = fc.record({
 });
 type Step = typeof step extends fc.Arbitrary<infer T> ? T : never;
 
-/** Applies one step; returns what kind of change it was. */
+/** A burst becomes 1-3 undos followed by 1-3 redos; every other step is one action. */
+const expand = (steps: Step[]): Step[] =>
+  steps.flatMap((s) =>
+    s.kind === 'burst'
+      ? [
+          ...Array.from({ length: (s.a % 3) + 1 }, () => ({ ...s, kind: 'undo' as const })),
+          ...Array.from({ length: (s.b % 3) + 1 }, () => ({ ...s, kind: 'redo' as const })),
+        ]
+      : [s],
+  );
+
+/** Applies one step; returns what happened. Undo and redo report `none` when there was nothing to do. */
 function run(store: TreeStore, s: Step): 'edit' | 'undo' | 'redo' | 'none' {
   const people = ids(store, 'person');
   const eventIds = ids(store, 'event');
@@ -95,7 +120,7 @@ function run(store: TreeStore, s: Step): 'edit' | 'undo' | 'redo' | 'none' {
       );
     case 'editEvent':
       if (!eventIds.length) return 'none';
-      return edit((tx) => events.update(tx, pick(eventIds, s.a), { date_text: s.text || null }));
+      return edit((tx) => events.update(tx, pick(eventIds, s.a), { date_text: s.date }));
     case 'deleteEvent':
       if (!eventIds.length) return 'none';
       return edit((tx) => events.delete(tx, pick(eventIds, s.a)));
@@ -147,13 +172,21 @@ describe('property: edit, undo and redo', { timeout: 300_000 }, () => {
         const initialGedcom = exportGedcom(store, { now: TODAY });
         const undoStack: string[] = [];
         const redoStack: string[] = [];
-        for (const s of steps) {
+        const batches = () =>
+          store.db.prepare('SELECT count(*) FROM change_batch').pluck().get() as number;
+        for (const s of expand(steps)) {
           const before = state(store);
+          const count = batches();
           const kind = run(store, s);
           const after = state(store);
-          if (kind === 'edit' && after !== before) {
+          if (kind === 'edit' && batches() > count) {
+            // A new batch, even one that changed nothing visible, clears the redo stack.
             undoStack.push(before);
             redoStack.length = 0;
+          } else if (kind === 'none' && s.kind === 'undo') {
+            expect(undoStack).toHaveLength(0);
+          } else if (kind === 'none' && s.kind === 'redo') {
+            expect(redoStack).toHaveLength(0);
           } else if (kind === 'undo') {
             expect(after).toBe(undoStack.pop());
             redoStack.push(before);
@@ -171,7 +204,7 @@ describe('property: edit, undo and redo', { timeout: 300_000 }, () => {
         expect(exportGedcom(store, { now: TODAY })).toBe(initialGedcom);
         store.close();
       }),
-      { numRuns: RUNS },
+      { numRuns: RUNS, ...replay },
     );
   });
 });

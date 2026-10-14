@@ -213,3 +213,83 @@ test('File > Import GEDCOM opens the file picker from any page', async ({ page }
   await page.getByRole('menuitem', { name: /Import GEDCOM/ }).click();
   await chooser;
 });
+
+test.describe('failed imports never delete data', () => {
+  async function treeInfo(page: Page, name: string) {
+    const res = await page.request.get(`/api/trees/${encodeURIComponent(name)}`);
+    return res.ok() ? ((await res.json()) as { tree: { peopleCount: number } }).tree : null;
+  }
+
+  test('revisiting a failed job keeps a tree re-imported under the same name', async ({
+    page,
+  }, testInfo) => {
+    const name = unique(testInfo, 'Redo');
+    await page.goto('/');
+    await chooseFile(page, `${name}.ged`, Buffer.from('not a gedcom\n'));
+    await expect(page.getByRole('heading', { level: 1, name: 'Import failed' })).toBeVisible({
+      timeout: 30_000,
+    });
+    const failedPage = page.url();
+    expect(await treeInfo(page, name)).toBeNull();
+
+    await page.goto('/');
+    await chooseFile(page, `${name}.ged`, sample);
+    await expect(page.getByRole('heading', { level: 1, name: 'Import complete' })).toBeVisible({
+      timeout: 30_000,
+    });
+    expect((await treeInfo(page, name))?.peopleCount).toBe(26);
+
+    await page.goto(failedPage);
+    await expect(page.getByRole('heading', { level: 1, name: 'Import failed' })).toBeVisible();
+    await page.goBack();
+    await page.goForward();
+    expect((await treeInfo(page, name))?.peopleCount).toBe(26);
+  });
+
+  test('a failure importing into a populated tree leaves it alone', async ({
+    page,
+    baseURL,
+  }, testInfo) => {
+    const name = unique(testInfo, 'Populated');
+    await page.goto('/');
+    await chooseFile(page, `${name}.ged`, sample);
+    await expect(page.getByRole('heading', { level: 1, name: 'Import complete' })).toBeVisible({
+      timeout: 30_000,
+    });
+    const { token } = (await (await page.request.get('/api/session')).json()) as {
+      token: string;
+    };
+    const started = await page.request.post(`/api/trees/${encodeURIComponent(name)}/import`, {
+      headers: { origin: new URL(baseURL!).origin, 'x-oa-token': token },
+      multipart: {
+        file: { name: 'again.ged', mimeType: 'application/octet-stream', buffer: sample },
+      },
+    });
+    expect(started.status()).toBe(202);
+    const { jobId } = (await started.json()) as { jobId: string };
+    await page.goto(`/import/${jobId}`);
+    await expect(page.getByRole('heading', { level: 1, name: 'Import failed' })).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.getByRole('alert')).toContainText('new, empty tree');
+    expect((await treeInfo(page, name))?.peopleCount).toBe(26);
+  });
+});
+
+test('deleting the open tree goes home', async ({ page }, testInfo) => {
+  const name = unique(testInfo, 'Doomed');
+  await page.goto('/');
+  await chooseFile(page, `${name}.ged`, sample);
+  await page.getByRole('link', { name: 'Open tree' }).click({ timeout: 30_000 });
+  await expect(page).toHaveURL(/\/tree\//);
+  const switcher = page.getByRole('banner').getByRole('button', { name: /Tree:/ });
+  await expect(switcher).toContainText(name);
+  await switcher.click();
+  await page.getByRole('menuitem', { name: 'Delete tree…' }).click();
+  await page
+    .getByRole('dialog', { name: `Delete “${name}”?` })
+    .getByRole('button', { name: 'Delete tree' })
+    .click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(switcher).not.toContainText(name);
+});

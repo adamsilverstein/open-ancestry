@@ -4,7 +4,6 @@ import { useQueryClient } from '@tanstack/react-query';
 import buttonStyles from '../../components/Button/Button.module.css';
 import { cx } from '../../lib/cx';
 import {
-  deleteTree,
   getJob,
   jobEventsUrl,
   setCurrentTree,
@@ -74,12 +73,9 @@ export function ImportPage() {
   useEffect(() => {
     if (!job || !finished(job) || settled.current) return;
     settled.current = true;
+    // Display only: a failed import's tree is the server's to clean up.
     if (job.state === 'completed') void setCurrentTree(queryClient, job.tree);
-    // A failed import leaves an empty tree behind; it was created only for this file.
-    else
-      void deleteTree(job.tree)
-        .catch(() => {})
-        .then(() => queryClient.invalidateQueries({ queryKey: treesQuery.queryKey }));
+    else void queryClient.invalidateQueries({ queryKey: treesQuery.queryKey });
   }, [job, queryClient]);
 
   if (missing) {
@@ -109,7 +105,8 @@ export function ImportPage() {
           {job.error ?? 'The import stopped with an unknown error.'}
         </p>
         <p className={styles.note}>
-          Nothing was imported from {job.fileName}; the empty tree made for it was removed.
+          Nothing was imported from {job.fileName}.
+          {job.createdTree && ' The empty tree made for it was removed.'}
         </p>
         <Link to="/" className={cx(buttonStyles.button, buttonStyles.secondary, buttonStyles.md)}>
           Try another file

@@ -25,12 +25,6 @@ export const deleteTree = (id: string) => apiSend<void>('DELETE', tree(id));
 export const getTree = (id: string, signal?: AbortSignal) =>
   apiGet<{ tree: TreeInfo }>(tree(id), signal).then((r) => r.tree);
 
-export function startImport(treeId: string, file: File): Promise<{ jobId: string }> {
-  const form = new FormData();
-  form.append('file', file, file.name);
-  return apiSend('POST', `${tree(treeId)}/import`, form);
-}
-
 export const getJob = (id: string, signal?: AbortSignal) =>
   apiGet<ImportJob>(`/jobs/${seg(id)}`, signal);
 
@@ -69,6 +63,8 @@ export interface ImportJob {
   id: string;
   tree: string;
   fileName: string;
+  /** The server created the tree for this upload (and removed it if the import failed). */
+  createdTree: boolean;
   state: 'queued' | 'running' | 'completed' | 'failed';
   progress: ImportProgress | null;
   result: ImportReportView | null;
@@ -109,42 +105,13 @@ export function hasImportExtension(fileName: string): boolean {
 }
 
 /**
- * A tree name from a file name: the base name with characters the library
- * refuses (separators, reserved characters, `%`, leading and trailing dots)
- * replaced, trimmed to 90 characters so a numeric suffix still fits.
- */
-export function treeNameFromFile(fileName: string): string {
-  const base = fileName.replace(/\.[^.]*$/, '');
-  const name = base
-    // eslint-disable-next-line no-control-regex
-    .replace(/[/\\:*?"<>|%\u0000-\u001f\u007f]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .replace(/^[\s.]+|[\s.]+$/g, '')
-    .slice(0, 90)
-    .trim();
-  return /^(con|prn|aux|nul|com\d|lpt\d)$/i.test(name) || !name ? `Imported ${name}`.trim() : name;
-}
-
-/**
- * Creates a tree named after the file (adding " 2", " 3", ... if taken) and
- * uploads the file into it. Returns the job to watch. A failed upload removes
- * the tree it created.
+ * Uploads the file into a new tree the server creates, named after the file
+ * (" 2", " 3", ... when taken). The server owns that tree: if the import
+ * fails it removes it, so the client never deletes anything.
  */
 export async function importIntoNewTree(file: File): Promise<{ jobId: string; tree: string }> {
-  const base = treeNameFromFile(file.name);
-  let created: TreeListItem | undefined;
-  for (let n = 1; !created; n++) {
-    try {
-      created = await createTree(n === 1 ? base : `${base} ${n}`);
-    } catch (error) {
-      if (!(error instanceof ApiError && error.status === 409) || n >= 50) throw error;
-    }
-  }
-  try {
-    const { jobId } = await startImport(created.id, file);
-    return { jobId, tree: created.id };
-  } catch (error) {
-    await deleteTree(created.id).catch(() => {});
-    throw error;
-  }
+  const form = new FormData();
+  form.append('file', file, file.name);
+  const { jobId, job } = await apiSend<{ jobId: string; job: ImportJob }>('POST', '/import', form);
+  return { jobId, tree: job.tree };
 }

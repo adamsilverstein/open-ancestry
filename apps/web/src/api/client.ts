@@ -49,15 +49,27 @@ function sessionToken() {
  * Resolves to the JSON response, or undefined for 204.
  */
 export async function apiSend<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const { token, tokenHeader } = await sessionToken();
-  const headers: Record<string, string> = { accept: 'application/json', [tokenHeader]: token };
   let payload: BodyInit | undefined;
+  const headers: Record<string, string> = { accept: 'application/json' };
   if (body instanceof FormData) payload = body;
   else if (body !== undefined) {
     headers['content-type'] = 'application/json';
     payload = JSON.stringify(body);
   }
-  const response = await fetch(`/api${path}`, { method, headers, body: payload });
+  const send = async () => {
+    const { token, tokenHeader } = await sessionToken();
+    return fetch(`/api${path}`, {
+      method,
+      headers: { ...headers, [tokenHeader]: token },
+      body: payload,
+    });
+  };
+  let response = await send();
+  if (response.status === 403) {
+    // The server restarted and issued a new token: fetch it once and retry.
+    session = undefined;
+    response = await send();
+  }
   if (!response.ok) throw await errorFrom(response);
   return (response.status === 204 ? undefined : await response.json()) as T;
 }

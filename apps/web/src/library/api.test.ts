@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, hasImportExtension, importIntoNewTree, treeNameFromFile } from './api';
+import { ApiError, deleteTree, hasImportExtension, importIntoNewTree } from './api';
 
 describe('import helpers', () => {
   it('accepts GEDCOM and GEDZIP extensions in any case', () => {
@@ -10,76 +10,65 @@ describe('import helpers', () => {
     expect(hasImportExtension('notes.txt')).toBe(false);
     expect(hasImportExtension('ged')).toBe(false);
   });
-
-  it('turns a file name into a tree name the library accepts', () => {
-    expect(treeNameFromFile('Vale Family Tree.ged')).toBe('Vale Family Tree');
-    expect(treeNameFromFile('a/b:c%d.ged')).toBe('a b c d');
-    expect(treeNameFromFile('..hidden..ged')).toBe('hidden');
-    expect(treeNameFromFile('CON.ged')).toBe('Imported CON');
-    expect(treeNameFromFile('.ged')).toBe('Imported');
-    expect(treeNameFromFile(`${'x'.repeat(200)}.ged`)).toHaveLength(90);
-  });
 });
 
-describe('importIntoNewTree', () => {
+/** Every session fetch issues a new token, like a restarted server. */
+let tokens = 0;
+
+describe('importIntoNewTree and mutations', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  function server(handlers: ((url: string, init: RequestInit) => Response | undefined)[]) {
-    const calls: { url: string; method: string; body: unknown }[] = [];
+  function server(handle: (url: string, init: RequestInit) => Response) {
+    const calls: { url: string; method: string; token?: string }[] = [];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string, init: RequestInit = {}) => {
-        calls.push({ url, method: init.method ?? 'GET', body: init.body });
-        if (url === '/api/session') return Response.json({ token: 't', tokenHeader: 'x-oa-token' });
-        for (const handler of handlers) {
-          const response = handler(url, init);
-          if (response) return response;
+        const headers = (init.headers ?? {}) as Record<string, string>;
+        calls.push({ url, method: init.method ?? 'GET', token: headers['x-oa-token'] });
+        if (url === '/api/session') {
+          return Response.json({ token: `t${++tokens}`, tokenHeader: 'x-oa-token' });
         }
-        return Response.json({ error: { code: 'not_found', message: 'nope' } }, { status: 404 });
+        return handle(url, init);
       }),
     );
     return calls;
   }
 
-  it('adds a number when the name is taken, then uploads', async () => {
-    const calls = server([
-      (url, init) =>
-        url === '/api/trees' && JSON.parse(String(init.body)).name === 'Vale'
-          ? Response.json({ error: { code: 'conflict', message: 'exists' } }, { status: 409 })
-          : undefined,
-      (url, init) =>
-        url === '/api/trees'
-          ? Response.json({ tree: { id: JSON.parse(String(init.body)).name } }, { status: 201 })
-          : undefined,
-      (url) =>
-        url.endsWith('/import') ? Response.json({ jobId: 'j1' }, { status: 202 }) : undefined,
-    ]);
-    const result = await importIntoNewTree(new File(['0 HEAD'], 'Vale.ged'));
-    expect(result).toEqual({ jobId: 'j1', tree: 'Vale 2' });
-    expect(calls.map((c) => `${c.method} ${c.url}`)).toEqual([
-      'GET /api/session',
-      'POST /api/trees',
-      'POST /api/trees',
-      'POST /api/trees/Vale%202/import',
-    ]);
+  it('uploads to the server-owned import route and reports the new tree', async () => {
+    const calls = server((url, init) => {
+      expect(init.body).toBeInstanceOf(FormData);
+      return url === '/api/import'
+        ? Response.json({ jobId: 'j1', job: { tree: 'Vale 2' } }, { status: 202 })
+        : Response.json({}, { status: 404 });
+    });
+    expect(await importIntoNewTree(new File(['0 HEAD'], 'Vale.ged'))).toEqual({
+      jobId: 'j1',
+      tree: 'Vale 2',
+    });
+    // No tree is created or deleted from the client.
+    expect(
+      calls.filter((c) => c.url !== '/api/session').map((c) => `${c.method} ${c.url}`),
+    ).toEqual(['POST /api/import']);
   });
 
-  it('removes the new tree when the upload is refused', async () => {
-    const calls = server([
-      (url) =>
-        url === '/api/trees' ? Response.json({ tree: { id: 'T' } }, { status: 201 }) : undefined,
-      (url) =>
-        url.endsWith('/import')
-          ? Response.json(
-              { error: { code: 'payload_too_large', message: 'too big' } },
-              { status: 413 },
-            )
-          : undefined,
-      (url, init) => (init.method === 'DELETE' ? new Response(null, { status: 204 }) : undefined),
-    ]);
-    const error = await importIntoNewTree(new File(['x'], 'T.ged')).catch((e: unknown) => e);
+  it('refreshes the session token once after a 403 (server restarted)', async () => {
+    let attempts = 0;
+    const calls = server(() =>
+      ++attempts === 1
+        ? Response.json({ error: { code: 'forbidden', message: 'bad token' } }, { status: 403 })
+        : new Response(null, { status: 204 }),
+    );
+    await deleteTree('T');
+    const deletes = calls.filter((c) => c.method === 'DELETE');
+    expect(deletes).toHaveLength(2);
+    expect(deletes[0]!.token).not.toBe(deletes[1]!.token);
+
+    attempts = -10;
+    server(() =>
+      Response.json({ error: { code: 'forbidden', message: 'still no' } }, { status: 403 }),
+    );
+    const error = await deleteTree('T').catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ApiError);
-    expect((error as ApiError).status).toBe(413);
-    expect(calls.at(-1)).toMatchObject({ method: 'DELETE', url: '/api/trees/T' });
+    expect((error as ApiError).status).toBe(403);
   });
 });

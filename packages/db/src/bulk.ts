@@ -37,7 +37,9 @@ export interface BulkWriterOptions {
    * With `freshTree`: this connection is the only one that has the file open
    * (the importer created the tree), so the load can switch from WAL to a
    * rollback journal, which writes each new page once instead of twice.
-   * Switching while another connection has the file open would lock it out.
+   * Switching while another connection has the file open would lock it out,
+   * so an import worker writing into a tree the server has open (its Library
+   * keeps its own connections) must leave this unset.
    */
   soleConnection?: boolean;
 }
@@ -80,7 +82,7 @@ export class BulkWriter {
     this.store = store;
     this.now = store.clock();
     if (freshTree) {
-      for (const table of DATA_TABLES) {
+      for (const table of [...DATA_TABLES, ...HISTORY_TABLES]) {
         if (table !== 'meta' && store.db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get()) {
           throw new Error('A fresh-tree bulk load needs an empty tree');
         }

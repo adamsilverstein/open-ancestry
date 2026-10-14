@@ -61,9 +61,12 @@ describe('bulk load into a fresh tree', () => {
     store.close();
   });
 
-  it('refuses a tree that already has data', () => {
+  it('refuses a tree that already has data or history', () => {
     const store = memoryTree();
     store.transact('add', (tx) => persons.create(tx, {}));
+    expect(() => new BulkWriter(store, { freshTree: true })).toThrow(/empty tree/);
+    // History alone (everything since undone, or deleted) also counts.
+    store.db.exec('DELETE FROM person');
     expect(() => new BulkWriter(store, { freshTree: true })).toThrow(/empty tree/);
     expect(store.db.inTransaction).toBe(false);
     store.close();

@@ -90,7 +90,7 @@ test.describe('person', () => {
       .click();
     await expect(h1(page)).toHaveText('Tobias');
     await page.keyboard.press(`${mod}+z`);
-    await expect(page).toHaveURL(new RegExp(`/person/${seeded.rowan}$`));
+    await expect(page).toHaveURL(new RegExp(`/person/${seeded.rowan}(\\?tree=[^&]*)?$`));
     await expect(toasts(page).filter({ hasText: 'Tobias is no longer in the tree' })).toBeVisible();
   });
 

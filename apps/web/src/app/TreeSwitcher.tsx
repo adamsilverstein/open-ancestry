@@ -15,6 +15,7 @@ import {
   MenuTrigger,
 } from '../components/Menu/Menu';
 import { useToast } from '../components/Toast/Toast';
+import type { TreeLayout } from '../components/TreeToolbar/TreeToolbar';
 import {
   createTree,
   currentTreeQuery,
@@ -57,7 +58,15 @@ export default function TreeSwitcher() {
     // home route below already resolves the new tree.
     const switched = setCurrentTree(queryClient, id);
     if (/^\/(tree|person)\//.test(pathname)) {
-      await navigate({ to: '/tree/$personId', params: { personId: 'home' }, search: {} });
+      // The tree view keeps its layout and generations; the new tree's home person is the focus.
+      await navigate({
+        to: '/tree/$personId',
+        params: { personId: 'home' },
+        search: (prev) => {
+          const { layout, up, down } = prev as { layout?: TreeLayout; up?: number; down?: number };
+          return { layout, up, down };
+        },
+      });
     }
     await switched;
   }

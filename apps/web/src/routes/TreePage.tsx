@@ -1,9 +1,10 @@
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId } from 'react';
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { FileUp } from 'lucide-react';
 import { EmptyState } from '../components/EmptyState/EmptyState';
-import { CURRENT_TREE_KEY, currentTreeQuery } from '../api/queries';
+import { currentTreeQuery } from '../api/queries';
+import { useUrlTree } from '../app/useUrlTree';
 import { fetchHome, treeKeys } from '../tree/api';
 import { TreeView } from '../tree/TreeView';
 import styles from '../tree/TreeView.module.css';
@@ -25,18 +26,7 @@ export function TreePage() {
   });
 
   // A shared link opens its tree: make it the current one (top bar, next visit).
-  const queryClient = useQueryClient();
-  const synced = useRef<string | null>(null);
-  useEffect(() => {
-    if (!search.tree || synced.current === search.tree) return;
-    synced.current = search.tree;
-    try {
-      localStorage.setItem(CURRENT_TREE_KEY, search.tree);
-    } catch {
-      // Storage may be unavailable; the URL still says which tree.
-    }
-    queryClient.setQueryData(currentTreeQuery.queryKey, search.tree);
-  }, [search.tree, queryClient]);
+  useUrlTree(search.tree);
 
   useEffect(() => {
     if (!wantsHome || !home.data || !tree) return;
@@ -74,7 +64,12 @@ export function TreePage() {
           <EmptyState
             level={2}
             title="No home person"
-            description="Choose a home person from someone's profile to open the tree there."
+            description="This tree has no home person to start from. Pick anyone from the people list to open the tree at them."
+            action={
+              <Link to="/people" className={styles.emptyLink}>
+                Open the people list
+              </Link>
+            }
           />
         </div>
       </div>

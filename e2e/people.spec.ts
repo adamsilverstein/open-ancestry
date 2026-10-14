@@ -108,7 +108,7 @@ test('opens a person from the list', async ({ page }) => {
   const link = bodyRows(page).first().getByRole('link');
   await expect(link).toHaveAccessibleName(/Ashgrove/);
   await link.click();
-  await expect(page).toHaveURL(/\/person\/[0-9A-Z]{26}$/);
+  await expect(page).toHaveURL(/\/person\/[0-9A-Z]{26}(\?tree=[^&]*)?$/);
 });
 
 test('stays virtualized and scrolls to the end of a 100k tree', async ({ page }) => {

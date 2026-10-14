@@ -98,7 +98,7 @@ test.describe('tabs', () => {
     await expect(tabs).toHaveText(['Facts', 'Gallery', 'Notes', 'LifeStory', 'Sources']);
     await expect(page.getByRole('tab', { name: 'Facts' })).toHaveAttribute('aria-selected', 'true');
     await page.getByRole('tab', { name: 'Notes' }).click();
-    await expect(page).toHaveURL(/\?tab=notes$/);
+    await expect(page).toHaveURL(/[?&]tab=notes(&|$)/);
     await expect(page.getByRole('tabpanel')).toContainText('Rowan kept the forge on Mill Lane');
     await page.reload();
     await expect(page.getByRole('tab', { name: 'Notes' })).toHaveAttribute('aria-selected', 'true');
@@ -216,7 +216,7 @@ test.describe('facts', () => {
     ]);
 
     await parents.getByRole('link', { name: /Edmund Ashdown/ }).click();
-    await expect(page).toHaveURL(new RegExp(`/person/${people.edmund}$`));
+    await expect(page).toHaveURL(new RegExp(`/person/${people.edmund}(\\?tree=[^&]*)?$`));
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Edmund Ashdown');
   });
 
@@ -306,7 +306,7 @@ test.describe('performance', () => {
           }),
         name,
       );
-      await expect(page).toHaveURL(new RegExp(`${target}$`));
+      await expect(page).toHaveURL(new RegExp(`${target}(\\?tree=[^&]*)?$`));
       timings.push(ms);
     }
     timings.sort((a, b) => a - b);

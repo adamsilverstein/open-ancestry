@@ -4,6 +4,7 @@ import {
   createRouter,
   lazyRouteComponent,
   notFound,
+  redirect,
 } from '@tanstack/react-router';
 import { isNotFound } from '../api/client';
 import { currentTreeQuery, personQuery } from '../api/queries';
@@ -68,9 +69,24 @@ const personRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/person/$personId',
   validateSearch: validatePersonSearch,
-  // Runs on hover/focus preload too, so the detail is usually cached by the click.
-  loader: async ({ params }) => {
+  // The URL names the tree, so Back after switching trees, or a shared link, opens the
+  // person in the tree they belong to, never a same-id person in the current one.
+  beforeLoad: async ({ params, search }) => {
+    if (search.tree) return;
     const tree = await queryClient.ensureQueryData(currentTreeQuery);
+    if (tree) {
+      throw redirect({
+        to: '/person/$personId',
+        params,
+        search: { ...search, tree },
+        replace: true,
+      });
+    }
+  },
+  loaderDeps: ({ search }) => ({ tree: search.tree }),
+  // Runs on hover/focus preload too, so the detail is usually cached by the click.
+  loader: async ({ params, deps }) => {
+    const tree = deps.tree ?? (await queryClient.ensureQueryData(currentTreeQuery));
     if (!tree) throw notFound({ data: { reason: 'no-tree' } });
     try {
       await queryClient.ensureQueryData(personQuery(tree, params.personId));

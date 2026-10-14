@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useQueryClient, useSuspenseQuery } from '@tanstack/react-query';
 import { getRouteApi, useRouter } from '@tanstack/react-router';
 import { isNotFound } from '../../api/client';
+import { useUrlTree } from '../../app/useUrlTree';
 import { personQuery } from '../../api/queries';
 import { useToast } from '../../components/Toast/Toast';
 import { fullName } from '../../lib/person';
@@ -45,7 +46,8 @@ function useLeaveWhenGone(tree: string, personId: string, name: string, error: u
 export function PersonPage() {
   const { personId } = route.useParams();
   const { tree } = route.useLoaderData();
-  const { tab = 'facts' } = route.useSearch();
+  const { tab = 'facts', tree: urlTree } = route.useSearch();
+  useUrlTree(urlTree);
   const navigate = route.useNavigate();
   // The loader already fetched it, so this never suspends on navigation.
   const { data: detail, error } = useSuspenseQuery(personQuery(tree, personId));

@@ -148,7 +148,7 @@ test.describe('family view', () => {
     await expect(quick).toContainText('Died 5 Sep 1957');
     await expect(card(page, 'Bram Vale')).toHaveAttribute('aria-expanded', 'true');
     await quick.getByRole('link', { name: 'Profile' }).click();
-    await expect(page).toHaveURL(new RegExp(`/person/${ids.bram}$`));
+    await expect(page).toHaveURL(new RegExp(`/person/${ids.bram}(\\?tree=[^&]*)?$`));
   });
 
   test('Escape closes the quick view and returns focus to the card', async ({ page }) => {
@@ -760,12 +760,15 @@ test.describe('family view', () => {
   }) => {
     // The family tree is the current one (runs after the fixture's own init script).
     await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
-    await page.goto(`/tree/${ids.ada}`);
+    await page.goto(`/tree/${ids.ada}?layout=pedigree&up=3`);
     await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
     const switcher = page.getByRole('banner').getByRole('button', { name: /Tree:/ });
     await switcher.click();
     await page.getByRole('menuitemradio', { name: seed.perf.tree }).click();
     await expect(page).toHaveURL(new RegExp(`/tree/${seed.perf.focusId}(\\?|$)`));
+    // The view keeps its layout and generations in the new tree.
+    await expect(page).toHaveURL(/layout=pedigree/);
+    await expect(page).toHaveURL(/up=3/);
     await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
     await expect(card(page, 'Ada Vale')).toHaveCount(0);
     await expect(page.getByText('Person not found')).toHaveCount(0);
@@ -820,7 +823,9 @@ test.describe('family view', () => {
       const switcher = page.getByRole('banner').getByRole('button', { name: /Tree:/ });
       await switcher.click();
       await page.getByRole('menuitemradio', { name: tree, exact: true }).click();
-      await expect(page).toHaveURL(/\/tree\//);
+      // The family tree's home person (Ada) opens in the tree view.
+      await expect(page).toHaveURL(new RegExp(`/tree/${ids.ada}\\?`));
+      await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
       await expect(switcher).toContainText(tree);
 
       await page.goBack();
@@ -831,6 +836,25 @@ test.describe('family view', () => {
       await expect(page.getByRole('heading', { level: 1, name: /Adacopy Vale/ })).toBeVisible();
     } finally {
       await request.delete(api, { headers });
+    }
+  });
+
+  test('a tree without a home person points to the people list', async ({
+    page,
+    request,
+    baseURL,
+  }, testInfo) => {
+    const { token } = (await (await request.get('/api/session')).json()) as { token: string };
+    const headers = { origin: baseURL!, 'x-oa-token': token };
+    const empty = `empty ${testInfo.workerIndex} ${Date.now()}`;
+    expect((await request.post('/api/trees', { data: { name: empty }, headers })).ok()).toBe(true);
+    try {
+      await page.goto(`/tree/home?tree=${encodeURIComponent(empty)}`);
+      await expect(page.getByRole('heading', { name: 'No home person' })).toBeVisible();
+      await page.getByRole('link', { name: 'Open the people list' }).click();
+      await expect(page).toHaveURL(/\/people/);
+    } finally {
+      await request.delete(`/api/trees/${encodeURIComponent(empty)}`, { headers });
     }
   });
 

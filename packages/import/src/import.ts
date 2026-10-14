@@ -7,9 +7,15 @@ import {
   type InsertRow,
   type TableName,
 } from '@open-ancestry/db';
-import { GedzipError, parseGedcom, readGedzip, type ParseResult } from '@open-ancestry/gedcom';
+import {
+  GedzipError,
+  detectEncoding,
+  parseGedcom,
+  readGedzip,
+  type ParseResult,
+} from '@open-ancestry/gedcom';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync, readSync, rmSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { Mapper, type Sink } from './mapper';
 import { MediaSource } from './media';
@@ -17,6 +23,7 @@ import {
   ImportError,
   type ImportPhase,
   type ImportInput,
+  type ImportLimits,
   type ImportOptions,
   type ImportReport,
   type ImportTarget,
@@ -28,21 +35,29 @@ const MiB = 1024 ** 2;
  * What one import may contain. A real Ancestry export of 100k people is about
  * 48 MiB with lines under 1 KiB; past these a file is refused before parsing,
  * since the parsed tree of a hostile file (millions of CONT lines) can need
- * dozens of times its size in memory.
+ * dozens of times its size in memory. A GEDZIP is capped by its GEDCOM text
+ * like a plain file, and its photos separately and more generously.
  */
-export const IMPORT_LIMITS = {
-  /** Largest GEDCOM or GEDZIP, in bytes. */
+export const IMPORT_LIMITS: Readonly<ImportLimits> = Object.freeze({
   maxBytes: 64 * MiB,
-  /** Longest physical line, in bytes. */
+  maxArchiveBytes: 1024 * MiB,
+  maxMediaBytes: 256 * MiB,
+  maxMediaTotalBytes: 1024 * MiB,
   maxLineLength: 64 * 1024,
-  /** Most level-0 records. */
   maxRecords: 2_000_000,
-  /** Most CONT/CONC lines in one record. */
   maxContinuations: 100_000,
-} as const;
+});
 
-const DEFAULT_MAX_BYTES = IMPORT_LIMITS.maxBytes;
-const DEFAULT_MAX_MEDIA_BYTES = 256 * MiB;
+/** `IMPORT_LIMITS` with the given caps replaced; undefined values keep the default. */
+export function resolveImportLimits(overrides: Partial<ImportLimits> = {}): ImportLimits {
+  const limits = { ...IMPORT_LIMITS };
+  for (const key of Object.keys(limits) as (keyof ImportLimits)[]) {
+    const value = overrides[key];
+    if (value !== undefined) limits[key] = value;
+  }
+  return limits;
+}
+
 /** Records mapped between yields to the event loop (for progress and abort). */
 const CHUNK = 500;
 
@@ -73,8 +88,22 @@ interface ReadResult {
   zipWarnings: string[];
 }
 
-function readInput(input: ImportInput, options: ImportOptions): ReadResult {
-  const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
+/** True when the file at `path` starts like a zip archive. */
+function isZipFile(path: string): boolean {
+  const fd = openSync(path, 'r');
+  try {
+    const head = new Uint8Array(4);
+    return readSync(fd, head, 0, 4, 0) === 4 && isZip(head);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+const tooLarge = (what: string, max: number) =>
+  new ImportError('too-large', `${what} is over ${max} bytes`);
+
+function readInput(input: ImportInput, options: ImportOptions, limits: ImportLimits): ReadResult {
+  const { maxBytes, maxArchiveBytes } = limits;
   let bytes: Uint8Array | string;
   let fileName: string | null = null;
   let zip = false;
@@ -82,7 +111,10 @@ function readInput(input: ImportInput, options: ImportOptions): ReadResult {
     fileName = basename(input.path);
     try {
       const size = statSync(input.path).size;
-      if (size > maxBytes) throw new ImportError('too-large', `File is over ${maxBytes} bytes`);
+      // A GEDZIP is sized by its parts once opened; only the archive cap applies here.
+      const archive = size > maxBytes && isZipFile(input.path);
+      if (size > (archive ? maxArchiveBytes : maxBytes))
+        throw archive ? tooLarge('Archive', maxArchiveBytes) : tooLarge('File', maxBytes);
       bytes = readFileSync(input.path);
     } catch (error) {
       if (error instanceof ImportError) throw error;
@@ -97,9 +129,10 @@ function readInput(input: ImportInput, options: ImportOptions): ReadResult {
     fileName = input.fileName ?? null;
   }
   const raw = typeof bytes === 'string' ? Buffer.from(bytes, 'utf8') : bytes;
-  if (raw.length > maxBytes) throw new ImportError('too-large', `File is over ${maxBytes} bytes`);
-  const sha256 = createHash('sha256').update(raw).digest('hex');
   zip ||= isZip(bytes);
+  if (zip && raw.length > maxArchiveBytes) throw tooLarge('Archive', maxArchiveBytes);
+  if (!zip && raw.length > maxBytes) throw tooLarge('File', maxBytes);
+  const sha256 = createHash('sha256').update(raw).digest('hex');
 
   if (!zip) {
     const media = options.mediaDir ? MediaSource.fromDir(options.mediaDir) : MediaSource.none();
@@ -108,8 +141,14 @@ function readInput(input: ImportInput, options: ImportOptions): ReadResult {
   try {
     const archive = readGedzip(raw, {
       maxGedcomSize: maxBytes,
-      maxEntrySize: options.maxMediaBytes ?? DEFAULT_MAX_MEDIA_BYTES,
+      maxEntrySize: limits.maxMediaBytes,
+      maxTotalSize: maxBytes + limits.maxMediaTotalBytes,
     });
+    let mediaBytes = 0;
+    for (const entry of archive.media.values()) mediaBytes += entry.length;
+    if (mediaBytes > limits.maxMediaTotalBytes) {
+      throw tooLarge('The media in the archive', limits.maxMediaTotalBytes);
+    }
     return {
       gedcom: archive.gedcom,
       fileName,
@@ -154,12 +193,24 @@ function isContinuation(bytes: Uint8Array, start: number, end: number): boolean 
   );
 }
 
+/** The file as UTF-8 (or another ASCII-compatible encoding), decoding UTF-16 first. */
+function asciiCompatible(input: Uint8Array | string): Uint8Array {
+  if (typeof input === 'string') return Buffer.from(input, 'utf8');
+  const { encoding } = detectEncoding(input);
+  if (encoding !== 'utf-16le' && encoding !== 'utf-16be') return input;
+  return Buffer.from(new TextDecoder(encoding).decode(input), 'utf8');
+}
+
 /**
- * One linear pass over the raw bytes, before decoding or parsing: refuses a
- * file whose lines, records or continuation runs are past IMPORT_LIMITS.
+ * One linear pass over the file before parsing (UTF-16 is decoded first, as
+ * its newlines and digits are not single bytes): refuses a file whose lines,
+ * records or continuation runs are past the limits.
  */
-export function checkLimits(input: Uint8Array | string, limits = IMPORT_LIMITS): void {
-  const bytes = typeof input === 'string' ? Buffer.from(input, 'utf8') : input;
+export function checkLimits(
+  input: Uint8Array | string,
+  limits: Pick<ImportLimits, 'maxLineLength' | 'maxRecords' | 'maxContinuations'> = IMPORT_LIMITS,
+): void {
+  const bytes = asciiCompatible(input);
   let line = 1;
   let records = 0;
   let continuations = 0;
@@ -266,12 +317,17 @@ export async function importGedcom(
   const { signal } = options;
   checkAbort(signal);
 
+  const limits = resolveImportLimits({
+    maxBytes: options.maxBytes,
+    maxMediaBytes: options.maxMediaBytes,
+    ...options.limits,
+  });
   progress('read', 0, 1);
-  const read = readInput(input, options);
+  const read = readInput(input, options, limits);
   const readMs = ms(started);
   progress('read', 1, 1);
 
-  checkLimits(read.gedcom);
+  checkLimits(read.gedcom, limits);
   progress('parse', 0, 1);
   const parseStart = performance.now();
   const doc = parseGedcom(read.gedcom, { maxWarnings: options.maxWarnings ?? 1000 });
@@ -326,7 +382,7 @@ export async function importGedcom(
       newId: store.newId,
       media: read.media,
       mediaRoot: store.dir ? treePaths(store.dir).media : null,
-      maxMediaBytes: options.maxMediaBytes ?? DEFAULT_MAX_MEDIA_BYTES,
+      maxMediaBytes: limits.maxMediaBytes,
       maxWarnings: options.maxWarnings ?? 1000,
       today: options.today ?? new Date(),
     });
@@ -407,6 +463,15 @@ export async function importGedcom(
     progress('commit', 0, 1);
     const commitStart = performance.now();
     const committed: BulkCounts = writer.commit();
+    // The WAL now holds the whole import, often as large as the database; fold
+    // it in and truncate it. Best effort: a reader may hold it open a while.
+    if (!created && store.dir) {
+      try {
+        store.db.pragma('wal_checkpoint(TRUNCATE)');
+      } catch {
+        // Checkpointed later, when the connections close.
+      }
+    }
     report.timings.commit = ms(commitStart);
     report.rows = committed;
     progress('commit', 1, 1);

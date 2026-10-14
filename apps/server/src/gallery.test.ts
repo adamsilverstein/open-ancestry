@@ -182,6 +182,58 @@ describe('thumbnails', () => {
   });
 });
 
+describe('thumbnail queue', () => {
+  async function images(count: number) {
+    const ids: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const bytes = await sharp({
+        create: {
+          width: 1600,
+          height: 1200,
+          channels: 3,
+          background: `#${(i * 40 + 16).toString(16).padStart(2, '0')}4060`,
+        },
+      })
+        .png()
+        .toBuffer();
+      await writeFile(join(treeDir(), 'media', 'photos', `p${i}.png`), bytes);
+      ids.push(addMedia({ local_path: `photos/p${i}.png` }));
+    }
+    return ids;
+  }
+
+  it('bounds concurrent renders and renders each image once for many requests', async () => {
+    const ids = await images(6);
+    const queue = new ThumbnailQueue({ concurrency: 2 });
+    let peak = 0;
+    const sampler = setInterval(() => (peak = Math.max(peak, queue.running)), 1);
+    const requests = ids.flatMap((id) =>
+      (['sm', 'md', 'lg', 'sm'] as const).map((size) =>
+        queue.ensure(treeDir(), id, `photos/p${ids.indexOf(id)}.png`, size),
+      ),
+    );
+    const paths = await Promise.all(requests);
+    clearInterval(sampler);
+    expect(paths.every(Boolean)).toBe(true);
+    expect(peak).toBeLessThanOrEqual(2);
+    expect(peak).toBeGreaterThan(0);
+    expect(queue.renders).toBe(6);
+  });
+
+  it('serves requests ahead of background work', async () => {
+    const ids = await images(6);
+    const queue = new ThumbnailQueue({ concurrency: 1 });
+    ids.forEach((id, i) => queue.enqueue(treeDir(), id, `photos/p${i}.png`));
+    const last = ids.length - 1;
+    await queue.ensure(treeDir(), ids[last]!, `photos/p${last}.png`, 'sm');
+    const done = ids.filter((id) => existsSync(join(treeDir(), 'thumbs', `${id}-lg.webp`)));
+    expect(done).toContain(ids[last]);
+    expect(done.length).toBeLessThan(ids.length);
+    await queue.idle();
+    expect(queue.renders).toBe(6);
+  });
+});
+
 describe('attaching media', () => {
   it('copies an upload into the tree, links it and records its type, size and hash', async () => {
     const res = await attach(
@@ -243,6 +295,39 @@ describe('attaching media', () => {
     const served = await api.get(`${s.base}/media/${media.id}`);
     expect(served.headers['content-type']).toBe('application/octet-stream');
     expect(served.headers['content-disposition']).toBe('attachment');
+  });
+
+  it('treats TIFF scans as photos with thumbnails, served as attachments', async () => {
+    const tiff = await sharp({
+      create: { width: 300, height: 400, channels: 3, background: '#888888' },
+    })
+      .tiff()
+      .toBuffer();
+    const res = await attach(
+      { owner_type: 'person', owner_id: s.ada },
+      { name: 'scan.tif', bytes: tiff },
+    );
+    const { media } = res.json();
+    expect(media).toMatchObject({ kind: 'photo', mime: 'image/tiff', width: 300, height: 400 });
+    expect((await api.get(`${s.base}/media/${media.id}/thumb/sm`)).statusCode).toBe(200);
+    expect((await api.get(`${s.base}/media/${media.id}`)).headers['content-disposition']).toBe(
+      'attachment',
+    );
+  });
+
+  it('stores simultaneous uploads of the same bytes once', async () => {
+    const results = await Promise.all(
+      ['one.png', 'two.png', 'three.png'].map((name) =>
+        attach({ owner_type: 'person', owner_id: s.ada }, { name, bytes: png }),
+      ),
+    );
+    expect(results.map((r) => r.statusCode)).toEqual([201, 201, 201]);
+    expect(new Set(results.map((r) => r.json().media.id)).size).toBe(1);
+    const store = library.open('Test');
+    expect(
+      store.db.prepare('SELECT count(*) FROM media WHERE sha256 IS NOT NULL').pluck().get(),
+    ).toBe(1);
+    expect(await readdir(join(treeDir(), 'media', 'attached'))).toHaveLength(1);
   });
 
   it('validates the owner, the fields and the token', async () => {

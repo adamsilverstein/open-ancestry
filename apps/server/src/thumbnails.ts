@@ -1,4 +1,4 @@
-import { mkdir, open, realpath, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, open, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join, sep } from 'node:path';
 import { treePaths, type TreeStore } from '@open-ancestry/db';
 import sharp from 'sharp';
@@ -21,7 +21,7 @@ export const isThumbSize = (size: string): size is ThumbSize => Object.hasOwn(TH
 const MAX_INPUT_PIXELS = 100_000_000;
 
 /** Raster formats sharp can read, by magic bytes (TIFF is common for document scans). */
-function isImage(head: Buffer): boolean {
+export function isImage(head: Buffer): boolean {
   const ascii = (at: number, text: string) =>
     head.subarray(at, at + text.length).toString('latin1') === text;
   return (
@@ -36,7 +36,7 @@ function isImage(head: Buffer): boolean {
   );
 }
 
-async function readHead(file: string): Promise<Buffer> {
+export async function readHead(file: string): Promise<Buffer> {
   const handle = await open(file, 'r');
   try {
     const buffer = Buffer.alloc(16);
@@ -78,23 +78,29 @@ async function render(source: string, treeDir: string, mediaId: string): Promise
   await mkdir(thumbs, { recursive: true });
   // A thumbs/ symlinked elsewhere must not carry writes out of the tree.
   if (!(await insideTree(treeDir, thumbs))) return false;
+  const sizes = (Object.entries(THUMB_SIZES) as [ThumbSize, number][]).sort((x, y) => y[1] - x[1]);
+  const tmp = (size: ThumbSize) => `${thumbFile(treeDir, mediaId, size)}.${process.pid}.tmp`;
   try {
-    const image = sharp(source, { limitInputPixels: MAX_INPUT_PIXELS, failOn: 'error' }).rotate();
-    for (const [size, edge] of Object.entries(THUMB_SIZES) as [ThumbSize, number][]) {
-      const out = thumbFile(treeDir, mediaId, size);
-      const tmp = `${out}.${process.pid}.tmp`;
-      await image
-        .clone()
+    // Decode the source once, for the largest size; the smaller ones come from that.
+    let previous: Buffer | undefined;
+    for (const [size, edge] of sizes) {
+      const input = previous ?? source;
+      const image = previous
+        ? sharp(input)
+        : sharp(input, { limitInputPixels: MAX_INPUT_PIXELS, failOn: 'error' }).rotate();
+      const webp = await image
         .resize({ width: edge, height: edge, fit: 'inside', withoutEnlargement: true })
         .webp({ quality: 80 })
-        .toFile(tmp);
-      await rename(tmp, out);
+        .toBuffer();
+      await writeFile(tmp(size), webp);
+      previous = webp;
     }
+    // The largest is renamed last: its presence means the set is complete.
+    for (const [size] of [...sizes].reverse())
+      await rename(tmp(size), thumbFile(treeDir, mediaId, size));
     return true;
   } catch {
-    for (const size of Object.keys(THUMB_SIZES) as ThumbSize[]) {
-      await rm(`${thumbFile(treeDir, mediaId, size)}.${process.pid}.tmp`, { force: true });
-    }
+    for (const [size] of sizes) await rm(tmp(size), { force: true });
     return false;
   }
 }
@@ -105,16 +111,28 @@ interface Task {
   localPath: string | null;
 }
 
+type Priority = 'now' | 'background';
+
 /**
- * Makes thumbnails one image at a time (sharp already uses several threads
- * per image), so a large import never starves request handling.
+ * Makes thumbnails with at most `concurrency` images decoding at once (sharp
+ * already uses several threads per image), for both background work and
+ * requests, so a gallery of large scans cannot exhaust memory or starve file
+ * reads. Requests jump ahead of background work; each image renders once.
  */
 export class ThumbnailQueue {
-  private readonly pending: Task[] = [];
-  /** Work in flight or done, by `treeDir|mediaId`, so each image renders once. */
+  private readonly concurrency: number;
+  private active = 0;
+  private readonly waiting: { key: string; priority: Priority; start: () => void }[] = [];
+  /** Work in flight, by `treeDir|mediaId`, so each image renders once. */
   private readonly inFlight = new Map<string, Promise<boolean>>();
-  private running = false;
+  /** In-flight work someone is waiting on now (it may not have reached the queue yet). */
+  private readonly urgent = new Set<string>();
+  private background = 0;
   private idleWaiters: (() => void)[] = [];
+
+  constructor({ concurrency = 2 }: { concurrency?: number } = {}) {
+    this.concurrency = concurrency;
+  }
 
   /** Queues every local image of a tree that has no thumbnails yet. */
   enqueueTree(store: TreeStore, treeDir: string): void {
@@ -125,13 +143,22 @@ export class ThumbnailQueue {
   }
 
   enqueue(treeDir: string, mediaId: string, localPath: string | null): void {
-    this.pending.push({ treeDir, mediaId, localPath });
-    void this.pump();
+    this.background++;
+    void this.run({ treeDir, mediaId, localPath }, 'background')
+      .catch(() => false)
+      .finally(() => {
+        this.background--;
+        if (this.background === 0) {
+          const waiters = this.idleWaiters;
+          this.idleWaiters = [];
+          for (const resolve of waiters) resolve();
+        }
+      });
   }
 
   /**
-   * The path of a thumbnail, rendering it now if needed; null when the media
-   * has no decodable local image.
+   * The path of a thumbnail, rendering it now (ahead of background work) if
+   * needed; null when the media has no decodable local image.
    */
   async ensure(
     treeDir: string,
@@ -143,42 +170,80 @@ export class ThumbnailQueue {
       const out = await resolveMediaPath(treeDir, `thumbs/${mediaId}-${size}.webp`);
       return out && (await exists(out)) ? out : null;
     };
-    return (await serve()) ?? ((await this.run({ treeDir, mediaId, localPath })) ? serve() : null);
+    return (
+      (await serve()) ?? ((await this.run({ treeDir, mediaId, localPath }, 'now')) ? serve() : null)
+    );
   }
 
-  /** Resolves once the background queue is empty. */
+  /** Resolves once all background work is done. */
   idle(): Promise<void> {
-    if (!this.running && this.pending.length === 0) return Promise.resolve();
+    if (this.background === 0) return Promise.resolve();
     return new Promise((resolve) => this.idleWaiters.push(resolve));
   }
 
-  private run(task: Task): Promise<boolean> {
+  /** Renders currently decoding, and renders done so far (for tests and diagnostics). */
+  get running(): number {
+    return this.active;
+  }
+  renders = 0;
+
+  private run(task: Task, priority: Priority): Promise<boolean> {
     const key = `${task.treeDir}|${task.mediaId}`;
-    let work = this.inFlight.get(key);
-    if (!work) {
-      work = (async () => {
-        if (await exists(thumbFile(task.treeDir, task.mediaId, 'lg'))) return true;
-        const source = await imageSource(task.treeDir, task.localPath);
-        return source ? render(source, task.treeDir, task.mediaId) : false;
-      })().finally(() => this.inFlight.delete(key));
-      this.inFlight.set(key, work);
+    const existing = this.inFlight.get(key);
+    if (priority === 'now') this.urgent.add(key);
+    if (existing) {
+      if (priority === 'now') this.promote(key);
+      return existing;
     }
+    const work = (async () => {
+      if (await exists(thumbFile(task.treeDir, task.mediaId, 'lg'))) return true;
+      const source = await imageSource(task.treeDir, task.localPath);
+      if (!source) return false;
+      await this.acquire(key, this.urgent.has(key) ? 'now' : 'background');
+      try {
+        this.renders++;
+        return await render(source, task.treeDir, task.mediaId);
+      } finally {
+        this.release();
+      }
+    })().finally(() => {
+      this.inFlight.delete(key);
+      this.urgent.delete(key);
+    });
+    this.inFlight.set(key, work);
     return work;
   }
 
-  private async pump(): Promise<void> {
-    if (this.running) return;
-    this.running = true;
-    try {
-      for (let task = this.pending.shift(); task; task = this.pending.shift()) {
-        await this.run(task).catch(() => false);
-      }
-    } finally {
-      this.running = false;
-      const waiters = this.idleWaiters;
-      this.idleWaiters = [];
-      for (const resolve of waiters) resolve();
+  private acquire(key: string, priority: Priority): Promise<void> {
+    if (this.active < this.concurrency) {
+      this.active++;
+      return Promise.resolve();
     }
+    return new Promise((resolve) => {
+      const waiter = { key, priority, start: resolve };
+      if (priority === 'now') {
+        const firstBackground = this.waiting.findIndex((w) => w.priority === 'background');
+        this.waiting.splice(firstBackground < 0 ? this.waiting.length : firstBackground, 0, waiter);
+      } else {
+        this.waiting.push(waiter);
+      }
+    });
+  }
+
+  /** A request for an image already queued in the background moves it ahead. */
+  private promote(key: string): void {
+    const index = this.waiting.findIndex((w) => w.key === key && w.priority === 'background');
+    if (index < 0) return;
+    const [waiter] = this.waiting.splice(index, 1);
+    waiter!.priority = 'now';
+    const firstBackground = this.waiting.findIndex((w) => w.priority === 'background');
+    this.waiting.splice(firstBackground < 0 ? this.waiting.length : firstBackground, 0, waiter!);
+  }
+
+  private release(): void {
+    const next = this.waiting.shift();
+    if (next) next.start();
+    else this.active--;
   }
 }
 

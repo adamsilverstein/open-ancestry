@@ -13,6 +13,7 @@
   "dependencies": {
     "@open-ancestry/db": "*",
     "@open-ancestry/gedcom": "*",
+    "@open-ancestry/import": "*",
     "@open-ancestry/server": "*",
     "ajv": "^8.20.0"
   },

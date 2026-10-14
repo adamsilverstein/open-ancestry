@@ -98,16 +98,28 @@ both. `relationshipName({ up, down }, sex, half?, modifier?, style?)` names a sh
    cousin`).
 3. **Marriage.** Partners are named directly (`husband`, `wife`, `partner`) and listed alongside
    any blood relationship, as are in-laws through A's or B's own partner (`niece and also
-   daughter-in-law`, `aunt and also mother-in-law`), unless they only restate a blood tie. Otherwise a bidirectional breadth-first search over parent, child and
+   daughter-in-law`, `aunt and also mother-in-law`), unless they only restate a blood tie. Without a blood
+   tie only the shortest marriage path is named, so someone who is two in-laws at once (a
+   brother-in-law and also a co-father-in-law) gets one name. Otherwise a bidirectional breadth-first search over parent, child and
    partner links finds the shortest path with one or two marriages. Common shapes get their own
    words (`father-in-law`, `sister-in-law`, `stepmother`, `stepbrother`, `step-grandmother`,
    `step-granddaughter`). Longer paths are named from the first marriage on and extended, with
    "of" in the Ancestry style (`husband of stepmother`, `sister of wife of brother-in-law`) and
    possessives in the formal one (`stepmother’s husband`).
-   Adoption reads `adopted` when A was adopted on the way and `adoptive` when B's side was.
+   Adoption reads `adopted` when A was adopted on the way and `adoptive` when B's side was, except
+   between siblings, who are `adopted brother` / `adopted sister` from either side.
    When the graph has dates (`lifespan`, `union`), a parent's spouse is a step-parent, and their
    children step-siblings, only if the union overlapped the child's life; otherwise the chain is
    named as it is (`husband of mother`, `daughter of wife`). Missing dates count as overlapping.
 
 Bench (`npm run bench -- relationship`): any-to-any in a 10k-person tree, p99 about 1ms against a
 10ms budget.
+
+## Shared kin rules
+
+Which links make someone a parent, how two siblings relate, and how qualified words are spelled
+live in `../kin` (`parentLink`, `isParent`, `siblingKind`, `lineQualifier`, `qualify`,
+`parentWord`, `childWord`, `siblingWord`). The calculator, the person page and the tree card
+labels all use them, so they agree: `half-sister`, `adopted brother`, `stepbrother`,
+`foster sister`, `step-aunt`; `private` links count as birth, `related` and `guardian` as care
+(foster wording, `guardian`/`ward` for the direct link).

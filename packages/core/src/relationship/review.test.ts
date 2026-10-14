@@ -117,7 +117,7 @@ describe('review: tricky names', () => {
     ['sibU', 'sibKid', 'aunt or uncle'],
     ['gf', 'sibU', 'grandfather'],
     ['adoptee', 'me', 'adopted brother'],
-    ['me', 'adoptee', 'adoptive sister'],
+    ['me', 'adoptee', 'adopted sister'],
     ['adoptee', 'gf', 'adopted grandson'],
     ['gf', 'adoptee', 'adoptive grandfather'],
     ['adoptee', 'dad', 'adopted son'],

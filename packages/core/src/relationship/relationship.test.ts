@@ -87,7 +87,7 @@ describe('relationship names (A is B’s ...)', () => {
     ['adoptee', 'me', 'adopted son'],
     ['me', 'adoptee', 'adoptive mother'],
     ['adoptee', 'son', 'adopted brother'],
-    ['son', 'adoptee', 'adoptive brother'],
+    ['son', 'adoptee', 'adopted brother'],
     ['adoptee', 'dad', 'adopted grandson'],
     ['fosterkid', 'uncle', 'foster daughter'],
     ['uncle', 'fosterkid', 'foster father'],

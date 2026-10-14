@@ -43,8 +43,8 @@ import type {
   RelationshipResult,
   Span,
 } from './types';
-import type { ChildRelation } from '../layout/types';
 import { isVirtualParent } from './graph';
+import { isBirthParent, lineQualifier, parentLink } from '../kin';
 
 interface Arrival {
   id: string;
@@ -56,8 +56,6 @@ interface Arrival {
   bio: boolean;
 }
 
-const BIO = new Set<ChildRelation>(['biological', 'unknown']);
-
 /** Alternative lines kept per ancestor, depth and child, for pedigree collapse. */
 const LINES_PER_CHILD = 4;
 
@@ -66,10 +64,9 @@ const LINES_PER_CHILD = 4;
  * on A's side of the common ancestor (A was adopted), "adoptive" on B's.
  */
 function modifierOf(path: RelationshipPath, up: number): Modifier {
-  const at = path.steps.findIndex((s) => s.rel !== undefined && !BIO.has(s.rel));
-  const rel = path.steps[at]?.rel;
-  if (rel === 'adopted') return at < up ? 'adopted' : 'adoptive';
-  return rel === 'step' || rel === 'foster' ? rel : undefined;
+  const rels = path.steps.map((s) => s.rel);
+  const adopted = rels.findIndex((rel) => parentLink(rel) === 'adoptive');
+  return lineQualifier(rels, adopted < up ? 'adopted' : 'adoptive');
 }
 
 /**
@@ -100,7 +97,7 @@ function ancestors(g: KinshipGraph, start: string, maxGenerations: number, maxNo
           depth,
           path: [...arrival.path, parent.id],
           steps: [...arrival.steps, { kind: 'parent', rel: parent.rel }],
-          bio: arrival.bio && BIO.has(parent.rel),
+          bio: arrival.bio && isBirthParent(parent.rel),
         };
         list.push(reached);
         found.set(parent.id, list);
@@ -135,7 +132,7 @@ function parentSet(g: KinshipGraph, child: string, bio: boolean): Set<string> {
   return new Set(
     g
       .parents(child)
-      .filter((p) => (!bio || BIO.has(p.rel)) && !isVirtualParent(p.id))
+      .filter((p) => (!bio || isBirthParent(p.rel)) && !isVirtualParent(p.id))
       .map((p) => p.id),
   );
 }
@@ -362,7 +359,7 @@ function peaks(segment: Segment): Segment[] {
 function runName(g: KinshipGraph, run: Segment, style: NameStyle): { shape: Shape; name: string } {
   const up = run.steps.filter((s) => s.kind === 'parent').length;
   const shape: Shape = { up, down: run.steps.length - up };
-  const bio = run.steps.every((s) => !s.rel || BIO.has(s.rel));
+  const bio = run.steps.every((s) => !s.rel || isBirthParent(s.rel));
   const half = shape.up > 0 && shape.down > 0 && isHalf(g, run.ids[up - 1]!, run.ids[up + 1]!, bio);
   const modifier = bio ? undefined : modifierOf(run, up);
   return { shape, name: bloodName(shape, g.sex(run.ids[0]!), half, modifier, style) };

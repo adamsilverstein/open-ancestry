@@ -1,0 +1,66 @@
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-1);
+  min-width: 0;
+}
+
+.label {
+  font: var(--oa-text-sm);
+  font-weight: var(--oa-weight-medium);
+}
+
+.hint {
+  color: var(--oa-text-muted);
+  font: var(--oa-text-xs);
+}
+
+/* Errors carry an icon so they are not signalled by color alone. */
+.error {
+  display: flex;
+  align-items: center;
+  gap: var(--oa-space-1);
+  color: var(--oa-danger);
+  font: var(--oa-text-xs);
+  font-weight: var(--oa-weight-medium);
+}
+
+/* Shared control chrome for text inputs, select and combobox triggers. */
+.control {
+  width: 100%;
+  min-height: 36px;
+  padding: var(--oa-space-2) var(--oa-space-3);
+  border: 1px solid var(--oa-border-strong);
+  border-radius: var(--oa-radius-md);
+  background: var(--oa-surface);
+  color: var(--oa-text);
+  font: var(--oa-text-md);
+  transition: border-color var(--oa-duration-fast) var(--oa-ease);
+}
+
+.control::placeholder {
+  color: var(--oa-text-muted);
+}
+
+.control:is(:hover, [data-demo-hover]):not(:disabled) {
+  border-color: var(--oa-text-muted);
+}
+
+.control:focus-visible,
+.control[data-demo-focus] {
+  outline: var(--oa-focus-width) solid var(--oa-focus);
+  outline-offset: 0;
+  border-color: var(--oa-focus);
+}
+
+.control[aria-invalid='true'] {
+  border-color: var(--oa-danger);
+  border-width: 2px;
+}
+
+.control:disabled,
+.control[data-disabled] {
+  background: var(--oa-surface-sunken);
+  color: var(--oa-text-muted);
+  cursor: not-allowed;
+}

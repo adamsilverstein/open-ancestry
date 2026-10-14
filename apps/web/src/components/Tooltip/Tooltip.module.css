@@ -1,0 +1,18 @@
+.content {
+  display: flex;
+  align-items: center;
+  gap: var(--oa-space-2);
+  max-width: 280px;
+  padding: var(--oa-space-1) var(--oa-space-2);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-text);
+  color: var(--oa-bg);
+  font: var(--oa-text-xs);
+  z-index: 50;
+}
+
+.kbd {
+  font: var(--oa-text-xs);
+  font-family: var(--oa-font-sans);
+  opacity: 0.8;
+}

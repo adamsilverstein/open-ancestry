@@ -1,0 +1,32 @@
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--oa-space-2);
+}
+
+.checkbox {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+  accent-color: var(--oa-accent);
+  cursor: pointer;
+}
+
+.checkbox:disabled {
+  cursor: not-allowed;
+}
+
+.label {
+  cursor: pointer;
+}
+
+.checkbox:disabled + div .label {
+  color: var(--oa-text-muted);
+  cursor: not-allowed;
+}
+
+.description {
+  color: var(--oa-text-muted);
+  font: var(--oa-text-sm);
+}

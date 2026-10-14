@@ -1,0 +1,5 @@
+.textarea {
+  resize: vertical;
+  field-sizing: content;
+  min-height: 80px;
+}

@@ -1,0 +1,133 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-6);
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--oa-space-6) var(--oa-space-4) var(--oa-space-8);
+}
+
+.intro {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-2);
+}
+
+.title,
+.display {
+  font: var(--oa-text-display);
+  font-weight: var(--oa-weight-semibold);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--oa-space-3);
+  padding-top: var(--oa-space-5);
+  border-top: 1px solid var(--oa-border);
+}
+
+.sectionTitle {
+  font: var(--oa-text-xl);
+  font-weight: var(--oa-weight-semibold);
+}
+
+.notes {
+  color: var(--oa-text-muted);
+  font: var(--oa-text-sm);
+}
+
+.rowWrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-1);
+}
+
+.rowLabel {
+  color: var(--oa-text-muted);
+  font: var(--oa-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oa-space-3);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-3);
+}
+
+.section > :is(.formGrid, .swatches, .canvasDemo, .plainList, .rowWrap, ol, ul) {
+  align-self: stretch;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: var(--oa-space-4);
+  align-items: start;
+}
+
+.swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--oa-space-2);
+}
+
+.swatch {
+  display: flex;
+  align-items: center;
+  gap: var(--oa-space-2);
+  font: var(--oa-text-xs);
+}
+
+.swatch code {
+  font-family: var(--oa-font-mono);
+}
+
+.chip {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--oa-border-strong);
+  border-radius: var(--oa-radius-sm);
+}
+
+.typeScale {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-1);
+}
+
+.plainList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Tree components are shown on the canvas they live on. */
+.canvasDemo {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--oa-space-4);
+  padding: var(--oa-space-5);
+  border-radius: var(--oa-radius-md);
+  background: var(--oa-canvas);
+}
+
+.status {
+  min-height: 18px;
+  color: var(--oa-text-muted);
+  font: var(--oa-text-sm);
+}

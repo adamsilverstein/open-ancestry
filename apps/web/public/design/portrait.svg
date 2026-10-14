@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <!-- Synthetic sepia "portrait" for the design system page; not a real person. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c9b18a"/>
+      <stop offset="1" stop-color="#8a6f4b"/>
+    </linearGradient>
+  </defs>
+  <rect width="120" height="120" fill="url(#bg)"/>
+  <circle cx="60" cy="48" r="22" fill="#5a4630"/>
+  <path d="M18 120c4-30 22-44 42-44s38 14 42 44z" fill="#4a3826"/>
+  <path d="M38 44c0-16 10-26 22-26s22 10 22 26c-6-8-14-12-22-12s-16 4-22 12z" fill="#2e2216"/>
+</svg>

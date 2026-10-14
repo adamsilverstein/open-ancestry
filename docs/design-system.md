@@ -139,14 +139,15 @@ Code: `apps/web/src/components/<Name>/<Name>.tsx` + `<Name>.module.css`, re-expo
 | `ToastProvider`, `useToast()` | `toast({ title, description, variant: info/error, duration })` | Icon + colored edge per variant. |
 | `Input`, `Textarea` | `label`, `hint`, `error`, plus native props | Shared `Field` wiring: label, `aria-describedby` for hint and error, `aria-invalid`; error has an icon. |
 | `Select` | `label`, `options: { value, label, disabled? }[]`, `value`, `onValueChange`, `placeholder`, `disabled` | Radix Select. |
-| `Combobox` | `label`, `options`, `value`, `onValueChange`, `placeholder`, `searchLabel`, `emptyText`, `disabled` | Button trigger (`role="combobox"`) opening a filterable cmdk list in a popover. |
+| `Combobox` | `label`, `options`, `value`, `onValueChange`, `placeholder`, `searchLabel`, `emptyText`, `disabled`, `onSearchChange`, `selectedLabel` | Button trigger (`role="combobox"`) opening a filterable cmdk list in a popover. With `onSearchChange` it shows server results as given (no client filtering); `selectedLabel` names a selection that is no longer in `options`. |
 | `Checkbox` | `label`, `description`, `indeterminate`, native props | Native input with `accent-color`. |
 | `Switch` | `label`, native props | Native checkbox with `role="switch"`; state shown by knob position. |
 | `Menu`, `MenuTrigger`, `MenuContent`, `MenuItem`, `MenuRadioGroup`, `MenuRadioItem`, `MenuSeparator` | Radix DropdownMenu props | Used by the File menu and the layout switch. |
 | `Skeleton` | `width`, `height`, `shape` (text/rect/circle) | Decorative (`aria-hidden`); the container sets `aria-busy`. Size to the final content. |
 | `EmptyState` | `icon`, `title`, `level` (1-3), `description`, `action` | `level={1}` when the empty state is the page (serif title). |
 | `Panel` | `title`, `actions`, `variant` (raised/sunken), `headingLevel` | Titled panels are labelled regions. |
-| `DateInput` | | Deferred to F12 (editing), where the date parser from `packages/core` lands. |
+| `DateInput` | `label`, `value`, `onValueChange`, `hint`, `error`, input props | Keeps the text exactly as typed (it is stored as `date_text`). A live preview line under it (`aria-live`, part of the field's description) shows how core `parseDate` reads it: `abt. 1890 · about`, `bet. 1900 and 1905 · between`, an info note for numeric dates that could be read day first, or a warning that text is not a date and will be kept as text. The line is reserved so the form never shifts. |
+| `ConfirmDialog` | `open`, `onOpenChange`, `title`, `description`, `confirmLabel`, `onConfirm`, `danger` | `role="alertdialog"`; Cancel has initial focus so Enter never confirms by accident. Stacks above a dialog it was opened from. Use for deletes, and say whether the action can be undone. |
 
 Hover and focus can be forced for screenshots with `data-demo-hover` / `data-demo-focus` on Button, IconButton, Input and PersonCard; only `/design` uses them.
 
@@ -162,6 +163,12 @@ Hover and focus can be forced for screenshots with `data-demo-hover` / `data-dem
 - `/design` is the kitchen sink. `e2e/design.spec.ts` exercises every component's states and keyboard behavior and takes full-page visual snapshots in light and dark.
 - Visual baselines are Chromium on Linux only (`e2e/__screenshots__`), matching the ubuntu CI runner; other platforms skip the comparison. Regenerate them with `npm run e2e:snapshots`, which runs the suite in the official Playwright Docker image (requires Docker).
 - `e2e/a11y.spec.ts` runs axe on every route, and on the open command palette, in both themes.
+
+### Editing
+
+- Edits go through `useEdit(tree)` (`src/api/edits.ts`). An optimistic update of the cached person detail is applied in the same event as the click; on error the old detail is restored and an error toast names the edit; afterwards every query of the tree is refetched.
+- Each API request is one undoable change batch. Cmd/Ctrl-Z and Shift-Cmd/Ctrl-Z (or Ctrl-Y) undo and redo anywhere except inside text fields, which keep their own undo; a toast names what was undone. The History panel in the top bar lists recent batches, with undone ones struck through and labelled.
+- Edit dialogs mount only while open, so each opening starts from the saved values.
 
 ## Layout patterns
 

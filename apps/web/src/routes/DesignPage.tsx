@@ -17,6 +17,8 @@ import {
   Checkbox,
   Combobox,
   CommandPalette,
+  ConfirmDialog,
+  DateInput,
   Dialog,
   DialogClose,
   EmptyState,
@@ -216,6 +218,9 @@ export function DesignPage() {
   const [viewport, setViewport] = useState<Rect>({ x: 300, y: 200, width: 600, height: 340 });
   const [minimapVisible, setMinimapVisible] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [dates, setDates] = useState(['abt 1890', '05/06/1960', 'when the mill burned', '']);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmed, setConfirmed] = useState('');
 
   const center = (point: { x: number; y: number }) =>
     setViewport((v) => ({ ...v, x: point.x - v.width / 2, y: point.y - v.height / 2 }));
@@ -391,6 +396,41 @@ export function DesignPage() {
           <Input label="Focused" data-demo-focus="" defaultValue="Focus state" />
           <Input label="Record id" disabled defaultValue="@I123@" />
         </div>
+      </Section>
+
+      <Section
+        title="DateInput"
+        notes="Text is kept as typed; the preview shows how it is read, ambiguity, or that it is not a date."
+      >
+        <div className={styles.formGrid}>
+          {['Approximate', 'Ambiguous', 'Not a date', 'Empty'].map((label, i) => (
+            <DateInput
+              key={label}
+              label={label}
+              value={dates[i]!}
+              hint=""
+              onValueChange={(value) => setDates((d) => d.map((v, j) => (j === i ? value : v)))}
+            />
+          ))}
+        </div>
+      </Section>
+
+      <Section
+        title="ConfirmDialog"
+        notes="Alert dialog for destructive actions; Cancel is focused first."
+      >
+        <Button variant="danger" onClick={() => setConfirmOpen(true)}>
+          Delete record
+        </Button>
+        <ConfirmDialog
+          open={confirmOpen}
+          onOpenChange={setConfirmOpen}
+          title="Delete this record?"
+          description="You can undo this."
+          confirmLabel="Delete record"
+          onConfirm={() => setConfirmed('Deleted')}
+        />
+        <Status>{confirmed}</Status>
       </Section>
 
       <Section title="Textarea">

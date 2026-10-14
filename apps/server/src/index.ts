@@ -9,7 +9,7 @@ import fastifyStatic from '@fastify/static';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import type { Deps } from './context';
-import { errorBody, registerErrorHandling } from './errors';
+import { errorBody, registerErrorHandling, toApiError } from './errors';
 import { JobManager, type Importer } from './jobs';
 import { Library, defaultLibraryRoot } from './library';
 import { editRoutes } from './routes/edit';
@@ -17,7 +17,7 @@ import { importRoutes } from './routes/imports';
 import { mediaRoutes } from './routes/media';
 import { peopleRoutes } from './routes/people';
 import { treeRoutes } from './routes/trees';
-import { createToken, isLoopbackHost, registerSecurity } from './security';
+import { SECURITY_HEADERS, createToken, isLoopbackHost, registerSecurity } from './security';
 
 export { Library, defaultLibraryRoot, treeNameProblem } from './library';
 export {
@@ -76,6 +76,15 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     logger: options.logger ?? false,
     bodyLimit: JSON_BODY_LIMIT,
     ajv: { customOptions: { removeAdditional: false, coerceTypes: 'array' } },
+    // Router-level failures (malformed URL, bad content type) get the typed envelope too.
+    frameworkErrors: (error, _request, reply: FastifyReply) => {
+      const api = toApiError(error);
+      // These replies skip the request hooks, so add the headers here.
+      return reply
+        .headers(SECURITY_HEADERS)
+        .code(api.statusCode)
+        .send(errorBody(api.code, api.message));
+    },
   }).withTypeProvider<TypeBoxTypeProvider>();
 
   const library =

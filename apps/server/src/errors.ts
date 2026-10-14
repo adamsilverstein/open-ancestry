@@ -41,7 +41,7 @@ export function errorBody(code: ErrorCode, message: string): ErrorBody {
 }
 
 /** Maps Fastify, database and API errors onto the typed JSON envelope. */
-function toApiError(error: FastifyError | Error): ApiError {
+export function toApiError(error: FastifyError | Error): ApiError {
   if (error instanceof ApiError) return error;
   if (error instanceof NotFoundError) return notFound(error.message);
   if (error instanceof UndoConflictError) return conflict(error.message);

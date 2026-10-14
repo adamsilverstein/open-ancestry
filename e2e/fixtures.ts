@@ -18,21 +18,24 @@ const rawCoverageDir = join(import.meta.dirname, '..', 'coverage', 'e2e', 'raw')
  * build's `window.__coverage__` after each test when E2E_COVERAGE=1.
  */
 export const test = base.extend<{ collectCoverage: void; currentTree: void; cspGuard: void }>({
-  // Issue #106: any Content Security Policy violation in any test fails it.
+  // Issue #106: any Content Security Policy violation in any test fails it. Each
+  // violation is sent to Node as it happens, so ones on pages the test navigated or
+  // reloaded away from (and in other pages of the context) still count.
   cspGuard: [
-    async ({ page }, use) => {
-      await page.addInitScript(() => {
-        const seen: string[] = [];
-        (globalThis as unknown as { __cspViolations: string[] }).__cspViolations = seen;
+    async ({ context }, use) => {
+      const seen: string[] = [];
+      await context.exposeBinding('__oaCspViolation', (source, violation: string) => {
+        seen.push(`${violation} (page ${source.page?.url() ?? 'unknown'})`);
+      });
+      await context.addInitScript(() => {
         document.addEventListener('securitypolicyviolation', (event) => {
-          seen.push(`${event.violatedDirective} at ${event.sourceFile}:${event.lineNumber}`);
+          const report = (globalThis as unknown as { __oaCspViolation?: (v: string) => void })
+            .__oaCspViolation;
+          report?.(`${event.violatedDirective} at ${event.sourceFile}:${event.lineNumber}`);
         });
       });
       await use();
-      const violations = await page
-        .evaluate(() => (globalThis as unknown as { __cspViolations?: string[] }).__cspViolations)
-        .catch(() => undefined);
-      expect(violations ?? [], 'Content Security Policy violations').toEqual([]);
+      expect(seen, 'Content Security Policy violations').toEqual([]);
     },
     { auto: true },
   ],

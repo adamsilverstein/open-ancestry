@@ -1,10 +1,10 @@
 # open-ancestry data model
 
-Current schema version: **1**
+Current schema version: **2**
 
 This is the reference for the local data format: the SQLite schema inside every tree, the rules the code keeps on top of it, and the JSON interchange format. It is owned by `packages/db`. `packages/db/src/data-model-doc.test.ts` fails if a table or column exists in the live database but not here (or the other way round), or if an enum value is missing, so this document cannot drift from the DDL.
 
-- DDL: `packages/db/src/migrations/v001-initial.ts` (frozen dump: `packages/db/src/migrations/history/schema-v1.sql`)
+- DDL: `packages/db/src/migrations/v001-initial.ts` and `v002-history-order.ts` (frozen dumps and history fixtures: `packages/db/src/migrations/history/schema-vN.sql`, `oa-vN.json`)
 - Row types: `packages/db/src/types.ts`; enums: `packages/db/src/enums.ts`
 - JSON Schema for interchange: `packages/db/schema/oa-json.schema.json`
 
@@ -418,11 +418,12 @@ One unit of work (one user action). See [undo and redo](#change-log-undo-and-red
 
 | Column | Type | Null | Meaning |
 |---|---|---|---|
-| `id` | TEXT | no | ULID; sorts in creation order. |
+| `id` | TEXT | no | ULID. Its time part follows the wall clock, so it is **not** used for ordering (a session with its clock behind would sort its edits before older ones). |
 | `label` | TEXT | no | Human label for the history panel, e.g. `Edit birth of Ellis Vale`. |
 | `state` | TEXT | no | `applied` (default), `undone`, or `superseded` (was undone, then a new edit discarded the redo stack). |
 | `created_at` | TEXT | no | When the batch was committed. |
 | `state_changed_at` | TEXT | yes | Last undo, redo or supersede. |
+| `seq` | INTEGER | no | Commit order, 1, 2, 3, ... (unique). Assigned as `max(seq) + 1` inside the batch's write transaction; undo, redo and the history panel order by it. Added in v2, which numbered existing batches by their first `change_log.seq`. |
 
 ### `change_log`
 
@@ -438,6 +439,7 @@ Every row-level change made through the unit of work, with full before and after
 | `op` | TEXT | no | `insert`, `update` or `delete`. |
 | `before_json` | TEXT | yes | Whole row before (JSON, columns in table order); null for inserts. |
 | `after_json` | TEXT | yes | Whole row after; null for deletes. CHECK ties nullness to `op`. |
+| `schema_version` | INTEGER | no | Schema version the images were written under (rows from before v2 are `1`). Undo upgrades older images through later migrations; see [versioning](#versioning-policy). |
 
 ### `search_doc`
 
@@ -538,7 +540,9 @@ All edits go through `store.transact(label, tx => ...)`. One call is one `change
 
 - **Undo** replays a batch's log newest-first, restoring each row's `before_json`; **redo** replays oldest-first, restoring `after_json`. Both run in one transaction and keep the search index in sync.
 - **Conflict check:** before restoring a row, its current value must equal the image being replaced. If a later batch changed the same row, the operation fails with `UndoConflictError` and nothing changes.
-- **Redo stack:** committing a new batch marks every `undone` batch `superseded`; superseded batches cannot be redone. `undoLast` takes the newest `applied` batch, `redoLast` the oldest `undone` one.
+- **Order:** batches are ordered by `change_batch.seq` (commit order), never by their ULIDs, whose time part follows the wall clock.
+- **Redo stack:** committing a new batch marks every `undone` batch `superseded`; superseded batches cannot be redone. `undoLast` takes the `applied` batch with the highest `seq`, `redoLast` the `undone` one with the lowest.
+- **Images across versions:** each `change_log` row records the `schema_version` its images were written under. Before replaying, an older image is upgraded through every later migration's column map, then shaped to the table's current columns: unknown keys are ignored (they never reach SQL), missing columns take their DEFAULT, and a missing NOT NULL column without a default is an error. The conflict check compares the shaped image with the live row.
 - **Bulk import** (`BulkWriter`) does not write `change_log` rows: a v1 import creates a new tree, and undoing it means deleting the tree.
 
 Property tests (fast-check) apply random edit scripts and assert that undoing every batch restores each earlier snapshot byte for byte, and redoing restores each later one.
@@ -561,7 +565,7 @@ Each result reports its `match` tier. Within a tier, BM25 ranks names 10, phonet
 {
   "format": "open-ancestry",
   "formatVersion": 1,
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "tables": {
     "change_batch": [],
     "person": [{ "id": "01J...", "sex": "F", "living": "inferred_dead", "...": "..." }]
@@ -571,7 +575,7 @@ Each result reports its `match` tier. Within a tier, BM25 ranks names 10, phonet
 
 - Rows have exactly the table's columns, in schema order. Tables appear in name order; rows are sorted by primary key. The file is `JSON.stringify(doc, null, 2)` plus a trailing newline. This canonical form makes export, import into a new tree, and export again byte-identical (tested).
 - `change_batch` and `change_log` are included by default (so undo history survives a round-trip) and can be left out with `{ history: false }`.
-- Import requires an empty tree with the same `schemaVersion`; it loads everything in one transaction and rebuilds the search index.
+- Import requires an empty tree. A document from an older `schemaVersion` is upgraded through each later migration (its column map, then any `upgradeTables` step) before validation; one from a newer version is refused. Import loads everything in one transaction and rebuilds the search index.
 - The JSON Schema in `packages/db/schema/oa-json.schema.json` is generated from the live schema (`npm run generate:json-schema -w @open-ancestry/db`); a test fails if it is stale, and exports are validated against it.
 
 ## Versioning policy
@@ -579,4 +583,27 @@ Each result reports its `match` tier. Within a tier, BM25 ranks names 10, phonet
 - `meta.schema_version` holds the applied migration number. Migrations are forward-only: a database is never downgraded, and opening a database newer than the app is refused.
 - Each migration runs in its own transaction; a failure leaves the database at the previous version.
 - Released migrations are frozen. `history/schema-vN.sql` is the exact schema each version produced; tests check that migration N still produces it, and that a database at every historical version upgrades to exactly the fresh schema.
-- To change the schema: add `vNNN-<name>.ts` and append it to `MIGRATIONS`, run `npm run dump-schema -w @open-ancestry/db` to freeze `schema-vN.sql`, regenerate the JSON Schema, update this document (the doc test lists what is missing), and bump `formatVersion` only if the JSON envelope itself changes.
+- Undo history and JSON backups survive migrations. Each migration declares how it changed columns, so rows written before it can be upgraded:
+
+  ```ts
+  {
+    version: 3,
+    name: 'person-alias',
+    sql: v003,
+    columns: {
+      person: { added: { future_col: 'none' } },   // new column -> value existing rows get (its DEFAULT)
+      place: { renamed: { type: 'kind' } },          // old name -> new name
+      event: { dropped: ['cause'] },
+    },
+    // Optional, for values computed from other rows (v2 numbers batches this way):
+    upgradeTables: (tables) => { /* edit an older JSON document's rows in place */ },
+  }
+  ```
+
+  A new table needs no entry: older images and documents simply have no rows for it. Renaming or dropping a whole table is not supported by the column map; add an `upgradeTables` step and keep history replay in mind.
+- `history/oa-vN.json` is a frozen synthetic tree with undo history (including a clock step back) exported by version N. Tests load every fixture both as a database at its version (frozen schema plus rows) and as a JSON backup, upgrade them to the latest version, and undo and redo the whole history. A simulated future migration that adds, renames and drops columns runs the same checks, so every new migration is gated on keeping old history usable.
+- To change the schema:
+  1. add `vNNN-<name>.ts`, append it to `MIGRATIONS` with its `columns` map (and `upgradeTables` if needed);
+  2. run `npm run dump-schema -w @open-ancestry/db` and `npm run freeze-history-fixture -w @open-ancestry/db` to freeze `schema-vN.sql` and `oa-vN.json`;
+  3. regenerate the JSON Schema (`npm run generate:json-schema -w @open-ancestry/db`);
+  4. update this document (the doc test lists what is missing), and bump `formatVersion` only if the JSON envelope itself changes.

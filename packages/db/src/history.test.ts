@@ -110,14 +110,17 @@ function frozenTree(version: number): string {
   mkdirSync(dir);
   const db = new Database(join(dir, 'tree.sqlite'));
   db.exec(readFileSync(join(historyDir, `schema-v${version}.sql`), 'utf8'));
+  // Foreign keys are deferred: load everything in one transaction.
+  db.exec('BEGIN');
   for (const [table, rows] of Object.entries(readFixture(version).tables)) {
-    for (const row of rows as Record<string, unknown>[]) {
+    for (const row of rows as unknown as Record<string, unknown>[]) {
       const columns = Object.keys(row);
       db.prepare(
         `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`,
       ).run(columns.map((c) => row[c]));
     }
   }
+  db.exec('COMMIT');
   db.close();
   return dir;
 }
@@ -292,7 +295,9 @@ describe('change_log images are tolerant and versioned', () => {
     const id = row.id as string;
     const withExtra = JSON.stringify({ ...row, 'dropped_col; DROP TABLE person': 1 });
     expect(parseLogImage(store, 'person', id, withExtra)).toEqual(row);
-    const { privacy: _privacy, primary_media_id: _media, ...missing } = row;
+    const missing = { ...row };
+    delete missing.privacy;
+    delete missing.primary_media_id;
     expect(parseLogImage(store, 'person', id, JSON.stringify(missing))).toEqual({
       ...row,
       privacy: 'public',
@@ -304,7 +309,8 @@ describe('change_log images are tolerant and versioned', () => {
   it('refuses images missing a required column, or from a newer version', () => {
     const store = openMemoryTree();
     const row = personImage(store);
-    const { created_at: _created, ...missing } = row;
+    const missing = { ...row };
+    delete missing.created_at;
     expect(() => parseLogImage(store, 'person', row.id as string, JSON.stringify(missing))).toThrow(
       /missing created_at/,
     );

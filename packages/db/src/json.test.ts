@@ -216,7 +216,8 @@ describe('JSON interchange', () => {
       const doc = baseDoc();
       const entry = doc.tables.change_log?.[0] as { after_json: string };
       const image = JSON.parse(entry.after_json) as Record<string, unknown>;
-      const { created_at: _created, ...missingRequired } = image;
+      const missingRequired = { ...image };
+      delete missingRequired.created_at;
       rejects(tamper({ after_json: JSON.stringify(missingRequired) }), /missing created_at/);
       rejects(tamper({ schema_version: 99 }), /newer/);
       rejects(tamper({ after_json: JSON.stringify({ ...image, id: 'OTHER' }) }), /key/);

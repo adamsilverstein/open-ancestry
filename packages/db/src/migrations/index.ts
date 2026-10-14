@@ -1,17 +1,96 @@
 import type { Database } from 'better-sqlite3';
 import v001 from './v001-initial';
+import v002 from './v002-history-order';
+
+/** How a migration changed one table's columns, so rows written before it can be upgraded. */
+export interface ColumnChanges {
+  /** New columns and the value existing rows get (the column's DEFAULT). */
+  added?: Record<string, unknown>;
+  dropped?: string[];
+  /** Old name -> new name. */
+  renamed?: Record<string, string>;
+}
+
+/** Rows by table, as in the JSON interchange format. */
+export type TableRowsByName = Record<string, Record<string, unknown>[]>;
 
 export interface Migration {
   version: number;
   name: string;
   sql: string;
+  /**
+   * Column changes per table. Undo upgrades change_log images recorded under
+   * older versions through these, and JSON import upgrades older backups.
+   */
+  columns?: Record<string, ColumnChanges>;
+  /**
+   * For changes a column map cannot express (values computed from other
+   * rows): applied to an older JSON document's tables after `columns`.
+   */
+  upgradeTables?: (tables: TableRowsByName) => void;
+}
+
+/** v2: number existing batches by commit order, mirroring the SQL backfill. */
+function numberBatches(tables: TableRowsByName): void {
+  const batches = tables.change_batch;
+  if (!batches) return;
+  const first = new Map<unknown, number>();
+  for (const entry of tables.change_log ?? []) {
+    const seq = entry.seq;
+    if (typeof seq !== 'number') continue;
+    const known = first.get(entry.batch_id);
+    if (known === undefined || seq < known) first.set(entry.batch_id, seq);
+  }
+  const key = (b: Record<string, unknown>) => first.get(b.id) ?? Infinity;
+  [...batches]
+    .sort((a, b) => key(a) - key(b) || (String(a.id) < String(b.id) ? -1 : 1))
+    .forEach((batch, i) => (batch.seq = i + 1));
 }
 
 /**
- * Forward-only migrations. To change the schema, append a migration, add its
- * frozen dump as history/schema-vN.sql, and update docs/data-model.md.
+ * Forward-only migrations. To change the schema, append a migration with its
+ * column map, freeze history/schema-vN.sql and history/oa-vN.json, and update
+ * docs/data-model.md ("Versioning policy" has the checklist).
  */
-export const MIGRATIONS: readonly Migration[] = [{ version: 1, name: 'initial', sql: v001 }];
+export const MIGRATIONS: readonly Migration[] = [
+  { version: 1, name: 'initial', sql: v001 },
+  {
+    version: 2,
+    name: 'history-order',
+    sql: v002,
+    columns: { change_batch: { added: { seq: 0 } }, change_log: { added: { schema_version: 1 } } },
+    upgradeTables: numberBatches,
+  },
+];
+
+/**
+ * Upgrades one row written under `fromVersion` through every later
+ * migration's column map. Returns a new object; the input is not changed.
+ */
+export function upgradeRow(
+  migrations: readonly Migration[],
+  fromVersion: number,
+  table: string,
+  row: Record<string, unknown>,
+): Record<string, unknown> {
+  let out = row;
+  for (const migration of migrations) {
+    const changes = migration.version > fromVersion ? migration.columns?.[table] : undefined;
+    if (!changes) continue;
+    out = { ...out };
+    for (const [from, to] of Object.entries(changes.renamed ?? {})) {
+      if (Object.hasOwn(out, from)) {
+        out[to] = out[from];
+        delete out[from];
+      }
+    }
+    for (const column of changes.dropped ?? []) delete out[column];
+    for (const [column, value] of Object.entries(changes.added ?? {})) {
+      if (!Object.hasOwn(out, column)) out[column] = value;
+    }
+  }
+  return out;
+}
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.length;
 

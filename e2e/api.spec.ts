@@ -175,3 +175,72 @@ test('the app can mutate same-origin, other origins cannot read the token', asyn
   }, baseURL!);
   expect(crossOrigin).toBe('blocked');
 });
+
+/** Sends `method path` exactly as written, so dot segments and escapes reach the server raw. */
+function rawRequest(baseURL: string, method: string, path: string): Promise<number> {
+  const { hostname, port } = new URL(baseURL);
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      { hostname, port, method, path, headers: { host: `${hostname}:${port}` } },
+      (res) => {
+        res.resume();
+        res.on('end', () => resolve(res.statusCode ?? 0));
+      },
+    );
+    req.on('error', reject);
+    req.end('{}');
+  });
+}
+
+test('encoded or dotted paths cannot sneak a mutation past the guard', async ({
+  request,
+  baseURL,
+}, testInfo) => {
+  const headers = await session(request, baseURL!);
+  const name = uniqueTree(testInfo);
+  const base = `/api/trees/${encodeURIComponent(name)}`;
+  await request.post('/api/trees', { headers, data: { name } });
+  await request.post(`${base}/people`, { headers, data: { names: [{ given: 'Ada' }] } });
+
+  for (const path of [
+    `/%61pi${base.slice(4)}/undo`,
+    `/ap%69${base.slice(4)}/undo`,
+    `/api/%2e%2e${base}/undo`,
+    `/api/..${base}/undo`,
+    `/%2561pi${base.slice(4)}/undo`,
+  ]) {
+    expect(await rawRequest(baseURL!, 'POST', path), path).toBe(400);
+  }
+  for (const path of [`${base}/undo/`, `/API${base.slice(4)}/undo`]) {
+    expect(await rawRequest(baseURL!, 'POST', path), path).toBe(403);
+  }
+  const history = await (await request.get(`${base}/history`)).json();
+  expect(history.items[0].state).toBe('applied');
+});
+
+test('a cross-site page cannot undo edits, even with an encoded path', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const headers = await session(request, baseURL!);
+  const name = uniqueTree(testInfo);
+  const base = `/api/trees/${encodeURIComponent(name)}`;
+  await request.post('/api/trees', { headers, data: { name } });
+  await request.post(`${base}/people`, { headers, data: { names: [{ given: 'Ada' }] } });
+
+  const port = new URL(baseURL!).port;
+  await page.goto(`http://localhost:${port}/`);
+  await page.evaluate(
+    async ({ target, paths }) => {
+      for (const path of paths) {
+        await fetch(`${target}${path}`, { method: 'POST', mode: 'no-cors', body: 'x' }).catch(
+          () => {},
+        );
+      }
+    },
+    { target: baseURL!, paths: [`${base}/undo`, `/%61pi${base.slice(4)}/undo`] },
+  );
+  const history = await (await request.get(`${base}/history`)).json();
+  expect(history.items[0].state).toBe('applied');
+});

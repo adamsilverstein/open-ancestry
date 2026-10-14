@@ -8,6 +8,7 @@ import {
   isLoopbackHost,
   isSameOrigin,
   parseHostHeader,
+  pathProblem,
   SECURITY_HEADERS,
 } from './security';
 import {
@@ -228,6 +229,102 @@ describe('session token and mutation guard', () => {
   });
 });
 
+describe('paths the router would decode', () => {
+  it.each([
+    ['POST', '/%61pi/trees'],
+    ['POST', '/ap%69/trees'],
+    ['POST', '/%41PI/trees'],
+    ['DELETE', '/%61pi/trees/Accepted%201'],
+    ['POST', '/api/trees/Accepted%201/%75ndo'],
+    ['POST', '/api/trees%2fAccepted%201/undo'],
+    ['POST', '/%2561pi/trees'],
+    ['POST', '/api//trees'],
+    ['GET', '/%61pi/session'],
+  ])('refuses %s %s before routing', async (method, url) => {
+    const res = await api.inject({
+      method: method as 'POST',
+      url,
+      headers: { host: HOST },
+      payload: { name: 'Sneaky' },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('bad_request');
+    expectSecurityHeaders(res.headers);
+  });
+
+  it.each(['/API/trees', '/Api/trees', '/api/trees/', '/apifoo', '/', '/anything/else'])(
+    'requires the token for a mutation to %s whatever the path',
+    async (url) => {
+      const res = await api.inject({
+        method: 'POST',
+        url,
+        headers: { host: HOST },
+        payload: { name: 'Sneaky' },
+      });
+      expect(res.statusCode).toBe(403);
+      expect(res.json().error.code).toBe('forbidden');
+    },
+  );
+
+  it('still serves legitimately encoded names', async () => {
+    expect((await api.get('/api/trees/Accepted%201')).statusCode).toBe(200);
+    expect((await api.get('/api/trees/M%C3%BCller')).statusCode).toBe(404);
+  });
+
+  it('pathProblem', () => {
+    expect(pathProblem('/api/trees/Vale%20Family?q=%61')).toBeNull();
+    expect(pathProblem('/api/trees/')).toBeNull();
+    expect(pathProblem('/')).toBeNull();
+    expect(pathProblem('/a%7e')).not.toBeNull();
+    expect(pathProblem('/a%5Cb')).not.toBeNull();
+    expect(pathProblem('/a%2')).not.toBeNull();
+    expect(pathProblem('/a%zz')).not.toBeNull();
+    expect(pathProblem('/a/./b')).not.toBeNull();
+    expect(pathProblem('/a/..')).not.toBeNull();
+    // Light-my-request normalizes these before the server sees them; e2e sends them raw.
+    expect(pathProblem('/api/%2e%2e/api/trees')).not.toBeNull();
+    expect(pathProblem('/api/../api/trees')).not.toBeNull();
+  });
+});
+
+describe('cross-site navigation', () => {
+  it('lets a cross-site link open the app but refuses cross-site fetches and forms', async () => {
+    const nav = { 'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'navigate' };
+    expect((await api.get('/', nav)).statusCode).not.toBe(403);
+    expect(
+      (await api.get('/', { 'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'cors' })).statusCode,
+    ).toBe(403);
+    const form = await api.inject({
+      method: 'POST',
+      url: '/api/trees',
+      headers: { ...MUTATION_HEADERS, ...nav },
+      payload: { name: 'Form' },
+    });
+    expect(form.statusCode).toBe(403);
+  });
+});
+
+describe('framework errors', () => {
+  it('carry the security headers and the error envelope', async () => {
+    const res = await api.inject({
+      method: 'GET',
+      url: '/api/trees/%E0%A4%A',
+      headers: { host: HOST },
+    });
+    expect(res.statusCode).toBe(400);
+    expectSecurityHeaders(res.headers);
+    const bad = await api.inject({
+      method: 'POST',
+      url: '/api/trees',
+      headers: { ...MUTATION_HEADERS, 'content-type': 'application/json' },
+      payload: '{not json',
+    });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json().error.code).toBe('bad_request');
+    expectSecurityHeaders(bad.headers);
+  });
+});
+
 describe('no CORS', () => {
   it('never sends CORS headers, even to a preflight', async () => {
     const preflight = await api.inject({
@@ -275,6 +372,9 @@ describe('helpers', () => {
   it('parseHostHeader', () => {
     expect(parseHostHeader('localhost.')?.hostname).toBe('localhost.');
     expect(parseHostHeader('user@localhost')).toBeNull();
+    expect(parseHostHeader('localhost:99999')).toBeNull();
+    expect(parseHostHeader('localhost:0')).toBeNull();
+    expect(parseHostHeader('localhost:65535')?.port).toBe('65535');
     expect(parseHostHeader('LocalHost:80')).toEqual({ hostname: 'localhost', port: '80' });
     expect(parseHostHeader('[::1]')).toEqual({ hostname: '[::1]', port: '' });
     expect(parseHostHeader('a b')).toBeNull();

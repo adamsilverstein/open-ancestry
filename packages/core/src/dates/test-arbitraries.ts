@@ -40,6 +40,10 @@ interface Span {
 /** Last year of `<first>s`: a century when it ends in 00 before 2000, else a decade. */
 const spanEnd = (first: number) => first + (first % 100 === 0 && first < 2000 ? 99 : 9);
 
+/** Last year of `<right>s` after `<left>s`: a century only when the left side is one. */
+const rightEnd = (left: number, right: number) =>
+  right + (left % 100 === 0 && left < 2000 && right % 100 === 0 ? 99 : 9);
+
 /** A decade (`1850s`, `1850's`, `2000s`) or a century before 2000 (`1700s`). */
 export const arbDecade: fc.Arbitrary<Span> = fc
   .tuple(fc.integer({ min: 1, max: 209 }), fc.constantFrom('s', "'s", 'S'))
@@ -64,8 +68,8 @@ export const arbHyphenSpan: fc.Arbitrary<Span> = fc.oneof(
   fc.tuple(fc.integer({ min: 101, max: 203 }), fc.integer({ min: 0, max: 5 })).map(([d, gap]) => ({
     text: `${d * 10}s-${(d + gap) * 10}s`,
     first: d * 10,
-    // The end follows the parser's rule: `1350s-1400s` runs to the end of the 1400s century.
-    last: spanEnd((d + gap) * 10),
+    // The right side is read at the left side's granularity: `1350s-1400s` ends in 1409.
+    last: rightEnd(d * 10, (d + gap) * 10),
   })),
 );
 
@@ -88,20 +92,14 @@ export const arbSpanDate: fc.Arbitrary<{ text: string; means: string }> = fc.one
   ),
   arbDecade.map((s) => ({ text: `FROM ${s.text}`, means: `FROM ${s.first}` })),
   arbHyphenSpan.map((s) => ({ text: `FROM ${s.text}`, means: `FROM ${s.first} TO ${s.last}` })),
-  fc.tuple(arbDecade, arbDecade).map(([a, b]) => {
-    const [lo, hi] = a.first <= b.first ? [a, b] : [b, a];
-    const last = Math.max(lo.last, hi.last);
-    // A century contains its decades, so the period ends at whichever span ends later.
-    return lo.last > hi.last
-      ? { text: `FROM ${lo.text} TO ${lo.text}`, means: `FROM ${lo.first} TO ${lo.last}` }
-      : { text: `FROM ${lo.text} TO ${hi.text}`, means: `FROM ${lo.first} TO ${last}` };
-  }),
-  fc.tuple(arbDecade, arbDecade).map(([a, b]) => {
-    const [lo, hi] = a.first <= b.first ? [a, b] : [b, a];
-    return lo.last > hi.last
-      ? { text: `BET ${lo.text} AND ${lo.text}`, means: `BET ${lo.first} AND ${lo.last}` }
-      : { text: `BET ${lo.text} AND ${hi.text}`, means: `BET ${lo.first} AND ${hi.last}` };
-  }),
+  fc
+    .tuple(arbDecade, arbDecade, fc.constantFrom(['FROM', 'TO'], ['BET', 'AND']))
+    .map(([a, b, [k1, k2]]) => {
+      const [lo, hi] = a.first <= b.first ? [a, b] : [b, a];
+      // The right side is read at the left side's granularity.
+      const end = rightEnd(lo.first, hi.first);
+      return { text: `${k1} ${lo.text} ${k2} ${hi.text}`, means: `${k1} ${lo.first} ${k2} ${end}` };
+    }),
 );
 
 /** Valid GEDCOM date strings across every qualifier and range form. */

@@ -52,6 +52,15 @@ describe('decades, centuries and hyphenated ranges', () => {
     ['1900s', 'BET 1900 AND 1999'],
     // Spans on either side of a written-out range.
     ['BET 1850s AND 1860s', 'BET 1850 AND 1869'],
+    // The right side of a two-sided span is read at the left side's granularity.
+    ['1660s-1700s', 'BET 1660 AND 1709'],
+    ['1700s-1800s', 'BET 1700 AND 1899'],
+    ['1700s-1750s', 'BET 1700 AND 1759'],
+    ['1990s-2000s', 'BET 1990 AND 2009'],
+    ['BET 1660s AND 1700s', 'BET 1660 AND 1709'],
+    ['BET 1700s AND 1800s', 'BET 1700 AND 1899'],
+    ['Abt. 1660s-1700s', 'BET 1660 AND 1709'],
+    ['Bef. 1660s-1700s', 'BEF 1709'],
   ])('%j means %s', (input, gedcom) => {
     const date = parseDate(input);
     expect(date.text).toBe(input);
@@ -94,6 +103,9 @@ describe('periods bounded by decades and centuries', () => {
     ['TO 2000s', 'TO 2009'],
     // Both ends.
     ['FROM 1850s TO 1860s', 'FROM 1850 TO 1869'],
+    ['FROM 1660s TO 1700s', 'FROM 1660 TO 1709'],
+    ['FROM 1660s-1700s', 'FROM 1660 TO 1709'],
+    ['TO 1660s-1700s', 'TO 1709'],
     ['FROM 1700s TO 1800s', 'FROM 1700 TO 1899'],
     ['FROM 1850 TO 1860s', 'FROM 1850 TO 1869'],
     ['FROM 1850s TO 1855', 'FROM 1850 TO 1855'],

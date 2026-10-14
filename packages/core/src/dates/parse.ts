@@ -50,7 +50,9 @@ const SIMPLE_QUALIFIERS: Record<string, DateQualifier> = {
 const YEAR_RANGE = /^(\d{3,4}) ?(?:-|–|TO) ?(\d{2}|\d{4})$/;
 /**
  * `1850S`, `1700S`, `1850'S`, `1850S-1860S`: decades, or centuries when ending
- * in 00 before 2000 (`2000S` is the decade 2000-2009).
+ * in 00 before 2000 (`2000S` is the decade 2000-2009). In a two-sided span the
+ * right side takes the left side's granularity: `1660S-1700S` is 1660-1709,
+ * `1700S-1800S` is 1700-1899.
  */
 const DECADES = /^(\d{1,3}0)'?S(?: ?(?:-|–|TO) ?(\d{1,3}0)'?S)?$/;
 const ISO = /^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$/;
@@ -145,16 +147,27 @@ function parseNormalized(
   return p && single(original, 'exact', p);
 }
 
+/** `1700s` alone is the eighteenth century; 21st-century `2000s` is a decade (#52). */
+const isCentury = (first: number) => first % 100 === 0 && first < 2000;
+
+/** Last year of `<first>s` read as a century or as a decade. */
+const lastYear = (first: number, century: boolean) =>
+  first + (century && first % 100 === 0 ? 99 : 9);
+
 /**
  * Years written as one span: `1850S` (decade), `1700S` (century), `1850S-1860S`,
  * `1850-1860` or `1850-60`. Undefined when `s` is not a span.
  */
-function yearSpan(s: string): [number, number] | undefined {
+function yearSpan(s: string, centuries?: boolean): [number, number] | undefined {
   let match = DECADES.exec(s);
   if (match) {
     const start = Number(match[1]);
-    const last = match[2] === undefined ? start : Number(match[2]);
-    const end = last + (last % 100 === 0 && last < 2000 ? 99 : 9);
+    const end =
+      match[2] === undefined
+        ? lastYear(start, centuries ?? isCentury(start))
+        : // The right side is read at the left side's granularity: `1660s-1700s` is decades
+          // (1660-1709), `1700s-1800s` centuries (1700-1899).
+          lastYear(Number(match[2]), isCentury(start));
     return start > 0 && end >= start ? [start, end] : undefined;
   }
   // `1890-95` is a range but `1890-09` is ISO year-month.
@@ -375,8 +388,12 @@ function range(
   calendar: Calendar,
 ): ParsedDate | undefined {
   // Either side may be a span itself: `BET 1850S AND 1860S` runs 1850-1869.
+  // A decade or century on the right is read at the left side's granularity, as in a
+  // hyphenated span: `BET 1660s AND 1700s` ends in 1709, `FROM 1700s TO 1800s` in 1899.
+  const left = DECADES.exec(a);
+  const centuries = left ? isCentury(Number(left[2] ?? left[1])) : undefined;
   const side = (s: string, i: 0 | 1): Point | undefined => {
-    const span = yearSpan(s);
+    const span = yearSpan(s, i === 1 ? centuries : undefined);
     return parsePoint(s, calendar) ?? (span && { point: { year: span[i] }, calendar });
   };
   const start = side(a, 0);

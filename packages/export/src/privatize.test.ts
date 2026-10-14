@@ -41,7 +41,7 @@ function livingOnlyStrings(store: TreeStore): string[] {
   const strings = new Map<string, boolean>(); // value -> seen on a non-private owner
   const add = (value: unknown, isPrivate: boolean) => {
     if (typeof value !== 'string' || value.trim().length < 3) return;
-    for (const part of value.split(/[\s/,;:]+/)) {
+    for (const part of value.split(/[^\p{L}\p{N}]+/u)) {
       if (part.length < 4) continue;
       strings.set(part, (strings.get(part) ?? false) || !isPrivate);
     }
@@ -104,13 +104,10 @@ function livingOnlyStrings(store: TreeStore): string[] {
 }
 
 /** Whole-word occurrences, so a year does not match inside a record number. */
-const leaks = (text: string, secrets: string[]) =>
-  secrets.filter((s) =>
-    new RegExp(
-      `(^|[^\\p{L}\\p{N}])${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\p{L}\\p{N}])`,
-      'u',
-    ).test(text),
-  );
+const leaks = (text: string, secrets: string[]) => {
+  const words = new Set(text.split(/[^\p{L}\p{N}]+/u));
+  return secrets.filter((s) => words.has(s));
+};
 
 const synthetic = ged(
   '0 @I1@ INDI',
@@ -207,6 +204,15 @@ describe('privatize living people', () => {
     async (file) => {
       const store = await importInto(readFileSync(join(FIXTURES, file)));
       const secrets = livingOnlyStrings(store);
+      if (file === 'ancestry-sample.ged') {
+        expect(secrets).toEqual(
+          expect.arrayContaining(['Margaret', 'Lily', 'Larkspur', 'Brackenridge', '2014', '1983']),
+        );
+      }
+      // Without the option they are written (a CONC can split one across lines).
+      if (secrets.length) {
+        expect(leaks(exportGedcom(store, { now: TODAY }), secrets).length).toBeGreaterThan(0);
+      }
       for (const version of ['5.5.1', '7'] as const) {
         const out = exportGedcom(store, { version, privatizeLiving: true, now: TODAY });
         expect(leaks(out, secrets), version).toEqual([]);

@@ -394,7 +394,11 @@ export class RecordWriter {
   }
 
   private event(event: EventRow): GedcomNode {
-    return n(event.type, event.value, [
+    // The edit API accepts `birt`; GEDCOM tags without a leading underscore are upper case.
+    const tag = /^[A-Za-z0-9][A-Za-z0-9_]*$/.test(event.type)
+      ? event.type.toUpperCase()
+      : event.type;
+    return n(tag, event.value, [
       v('TYPE', event.custom_type),
       this.date(event.date_text),
       this.place(event.place_id),

@@ -678,9 +678,29 @@ export interface ListPeopleOptions {
   offset?: number;
 }
 
+/** Earliest principal date of the given event types per person, as one grouped pass. */
 const vitalSort = (types: readonly string[]) =>
-  `(SELECT min(e.date_sort) FROM event_role r CROSS JOIN event e ON e.id = r.event_id
-    WHERE r.person_id = p.id AND r.role = 'principal' AND e.type IN (${types.map((t) => `'${t}'`).join(', ')}))`;
+  `LEFT JOIN (SELECT r.person_id, min(e.date_sort) AS k FROM event_role r
+      CROSS JOIN event e ON e.id = r.event_id
+      WHERE r.role = 'principal' AND e.type IN (${types.map((t) => `'${t}'`).join(', ')})
+        AND e.date_sort IS NOT NULL
+      GROUP BY r.person_id) v ON v.person_id = p.id`;
+
+/*
+ * Sorting a whole tree (and OFFSET deep into it) costs far more than reading
+ * one page, and the list asks for page after page of the same order while the
+ * user scrolls. So the full sorted id list is computed once per (filters,
+ * sort, database version) and pages are slices of it. The version combines
+ * this connection's total_changes() with PRAGMA data_version (writes from
+ * other connections), so any write anywhere invalidates it.
+ */
+const ORDER_CACHE_SIZE = 4;
+const orderCache = new WeakMap<TreeStore, Map<string, string[]>>();
+
+function databaseVersion(store: TreeStore): string {
+  const { changes } = store.stmt('SELECT total_changes() AS changes').get() as { changes: number };
+  return `${changes}:${store.db.pragma('data_version', { simple: true }) as number}`;
+}
 
 /** The people list: sorted, filtered and paginated, with the total match count. */
 export function listPeople(
@@ -695,6 +715,25 @@ export function listPeople(
     offset = 0,
   }: ListPeopleOptions = {},
 ): { total: number; items: PersonSummary[] } {
+  const ids = sortedPeople(store, { sort, direction, sex, living, tagId });
+  const page = ids.slice(Math.max(0, offset), Math.max(0, offset) + Math.max(0, limit));
+  return { total: ids.length, items: getPersonSummaries(store, page) };
+}
+
+function sortedPeople(
+  store: TreeStore,
+  { sort, direction, sex, living, tagId }: Omit<ListPeopleOptions, 'limit' | 'offset'>,
+): string[] {
+  const cacheKey = JSON.stringify([sort, direction, sex, living, tagId, databaseVersion(store)]);
+  let cache = orderCache.get(store);
+  const hit = cache?.get(cacheKey);
+  if (hit) {
+    // Refresh recency.
+    cache!.delete(cacheKey);
+    cache!.set(cacheKey, hit);
+    return hit;
+  }
+
   const dir = direction === 'desc' ? 'DESC' : 'ASC';
   const where: string[] = [];
   const params: unknown[] = [];
@@ -715,19 +754,27 @@ export function listPeople(
   const keys: Record<string, string> = {
     surname: `n.surname IS NULL, n.surname COLLATE NOCASE ${dir}, n.given COLLATE NOCASE ${dir}`,
     given: `n.given IS NULL, n.given COLLATE NOCASE ${dir}, n.surname COLLATE NOCASE ${dir}`,
-    birth: `k IS NULL, k ${dir}`,
-    death: `k IS NULL, k ${dir}`,
+    birth: `v.k IS NULL, v.k ${dir}`,
+    death: `v.k IS NULL, v.k ${dir}`,
   };
-  const key = keys[sort] ?? keys.surname;
-  const sortExpr =
-    sort === 'birth' ? vitalSort(BIRTH_TYPES) : sort === 'death' ? vitalSort(DEATH_TYPES) : 'NULL';
-  const from = `FROM person p LEFT JOIN person_name n ON n.person_id = p.id AND n.is_primary = 1
-    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`;
-  const total = (store.stmt(`SELECT count(*) AS n ${from}`).get(...params) as { n: number }).n;
-  const ids = (
-    store
-      .stmt(`SELECT p.id, ${sortExpr} AS k ${from} ORDER BY ${key}, p.id LIMIT ? OFFSET ?`)
-      .all(...params, limit, offset) as { id: string }[]
-  ).map((r) => r.id);
-  return { total, items: getPersonSummaries(store, ids) };
+  const key = keys[sort ?? 'surname'] ?? keys.surname;
+  const join =
+    sort === 'birth' ? vitalSort(BIRTH_TYPES) : sort === 'death' ? vitalSort(DEATH_TYPES) : '';
+  const ids = store
+    .stmt(
+      `SELECT p.id FROM person p LEFT JOIN person_name n ON n.person_id = p.id AND n.is_primary = 1
+       ${join} ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+       ORDER BY ${key}, p.id`,
+    )
+    .pluck()
+    .all(...params) as string[];
+
+  if (!cache) {
+    cache = new Map();
+    orderCache.set(store, cache);
+  }
+  cache.set(cacheKey, ids);
+  for (const old of [...cache.keys()].slice(0, Math.max(0, cache.size - ORDER_CACHE_SIZE)))
+    cache.delete(old);
+  return ids;
 }

@@ -24,6 +24,7 @@ import {
   OTHER_DEATH_FACTS,
   SINGULAR_EVENTS,
   childRelationship,
+  morePrivate,
   nameType,
   privacy,
   relationshipStatus,
@@ -489,8 +490,8 @@ export class Mapper {
           break;
         case 'RESN': {
           const level = privacy(c.value);
-          if (level && person.privacy === 'public') {
-            person.privacy = level;
+          if (level) {
+            person.privacy = morePrivate(person.privacy, level);
             this.use(c);
           }
           break;
@@ -696,8 +697,8 @@ export class Mapper {
         }
         case 'RESN': {
           const level = privacy(c.value);
-          if (level && row.privacy == null) {
-            row.privacy = level;
+          if (level) {
+            row.privacy = morePrivate(row.privacy, level);
             this.use(c);
           }
           break;
@@ -1216,8 +1217,8 @@ export class Mapper {
         }
         case 'RESN': {
           const level = privacy(c.value);
-          if (level && family.privacy === 'public') {
-            family.privacy = level;
+          if (level) {
+            family.privacy = morePrivate(family.privacy, level);
             this.use(c);
           }
           break;
@@ -1472,7 +1473,7 @@ export class Mapper {
       // Indexed rather than searched per MARR: one person can have thousands
       // of families and marriages, which made this quadratic.
       const index = new MarriageIndex();
-      for (const family of families) for (const m of family.marriages) index.add(m);
+      families.forEach((family, f) => family.marriages.forEach((m, i) => index.add(m, f, i)));
       let unmarried = families.filter((f) => !f.marriages.length);
       for (const node of person.marriages) {
         const date = normalizeDate(text(this.child(node, 'DATE')));
@@ -1498,7 +1499,7 @@ export class Mapper {
           );
           const added = marriage(event);
           family.marriages.push(added);
-          index.add(added);
+          index.add(added, families.indexOf(family), family.marriages.length - 1);
           unmarried = [];
         } else {
           this.mapPersonEvent(node, person);
@@ -1814,29 +1815,32 @@ function marriage(event: { id: string; date: string | undefined; place: string }
 
 /**
  * A person's family marriages, looked up the way the old linear `find` did:
- * the first marriage (in family, then marriage order) whose date matches when
- * a date is given and whose place matches when a place is given.
+ * the first marriage in (family, marriage) order whose date matches when a
+ * date is given and whose place matches when a place is given. Marriages can
+ * be added to an earlier family later, so each key keeps the lowest rank
+ * rather than the first added.
  */
 class MarriageIndex {
-  private first: Marriage | undefined;
-  private readonly byDate = new Map<string, Marriage>();
-  private readonly byPlace = new Map<string, Marriage>();
-  private readonly byBoth = new Map<string, Marriage>();
+  private readonly byKey = new Map<string, { m: Marriage; family: number; order: number }>();
 
-  add(m: Marriage): void {
+  add(m: Marriage, family: number, order: number): void {
     const date = normalizeDate(m.date);
-    this.first ??= m;
-    if (!this.byDate.has(date)) this.byDate.set(date, m);
-    if (!this.byPlace.has(m.place)) this.byPlace.set(m.place, m);
-    const both = `${date}\u0000${m.place}`;
-    if (!this.byBoth.has(both)) this.byBoth.set(both, m);
+    for (const key of ['', `d${date}`, `p${m.place}`, `b${date}\u0000${m.place}`]) {
+      const current = this.byKey.get(key);
+      if (
+        !current ||
+        family < current.family ||
+        (family === current.family && order < current.order)
+      ) {
+        this.byKey.set(key, { m, family, order });
+      }
+    }
   }
 
   find(date: string, place: string): Marriage | undefined {
-    if (!date && !place) return this.first;
-    if (!date) return this.byPlace.get(place);
-    if (!place) return this.byDate.get(date);
-    return this.byBoth.get(`${date}\u0000${place}`);
+    const key =
+      !date && !place ? '' : !date ? `p${place}` : !place ? `d${date}` : `b${date}\u0000${place}`;
+    return this.byKey.get(key)?.m;
   }
 }
 

@@ -1,3 +1,4 @@
+import { resnRestrictions } from '@open-ancestry/gedcom';
 import type { ChildRelationship, NameType, Privacy, RelationshipType } from '@open-ancestry/db';
 
 const words = (list: string) => new Set(list.trim().split(/\s+/));
@@ -78,18 +79,20 @@ export function nameType(value: string | undefined): NameType {
   return NAME_TYPES[(value ?? '').trim().toLowerCase()] ?? 'other';
 }
 
-const PRIVACY_RANK: Privacy[] = ['public', 'private', 'confidential', 'locked'];
+/** Least to most restrictive: locked only guards edits, so any disclosure limit outranks it. */
+const PRIVACY_RANK: Privacy[] = ['public', 'locked', 'private', 'confidential'];
 
-/** GEDCOM `RESN` (5.5.1 single value or 7.0 comma list) to the most restrictive privacy level. */
+/** GEDCOM `RESN` (5.5.1 single value or 7 comma list) to the most restrictive privacy level. */
 export function privacy(value: string | undefined): Privacy | undefined {
-  let best: Privacy | undefined;
-  for (const part of (value ?? '').split(',')) {
-    const word = part.trim().toLowerCase();
-    const level: Privacy | undefined =
-      word === 'privacy' ? 'private' : PRIVACY_RANK.find((p) => p === word && p !== 'public');
-    if (level && (!best || PRIVACY_RANK.indexOf(level) > PRIVACY_RANK.indexOf(best))) best = level;
-  }
-  return best;
+  const found = resnRestrictions(value);
+  if (found.includes('CONFIDENTIAL')) return 'confidential';
+  if (found.includes('PRIVACY')) return 'private';
+  return found.length ? 'locked' : undefined;
+}
+
+/** The more restrictive of two privacy levels, so repeated RESN lines combine. */
+export function morePrivate(a: Privacy | null | undefined, b: Privacy): Privacy {
+  return a && PRIVACY_RANK.indexOf(a) > PRIVACY_RANK.indexOf(b) ? a : b;
 }
 
 /** Family Tree Maker `_STAT` to a relationship type. */

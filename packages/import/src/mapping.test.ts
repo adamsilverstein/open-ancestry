@@ -554,6 +554,28 @@ describe('families and links', () => {
 });
 
 describe('tags and privacy', () => {
+  it('combines repeated RESN lines by the most restrictive level', async () => {
+    const { store } = await importInto(
+      ged(
+        '0 @I1@ INDI',
+        '1 RESN locked',
+        '1 RESN confidential',
+        '1 BIRT',
+        '2 RESN locked',
+        '2 RESN privacy',
+        '1 FAMS @F1@',
+        '0 @F1@ FAM',
+        '1 HUSB @I1@',
+        '1 RESN locked',
+        '1 RESN privacy',
+      ),
+    );
+    expect(value(store, 'SELECT privacy FROM person')).toBe('confidential');
+    expect(value(store, 'SELECT privacy FROM event')).toBe('private');
+    expect(value(store, 'SELECT privacy FROM family')).toBe('private');
+    expect(value(store, "SELECT count(*) FROM unmapped_line WHERE line LIKE '%RESN%'")).toBe(0);
+  });
+
   it('maps tags on families, events, sources and media; RESN on people', async () => {
     const { store } = await importInto(
       ged(

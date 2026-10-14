@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { coordinate } from './places';
-import { importInto, rows } from './test-helpers';
+import { familyEvents, importInto, notesOf, rows } from './test-helpers';
 
 /*
  * Real exports (and hostile files) can put thousands of families and
@@ -50,6 +50,44 @@ describe('no quadratic paths', () => {
     expect(report.warnings.filter((w) => w.code === 'duplicate-link')).toHaveLength(10);
   }, 60_000);
 
+  it('matches a marriage in family order, even one attached to a family partway through', async () => {
+    // F1 has no marriage of its own; F2 and F3 marry in 1900. The person's first
+    // MARR (Rome) matches neither, so it becomes F1's marriage. The second MARR
+    // gives only the date, which F1's new marriage, F2's and F3's all match: the
+    // first in family order (F1) takes its note, as the linear search did.
+    const { store } = await importInto(
+      gedOf([
+        '0 @I1@ INDI',
+        '1 FAMS @F1@',
+        '1 FAMS @F2@',
+        '1 FAMS @F3@',
+        '1 MARR',
+        '2 DATE 1900',
+        '2 PLAC Rome',
+        '1 MARR',
+        '2 DATE 1900',
+        '2 NOTE Which marriage',
+        '0 @F1@ FAM',
+        '1 HUSB @I1@',
+        '0 @F2@ FAM',
+        '1 HUSB @I1@',
+        '1 MARR',
+        '2 DATE 1900',
+        '2 PLAC London',
+        '0 @F3@ FAM',
+        '1 HUSB @I1@',
+        '1 MARR',
+        '2 DATE 1900',
+        '2 PLAC Paris',
+      ]),
+    );
+    const [rome] = familyEvents(store, '@F1@', 'MARR');
+    const [london] = familyEvents(store, '@F2@', 'MARR');
+    expect(rome?.place).toBe('Rome');
+    expect(notesOf(store, 'event', rome!.id)).toEqual(['Which marriage']);
+    expect(notesOf(store, 'event', london!.id)).toEqual([]);
+  });
+
   it('parses coordinates without catastrophic backtracking', () => {
     const hostile = `N${' '.repeat(100_000)}1x`;
     const started = performance.now();
@@ -58,6 +96,10 @@ describe('no quadratic paths', () => {
     expect(coordinate(`${' '.repeat(100_000)}N51.5`, 'lat')).toBe(51.5);
     expect(performance.now() - started).toBeLessThan(50);
     expect(coordinate('  N 51.5 ', 'lat')).toBe(51.5);
+    // Any whitespace between hemisphere and number, as before the cap.
+    expect(coordinate('N  51.5', 'lat')).toBe(51.5);
+    expect(coordinate('N\t51.5', 'lat')).toBe(51.5);
+    expect(coordinate(`N${' '.repeat(40)}51.5`, 'lat')).toBe(51.5);
     expect(coordinate('W0.25', 'long')).toBe(-0.25);
     expect(coordinate('-71.2', 'long')).toBe(-71.2);
   });

@@ -669,10 +669,19 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       stopAnimation();
       apply(centeredOnFocus(transform.current, true));
     } else if (prev.focus !== focusPersonId) {
-      if (keepFocus.current) {
-        keepFocus.current = false;
+      // Keyboard focus follows to the new focus card when the re-focus came from
+      // the canvas, or focus is still in the tree or was lost to the page (Find in
+      // the palette returns it to a card or toolbar button that may be gone).
+      const focused = document.activeElement;
+      if (
+        keepFocus.current ||
+        !focused ||
+        focused === document.body ||
+        focused.closest('[data-tree-region]')
+      ) {
         pendingFocus.current = focusPersonId;
       }
+      keepFocus.current = false;
       // Re-focus: jump so the new focus card is where it was, then glide it to the center.
       const old = prev.layout?.nodes.find((n) => n.key === focusPersonId);
       stopAnimation();

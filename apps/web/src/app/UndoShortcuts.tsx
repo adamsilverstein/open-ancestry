@@ -13,13 +13,14 @@ function isEditable(target: EventTarget | null): boolean {
 }
 
 /**
- * An open dialog or popover owns the keyboard: undoing behind an edit form
- * would leave it showing stale values that its Save would write back.
+ * An open dialog, popover or menu owns the keyboard: undoing behind an edit
+ * form would leave it showing stale values that its Save would write back, and
+ * a menu would stay open over a changed page.
  */
 function dialogOpen(): boolean {
   return (
     document.querySelector(
-      '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
+      '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [role="menu"][data-state="open"]',
     ) !== null
   );
 }

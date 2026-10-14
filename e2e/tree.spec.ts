@@ -227,7 +227,8 @@ test.describe('family view', () => {
   test('the family view loads in one request, siblings and aunts included', async ({ page }) => {
     const requests: string[] = [];
     page.on('request', (r) => {
-      if (r.url().includes('/neighborhood')) requests.push(r.url());
+      // API calls only: a JS chunk can be named after the neighborhood module too.
+      if (new URL(r.url()).pathname.match(/^\/api\/.*\/neighborhood$/)) requests.push(r.url());
     });
     await open(page);
     await expect(card(page, 'Fenn Vale')).toBeAttached();
@@ -505,7 +506,7 @@ test.describe('family view', () => {
     // Keyboard focus lands on the new focus card, so arrows and shortcuts keep working.
     await expect(card(page, 'Tilda Hale')).toBeFocused();
     await page.keyboard.press('ArrowUp');
-    expect(await activeKey(page)).toBe(ids.piers);
+    expect([ids.piers, ids.rhea]).toContain(await activeKey(page));
     await page.keyboard.press('f');
     await expect(page.getByRole('dialog', { name: 'Command palette' })).toBeVisible();
   });

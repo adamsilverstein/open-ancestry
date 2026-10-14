@@ -1,0 +1,117 @@
+/*
+ * open-ancestry design tokens. Source of truth: docs/design-system.md.
+ *
+ * Themes: every color is a light-dark() pair driven by `color-scheme`. The root
+ * follows the OS (`light dark`); `<html data-theme="light|dark">`, set by the
+ * theme toggle and public/theme-init.js, pins one scheme.
+ */
+:root {
+  color-scheme: light dark;
+
+  /* Color */
+  --oa-bg: light-dark(#faf8f4, #14171c);
+  --oa-surface: light-dark(#ffffff, #1c2027);
+  --oa-surface-sunken: light-dark(#f2efe8, #101318);
+  --oa-surface-hover: light-dark(#f5f2ec, #242932);
+  --oa-surface-selected: light-dark(#e3efe8, #1e3328);
+  --oa-canvas: light-dark(#3d424a, #22262d);
+  --oa-canvas-line: light-dark(#8a9099, #5c636d);
+  --oa-canvas-text: #eceef1;
+  --oa-canvas-text-muted: light-dark(#c9ced6, #a3abb6);
+  --oa-text: light-dark(#1d232b, #eceef1);
+  --oa-text-muted: light-dark(#5b6470, #a3abb6);
+  --oa-border: light-dark(#e2ded5, #2e343d);
+  /* Input and control outlines; 3:1 against surfaces (WCAG 1.4.11). */
+  --oa-border-strong: light-dark(#857f73, #6e7682);
+  --oa-accent: light-dark(#2f6f4e, #5fb98a);
+  --oa-accent-hover: light-dark(#255a3f, #77c79c);
+  --oa-accent-contrast: light-dark(#ffffff, #0d1f16);
+  --oa-focus: light-dark(#2f6f4e, #7fd3a8);
+  --oa-person-male: light-dark(#5b7fa6, #7fa3cb);
+  --oa-person-female: light-dark(#c0664a, #e08a6e);
+  --oa-person-unknown: light-dark(#7b7f87, #9aa0a8);
+  /* Warning is for icons and borders only in light mode (3.4:1); pair with --oa-text. */
+  --oa-warning: light-dark(#b7791f, #e0a84a);
+  --oa-danger: light-dark(#b3261e, #f2867e);
+  --oa-danger-contrast: light-dark(#ffffff, #14171c);
+  --oa-info: light-dark(#2b6cb0, #76a9e0);
+  --oa-scrim: light-dark(rgb(29 35 43 / 0.4), rgb(0 0 0 / 0.6));
+
+  /* Tags: categorical, each at least 4.5:1 on --oa-surface and --oa-bg. */
+  --oa-tag-1: light-dark(#0f766e, #2dd4bf);
+  --oa-tag-2: light-dark(#1d4ed8, #93c5fd);
+  --oa-tag-3: light-dark(#6d28d9, #c4b5fd);
+  --oa-tag-4: light-dark(#a21caf, #f0abfc);
+  --oa-tag-5: light-dark(#b91c1c, #fca5a5);
+  --oa-tag-6: light-dark(#b45309, #fcd34d);
+  --oa-tag-7: light-dark(#4d7c0f, #bef264);
+  --oa-tag-8: light-dark(#475569, #cbd5e1);
+
+  /* Typography */
+  --oa-font-sans: 'Inter Variable', system-ui, sans-serif;
+  --oa-font-serif: 'Source Serif 4 Variable', Georgia, serif;
+  --oa-font-mono: ui-monospace, 'SF Mono', monospace;
+  --oa-text-xs: 12px / 16px var(--oa-font-sans);
+  --oa-text-sm: 13px / 18px var(--oa-font-sans);
+  --oa-text-md: 15px / 22px var(--oa-font-sans);
+  --oa-text-lg: 18px / 26px var(--oa-font-sans);
+  --oa-text-xl: 24px / 30px var(--oa-font-sans);
+  --oa-text-display: 36px / 42px var(--oa-font-serif);
+  --oa-weight-regular: 400;
+  --oa-weight-medium: 500;
+  --oa-weight-semibold: 600;
+  --oa-weight-bold: 700;
+
+  /* Space (4px base) */
+  --oa-space-1: 4px;
+  --oa-space-2: 8px;
+  --oa-space-3: 12px;
+  --oa-space-4: 16px;
+  --oa-space-5: 24px;
+  --oa-space-6: 32px;
+  --oa-space-7: 48px;
+  --oa-space-8: 64px;
+
+  /* Radius */
+  --oa-radius-sm: 4px;
+  --oa-radius-md: 8px;
+  --oa-radius-lg: 12px;
+  --oa-radius-full: 9999px;
+
+  /* Elevation: dark mode drops shadows for a lighter surface plus border. */
+  --oa-shadow-1:
+    0 1px 2px light-dark(rgb(29 35 43 / 0.08), transparent),
+    0 1px 3px light-dark(rgb(29 35 43 / 0.06), transparent);
+  --oa-shadow-2:
+    0 4px 12px light-dark(rgb(29 35 43 / 0.12), transparent),
+    0 1px 3px light-dark(rgb(29 35 43 / 0.08), transparent);
+  --oa-shadow-3:
+    0 12px 32px light-dark(rgb(29 35 43 / 0.18), rgb(0 0 0 / 0.4)),
+    0 2px 6px light-dark(rgb(29 35 43 / 0.08), transparent);
+  --oa-elevated-border: light-dark(transparent, #3a414b);
+
+  /* Motion */
+  --oa-duration-fast: 120ms;
+  --oa-duration-base: 180ms;
+  --oa-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Layout */
+  --oa-topbar-height: 48px;
+  --oa-focus-ring: 2px solid var(--oa-focus);
+  --oa-focus-offset: 2px;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --oa-duration-fast: 0ms;
+    --oa-duration-base: 0ms;
+  }
+}

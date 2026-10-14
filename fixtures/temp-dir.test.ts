@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -28,4 +29,35 @@ describe('makeTempDir', () => {
     // Idempotent: nothing left to remove.
     expect(() => removeTempDirs()).not.toThrow();
   });
+});
+
+describe('on Ctrl-C or SIGTERM', () => {
+  it.each(['SIGINT', 'SIGTERM'] as const)(
+    'removes only its own folders on %s, then dies by that signal',
+    (signal) => {
+      const other = makeTempDir('oa-temp-test-other-');
+      // A child that makes a folder, then is interrupted before any cleanup hook runs.
+      const child = spawnSync(
+        process.execPath,
+        [
+          '--import',
+          'tsx',
+          '--input-type=module',
+          '-e',
+          `const { makeTempDir } = await import(${JSON.stringify(join(import.meta.dirname, 'temp-dir.ts'))});
+           console.log(makeTempDir('oa-temp-test-child-'));
+           process.kill(process.pid, '${signal}');
+           await new Promise((r) => setTimeout(r, 5000));`,
+        ],
+        { encoding: 'utf8', env: { ...process.env, VITEST: '' } },
+      );
+      const made = child.stdout.trim();
+      expect(made).toMatch(/oa-temp-test-child-/);
+      expect(existsSync(made)).toBe(false);
+      expect(child.signal).toBe(signal);
+      // Folders this process (the parent) made are not touched.
+      expect(existsSync(other)).toBe(true);
+    },
+    20_000,
+  );
 });

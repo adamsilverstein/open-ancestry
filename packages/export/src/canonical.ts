@@ -17,6 +17,7 @@ import type {
   TagRow,
 } from '@open-ancestry/db';
 import type { GedcomNode } from '@open-ancestry/gedcom';
+import type { NameTextState } from './dirty';
 import { ownerKey, type TreeData } from './load';
 
 /** Kinds of top-level record the writer can point at. */
@@ -33,8 +34,8 @@ export interface WriterContext {
   isPrivateFamily(id: string): boolean;
   /** Whether a note is written as its own record (shared) rather than inline. */
   isNoteRecord(note: NoteRow): boolean;
-  /** The name's parts were edited after its imported text, so the text is out of date. */
-  isStaleNameText(nameId: string): boolean;
+  /** Whether a name's parts or nickname were edited after its imported text was set. */
+  nameTextState(nameId: string): NameTextState | undefined;
   /** A note or media item attached anywhere to a privatized person or family: never written. */
   isWithheld(id: string): boolean;
   /** FILE value for a media row. */
@@ -174,6 +175,28 @@ const mimeOfPath = (path: string | null | undefined) =>
 /** GEDCOM 7 AGE grammar: `> 25y 3m`, `8w`, `< 1d`. */
 const AGE_7 =
   /^(?:[<>] )?(?:\d+y(?: \d+m)?(?: \d+w)?(?: \d+d)?|\d+m(?: \d+w)?(?: \d+d)?|\d+w(?: \d+d)?|\d+d)$/;
+
+/**
+ * The imported name text with its quoted nickname (`Ann "Nan" /Ash/`)
+ * replaced by the current one, added after the given names when there was
+ * none, or removed when the nickname was cleared.
+ */
+export function withNickname(text: string, nickname: string | null): string {
+  // Straight or curly quotes, as the name parser accepts; the original quote marks are kept.
+  const quoted = /\s*(["“])[^"“”]*(["”])/;
+  if (quoted.test(text)) {
+    return text
+      .replace(quoted, (_, open: string, close: string) =>
+        nickname ? ` ${open}${nickname}${close}` : '',
+      )
+      .trim();
+  }
+  if (!nickname) return text;
+  const slash = text.indexOf('/');
+  return slash > 0
+    ? `${text.slice(0, slash).trimEnd()} "${nickname}" ${text.slice(slash)}`
+    : `${text} "${nickname}"`;
+}
 
 const coordinate = (value: number, positive: string, negative: string) =>
   value < 0 ? `${negative}${-value}` : `${positive}${value}`;
@@ -336,7 +359,13 @@ export class RecordWriter {
   // ------------------------------------------------------------ parts
 
   private name(name: PersonNameRow, first: boolean): GedcomNode {
-    const text = this.ctx.isStaleNameText(name.id) ? null : name.full_text;
+    const state = this.ctx.nameTextState(name.id);
+    const text =
+      state === 'stale'
+        ? null
+        : state === 'nickname' && name.full_text
+          ? withNickname(name.full_text, name.nickname)
+          : name.full_text;
     const value =
       text ??
       ([

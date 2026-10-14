@@ -15,7 +15,7 @@ import {
   type RecordKind,
   type WriterContext,
 } from './canonical';
-import { dirtyRecords, staleNameTexts } from './dirty';
+import { dirtyRecords, nameTextStates, type NameTextState } from './dirty';
 import { mergeUnmapped, type MergeContext } from './merge';
 import { TreeData, ownerKey } from './load';
 import type { GedcomExport, GedcomExportOptions } from './types';
@@ -118,7 +118,7 @@ class GedcomWriter implements WriterContext, MergeContext {
   private readonly living = new Set<string>();
   private readonly privateFamilies = new Set<string>();
   private readonly withheld = new Set<string>();
-  private staleNames: Set<string> | undefined;
+  private nameStates: Map<string, NameTextState> | undefined;
   private readonly xrefs = new Map<string, string>();
   private readonly used = new Set<string>();
   private readonly counters = new Map<string, number>();
@@ -176,9 +176,9 @@ class GedcomWriter implements WriterContext, MergeContext {
     return this.privateFamilies.has(id);
   }
 
-  isStaleNameText(nameId: string): boolean {
-    this.staleNames ??= staleNameTexts(this.store);
-    return this.staleNames.has(nameId);
+  nameTextState(nameId: string): NameTextState | undefined {
+    this.nameStates ??= nameTextStates(this.store);
+    return this.nameStates.get(nameId);
   }
 
   isWithheld(id: string): boolean {

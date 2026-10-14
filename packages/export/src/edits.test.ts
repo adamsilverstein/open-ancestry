@@ -107,7 +107,7 @@ describe('edited records', () => {
         { given: 'Theo', surname: 'Ashby', full_text: 'Theo /Ashby/' },
       ]);
     }
-    // A nickname edit alone keeps the imported text and its formatting.
+    // A nickname edit alone keeps the imported text, with the quoted nickname replaced.
     store.transact('Nickname', (tx) =>
       names.update(tx, primaryName(store, '@I1@'), {
         given: 'Thaddeus',
@@ -115,21 +115,45 @@ describe('edited records', () => {
       }),
     );
     store.transact('Retype', (tx) =>
-      names.update(tx, primaryName(store, '@I1@'), { full_text: 'Thaddeus "Tad" /Ashgrove/' }),
+      names.update(tx, primaryName(store, '@I1@'), { full_text: 'Thaddeus "Tad"  /Ashgrove/ ' }),
     );
     store.transact('Nick', (tx) =>
       names.update(tx, primaryName(store, '@I1@'), { nickname: 'Taddy' }),
     );
     const nicked = exportGedcom(store, { now: TODAY });
-    expect(nicked).toContain('1 NAME Thaddeus "Tad" /Ashgrove/\n2 GIVN Thaddeus\n2 NICK Taddy');
+    expect(nicked).toContain('1 NAME Thaddeus "Taddy"  /Ashgrove/\n2 GIVN Thaddeus\n2 NICK Taddy');
     expect(rows(await importInto(nicked), 'SELECT nickname, full_text FROM person_name')).toEqual([
-      { nickname: 'Taddy', full_text: 'Thaddeus "Tad" /Ashgrove/' },
+      { nickname: 'Taddy', full_text: 'Thaddeus "Taddy"  /Ashgrove/' },
     ]);
     // Setting the text itself makes it current again.
     store.transact('Retype', (tx) =>
       names.update(tx, primaryName(store, '@I1@'), { full_text: 'Theo "Ted" /Ashby/' }),
     );
     expect(exportGedcom(store, { now: TODAY })).toContain('1 NAME Theo "Ted" /Ashby/');
+  });
+
+  it('never keeps an old quoted nickname in the NAME text', async () => {
+    const store = await importInto(ged('0 @I1@ INDI', '1 NAME Ann "Nan" /Ash/', '2 NICK Nan'));
+    const id = primaryName(store, '@I1@');
+    const nameLine = async (nickname: string | null) => {
+      store.transact('Nick', (tx) => names.update(tx, id, { nickname }));
+      const out = buildGedcomExport(store, { version: '5.5.1', now: TODAY }).text;
+      const again = await importInto(out);
+      return {
+        line: recordText(out, '@I1@')!.split('\n')[1],
+        nickname: rows(again, 'SELECT nickname FROM person_name')[0]!.nickname,
+      };
+    };
+    expect(await nameLine('Tad')).toEqual({ line: '1 NAME Ann "Tad" /Ash/', nickname: 'Tad' });
+    expect(await nameLine(null)).toEqual({ line: '1 NAME Ann /Ash/', nickname: null });
+    // Back to a nickname on a text that no longer quotes one: it is added after the given names.
+    expect(await nameLine('Annie')).toEqual({
+      line: '1 NAME Ann "Annie" /Ash/',
+      nickname: 'Annie',
+    });
+    const v7 = buildGedcomExport(store, { version: '7', now: TODAY }).text;
+    expect(recordText(v7, '@I1@')).toContain('1 NAME Ann "Annie" /Ash/');
+    expect(v7).not.toMatch(/Nan|Tad/);
   });
 
   it('an edited event regenerates its owner only', async () => {

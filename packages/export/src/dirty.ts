@@ -13,6 +13,8 @@ const OWNER_COLUMNS: Record<string, string> = {
   partner2_id: 'person',
 };
 
+const BOOKKEEPING = new Set(['import_batch', 'unmapped_line', 'meta']);
+
 interface LogRow {
   entity: string;
   entity_id: string;
@@ -93,6 +95,8 @@ export function dirtyRecords(store: TreeStore, data: TreeData): Set<string> {
   };
 
   for (const row of log) {
+    // Import bookkeeping: a re-import adds the new export's text without changing what it describes.
+    if (BOOKKEEPING.has(row.entity) || (row.entity === 'raw_record' && !row.before_json)) continue;
     const before = row.before_json
       ? (JSON.parse(row.before_json) as Record<string, unknown>)
       : null;
@@ -111,6 +115,17 @@ export function dirtyRecords(store: TreeStore, data: TreeData): Set<string> {
       }
       if (typeof image.owner_type === 'string') mark(image.owner_type, image.owner_id as string);
     }
+  }
+  // Records a re-import kept the new text of, although the tree says something else.
+  const stale = data.rawBatchId
+    ? (store.db
+        .prepare('SELECT value FROM meta WHERE key = ?')
+        .pluck()
+        .get(`export.stale:${data.rawBatchId}`) as string | undefined)
+    : undefined;
+  for (const key of stale ? (JSON.parse(stale) as string[]) : []) {
+    const [table, id] = key.split('|') as [string, string];
+    mark(table, id);
   }
   return dirty;
 }

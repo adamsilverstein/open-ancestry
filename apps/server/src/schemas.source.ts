@@ -25,6 +25,11 @@ export const Id = Type.String({ minLength: 1, maxLength: 64, pattern: '^[0-9A-Za
 export const TreeParams = Type.Object({ tree: Type.String({ minLength: 1, maxLength: 100 }) });
 export const TreeIdParams = Type.Object({ tree: TreeParams.properties.tree, id: Id });
 export const JobParams = Type.Object({ id: Type.String({ format: 'uuid' }) });
+/** The change ids from a re-import review the user accepted. */
+export const ReimportApplyBody = Type.Object(
+  { accept: Type.Array(Type.String({ maxLength: 32 }), { maxItems: 1_000_000 }) },
+  strict,
+);
 
 export const TreeBody = Type.Object(
   { name: Type.String({ minLength: 1, maxLength: 100 }) },

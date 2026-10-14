@@ -138,3 +138,63 @@ test('generations loaded by a chevron come back after an undo', async ({
   await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
   await expect(card(page, 'Abner Ashdown')).toBeAttached();
 });
+
+test('undo after idling past the query cache lifetime updates the tree', async ({
+  page,
+  request,
+  baseURL,
+}) => {
+  await post(request, baseURL!, `${base()}/people/${seeded.rowan}/children`, {
+    person: { sex: 'M', names: [{ given: 'Tobias', surname: 'Ashdown' }] },
+  });
+  await page.clock.install();
+  await openTree(page);
+  await expect(card(page, 'Tobias Ashdown')).toBeAttached();
+  // Idle for 6 minutes: unobserved queries are garbage-collected after 5.
+  await page.clock.fastForward('06:00');
+  await card(page, 'Rowan Ashdown').focus();
+  await page.keyboard.press(`${mod}+z`);
+  await expect(card(page, 'Tobias Ashdown')).toHaveCount(0);
+});
+
+test('keyboard focus stays on the card after undo and redo', async ({ page, request, baseURL }) => {
+  await post(request, baseURL!, `${base()}/people/${seeded.rowan}/children`, {
+    person: { sex: 'M', names: [{ given: 'Tobias', surname: 'Ashdown' }] },
+  });
+  await openTree(page);
+  await card(page, 'Edmund Ashdown').focus();
+  await page.keyboard.press(`${mod}+z`);
+  await expect(card(page, 'Tobias Ashdown')).toHaveCount(0);
+  await expect(card(page, 'Edmund Ashdown')).toBeFocused();
+  await page.keyboard.press(`Shift+${mod}+z`);
+  await expect(card(page, 'Tobias Ashdown')).toBeAttached();
+  await expect(card(page, 'Edmund Ashdown')).toBeFocused();
+  // And the arrows still work.
+  await page.keyboard.press('ArrowDown');
+  await expect(card(page, 'Rowan Ashdown')).toBeFocused();
+});
+
+test('a burst of undos resets the tree once', async ({ page, request, baseURL }) => {
+  for (const given of ['Tobias', 'Ursula', 'Victor']) {
+    await post(request, baseURL!, `${base()}/people/${seeded.rowan}/children`, {
+      person: { sex: 'M', names: [{ given, surname: 'Ashdown' }] },
+    });
+  }
+  await openTree(page);
+  await expect(card(page, 'Victor Ashdown')).toBeAttached();
+  const focusLoads: string[] = [];
+  page.on('request', (r) => {
+    const url = new URL(r.url());
+    if (url.pathname.endsWith('/neighborhood') && url.searchParams.get('focus') === seeded.rowan) {
+      focusLoads.push(url.search);
+    }
+  });
+  await card(page, 'Rowan Ashdown').focus();
+  for (let i = 0; i < 3; i++) await page.keyboard.press(`${mod}+z`);
+  await expect(card(page, 'Tobias Ashdown')).toHaveCount(0);
+  await expect(card(page, 'Ursula Ashdown')).toHaveCount(0);
+  await expect(card(page, 'Victor Ashdown')).toHaveCount(0);
+  await page.waitForTimeout(300);
+  // Each undo applies on the server in turn, but the tree reloads once at the end.
+  expect(focusLoads.length).toBeLessThanOrEqual(2);
+});

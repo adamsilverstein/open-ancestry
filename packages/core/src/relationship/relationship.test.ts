@@ -1,0 +1,240 @@
+import fc from 'fast-check';
+import { describe, expect, it } from 'vitest';
+import { kinshipGraph, relationship } from './index';
+import type { KinshipGraph } from './index';
+import {
+  bigFamily,
+  collapse,
+  cousinParents,
+  doubleCousins,
+  GraphBuilder,
+  randomTree,
+} from './test-family';
+
+const family = kinshipGraph(bigFamily());
+const name = (g: KinshipGraph, a: string, b: string) => relationship(g, a, b).name;
+
+describe('relationship names (A is B’s ...)', () => {
+  it.each<[string, string, string]>([
+    // Self and unrelated
+    ['me', 'me', 'self'],
+    ['stranger', 'me', 'unrelated'],
+    ['me', 'stranger', 'unrelated'],
+    // Direct line up
+    ['dad', 'me', 'father'],
+    ['mom', 'me', 'mother'],
+    ['gf', 'me', 'grandfather'],
+    ['gm', 'me', 'grandmother'],
+    ['ggf', 'me', 'great-grandfather'],
+    ['gggf', 'me', '2nd great-grandfather'],
+    ['gggm', 'me', '2nd great-grandmother'],
+    ['me', 'g4son', '3rd great-grandmother'],
+    ['bro', 'kidU', 'father'],
+    // Direct line down
+    ['me', 'dad', 'daughter'],
+    ['bro', 'dad', 'son'],
+    ['me', 'gf', 'granddaughter'],
+    ['me', 'ggf', 'great-granddaughter'],
+    ['gggson', 'me', '2nd great-grandson'],
+    ['g4son', 'me', '3rd great-grandson'],
+    ['kidU', 'bro', 'child'],
+    // Siblings and half siblings
+    ['bro', 'me', 'brother'],
+    ['sis', 'me', 'sister'],
+    ['me', 'bro', 'sister'],
+    ['halfbro', 'me', 'half-brother'],
+    ['me', 'halfbro', 'half-sister'],
+    ['halfsis', 'me', 'half-sister'],
+    ['dadStep', 'me', 'half-brother'],
+    // Aunts, uncles, nieces, nephews
+    ['uncle', 'me', 'uncle'],
+    ['aunt', 'me', 'aunt'],
+    ['me', 'uncle', 'niece'],
+    ['bro', 'aunt', 'nephew'],
+    ['gaunt', 'me', 'great-aunt'],
+    ['gaunt', 'dad', 'aunt'],
+    ['ggUncle', 'me', 'great-granduncle'],
+    ['nephew', 'me', 'nephew'],
+    ['niece', 'me', 'niece'],
+    ['gnephew', 'me', 'great-niece'],
+    ['me', 'gnephew', 'great-aunt'],
+    ['halfnephew', 'me', 'half-nephew'],
+    ['kidU', 'me', 'niece or nephew'],
+    ['me', 'kidU', 'aunt'],
+    // Cousins
+    ['cousin1', 'me', '1st cousin'],
+    ['cousin2', 'me', '1st cousin'],
+    ['cousin3', 'me', '1st cousin'],
+    ['gcousin', 'me', '1st cousin once removed'],
+    ['me', 'gcousin', '1st cousin once removed'],
+    ['gc2', 'me', '2nd cousin'],
+    ['gc3', 'me', '2nd cousin once removed'],
+    ['c1kid', 'me', '1st cousin once removed'],
+    ['c1gkid', 'me', '1st cousin twice removed'],
+    ['ggUcousin', 'me', '1st cousin twice removed'],
+    ['cousin1', 'son', '1st cousin once removed'],
+    ['gc3', 'son', '3rd cousin'],
+    ['gc3', 'gson', '3rd cousin once removed'],
+    ['gc2', 'son', '2nd cousin once removed'],
+    ['ggUcousin', 'son', '1st cousin 3 times removed'],
+    // Adoption, foster and step edges
+    ['adoptee', 'me', 'adopted son'],
+    ['me', 'adoptee', 'adoptive mother'],
+    ['adoptee', 'son', 'adoptive brother'],
+    ['adoptee', 'dad', 'adopted grandson'],
+    ['fosterkid', 'uncle', 'foster daughter'],
+    ['uncle', 'fosterkid', 'foster father'],
+    ['dad', 'dadStep', 'stepfather'],
+    ['dadStep', 'dad', 'stepson'],
+    // Marriage
+    ['hus', 'me', 'husband'],
+    ['me', 'hus', 'wife'],
+    ['husDad', 'me', 'father-in-law'],
+    ['husMom', 'me', 'mother-in-law'],
+    ['me', 'husDad', 'daughter-in-law'],
+    ['husSis', 'me', 'sister-in-law'],
+    ['broW', 'me', 'sister-in-law'],
+    ['me', 'broW', 'sister-in-law'],
+    ['hus', 'bro', 'brother-in-law'],
+    ['sonW', 'me', 'daughter-in-law'],
+    ['me', 'sonW', 'mother-in-law'],
+    ['hus', 'dad', 'son-in-law'],
+    ['stepmom', 'me', 'stepmother'],
+    ['me', 'stepmom', 'stepdaughter'],
+    ['stepdau', 'me', 'stepdaughter'],
+    ['me', 'stepdau', 'stepmother'],
+    ['stepsib', 'me', 'stepbrother'],
+    ['stepmom', 'son', 'step-grandmother'],
+    ['uncleW', 'me', 'aunt by marriage'],
+    ['auntH', 'me', 'uncle by marriage'],
+    ['sisH', 'bro', 'brother-in-law'],
+    ['c1w', 'me', '1st cousin’s wife'],
+    ['cousin1', 'hus', 'wife’s 1st cousin'],
+    ['husSisH', 'me', 'husband’s sister’s husband'],
+    ['me', 'uncleW', 'husband’s niece'],
+    ['gson', 'hus', 'grandson'],
+  ])('%s is %s’s %s', (a, b, expected) => {
+    expect(name(family, a, b)).toBe(expected);
+  });
+});
+
+describe('paths and pedigree collapse', () => {
+  it('returns the path from A up to the common ancestors and down to B', () => {
+    const r = relationship(family, 'cousin1', 'me');
+    expect(r.relationships).toHaveLength(1);
+    const [first] = r.relationships;
+    expect(first).toMatchObject({
+      kind: 'blood',
+      half: false,
+      generations: [2, 2],
+      commonAncestors: ['gf', 'gm'],
+    });
+    expect(first!.paths[0]).toEqual({
+      ids: ['cousin1', 'uncle', 'gf', 'dad', 'me'],
+      steps: [
+        { kind: 'parent', rel: 'unknown' },
+        { kind: 'parent', rel: 'unknown' },
+        { kind: 'child', rel: 'unknown' },
+        { kind: 'child', rel: 'unknown' },
+      ],
+    });
+  });
+
+  it('marks half relationships with a single common ancestor', () => {
+    const r = relationship(family, 'halfbro', 'me').relationships[0]!;
+    expect(r).toMatchObject({ half: true, commonAncestors: ['dad'] });
+  });
+
+  it('reports a marriage path with its spouse steps', () => {
+    const r = relationship(family, 'stepmom', 'me').relationships[0]!;
+    expect(r.kind).toBe('marriage');
+    expect(r.paths[0]).toEqual({
+      ids: ['stepmom', 'dad', 'me'],
+      steps: [{ kind: 'spouse' }, { kind: 'child', rel: 'unknown' }],
+    });
+  });
+
+  it('names both relationships when pedigree collapse gives two', () => {
+    const g = kinshipGraph(collapse());
+    const r = relationship(g, 'A', 'B');
+    expect(r.name).toBe('2nd cousin and also 3rd cousin once removed');
+    expect(r.relationships.map((x) => x.commonAncestors)).toEqual([
+      ['p1', 'p2'],
+      ['q1', 'q2'],
+    ]);
+    expect(relationship(g, 'B', 'A').name).toBe('2nd cousin and also 3rd cousin once removed');
+  });
+
+  it('collects every path for one name when parents are cousins', () => {
+    const g = kinshipGraph(cousinParents());
+    const r = relationship(g, 'ggf', 'me');
+    expect(r.name).toBe('great-grandfather');
+    expect(r.relationships).toHaveLength(1);
+    expect(r.relationships[0]!.paths.map((p) => p.ids)).toEqual([
+      ['ggf', 'ga', 'dad', 'me'],
+      ['ggf', 'gb', 'mom', 'me'],
+    ]);
+    expect(name(g, 'dad', 'mom')).toBe('husband and also 1st cousin');
+  });
+
+  it('calls two cousin relationships through both parents double cousins', () => {
+    const g = kinshipGraph(doubleCousins());
+    const r = relationship(g, 'k1', 'k2');
+    expect(r.name).toBe('double 1st cousin');
+    expect(r.relationships[0]!.paths).toHaveLength(2);
+  });
+
+  it('uses neutral words for an unknown sex and unknown ids', () => {
+    const g = kinshipGraph(
+      new GraphBuilder()
+        .person('p', 'X')
+        .person('c', 'U')
+        .person('d', 'U')
+        .family('F', 'p', null, ['c', 'd'])
+        .build(),
+    );
+    expect(name(g, 'p', 'c')).toBe('parent');
+    expect(name(g, 'c', 'd')).toBe('sibling');
+    expect(name(g, 'ghost', 'c')).toBe('unrelated');
+  });
+
+  it('terminates on cycles and respects the generation bound', () => {
+    const g = kinshipGraph(
+      new GraphBuilder()
+        .person('a', 'M')
+        .person('b', 'F')
+        .family('F1', 'a', null, ['b'])
+        .family('F2', 'b', null, ['a'])
+        .build(),
+    );
+    expect(name(g, 'a', 'b')).toBe('father and also son');
+    const chain = new GraphBuilder();
+    for (let i = 0; i <= 30; i++) chain.person(`p${i}`, 'M');
+    for (let i = 0; i < 30; i++) chain.family(`f${i}`, `p${i + 1}`, null, [`p${i}`]);
+    const deep = kinshipGraph(chain.build());
+    expect(name(deep, 'p25', 'p0')).toBe('unrelated');
+    expect(relationship(deep, 'p25', 'p0', { maxGenerations: 30 }).name).toBe(
+      '23rd great-grandfather',
+    );
+  });
+
+  it('is symmetric in whether people are related, and terminates on random trees', () => {
+    const { graph, ids } = randomTree(400, 3);
+    const g = kinshipGraph(graph);
+    fc.assert(
+      fc.property(fc.constantFrom(...ids), fc.constantFrom(...ids), (a, b) => {
+        const ab = relationship(g, a, b);
+        const ba = relationship(g, b, a);
+        expect(ab.relationships.length > 0).toBe(ba.relationships.length > 0);
+        for (const r of ab.relationships) {
+          for (const p of r.paths) {
+            expect(p.ids[0]).toBe(a);
+            expect(p.ids.at(-1)).toBe(b);
+            expect(p.steps).toHaveLength(p.ids.length - 1);
+          }
+        }
+      }),
+      { numRuns: 300 },
+    );
+  });
+});

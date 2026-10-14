@@ -327,14 +327,33 @@ export function TreeView({
 
   const onRendered = useCallback(() => {
     setRendered(shownResult);
-    if (refocusPending.current) {
-      refocusPending.current = false;
-      try {
-        performance.measure('oa-tree-refocus', REFOCUS_MARK);
-      } catch {
-        // The start mark was cleared; nothing to measure.
-      }
-    }
+    const measure = refocusPending.current;
+    refocusPending.current = false;
+    // For perf tests and profiling, once the frame showing this layout is painted:
+    // a task queued from the next animation frame runs after that frame's paint.
+    requestAnimationFrame(() => {
+      const channel = new MessageChannel();
+      channel.port1.onmessage = () => {
+        // The first layout on screen is the tree's first paint; later ones replace
+        // the previous mark, and old re-focus measures are dropped, so the
+        // timeline does not grow for the life of the tab.
+        if (performance.getEntriesByName('oa-tree-first-paint', 'mark').length === 0) {
+          performance.mark('oa-tree-first-paint');
+        }
+        performance.clearMarks('oa-tree-ready');
+        performance.mark('oa-tree-ready');
+        if (!measure) return;
+        if (performance.getEntriesByName('oa-tree-refocus', 'measure').length >= 100) {
+          performance.clearMeasures('oa-tree-refocus');
+        }
+        try {
+          performance.measure('oa-tree-refocus', REFOCUS_MARK, 'oa-tree-ready');
+        } catch {
+          // The start mark was cleared; nothing to measure.
+        }
+      };
+      channel.port2.postMessage(null);
+    });
   }, [shownResult]);
 
   const onToggle = useCallback(

@@ -44,11 +44,11 @@ test('compares two records, merges with the chosen facts, and undoes', async ({ 
 
   // Keep the left record but take the right one's birth.
   await table.getByRole('radio', { name: /Birth from Rowan Ashdowne/ }).check();
-  await page.getByRole('button', { name: 'Merge' }).click();
+  await page.getByRole('button', { name: 'Merge', exact: true }).click();
   const confirm = page.getByRole('alertdialog', {
     name: /Merge Rowan Ashdowne into Rowan Ashdown/,
   });
-  await confirm.getByRole('button', { name: 'Merge' }).click();
+  await confirm.getByRole('button', { name: 'Merge', exact: true }).click();
 
   await expect(page).toHaveURL(new RegExp(`/person/(${rowan}|${twin})$`));
   const id = new URL(page.url()).pathname.split('/').pop()!;
@@ -78,9 +78,9 @@ test('can swap which record is kept and take its name', async ({ page }) => {
   await page.getByRole('button', { name: 'Swap sides' }).click();
   const table = page.getByRole('table', { name: 'Compare records' });
   await expect(table.getByRole('columnheader').nth(1)).toContainText('Rowan Ashdowne');
-  await table.getByRole('radio', { name: /Name from Rowan Ashdown$/ }).check();
-  await page.getByRole('button', { name: 'Merge' }).click();
-  await page.getByRole('alertdialog').getByRole('button', { name: 'Merge' }).click();
+  await table.getByRole('radio', { name: 'Name from Rowan Ashdown: Rowan Ashdown' }).check();
+  await page.getByRole('button', { name: 'Merge', exact: true }).click();
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Merge', exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/person/${twin}$`));
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Rowan Ashdown');
 });

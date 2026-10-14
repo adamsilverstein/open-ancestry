@@ -101,6 +101,19 @@ describe('undo / redo', () => {
     store.close();
   });
 
+  it('reports rows still referenced by later edits as a conflict, not a raw FK error', () => {
+    const store = memoryTree();
+    const { batchId, result: p } = store.transact('add', (tx) => persons.create(tx, {}));
+    store.transact('family', (tx) => families.create(tx, { partner1_id: p.id }));
+    const before = snapshot(store);
+    expect(() => undo(store, batchId)).toThrow(UndoConflictError);
+    expect(() => undo(store, batchId)).toThrow(/later edits still depend/);
+    expect(store.db.inTransaction).toBe(false);
+    expect(snapshot(store)).toBe(before);
+    expect(listBatches(store).find((b) => b.id === batchId)?.state).toBe('applied');
+    store.close();
+  });
+
   it('refuses invalid state transitions', () => {
     const store = memoryTree();
     const { batchId } = store.transact('add', (tx) => persons.create(tx, {}));

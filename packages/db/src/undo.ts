@@ -77,7 +77,7 @@ function replay(
     .all(batch.id) as ChangeLogRow[];
   const now = store.clock();
   const tx = new Tx(store, batch.id, now, false);
-  store.db.transaction(() => {
+  const run = store.db.transaction(() => {
     for (const entry of log) {
       const [from, to] =
         direction === 'undo'
@@ -102,7 +102,21 @@ function replay(
     store
       .stmt('UPDATE change_batch SET state = ?, state_changed_at = ? WHERE id = ?')
       .run(direction === 'undo' ? 'undone' : 'applied', now, batch.id);
-  })();
+  });
+  try {
+    run();
+  } catch (error) {
+    // A deferred foreign key failure at COMMIT leaves the transaction open.
+    if (store.db.inTransaction) store.db.exec('ROLLBACK');
+    // Rows created by this batch are still referenced by later edits (or rows
+    // it deleted are needed by them): the same situation as a row conflict.
+    if ((error as { code?: string }).code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
+      throw new UndoConflictError(
+        `Cannot ${direction} "${batch.label}": later edits still depend on rows it ${direction === 'undo' ? 'created' : 'removed'}`,
+      );
+    }
+    throw error;
+  }
   return getBatch(store, batch.id);
 }
 

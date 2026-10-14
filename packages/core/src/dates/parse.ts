@@ -120,11 +120,13 @@ function parseNormalized(
   if ((match = FROM_TO.exec(s))) return range(original, 'from_to', match[1]!, match[2]!, calendar);
   if ((match = FROM.exec(s))) {
     const p = parsePoint(match[1]!, calendar);
-    return p && single(original, 'from', p);
+    if (p) return single(original, 'from', p);
+    return periodSpan(original, 'from', match[1]!, calendar);
   }
   if ((match = TO.exec(s))) {
     const p = parsePoint(match[1]!, calendar);
-    return p && single(original, 'to', p);
+    if (p) return single(original, 'to', p);
+    return periodSpan(original, 'to', match[1]!, calendar);
   }
   if ((match = BET_SPAN.exec(s))) {
     const span = yearSpan(match[1]!);
@@ -188,6 +190,35 @@ function spanDate(
     { point: { year: start }, calendar },
     { point: { year: end }, calendar },
   );
+}
+
+/**
+ * `FROM` or `TO` a span. A span written as a range (`FROM 1850s-1860s`,
+ * `FROM 1850-60`) is the whole period. A single decade or century is read
+ * loosely, as with BEF and AFT: from its first year (`FROM 1850s` is
+ * `FROM 1850`), to its last (`TO 1850s` is `TO 1859`).
+ */
+function periodSpan(
+  original: string,
+  qualifier: 'from' | 'to',
+  s: string,
+  calendar: Calendar,
+): ParsedDate | undefined {
+  const span = yearSpan(s);
+  if (!span) return undefined;
+  const [start, end] = span;
+  if (qualifier === 'from' && /-|–| TO /.test(s)) {
+    return build(
+      original,
+      'from_to',
+      { point: { year: start }, calendar },
+      { point: { year: end }, calendar },
+    );
+  }
+  return single(original, qualifier, {
+    point: { year: qualifier === 'from' ? start : end },
+    calendar,
+  });
 }
 
 /** Reads a leading calendar escape or keyword. Null means an unknown calendar. */

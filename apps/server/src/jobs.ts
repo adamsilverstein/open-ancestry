@@ -20,8 +20,10 @@ export interface ImporterOptions {
 }
 
 /**
- * Imports a GEDCOM or GEDZIP file at `filePath` into `target`. Matches
- * `importGedcom` from @open-ancestry/import, which is injected so tests can fake it.
+ * Imports a GEDCOM or GEDZIP file at `filePath` into the empty tree `target`.
+ * Wire the real importer with
+ * `(path, store, options) => importGedcom({ path }, store, options)` from
+ * @open-ancestry/import; it is injected so tests can fake it.
  */
 export type Importer = (
   filePath: string,

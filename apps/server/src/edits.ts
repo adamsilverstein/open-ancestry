@@ -64,7 +64,11 @@ export function dateColumns(dateText: string | null | undefined) {
     date_qualifier: parsed.qualifier,
     date_sort: parsed.valid ? parsed.sortKey : null,
     date_sort_end: parsed.valid ? (parsed.sortKeyEnd ?? null) : null,
-    calendar: parsed.calendar === 'gregorian' ? null : parsed.calendar,
+    // Null means gregorian; matches dateColumns in @open-ancestry/import.
+    calendar:
+      !parsed.valid || parsed.calendar === 'gregorian' || parsed.calendar === 'unknown'
+        ? null
+        : parsed.calendar,
   };
 }
 

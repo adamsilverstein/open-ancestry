@@ -84,7 +84,7 @@ describe('CONC splitting of an unsplittable run', () => {
     const value = 'ab' + '@'.repeat(40);
     const out = serializeNode(node({ level: 0, tag: 'NOTE', value }), { maxLineLength: 10 });
     expect(parseGedcom(out).records[0]!.value).toBe(value);
-    expect(out.trimEnd().split('\n').at(-1)).toMatch(/^1 CONC b@{40}$/);
+    expect(out.trimEnd().split('\n').at(-1)).toMatch(/^1 CONC b@{80}$/);
   });
 });
 

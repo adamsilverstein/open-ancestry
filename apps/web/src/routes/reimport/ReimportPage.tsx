@@ -8,6 +8,7 @@ import buttonStyles from '../../components/Button/Button.module.css';
 import { Checkbox } from '../../components/Checkbox/Checkbox';
 import { useToast } from '../../components/Toast/Toast';
 import { cx } from '../../lib/cx';
+import { cancelJob, getJob } from '../../library/api';
 import { useImportJob } from '../../library/useImportJob';
 import importStyles from '../import/Import.module.css';
 import {
@@ -243,6 +244,9 @@ function Review({ review }: { review: ReimportReview }) {
 export function ReimportPage() {
   const { jobId } = useParams({ from: '/reimport/$jobId' });
   const { job, missing } = useImportJob(jobId);
+  const navigate = useNavigate();
+  const toast = useToast();
+  const [cancelling, setCancelling] = useState(false);
   const result =
     job?.state === 'completed' ? (job.result as unknown as { reimportId: string }) : null;
   const { data: review, error } = useQuery({
@@ -278,12 +282,32 @@ export function ReimportPage() {
     );
   }
   if (review) return <Review key={review.id} review={review} />;
+
+  /** Stops the comparison, or discards its review if it finished in the meantime. */
+  async function cancel() {
+    setCancelling(true);
+    try {
+      await cancelJob(jobId);
+    } catch {
+      const latest = await getJob(jobId).catch(() => null);
+      const done = latest?.result as unknown as { reimportId?: string } | undefined;
+      if (done?.reimportId) await discardReimport(done.reimportId).catch(() => {});
+    }
+    toast({ title: 'Re-import cancelled. Your tree was not changed.' });
+    await navigate({ to: '/' });
+  }
+
   return (
     <div className={importStyles.page} aria-busy="true">
       <h1 className={importStyles.title}>
         {job ? `Comparing ${job.fileName} with your tree` : 'Starting the comparison'}
       </h1>
       <progress className={importStyles.progress} aria-label="Comparison progress" />
+      <div>
+        <Button variant="secondary" disabled={cancelling} onClick={() => void cancel()}>
+          Cancel
+        </Button>
+      </div>
     </div>
   );
 }

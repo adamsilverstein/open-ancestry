@@ -28,6 +28,9 @@ export const getTree = (id: string, signal?: AbortSignal) =>
 export const getJob = (id: string, signal?: AbortSignal) =>
   apiGet<ImportJob>(`/jobs/${seg(id)}`, signal);
 
+/** Stops a queued or running job; 409 once it has finished. */
+export const cancelJob = (id: string) => apiSend<{ job: ImportJob }>('DELETE', `/jobs/${seg(id)}`);
+
 export const jobEventsUrl = (id: string) => `/api/jobs/${seg(id)}/events`;
 
 /** The import report (packages/import ImportReport), as much as the UI shows. */

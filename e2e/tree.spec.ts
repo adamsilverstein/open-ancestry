@@ -518,6 +518,44 @@ test.describe('family view', () => {
     await expect(canvas(page).getByText('Ada’s grandparents')).toBeInViewport();
   });
 
+  test('the minimap settles before it moves, and does not flip back and forth', async ({
+    page,
+  }) => {
+    await open(page);
+    await settled(page);
+    const minimap = page.getByTestId('tree-minimap');
+    await expect(minimap).toBeVisible();
+    await minimap.evaluate((el) => {
+      const w = window as unknown as { __cornerChanges: number };
+      w.__cornerChanges = 0;
+      new MutationObserver((records) => (w.__cornerChanges += records.length)).observe(el, {
+        attributes: true,
+        attributeFilter: ['data-corner', 'hidden'],
+      });
+    });
+    // A slow pan that carries row labels and cards across the bottom corners and back.
+    const v = await box(canvas(page));
+    const at = (fx: number, fy: number) => [v.x + v.width * fx, v.y + v.height * fy] as const;
+    await page.mouse.move(...at(0.5, 0.3));
+    await page.mouse.down();
+    for (const [fx, fy] of [
+      [0.3, 0.8],
+      [0.7, 0.9],
+      [0.5, 0.6],
+      [0.2, 0.9],
+      [0.6, 0.5],
+    ] as const) {
+      await page.mouse.move(...at(fx, fy), { steps: 20 });
+    }
+    await page.mouse.up();
+    await settled(page);
+    await page.waitForTimeout(400);
+    const changes = await page.evaluate(
+      () => (window as unknown as { __cornerChanges: number }).__cornerChanges,
+    );
+    expect(changes).toBeLessThanOrEqual(1);
+  });
+
   test('the minimap shows the viewport and navigates on click and drag', async ({ page }) => {
     await open(page);
     const minimap = page.getByRole('application', { name: 'Minimap' });
@@ -980,6 +1018,8 @@ test.describe('wide descendant charts (#74)', () => {
     const out: Box[] = [];
     for (const el of await locator.all()) {
       if (!(await el.isVisible())) continue;
+      // Thin gaps fade a label out but keep it in the reading order.
+      if ((await el.getAttribute('data-thin')) !== null) continue;
       const b = await el.boundingBox();
       if (b) out.push(b);
     }
@@ -1022,6 +1062,29 @@ test.describe('wide descendant charts (#74)', () => {
     for (let i = 0; i < 4 && (await transform(page)).scale > 0.45; i++) {
       await page.getByRole('button', { name: 'Zoom out' }).click();
       await settled(page);
+      await expectLabelsClear(page);
+    }
+    // Slide the rows under the gutter: their gaps are now thinner than a label,
+    // which fades out but stays in the reading order.
+    await drag(page, -200, 0);
+    await expectLabelsClear(page);
+    await expect(page.locator('[data-testid="tree-row-label"][data-thin]')).not.toHaveCount(0);
+    await expect(page.locator('[data-testid="tree-row-label"][hidden]')).toHaveCount(0);
+  });
+
+  test('row labels stay clear of cards after the text size changes', async ({ page }) => {
+    await open(page, 'bram', '&layout=descendants');
+    await settled(page);
+    await page.getByRole('button', { name: 'Fit to screen' }).click();
+    await settled(page);
+    while ((await transform(page)).scale < 1) {
+      await page.getByRole('button', { name: 'Zoom in' }).click();
+      await settled(page);
+    }
+    // Like a minimum font size setting or a late web font: the labels grow.
+    await page.addStyleTag({ content: '[data-testid="tree-row-label"] { font-size: 26px; }' });
+    for (const dx of [150, 150, 150]) {
+      await drag(page, dx, 0);
       await expectLabelsClear(page);
     }
   });

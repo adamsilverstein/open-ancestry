@@ -31,6 +31,15 @@ for (const colorScheme of ['light', 'dark'] as const) {
       });
     }
 
+    test('the drop zone offers one control for choosing a file (issue #118)', async ({ page }) => {
+      await page.goto('/');
+      const zone = page.getByRole('region', { name: 'Import a file' });
+      await expect(zone.getByRole('button', { name: 'Import GEDCOM' })).toBeVisible();
+      // The file input behind the button is hidden from assistive technology.
+      await expect(zone.getByRole('button')).toHaveCount(1);
+      await expect(zone.locator('input[type=file]')).toHaveAttribute('aria-hidden', 'true');
+    });
+
     test('person gallery and lightbox have no violations', async ({ page }) => {
       await page.addInitScript((tree) => localStorage.setItem('oa-tree', tree), MEDIA_TREE);
       await page.goto(`/person/${MEDIA_IDS.imogen}?tab=gallery`);
@@ -50,9 +59,10 @@ for (const colorScheme of ['light', 'dark'] as const) {
         mimeType: 'application/octet-stream',
         buffer: Buffer.from(ged),
       });
-      await expect(page.getByRole('heading', { level: 1, name: 'Import complete' })).toBeVisible({
-        timeout: 30_000,
-      });
+      const done = page.getByRole('heading', { level: 1, name: 'Import complete' });
+      await expect(done).toBeVisible({ timeout: 30_000 });
+      // Focus moves to the outcome so screen readers announce it (issue #118).
+      await expect(done).toBeFocused();
       expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
       await page.getByRole('banner').getByRole('button', { name: /Tree:/ }).click();
       await expect(page.getByRole('menu')).toBeVisible();

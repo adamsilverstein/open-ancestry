@@ -5,7 +5,9 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { generateGedcom } from '../../../fixtures/generate';
-import { exposureWarning, main, parseCliArgs, progressReporter, run } from './main';
+import { openMemoryTree } from '@open-ancestry/db';
+import { importGedcom } from '@open-ancestry/import';
+import { exposureWarning, formatReport, main, parseCliArgs, progressReporter, run } from './main';
 
 describe('parseCliArgs', () => {
   it('parses serve with defaults', () => {
@@ -412,5 +414,39 @@ describe('serve on SIGINT/SIGTERM', () => {
     expect(exits).toEqual([1]);
     await vi.waitFor(() => expect(exits).toEqual([1, 0]));
     await server?.close();
+  });
+});
+
+describe('formatReport layout (issue #121)', () => {
+  async function report(lines: string[]) {
+    return importGedcom(
+      { bytes: ['0 HEAD', '1 GEDC', '2 VERS 5.5.1', ...lines, '0 TRLR', ''].join('\n') },
+      openMemoryTree(),
+      { today: new Date('2026-10-14T12:00:00Z') },
+    );
+  }
+  const tree = { name: 'T', dir: '/lib/T.oatree', homePerson: null };
+
+  it('keeps a space between columns and shortens long examples', async () => {
+    const r = await report([
+      '0 @I1@ INDI',
+      '1 NOTE start',
+      '1 CONC stray continuation',
+      `1 _LONG ${'x'.repeat(500)}`,
+    ]);
+    const out = formatReport(r, tree).split('\n');
+    const warning = out.find((l) => l.includes('misplaced-continuation'))!;
+    expect(warning).toMatch(/misplaced-continuation +\S/);
+    const long = out.find((l) => l.includes('INDI._LONG'))!;
+    expect(long.length).toBeLessThanOrEqual(130);
+    expect(long.endsWith('…')).toBe(true);
+  });
+
+  it('reads short imports as under 0.1s, not 0.0s', async () => {
+    const r = await report(['0 @I1@ INDI']);
+    r.timings.total = 12;
+    expect(formatReport(r, tree).split('\n')[0]).toMatch(/ in under 0\.1s$/);
+    r.timings.total = 1234;
+    expect(formatReport(r, tree).split('\n')[0]).toMatch(/ in 1\.2s$/);
   });
 });

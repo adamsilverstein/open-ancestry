@@ -50,6 +50,13 @@ test('imports the Ancestry sample through the file picker and opens the tree', a
     page.getByRole('region', { name: 'Unmapped tags' }).getByText('No unmapped tags'),
   ).toBeVisible();
   await expect(report.getByText('Ancestry.com Family Trees')).toBeVisible();
+  // Issue #121: the facts a genealogist checks before opening the tree.
+  await expect(report.getByRole('group', { name: 'Repositories' })).toContainText('1');
+  await expect(report.getByRole('group', { name: 'Submitters' })).toContainText('1');
+  await expect(report.getByRole('link', { name: 'Thaddeus Ashgrove' })).toHaveAttribute(
+    'href',
+    /\/person\/[0-9A-Z]{26}$/,
+  );
 
   await page.getByRole('link', { name: 'Open tree' }).click();
   await expect(page).toHaveURL(/\/tree\/[0-9A-Z]{26}$/);
@@ -79,6 +86,57 @@ test('shows warnings with line numbers and unmapped tags', async ({ page }, test
   await expect(unmapped.getByRole('row', { name: /INDI\._SKYPEID/ })).toContainText(
     '1 _SKYPEID wren.t',
   );
+});
+
+test('shows the GEDCOM version the importer assumed, and a failure is focused', async ({
+  page,
+}, testInfo) => {
+  // No GEDC.VERS: the importer reads it as 5.5.1, and the report says so like the CLI.
+  await page.goto('/');
+  await chooseFile(
+    page,
+    `${unique(testInfo, 'NoVers')}.ged`,
+    Buffer.from('0 HEAD\n0 @I1@ INDI\n0 TRLR\n'),
+  );
+  const done = page.getByRole('heading', { level: 1, name: 'Import complete' });
+  await expect(done).toBeVisible({ timeout: 30_000 });
+  await expect(done).toBeFocused();
+  const report = page.getByRole('region', { name: 'Import report' });
+  await expect(report.getByText('GEDCOM 5.5.1, utf-8')).toBeVisible();
+  await expect(page.getByText(/ in 0\.0 s/)).toHaveCount(0);
+
+  await page.goto('/');
+  await chooseFile(
+    page,
+    `${unique(testInfo, 'NotGedcom')}.ged`,
+    Buffer.from('hello, not a gedcom\n'),
+  );
+  const failed = page.getByRole('heading', { level: 1, name: 'Import failed' });
+  await expect(failed).toBeVisible({ timeout: 30_000 });
+  await expect(failed).toBeFocused();
+});
+
+test('refuses a file over the upload limit before sending it (issue #120)', async ({ page }) => {
+  // A test-sized limit: the app reads the server's caps from /api/limits.
+  await page.route('**/api/limits', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ importUpload: { gedcomBytes: 1024, archiveBytes: 4096 } }),
+    }),
+  );
+  const uploads: string[] = [];
+  page.on('request', (r) => r.url().includes('/api/import') && uploads.push(r.url()));
+  await page.goto('/');
+  await chooseFile(page, 'big.ged', Buffer.alloc(2048, 'x'));
+  await expect(page.getByRole('alert')).toHaveText(
+    'This file is 2 KB. GEDCOM files can be up to 1 KB.',
+  );
+  await chooseFile(page, 'photos.zip', Buffer.alloc(5000, 'x'));
+  await expect(page.getByRole('alert')).toHaveText(
+    'This file is 4.9 KB. GEDZIP files can be up to 4 KB.',
+  );
+  expect(uploads).toEqual([]);
+  await expect(page).toHaveURL(/\/$/);
 });
 
 test('accepts a dropped file', async ({ page }, testInfo) => {

@@ -266,7 +266,12 @@ describe('POST import', () => {
     expect((await upload(api, base, 'big.ged', Buffer.alloc(4096, 'x'))).statusCode).toBe(413);
     const huge = await upload(api, base, 'huge.gdz', Buffer.alloc(16_384, 'x'));
     expect(huge.statusCode).toBe(413);
-    expect(huge.json().error.message).toMatch(/8192/);
+    // In units a person reads (issue #120).
+    expect(huge.json().error.message).toBe('GEDZIP uploads are limited to 8 KB');
+    expect((await api.get('/api/limits')).json()).toEqual({
+      importUpload: { gedcomBytes: 1024, archiveBytes: 8192 },
+      mediaUploadBytes: 1024 ** 3,
+    });
     expect(fake.calls).toHaveLength(0);
     const zip = await upload(api, base, 'photos.zip', Buffer.alloc(4096, 'x'));
     expect(zip.statusCode, zip.body).toBe(202);

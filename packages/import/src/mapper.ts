@@ -292,6 +292,37 @@ export class Mapper {
     return key;
   }
 
+  /**
+   * A GEDCOM 7 `PHRASE` under `node`, marked as mapped; undefined in 5.5.1,
+   * where PHRASE is not a standard tag.
+   */
+  private phrase(node: GedcomNode): string | undefined {
+    if (this.major < 7) return undefined;
+    const phrase = this.child(node, 'PHRASE');
+    const value = text(phrase);
+    if (value) this.use(phrase);
+    return value;
+  }
+
+  /**
+   * Date columns for a DATE node. In GEDCOM 7 a PHRASE holds the date as
+   * written (an export keeps Ancestry's `Abt. 1842` there), so it becomes
+   * date_text, parsed when it can be and otherwise sorted by the DATE value.
+   * `text` is what living inference reads.
+   */
+  private date(
+    node: GedcomNode,
+  ): { columns: ReturnType<typeof dateColumns>; text: string } | undefined {
+    const value = text(node);
+    const phrase = this.phrase(node);
+    if (!phrase && !value) return undefined;
+    this.use(node);
+    if (!phrase) return { columns: dateColumns(value!), text: value! };
+    const columns = dateColumns(phrase);
+    if (columns.date_qualifier !== 'text' || !value) return { columns, text: phrase };
+    return { columns: { ...dateColumns(value), date_text: phrase }, text: value };
+  }
+
   // ------------------------------------------------------------ records
 
   mapRecord(index: number): void {
@@ -507,6 +538,11 @@ export class Mapper {
         parts[c.tag] = c.value!.trim();
       }
     }
+    // GEDCOM 7 has a fixed list of name types; others are TYPE OTHER with a PHRASE.
+    const typeNode = this.child(node, 'TYPE');
+    if (parts.TYPE?.toUpperCase() === 'OTHER' && typeNode) {
+      parts.TYPE = this.phrase(typeNode)?.trim() ?? parts.TYPE;
+    }
     const full = text(node);
     if (!full && !parts.GIVN && !parts.SURN) return;
     this.use(node);
@@ -613,13 +649,15 @@ export class Mapper {
             this.use(c);
           }
           break;
-        case 'DATE':
-          if (text(c) && date === undefined) {
-            date = c.value!;
-            Object.assign(row, dateColumns(date));
-            this.use(c);
+        case 'DATE': {
+          if (date !== undefined) break;
+          const parsed = this.date(c);
+          if (parsed) {
+            date = parsed.text;
+            Object.assign(row, parsed.columns);
           }
           break;
+        }
         case 'PLAC': {
           if (row.place_id) break;
           const placeId = this.mapPlace(c);
@@ -629,12 +667,14 @@ export class Mapper {
           }
           break;
         }
-        case 'AGE':
-          if (text(c) && row.age == null) {
-            row.age = c.value!;
+        case 'AGE': {
+          const age = this.phrase(c) ?? text(c);
+          if (age && row.age == null) {
+            row.age = age;
             this.use(c);
           }
           break;
+        }
         case 'CAUS':
           if (text(c) && row.cause == null) {
             row.cause = c.value!;
@@ -807,9 +847,8 @@ export class Mapper {
         case 'DATA':
           this.use(c);
           for (const d of c.children) {
-            if (d.tag === 'DATE' && text(d) && row.date_text == null) {
-              row.date_text = d.value!;
-              this.use(d);
+            if (d.tag === 'DATE') {
+              if (row.date_text == null) row.date_text = this.date(d)?.columns.date_text;
             } else if (d.tag === 'TEXT' && text(d)) {
               texts.push(d.value!);
               this.use(d);
@@ -1005,8 +1044,13 @@ export class Mapper {
   }
 
   private mapFile(node: GedcomNode, row: InsertRow<'media'>, xref: string | undefined): void {
-    const value = node.value!.trim();
-    const ref = classifyFile(value);
+    let value = node.value!.trim();
+    let ref = classifyFile(value);
+    if (this.major >= 7 && ref.type !== 'remote') {
+      // GEDCOM 7 FILE values are URI references, so local paths are percent-encoded.
+      value = decodeUri(value);
+      ref = classifyFile(value);
+    }
     if (ref.type === 'remote') {
       row.remote_url = ref.url;
       this.remoteMedia++;
@@ -1794,6 +1838,14 @@ export function dateColumns(dateText: string) {
     DATE_CACHE.set(dateText, columns);
   }
   return columns;
+}
+
+function decodeUri(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function sha256(bytes: Uint8Array): string {

@@ -1001,7 +1001,7 @@ test.describe('step and adoptive kinship (#138)', () => {
       /, adoptive mother of Peter Ashgrove$/,
     );
     await expect(card(page, 'Thomas Ashgrove')).toHaveAccessibleName(
-      /, brother of Peter Ashgrove$/,
+      /, adopted brother of Peter Ashgrove$/,
     );
   });
 });

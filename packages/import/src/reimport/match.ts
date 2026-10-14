@@ -142,7 +142,12 @@ interface Candidate {
   reasons: string[];
   corroboration: number;
   agree: number;
+  /** The part of the score that is only the kept-xref hint. */
+  hint: number;
 }
+
+/** Ancestry sometimes keeps xrefs: a small nudge, never enough to settle a tie on its own. */
+const XREF_HINT = 0.15;
 
 /** Without at least this much agreement beyond the name, a match is never "high confidence". */
 const MIN_CORROBORATION = 2;
@@ -206,8 +211,9 @@ export function matchPeople(existing: Snapshot, incoming: Snapshot): Map<string,
       const base = baseScore(existing.people.get(id)!, i);
       let { score } = base;
       const reasons = [...base.reasons];
-      if (id === sameXref) {
-        score += 0.15;
+      const hint = id === sameXref ? XREF_HINT : 0;
+      if (hint) {
+        score += hint;
         reasons.push('same xref as the last import');
       }
       if (score >= MATCH_THRESHOLD - 0.4) {
@@ -218,6 +224,7 @@ export function matchPeople(existing: Snapshot, incoming: Snapshot): Map<string,
           reasons,
           corroboration: base.corroboration,
           agree: 0,
+          hint,
         });
       }
     }
@@ -265,7 +272,7 @@ export function matchPeople(existing: Snapshot, incoming: Snapshot): Map<string,
     let top = -Infinity;
     for (const x of byKey[key].get(id) ?? []) {
       if (x !== except && (key === 'i' ? x.e !== except.e : x.i !== except.i)) {
-        top = Math.max(top, x.score);
+        top = Math.max(top, x.score - x.hint);
       }
     }
     return top;
@@ -283,7 +290,8 @@ export function matchPeople(existing: Snapshot, incoming: Snapshot): Map<string,
       c.reasons = [...c.reasons, 'little evidence beyond the name'];
     }
     const rival = Math.max(best('i', c.i, c), merged ? -Infinity : best('e', c.e, c));
-    if (rival >= c.score - TIE_MARGIN) {
+    // Evidence alone decides a tie: two people the export can't tell apart are the user's call.
+    if (rival >= c.score - c.hint - TIE_MARGIN) {
       confidence = Math.min(confidence, CHECK_CONFIDENCE);
       c.reasons = [...c.reasons, 'another person is as likely'];
     }

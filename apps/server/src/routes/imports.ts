@@ -144,15 +144,17 @@ export function importRoutes(app: Api, deps: Deps): void {
       try {
         const job = jobs.enqueue(
           { tree, fileName: upload.fileName, kind: 'reimport' },
-          async (signal, onProgress) => {
-            const session = await prepareReimport(
-              library.open(tree),
-              { path: upload.path },
-              { signal, onProgress: (phase, done, total) => onProgress({ phase, done, total }) },
-            );
-            const stored = reimports.add(tree, upload.fileName, session);
-            return { reimportId: stored.id, counts: session.diff.counts };
-          },
+          (signal, onProgress) =>
+            // Busy, like an import: the tree is not renamed or deleted under the compare.
+            library.whileBusy(tree, async () => {
+              const session = await prepareReimport(
+                library.open(tree),
+                { path: upload.path },
+                { signal, onProgress: (phase, done, total) => onProgress({ phase, done, total }) },
+              );
+              const stored = reimports.add(tree, upload.fileName, session);
+              return { reimportId: stored.id, counts: session.diff.counts };
+            }),
           upload.cleanup,
         );
         return reply.code(202).send({ jobId: job.id, job });

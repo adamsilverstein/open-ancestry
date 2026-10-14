@@ -1,3 +1,4 @@
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { parseDate } from '../dates';
 import { inferLiving } from './index';
@@ -102,5 +103,109 @@ describe('inferLiving', () => {
 
   it('defaults today to the current date', () => {
     expect(inferLiving({ birth: String(new Date().getFullYear() - 1) }).living).toBe(true);
+  });
+
+  it.each<[string, LivingInput]>([
+    ['open-ended birth', { birth: 'AFT 1800' }],
+    ['open-ended FROM birth', { birth: 'FROM 1800' }],
+    ['range birth uses its latest year', { birth: 'BET 1800 AND 1950' }],
+    ['future birth', { birth: '2400' }],
+    [
+      'null death and burial',
+      { birth: '1950', death: null, burial: null } as unknown as LivingInput,
+    ],
+    ['non-boolean death flag', { hasDeathFacts: 'true' } as unknown as LivingInput],
+    ['relatives as a string, not a list', { parentBirths: '1800' } as unknown as LivingInput],
+    ['open-ended parent birth', { parentBirths: ['AFT 1800'] }],
+    ['forged parsed birth', { birth: { ...parseDate('1800'), sortKey: NaN } }],
+    ['forged invalid parsed birth', { birth: { ...parseDate('1800'), valid: false } }],
+    ['numeric birth', { birth: 1800 } as unknown as LivingInput],
+  ])('fails closed: %s', (_label, input) => {
+    expect(inferLiving(input, today).living).toBe(true);
+  });
+
+  it('fails closed on bad today, threshold or input', () => {
+    expect(inferLiving({ birth: '1800' }, new Date('nope')).living).toBe(true);
+    expect(inferLiving({ birth: '1800' }, 'today' as unknown as Date).living).toBe(true);
+    expect(inferLiving({ birth: '1950' }, today, NaN).living).toBe(true);
+    expect(inferLiving({ birth: '1950' }, today, 0).living).toBe(true);
+    expect(inferLiving({ birth: '1950' }, today, -5).living).toBe(true);
+    expect(inferLiving(null as unknown as LivingInput, today).living).toBe(true);
+  });
+
+  it('still uses positive evidence', () => {
+    expect(inferLiving({ birth: 'BEF 1900' }, today).living).toBe(false);
+    expect(inferLiving({ birth: '1800' }, today, NaN).living).toBe(false);
+  });
+});
+
+describe('inferLiving fails closed (properties)', () => {
+  const noDeath = {
+    death: fc.constantFrom(undefined, null),
+    burial: fc.constantFrom(undefined, null),
+  };
+  const anyDate = fc.oneof(
+    fc.anything(),
+    fc.string(),
+    fc.integer().map(String),
+    fc.constant('AFT 1700'),
+  );
+  const arbInput = fc.record(
+    {
+      birth: anyDate,
+      hasDeathFacts: fc.oneof(
+        fc.constant(false),
+        fc.anything().filter((v) => v !== true),
+      ),
+      parentBirths: fc.oneof(fc.array(anyDate), fc.anything()),
+      spouseBirths: fc.oneof(fc.array(anyDate), fc.anything()),
+      childBirths: fc.oneof(fc.array(anyDate), fc.anything()),
+      ...noDeath,
+    },
+    { requiredKeys: [] },
+  ) as fc.Arbitrary<LivingInput>;
+  const arbToday = fc.oneof(fc.date(), fc.constant(new Date('nope')), fc.anything());
+  const arbThreshold = fc.oneof(fc.integer({ min: -10, max: 200 }), fc.double());
+
+  it('only reports deceased when a birth year is at least the threshold ago', () => {
+    fc.assert(
+      fc.property(arbInput, arbToday, arbThreshold, (input, now, threshold) => {
+        const result = inferLiving(input, now as Date, threshold);
+        if (result.living) return;
+        const t = Number.isFinite(threshold) && threshold > 0 ? threshold : 100;
+        expect(result.reason).toBe('birth-beyond-threshold');
+        expect(Number.isFinite(result.birthYear)).toBe(true);
+        expect((now as Date).getFullYear() - result.birthYear!).toBeGreaterThanOrEqual(t);
+      }),
+      { numRuns: 1000 },
+    );
+  });
+
+  it('is always living when no date parses', () => {
+    const noDate = fc.string().filter((s) => !parseDate(s).valid);
+    fc.assert(
+      fc.property(
+        fc.record(
+          {
+            birth: noDate,
+            parentBirths: fc.array(noDate),
+            spouseBirths: fc.array(noDate),
+            childBirths: fc.array(noDate),
+          },
+          { requiredKeys: [] },
+        ),
+        (input) => {
+          expect(inferLiving(input, today)).toMatchObject({ living: true, reason: 'no-dates' });
+        },
+      ),
+    );
+  });
+
+  it('is always living for a birth within the threshold, whatever the relatives', () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 1927, max: 3000 }), arbInput, (year, input) => {
+        expect(inferLiving({ ...input, birth: String(year) }, today).living).toBe(true);
+      }),
+    );
   });
 });

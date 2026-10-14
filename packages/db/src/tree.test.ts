@@ -9,6 +9,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -19,6 +20,7 @@ import {
   openMemoryTree,
   openTree,
   persons,
+  restrictMode,
   treePaths,
 } from './index';
 
@@ -86,6 +88,29 @@ describe.skipIf(process.platform === 'win32')('opening refuses linked tree files
     // In a shared folder, someone could link any file of yours in as the tree.
     linkSync(database, join(root, 'elsewhere.sqlite'));
     expect(() => openTree(dir)).toThrow(/hard link/);
+  });
+
+  it('refuses a media or thumbs folder that is a symlink', () => {
+    for (const which of ['media', 'thumbs'] as const) {
+      const dir = join(root, `Linked ${which}.oatree`);
+      createTree(dir).close();
+      const outside = join(root, `outside-${which}`);
+      mkdirSync(outside);
+      rmSync(treePaths(dir)[which], { recursive: true });
+      symlinkSync(outside, treePaths(dir)[which]);
+      expect(() => openTree(dir), which).toThrow(/symbolic link/);
+    }
+  });
+
+  it('never hangs on a FIFO planted in the tree', () => {
+    const dir = join(root, 'Fifo.oatree');
+    createTree(dir).close();
+    const { thumbs } = treePaths(dir);
+    rmSync(thumbs, { recursive: true });
+    execFileSync('mkfifo', [thumbs]);
+    // Opening a FIFO for reading blocks until a writer comes: refuse, not hang.
+    expect(() => openTree(dir)).toThrow(/not a folder/);
+    expect(() => restrictMode(thumbs, 0o700)).not.toThrow();
   });
 
   it('opens an ordinary tree', () => {

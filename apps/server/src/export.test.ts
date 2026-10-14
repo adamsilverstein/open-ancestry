@@ -59,6 +59,13 @@ describe('GEDCOM export routes', () => {
     );
   });
 
+  it('writes event types the edit API accepts in lower case as GEDCOM tags', async () => {
+    await api.post(`${s.base}/people/${s.ada}/events`, { type: 'grad', date_text: '1963' });
+    const res = await api.get(`${s.base}/export.ged?version=7`);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain('1 GRAD\n2 DATE 1963');
+  });
+
   it('rejects unknown versions and options', async () => {
     for (const query of ['version=6', 'privatize=maybe', 'format=json']) {
       const res = await api.get(`${s.base}/export.ged?${query}`);

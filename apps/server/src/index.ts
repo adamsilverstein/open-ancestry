@@ -14,6 +14,7 @@ import type { Deps } from './context';
 import { errorBody, registerErrorHandling, toApiError } from './errors';
 import { JobManager, type Importer } from './jobs';
 import { Library, defaultLibraryRoot } from './library';
+import { checkRoutes } from './routes/checks';
 import { editRoutes } from './routes/edit';
 import { importRoutes, sweepStaleUploads } from './routes/imports';
 import { reimportRoutes } from './routes/reimports';
@@ -176,6 +177,7 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     treeRoutes(typed, deps);
     peopleRoutes(typed, deps);
     editRoutes(typed, deps);
+    checkRoutes(typed, deps);
     importRoutes(typed, deps);
     reimportRoutes(typed, deps);
     mediaRoutes(typed, deps);

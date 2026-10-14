@@ -77,8 +77,24 @@ describe('re-import labels', () => {
         'New child of a partnership not in this tree; tick to add',
       ],
       [
-        { ...base, kind: 'possible-match', existingName: 'Edith Ashgrove' },
-        'Looks like Edith Ashgrove, who is already matched; not added unless you tick it',
+        {
+          ...base,
+          kind: 'possible-match',
+          existingName: 'Edith Ashgrove',
+          confidence: 0.91,
+          taken: true,
+        },
+        'Looks like Edith Ashgrove (91%), who is already matched; not added unless you tick it',
+      ],
+      [
+        {
+          ...base,
+          kind: 'possible-match',
+          existingName: 'Mary Brown',
+          confidence: 0.59,
+          taken: false,
+        },
+        'Possibly Mary Brown (59% match); not added unless you tick it',
       ],
       [
         { ...base, kind: 'merged', incomingName: 'Thad Ashgrove' },

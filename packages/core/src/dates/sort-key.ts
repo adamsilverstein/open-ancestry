@@ -11,11 +11,13 @@
  * - Dual years sort by the new-style year (`1750/51` as 1751).
  * - Julian full dates are converted exactly. Partial Julian dates keep their
  *   Julian year/month (up to ~13 days off), since a month or year has no single
- *   Gregorian equivalent. Hebrew and French Republican are approximate.
+ *   Gregorian equivalent.
+ * - Hebrew and French Republican dates are converted exactly, partial ones via
+ *   the first, middle or last day of their month or year.
  * - B.C. years are negative; the encoding stays monotonic.
  * - Unparseable text gets UNDATED_SORT_KEY so it sorts after every date.
  */
-import { daysInMonth, monthsInYear, toGregorian } from './calendar';
+import { exactMonthDays, monthsInYear, toGregorian } from './calendar';
 import type { Calendar, DatePoint } from './types';
 
 export const UNDATED_SORT_KEY = Number.MAX_SAFE_INTEGER;
@@ -36,10 +38,11 @@ export function pointKey(point: DatePoint, calendar: Calendar, bound: Bound): nu
       (bound === 'low'
         ? 1
         : bound === 'high'
-          ? daysInMonth(calendar, year, m)
+          ? exactMonthDays(calendar, year, m)
           : month === undefined
             ? 1
-            : 15);
+            : // Mid-month; the five or six COMP days have a nearer middle.
+              Math.min(15, Math.ceil(exactMonthDays(calendar, year, m) / 2)));
     const g = toGregorian(calendar, year, m, d);
     return encode(g.year, g.month, g.day);
   }

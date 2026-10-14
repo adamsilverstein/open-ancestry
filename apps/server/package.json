@@ -1,0 +1,20 @@
+{
+  "name": "@open-ancestry/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "tsx watch src/dev.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fastify/static": "^10.1.6",
+    "@open-ancestry/core": "*",
+    "@open-ancestry/db": "*",
+    "@open-ancestry/gedcom": "*",
+    "fastify": "^5.12.7"
+  }
+}

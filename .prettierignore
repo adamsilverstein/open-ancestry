@@ -1,0 +1,7 @@
+coverage/
+dist/
+playwright-report/
+test-results/
+.nyc_output/
+package-lock.json
+*.ged

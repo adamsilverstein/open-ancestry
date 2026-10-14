@@ -1,0 +1,57 @@
+{
+  "name": "open-ancestry",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "packages/core",
+    "packages/gedcom",
+    "packages/db",
+    "apps/server",
+    "apps/web",
+    "apps/cli"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n server,web -c blue,green \"npm run dev -w @open-ancestry/server\" \"npm run dev -w @open-ancestry/web\"",
+    "build": "npm run build -w @open-ancestry/web && npm run build -w @open-ancestry/cli",
+    "start": "node apps/cli/dist/cli.js serve",
+    "lint": "eslint . && prettier --check .",
+    "format": "prettier --write .",
+    "typecheck": "tsc -p tsconfig.json && npm run typecheck --workspaces --if-present",
+    "test": "vitest run --coverage",
+    "test:watch": "vitest",
+    "e2e": "npm run build && playwright test -c e2e",
+    "e2e:coverage": "rm -rf coverage/e2e && E2E_COVERAGE=1 npm run e2e",
+    "coverage": "npm test && npm run e2e:coverage && npm run coverage:merge",
+    "coverage:merge": "tsx scripts/coverage-merge.ts",
+    "bench": "tsx bench/run.ts",
+    "fixtures": "tsx fixtures/generate.ts"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@eslint/js": "^9.39.5",
+    "@playwright/test": "^1.64.0",
+    "@types/node": "^24.0.0",
+    "@vitest/coverage-istanbul": "^5.0.4",
+    "concurrently": "^10.0.6",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.13.0",
+    "nyc": "^18.0.0",
+    "prettier": "^3.9.10",
+    "tinybench": "^6.2.2",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.71.2",
+    "vitest": "^5.0.4"
+  },
+  "allowScripts": {
+    "better-sqlite3@13.0.3": true,
+    "esbuild@0.28.2": true
+  }
+}

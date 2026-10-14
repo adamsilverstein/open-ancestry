@@ -40,6 +40,11 @@ CREATE TABLE citation_link (
   UNIQUE (citation_id, owner_type, owner_id)
 ) STRICT;
 
+CREATE TABLE derived_state (
+  name TEXT PRIMARY KEY NOT NULL,
+  fingerprint TEXT NOT NULL
+) STRICT;
+
 CREATE TABLE event (
   id TEXT PRIMARY KEY NOT NULL,
   type TEXT NOT NULL,

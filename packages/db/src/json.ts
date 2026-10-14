@@ -2,6 +2,7 @@ import { createRequire } from 'node:module';
 import type { Ajv2020 as Ajv2020Class } from 'ajv/dist/2020.js';
 import type { ValidateFunction } from 'ajv';
 import { BulkWriter } from './bulk';
+import { refreshDerivedColumns } from './derived';
 import { ENUM_COLUMNS } from './enums';
 import { listTables, upgradeRow, type TableRowsByName } from './migrations/index';
 import type { TreeStore } from './store';
@@ -19,7 +20,7 @@ export const OA_JSON_FORMAT = 'open-ancestry';
 export const OA_JSON_FORMAT_VERSION = 1;
 
 /** Derived tables rebuilt on import rather than exported. */
-const DERIVED_TABLES = new Set(['search_doc', 'person_search']);
+const DERIVED_TABLES = new Set(['search_doc', 'person_search', 'derived_state']);
 const HISTORY_TABLES = new Set(['change_batch', 'change_log']);
 
 export type OaJsonTables = { [T in keyof TableRows]: TableRows[T][] } & {
@@ -191,6 +192,8 @@ export function importJson(
     throw error;
   }
   writer.commit();
+  // The backup's sort keys came from whatever date parser wrote them.
+  refreshDerivedColumns(store, { force: true, reason: 'imported backup' });
 }
 
 /**

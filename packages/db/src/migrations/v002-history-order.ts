@@ -10,6 +10,10 @@
 // change_log.schema_version: the version each before/after image was written
 // under, so older images can be upgraded through later migrations (#101).
 // Every image recorded before this migration was written under version 1.
+//
+// derived_state: fingerprints of computations behind derived columns (such as
+// event.date_sort from date_text), so a tree recomputes them when packages/core
+// changes the computation (see derived.ts). Not exported, not change-logged.
 export default /* sql */ `
 ALTER TABLE change_batch ADD COLUMN seq INTEGER NOT NULL DEFAULT 0;
 UPDATE change_batch SET seq = ordered.n
@@ -25,4 +29,9 @@ DROP INDEX change_batch_state_idx;
 CREATE INDEX change_batch_state_idx ON change_batch (state, seq);
 
 ALTER TABLE change_log ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1;
+
+CREATE TABLE derived_state (
+  name TEXT PRIMARY KEY NOT NULL,
+  fingerprint TEXT NOT NULL
+) STRICT;
 `;

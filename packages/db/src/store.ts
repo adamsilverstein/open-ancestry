@@ -36,6 +36,8 @@ export interface StoreOptions {
    * chain to simulate a future schema version.
    */
   migrations?: readonly Migration[];
+  /** Maintenance messages, such as derived columns being recomputed (default console.info). */
+  log?: (message: string) => void;
 }
 
 const TIMESTAMP_COLUMNS = new Set(['created_at', 'updated_at', 'started_at']);
@@ -56,6 +58,7 @@ export class TreeStore {
   readonly migrations: readonly Migration[];
   /** The schema version this store migrated to and writes change_log images under. */
   readonly schemaVersion: number;
+  readonly log: (message: string) => void;
   private readonly statements = new Map<string, Statement>();
   private readonly plans = new Map<string, TablePlan>();
 
@@ -73,6 +76,7 @@ export class TreeStore {
     db.pragma('temp_store = MEMORY');
     db.pragma('cache_size = -65536');
     db.pragma('busy_timeout = 5000');
+    this.log = options.log ?? ((message) => console.info(message));
     this.migrations = options.migrations ?? MIGRATIONS;
     this.schemaVersion = this.migrations.length;
     migrate(db, { migrations: this.migrations });

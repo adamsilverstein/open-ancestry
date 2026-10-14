@@ -1,4 +1,5 @@
 import { Tx, type TreeStore } from './store';
+import { deriveDateSort, hasConvertedDate } from './derived';
 import { upgradeRow } from './migrations/index';
 import { DATA_TABLES } from './tables';
 import type { ChangeBatchRow, ChangeLogRow } from './types';
@@ -71,6 +72,29 @@ export function parseLogImage(
   return row;
 }
 
+/**
+ * A row as compared by the undo conflict check. Derived sort keys of
+ * calendar-converted dates are left out: they may have been recomputed since
+ * the image was logged (derived.ts), which is not a later edit.
+ */
+function comparable(entity: string, row: unknown): string | null {
+  if (row === undefined || row === null) return null;
+  const record = row as Record<string, unknown>;
+  if (entity === 'event' && hasConvertedDate(record)) {
+    return JSON.stringify({ ...record, date_sort: null, date_sort_end: null });
+  }
+  return JSON.stringify(record);
+}
+
+/** Restored rows get sort keys from the current date parser, like a fresh write. */
+function rederive(
+  entity: string,
+  row: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (entity !== 'event' || row === null || !hasConvertedDate(row)) return row;
+  return { ...row, ...deriveDateSort(row.date_text) };
+}
+
 function getBatch(store: TreeStore, batchId: string): ChangeBatchRow {
   const batch = store.stmt('SELECT * FROM change_batch WHERE id = ?').get(batchId) as
     ChangeBatchRow | undefined;
@@ -115,13 +139,12 @@ function replay(
       const current = store
         .stmt(`SELECT * FROM ${entry.entity} WHERE ${key} = ?`)
         .get(entry.entity_id);
-      const currentJson = current === undefined ? null : JSON.stringify(current);
-      if (currentJson !== (expected === null ? null : JSON.stringify(expected))) {
+      if (comparable(entry.entity, current) !== comparable(entry.entity, expected)) {
         throw new UndoConflictError(
           `Cannot ${direction} "${batch.label}": ${entry.entity} ${entry.entity_id} was changed by a later edit`,
         );
       }
-      tx.restore(entry.entity, entry.entity_id, target);
+      tx.restore(entry.entity, entry.entity_id, rederive(entry.entity, target));
     }
     tx.flush();
     store

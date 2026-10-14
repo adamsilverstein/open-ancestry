@@ -441,6 +441,15 @@ Every row-level change made through the unit of work, with full before and after
 | `after_json` | TEXT | yes | Whole row after; null for deletes. CHECK ties nullness to `op`. |
 | `schema_version` | INTEGER | no | Schema version the images were written under (rows from before v2 are `1`). Undo upgrades older images through later migrations; see [versioning](#versioning-policy). |
 
+### `derived_state`
+
+Derived bookkeeping: one fingerprint per derived-column computation (see [Dates](#dates)). Not exported, not change-logged.
+
+| Column | Type | Null | Meaning |
+|---|---|---|---|
+| `name` | TEXT | no | Step name, e.g. `event_date_sort`. |
+| `fingerprint` | TEXT | no | Output of the computation on fixed sample inputs. When the current code gives a different fingerprint, the step recomputes its rows. |
+
 ### `search_doc`
 
 Derived: maps each person to their full-text row. Not exported; rebuilt on import.
@@ -485,7 +494,10 @@ Dates are parsed by packages/core and stored as five columns on `event` (and `da
 - `date_qualifier`, `date_sort`, `date_sort_end`, `calendar` come from the parser. `date_sort` is an integer `YYYYMMDD` (missing month or day set to the midpoint, offsets for qualifiers) indexed by `event_date_sort_idx`, so timelines and "born between" queries sort and filter numerically.
 - Unparseable input is kept with `date_qualifier = 'text'` and null sort keys.
 
-packages/db does not parse dates; callers pass these fields in.
+Callers pass these fields in on write (the importer and editor parse with packages/core). One exception keeps stored keys in step with the parser:
+
+- **Derived column refresh.** Sort keys of `julian`, `hebrew` and `french_r` dates depend on calendar conversion in packages/core, which can change (for example #142 making Hebrew and French Republican keys exact). `refreshDerivedColumns` fingerprints the conversion on fixed sample dates and keeps the fingerprint in `derived_state`. When a tree opens with a different fingerprint, and always after a JSON import, it recomputes `date_sort` / `date_sort_end` from `date_text` for those calendars and refreshes the affected search documents. It only writes rows whose keys changed, is idempotent, writes no `change_log` rows (derived values are not edits), and logs one line per step that changed rows (`StoreOptions.log`, default `console.info`).
+- Undo stays consistent: the conflict check ignores these derived keys, and restored rows get keys from the current parser, like a fresh write. Gregorian rows are never recomputed, so stored keys there are exactly what the writer passed.
 
 ## How GEDCOM and Ancestry map
 

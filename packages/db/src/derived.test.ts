@@ -76,10 +76,10 @@ describe('derived column refresh', () => {
     expect(result).toEqual({ event_date_sort: 2 });
     const french = parseDate(FRENCH);
     expect(sorts(store)).toEqual([
-      { date_text: FRENCH, date_sort: french.sortKey, date_sort_end: french.sortKeyEnd },
-      { date_text: HEBREW, date_sort: parseDate(HEBREW).sortKey, date_sort_end: null },
       // Gregorian rows are left alone.
       { date_text: '1850', date_sort: 10000101, date_sort_end: null },
+      { date_text: FRENCH, date_sort: french.sortKey, date_sort_end: french.sortKeyEnd },
+      { date_text: HEBREW, date_sort: parseDate(HEBREW).sortKey, date_sort_end: null },
     ]);
     expect(count(store, 'change_log')).toBe(logged);
     // The search index follows: years come from date_sort.
@@ -99,13 +99,13 @@ describe('derived column refresh', () => {
     store = openTree(dir, { log: (m) => messages.push(m) });
     // Fingerprints match the current parser: nothing recomputed.
     expect(messages).toEqual([]);
-    expect(sorts(store)[1]).toMatchObject({ date_sort: 10000101 });
+    expect(sorts(store)[2]).toMatchObject({ date_sort: 10000101 });
     forgetFingerprints(store);
     store.close();
 
     store = openTree(dir, { log: (m) => messages.push(m) });
     expect(messages).toEqual(['Recomputed event_date_sort for 2 rows (date parser changed)']);
-    expect(sorts(store)[1]).toMatchObject({ date_sort: parseDate(HEBREW).sortKey });
+    expect(sorts(store)[2]).toMatchObject({ date_sort: parseDate(HEBREW).sortKey });
     store.close();
 
     messages.length = 0;
@@ -143,7 +143,7 @@ describe('derived column refresh', () => {
     source.close();
     const store = openMemoryTree();
     importJson(store, doc);
-    expect(sorts(store)[1]).toMatchObject({ date_sort: parseDate(HEBREW).sortKey });
+    expect(sorts(store)[2]).toMatchObject({ date_sort: parseDate(HEBREW).sortKey });
     store.close();
   });
 });

@@ -25,7 +25,11 @@ process.env.E2E_PORT ??= String(await freePort());
 const port = Number(process.env.E2E_PORT);
 // A throwaway library per run, never the user's ~/OpenAncestry. global-setup.ts
 // adds the fixture tree to it; workers find it through the environment.
-process.env.OA_E2E_LIBRARY ??= join(tmpdir(), `oa-e2e-library-${port}`);
+if (!process.env.OA_E2E_LIBRARY) {
+  process.env.OA_E2E_LIBRARY = join(tmpdir(), `oa-e2e-library-${port}`);
+  // Ours to remove when the run ends (global-teardown.ts); a library passed in is kept.
+  process.env.OA_E2E_LIBRARY_OWNED = '1';
+}
 const library = process.env.OA_E2E_LIBRARY;
 const baseURL = `http://127.0.0.1:${port}`;
 const ci = Boolean(process.env.CI);
@@ -34,6 +38,7 @@ export default defineConfig({
   testDir: '.',
   outputDir: '../test-results',
   globalSetup: ['./global-setup.ts', './search-setup.ts'],
+  globalTeardown: './global-teardown.ts',
   fullyParallel: true,
   forbidOnly: ci,
   retries: ci ? 1 : 0,

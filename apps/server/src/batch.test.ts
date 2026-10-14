@@ -148,6 +148,63 @@ describe('batch', () => {
     expect((await detail(s.ada)).names[0]).toMatchObject({ given: 'Ada', surname: 'Ashby' });
   });
 
+  it('checks expect against the rows as the batch found them, not as earlier ops left them', async () => {
+    // Ada gets a second name, so there is a primary to delete and one to promote.
+    const added = await api.post(`${s.base}/people/${s.ada}/names`, {
+      given: 'Addie',
+      type: 'aka',
+    });
+    expect(added.statusCode).toBe(201);
+    let seen = await detail(s.ada);
+    const [primary, other] = seen.names as unknown as Record<string, unknown>[];
+    expect(primary).toMatchObject({ is_primary: 1 });
+
+    // Promoting the other name demotes the primary before its own delete runs.
+    let res = await api.post(`${s.base}/batch`, {
+      label: 'Swap primary',
+      operations: [
+        { op: 'name.update', id: other!.id, name: { is_primary: true }, expect: other },
+        { op: 'name.delete', id: primary!.id, expect: primary },
+      ],
+    });
+    expect(res.statusCode, res.body).toBe(200);
+    expect((await detail(s.ada)).names.map((n) => n.given)).toEqual(['Addie']);
+
+    // A name edit and a person edit in one save: neither makes the other stale.
+    seen = await detail(s.ada);
+    res = await api.post(`${s.base}/batch`, {
+      label: 'Name and sex',
+      operations: [
+        { op: 'name.update', id: seen.names[0]!.id, name: { given: 'Ada' }, expect: seen.names[0] },
+        {
+          op: 'person.update',
+          id: s.ada,
+          patch: { sex: 'X' },
+          expect: { updated_at: seen.person.updated_at },
+        },
+      ],
+    });
+    expect(res.statusCode, res.body).toBe(200);
+  });
+
+  it('refuses a stale second operation and keeps the first one out too', async () => {
+    const seen = await detail(s.ada);
+    const res = await api.post(`${s.base}/batch`, {
+      label: 'Half stale',
+      operations: [
+        { op: 'person.update', id: s.ada, patch: { sex: 'X' } },
+        {
+          op: 'name.update',
+          id: seen.names[0]!.id,
+          name: { given: 'Q' },
+          expect: { given: 'Old' },
+        },
+      ],
+    });
+    expect(res.statusCode).toBe(409);
+    expect((await detail(s.ada)).person.sex).toBe(seen.person.sex);
+  });
+
   it('checks family links (no timestamp) against the values the client saw', async () => {
     const { link } = (await detail(s.ada)).parentFamilies[0]!;
     await api.post(`${s.base}/batch`, {
@@ -194,6 +251,10 @@ describe('batch', () => {
       {
         label: 'x',
         operations: [{ op: 'person.update', id: s.ada, patch: {}, expect: { nope: 1 } }],
+      },
+      {
+        label: 'x',
+        operations: [{ op: 'person.update', id: s.ada, patch: {}, expect: { constructor: 1 } }],
       },
       {
         label: 'x',

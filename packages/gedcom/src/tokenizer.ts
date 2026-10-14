@@ -23,6 +23,13 @@ const NINE = 0x39;
 
 const isDelimiter = (c: number) => c === SPACE || c === TAB;
 
+/** An xref or pointer: `@`, one or more characters other than `@`, whitespace or controls, `@`. */
+// eslint-disable-next-line no-control-regex
+export const XREF_PATTERN = /^@[^@\s\x00-\x1f\x7f]+@$/;
+
+/** A tag the tokenizer accepts: uppercase/digits/underscore, or `_` then any case. */
+export const TAG_PATTERN = /^(?:[A-Z0-9_]+|_[A-Za-z0-9_]+)$/;
+
 function isTagChar(c: number): boolean {
   return (
     (c >= 0x41 && c <= 0x5a) || // A-Z
@@ -63,7 +70,7 @@ export function tokenizeLine(line: string): Token | undefined {
     const close = line.indexOf('@', i + 1);
     if (close === -1 || close === i + 1) return undefined;
     xref = line.slice(i, close + 1);
-    if (xref.includes(' ')) return undefined;
+    if (!XREF_PATTERN.test(xref)) return undefined;
     i = close + 1;
     if (i === n || !isDelimiter(line.charCodeAt(i))) return undefined;
     if (line.charCodeAt(i) !== SPACE || isDelimiter(line.charCodeAt(i + 1))) canonical = false;
@@ -98,7 +105,8 @@ export function tokenizeLine(line: string): Token | undefined {
 
 /** A broken line that still has a 0-99 level, an optional xref and an uppercase or `_` tag. */
 const REPAIRABLE =
-  /^[ \t]*(\d{1,2})[ \t]+(?:(@[^@ \t]+@)[ \t]*)?([A-Z0-9_]+|_[A-Za-z0-9_]+)(?:[ \t]([\s\S]*))?$/;
+  // eslint-disable-next-line no-control-regex
+  /^[ \t]*(\d{1,2})[ \t]+(?:(@[^@\s\x00-\x1f\x7f]+@)[ \t]*)?([A-Z0-9_]+|_[A-Za-z0-9_]+)(?:[ \t]([\s\S]*))?$/;
 
 /**
  * `tokenizeLine`, plus repair of near-misses such as `0 @I2@INDI` (no space

@@ -11,7 +11,7 @@ import {
   mismatchWarnings,
 } from './encoding';
 import { analyzeHeader } from './header';
-import { LineSplitter, looksStructural, parseLine, type Token } from './tokenizer';
+import { LineSplitter, XREF_PATTERN, looksStructural, parseLine, type Token } from './tokenizer';
 import type {
   Continuation,
   EncodingInfo,
@@ -24,14 +24,13 @@ import type {
   WarningCode,
 } from './types';
 
+/** Characters an edited value cannot keep verbatim (see `serializeNode`). */
+// eslint-disable-next-line no-control-regex
+const REENCODED = /[\x00-\x08\x0b-\x1f\u0085\u2028\u2029]/;
+
 /** Whether a raw value is a pointer such as `@I1@` or `@VOID@` (not `@@` or `@#D`). */
 export function isPointer(raw: string): boolean {
-  const n = raw.length;
-  if (n < 3 || raw.charCodeAt(0) !== 0x40 || raw.charCodeAt(n - 1) !== 0x40) return false;
-  const second = raw.charCodeAt(1);
-  if (second === 0x40 || second === 0x23) return false;
-  const inner = raw.indexOf('@', 1);
-  return inner === n - 1 && !raw.includes(' ');
+  return raw.charCodeAt(0) === 0x40 && raw.charCodeAt(1) !== 0x23 && XREF_PATTERN.test(raw);
 }
 
 /**
@@ -242,8 +241,9 @@ class TreeBuilder {
       } else {
         const value = decodeEscapes(raw, this.major);
         node.value = value;
-        // Kept whenever `@` is involved so the original escaping survives re-emission.
-        if (raw.includes('@')) node.rawValue = raw;
+        // Kept whenever re-encoding `value` would not give back the same text: `@`
+        // escaping, and characters the serializer turns into CONT or drops.
+        if (raw.includes('@') || REENCODED.test(raw)) node.rawValue = raw;
       }
     }
 

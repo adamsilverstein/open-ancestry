@@ -55,7 +55,7 @@ export const person = (
 export function uniqueTreeName(prefix: string, label: string): string {
   const unique = `${Date.now()}${Math.random().toString(36).slice(2, 6)}`;
   // Long titles are cut to the 100-character limit, so the unique part leads.
-  return `${prefix} ${unique} ${label.replace(/[^\w ]/g, '')}`.slice(0, 100);
+  return `${prefix} ${unique} ${label.replace(/[^\w ]/g, '')}`.slice(0, 100).trimEnd();
 }
 
 export async function seedTree(

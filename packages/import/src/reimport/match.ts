@@ -81,11 +81,35 @@ function yearScore(a: number | null, b: number | null): number | null {
 const nameText = (n: { given: string | null; surname: string | null }) =>
   [n.given, n.surname].filter(Boolean).join(' ');
 
-/** The date, or place, of a person's (preferred) fact of one type, normalized. */
-function factOf(p: SnapPerson, type: string, part: 'date' | 'place'): string {
-  const events = p.events.filter((e) => e.row.type === type);
-  const e = events.find((x) => x.isPreferred) ?? events[0];
-  return norm(part === 'date' ? e?.row.date_text : e?.place);
+/** A person's normalized names and key facts, worked out once (matching compares many pairs). */
+interface Prepared {
+  names: { given: string; surname: string; primary: boolean; text: string }[];
+  facts: Record<'BIRT.date' | 'DEAT.date' | 'BIRT.place', string>;
+}
+const prepared = new WeakMap<SnapPerson, Prepared>();
+function prepare(p: SnapPerson): Prepared {
+  let ready = prepared.get(p);
+  if (ready) return ready;
+  const fact = (type: string, part: 'date' | 'place') => {
+    const events = p.events.filter((e) => e.row.type === type);
+    const e = events.find((x) => x.isPreferred) ?? events[0];
+    return norm(part === 'date' ? e?.row.date_text : e?.place);
+  };
+  ready = {
+    names: p.names.map((n) => ({
+      given: norm(n.given),
+      surname: norm(n.surname),
+      primary: !!n.is_primary || p.names.length === 1,
+      text: nameText(n),
+    })),
+    facts: {
+      'BIRT.date': fact('BIRT', 'date'),
+      'DEAT.date': fact('DEAT', 'date'),
+      'BIRT.place': fact('BIRT', 'place'),
+    },
+  };
+  prepared.set(p, ready);
+  return ready;
 }
 
 /**
@@ -93,29 +117,26 @@ function factOf(p: SnapPerson, type: string, part: 'date' | 'place'): string {
  * to say so: the primary name and the person's other names are told apart.
  */
 function nameMatch(e: SnapPerson, i: SnapPerson): { score: number; reason: string | null } {
-  const incoming = i.names.find((n) => n.is_primary) ?? i.names[0];
-  let best = { given: 0, primary: true, name: e.names[0] };
-  for (const n of e.names.length ? e.names : [undefined]) {
-    const g = jaroWinkler(n ? norm(n.given) : e.given, i.given);
-    const primary = !n || !!n.is_primary || e.names.length === 1;
-    if (g > best.given || (g === best.given && primary && !best.primary)) {
-      best = { given: g, primary, name: n };
+  const names = prepare(e).names;
+  const incoming = prepare(i).names.find((n) => n.primary) ?? prepare(i).names[0];
+  let best = { given: jaroWinkler(e.given, i.given), primary: true, text: '' };
+  for (const n of names) {
+    const g = jaroWinkler(n.given, i.given);
+    if (g > best.given || (g === best.given && n.primary && (!best.primary || !best.text))) {
+      best = { given: g, primary: n.primary, text: n.text };
     }
   }
   // A married name in one export and a birth name in the other is common: take the best surname.
-  const surname = Math.max(
-    jaroWinkler(e.surname, i.surname),
-    ...e.names.map((n) => jaroWinkler(norm(n.surname), i.surname)),
-  );
-  const tree = best.name ? nameText(best.name) : '';
-  const exported = incoming ? nameText(incoming) : '';
+  let surname = jaroWinkler(e.surname, i.surname);
+  for (const n of names) surname = Math.max(surname, jaroWinkler(n.surname, i.surname));
+  const exported = incoming?.text ?? '';
   let reason: string | null = null;
   if (best.given === 1 && surname === 1) {
-    reason = best.primary ? 'same name' : `matches another name (${tree})`;
+    reason = best.primary ? 'same name' : `matches another name (${best.text})`;
   } else if (best.given > 0.85 && surname > 0.85) {
     reason = best.primary
-      ? `similar name (${tree} / ${exported})`
-      : `similar to another name (${tree} / ${exported})`;
+      ? `similar name (${best.text} / ${exported})`
+      : `similar to another name (${best.text} / ${exported})`;
   }
   return { score: (best.given + surname) / 2, reason };
 }
@@ -160,13 +181,13 @@ function baseScore(
   }
   // Facts both records have that say different things: the match is not certain.
   let differences = 0;
-  for (const [type, part, label] of [
-    ['BIRT', 'date', 'different birth date'],
-    ['DEAT', 'date', 'different death date'],
-    ['BIRT', 'place', 'different birth place'],
+  for (const [fact, label] of [
+    ['BIRT.date', 'different birth date'],
+    ['DEAT.date', 'different death date'],
+    ['BIRT.place', 'different birth place'],
   ] as const) {
-    const a = factOf(e, type, part);
-    const b = factOf(i, type, part);
+    const a = prepare(e).facts[fact];
+    const b = prepare(i).facts[fact];
     if (a && b && a !== b) {
       differences++;
       reasons.push(label);

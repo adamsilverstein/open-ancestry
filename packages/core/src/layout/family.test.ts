@@ -268,15 +268,16 @@ describe('siblings in the family view', () => {
     const layout = layoutFamily(siblings, 'me');
     expect(describeLayout(layout)).toMatchSnapshot();
     expect(row(layout, -1)).toEqual(['auntH', 'aunt', 'dad', 'mom', 'uncle', 'uncleW']);
-    expect(row(layout, 0)).toEqual(['older', 'olderW', 'sp', 'me', 'younger', 'half']);
+    // The paternal half brother sits on the father's side of the full siblings.
+    expect(row(layout, 0)).toEqual(['half', 'older', 'olderW', 'sp', 'me', 'younger']);
     expect([node(layout, 'me').x, node(layout, 'me').y]).toEqual([0, 0]);
     // Grandparents sit over their own children: the aunt and the father.
     const gp = (centerX(node(layout, 'gpa')) + centerX(node(layout, 'gma'))) / 2;
     expect(gp).toBe((centerX(node(layout, 'aunt')) + centerX(node(layout, 'dad'))) / 2);
-    // One sibling bar under the parents spans every sibling.
+    // The parents' sibling bar spans the full siblings only.
     const bar = layout.edges.find((e) => e.kind === 'sibling-bar' && e.familyId === 'F_me')!;
     expect(bar.points[0]![0]).toBe(centerX(node(layout, 'older')));
-    expect(bar.points[1]![0]).toBe(centerX(node(layout, 'half')));
+    expect(bar.points[1]![0]).toBe(centerX(node(layout, 'younger')));
     expect(layout.edges.find((e) => e.kind === 'couple' && e.familyId === 'F_uncle')).toBeDefined();
   });
 
@@ -318,7 +319,11 @@ describe('siblings in the family view', () => {
     const edges = layout.edges.filter((e) => e.familyId === 'F_me');
     expect(edges.some((e) => e.parents)).toBe(false);
     expect(edges.filter((e) => e.kind === 'sibling-bar')).toHaveLength(1);
-    expect(edges.filter((e) => e.child)).toHaveLength(4);
+    // The half brother shares the bar but keeps his own family on his edge.
+    expect(edges.filter((e) => e.child)).toHaveLength(3);
+    const bar = edges.find((e) => e.kind === 'sibling-bar')!;
+    const half = layout.edges.find((e) => e.child === 'half')!;
+    expect(half.group).toBe(bar.group);
   });
 
   it('orders undated siblings after dated ones, keeping family order', () => {

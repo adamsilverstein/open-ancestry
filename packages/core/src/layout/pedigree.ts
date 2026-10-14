@@ -40,7 +40,7 @@ export function layoutPedigree(
   const focus = b.card(focusId, 'focus', 0);
   const root = b.unit([focus], 0);
   const queue = b.addParents(root, 0, b.budget(focusId, 'up', s.ancestorsDepth), gaps.couple);
-  const units = [root, ...b.growAncestors(queue, gaps.couple, false)];
+  const units = [root, ...b.growAncestors(queue, gaps.couple)];
   tidyLayout(units, { card: size.height, couple: gaps.couple, sibling: gaps.sibling });
 
   const column = size.width + gaps.generation;

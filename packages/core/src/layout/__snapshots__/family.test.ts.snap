@@ -34,7 +34,7 @@ exports[`layoutFamily > groups children under each spouse for several marriages 
 a1@-292,214  a2@-148,214  u1@-4,214  b1@140,214  c1@284,214  c2@428,214
 couple F1 w1+me : -16,75 0,75
 couple F2 me+w2 : 120,75 136,75
-couple F3 me+w3 : 90,0 90,-16 302,-16 302,0
+couple F3 me+w3 : 90,0 90,-10 302,-10 302,0
 parent-child F1 w1+me : -8,75 -8,160.7 -160,160.7 -160,182
 sibling-bar F1  : -232,182 -88,182
 parent-child F1 a1 unknown : -232,182 -232,214
@@ -165,7 +165,7 @@ exports[`parent sets and spouses > shows one spouse's parents at a time and move
 w1@-136,0[-up]  me@0,0[focus -up -sibs]  w2@136,0  w3@272,0  sib@408,0
 couple F1 w1+me : -16,75 0,75
 couple F2 me+w2 : 120,75 136,75
-couple F3 me+w3 : 90,0 90,-16 302,-16 302,0
+couple F3 me+w3 : 90,0 90,-10 302,-10 302,0
 couple Fp dad+mom : 192,-139 208,-139
 parent-child Fw1 wd : -12,-64 -12,-48 -76,-48 -76,-32
 parent-child Fw1 w1 unknown : -76,-32 -76,0
@@ -178,35 +178,36 @@ bounds -136,-214 664x364"
 `;
 
 exports[`siblings in the family view > shows aunts and uncles beside the parents and siblings beside the focus couple 1`] = `
-"gpa@-276,-428  gma@-140,-428  mgpa@4,-428  mgma@140,-428
-auntH@-412,-214  aunt@-276,-214  dad@-140,-214[-up -sibs]  mom@4,-214[-up -sibs]  uncle@140,-214  uncleW@276,-214
-older@-408,0  olderW@-272,0  sp@-136,0  me@0,0[focus -up -down -sibs]  younger@136,0  half@272,0[half]
+"gpa@-344,-428  gma@-208,-428  mgpa@-64,-428  mgma@72,-428
+auntH@-480,-214  aunt@-344,-214[+down]  dad@-208,-214[-up -sibs]  mom@-64,-214[-up -sibs]  uncle@72,-214[+down]  uncleW@208,-214
+half@-544,0[half]  older@-408,0[+down]  olderW@-272,0  sp@-136,0  me@0,0[focus -up -down -sibs]  younger@136,0
 kid@-68,214
 couple F_sp sp+me : -16,75 0,75
 couple F_older older+olderW : -288,75 -272,75
-couple F_me dad+mom : -20,-139 4,-139
-couple F_aunt auntH+aunt : -292,-139 -276,-139
-couple F_dad gpa+gma : -156,-353 -140,-353
-couple F_uncle uncle+uncleW : 260,-139 276,-139
-couple F_mom mgpa+mgma : 124,-353 140,-353
+couple F_me dad+mom : -88,-139 -64,-139
+couple F_aunt auntH+aunt : -360,-139 -344,-139
+couple F_dad gpa+gma : -224,-353 -208,-353
+couple F_uncle uncle+uncleW : 192,-139 208,-139
+couple F_mom mgpa+mgma : 56,-353 72,-353
 parent-child F_sp sp+me : -8,75 -8,182
 parent-child F_sp kid unknown : -8,182 -8,214
-parent-child F_me dad+mom : -8,-139 -8,-32
-sibling-bar F_me  : -348,-32 332,-32
+parent-child F_me dad+mom : -76,-139 -76,-32
+sibling-bar F_me  : -348,-32 196,-32
 parent-child F_me me unknown : 60,-32 60,0
 parent-child F_me older unknown : -348,-32 -348,0
 parent-child F_me younger unknown : 196,-32 196,0
-parent-child F_me half unknown half : 332,-32 332,0
-parent-child F_dad gpa+gma : -148,-353 -148,-246
-sibling-bar F_dad  : -216,-246 -80,-246
-parent-child F_dad dad unknown : -80,-246 -80,-214
-parent-child F_dad aunt unknown : -216,-246 -216,-214
-parent-child F_mom mgpa+mgma : 132,-353 132,-246
-sibling-bar F_mom  : 64,-246 200,-246
-parent-child F_mom mom unknown : 64,-246 64,-214
-parent-child F_mom uncle unknown : 200,-246 200,-214
-label -2 "Grandparents" @-412,-353
-label -1 "Parents" @-412,-139
-label 1 "Children" @-412,289
-bounds -412,-428 808x792"
+parent-child F_step dad : -148,-64 -148,-48 -484,-48 -484,-32
+parent-child F_step half unknown half : -484,-32 -484,0
+parent-child F_dad gpa+gma : -216,-353 -216,-246
+sibling-bar F_dad  : -284,-246 -148,-246
+parent-child F_dad dad unknown : -148,-246 -148,-214
+parent-child F_dad aunt unknown : -284,-246 -284,-214
+parent-child F_mom mgpa+mgma : 64,-353 64,-246
+sibling-bar F_mom  : -4,-246 132,-246
+parent-child F_mom mom unknown : -4,-246 -4,-214
+parent-child F_mom uncle unknown : 132,-246 132,-214
+label -2 "Grandparents" @-544,-353
+label -1 "Parents" @-544,-139
+label 1 "Children" @-544,289
+bounds -544,-428 872x792"
 `;

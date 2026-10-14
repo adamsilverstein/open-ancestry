@@ -114,8 +114,12 @@ describe('layout properties', () => {
         assertNoOverlap(layout.nodes);
         assertVerticalEdges(layout);
         expect(crossings(layout.edges)).toEqual([]);
+        const anyRow = layout.nodes.find((n) => n.generation !== 0);
+        const rowStep = anyRow ? anyRow.y / anyRow.generation : 0;
+        expect(rowStep === 0 || rowStep >= 150 + 64).toBe(true);
         for (const n of layout.nodes) {
-          expect(n.y).toBe(n.generation * (150 + 64));
+          // Rows are evenly spaced (the gap grows only to fit couple lanes).
+          expect(n.y).toBe(n.generation * rowStep);
           if (n.isDuplicate) expect(layout.nodes.some((p) => p.key === n.duplicateOf)).toBe(true);
         }
       }),

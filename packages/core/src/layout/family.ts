@@ -31,14 +31,19 @@ import type {
   TreeLayout,
 } from './types';
 
+/** Least vertical distance between two couple lanes. */
+const LANE_SPACING = 8;
+/** Sideways jogs shorter than this are drawn as straight drops. */
+const SNAP = 4;
+
 const FAMILY_CHEVRONS: Chevrons = {
   up: new Set<Role>(['focus', 'spouse', 'ancestor']),
-  down: new Set<Role>(['focus', 'descendant']),
+  down: new Set<Role>(['focus', 'descendant', 'sibling', 'cousin']),
   siblings: new Set<Role>(['focus', 'ancestor']),
 };
 const DESCENDANT_CHEVRONS: Chevrons = {
   up: new Set(),
-  down: FAMILY_CHEVRONS.down,
+  down: new Set<Role>(['focus', 'descendant']),
   siblings: new Set(),
 };
 
@@ -104,20 +109,36 @@ function layoutVertical(
         : shown < descRoot.anchor
           ? 'right'
           : 'left';
-    b.addSiblings(descRoot, side);
+    // The spouse's parents take that side of the focus row, so cousins can't.
+    if (side !== 'center') b.spouseParentsSide = side === 'left' ? 'right' : 'left';
+    descQueue.push(...b.addSiblings(descRoot, side, 'up', gaps.sibling));
     const ancRoot = b.unit(descRoot.cards, 0);
     const queue = descRoot.cards.flatMap((card, i) => {
       if ((card.role !== 'focus' && card.role !== 'spouse') || card.upBlocked) return [];
       const base = card === focus ? s.ancestorsDepth : 0;
       return b.addParents(ancRoot, i, b.budget(card.personId, 'up', base), gaps.couple);
     });
-    ancUnits = [ancRoot, ...b.growAncestors(queue, gaps.couple, true)];
+    ancUnits = [ancRoot, ...b.growAncestors(queue, gaps.couple, gaps.sibling), ...b.downUnits];
   }
   const descUnits = [descRoot, ...b.growDescendants(descQueue, gaps.sibling)];
 
+  // Couples with cards between them (a third spouse onwards) are joined by
+  // lanes above their row, at least LANE_SPACING apart; grow the space
+  // between generations when the widest block needs more room.
+  const margin = Math.min(10, gaps.generation / 6);
+  let lanes = 0;
+  const slot = new Map<Card, [Unit, number]>();
+  for (const u of [...ancUnits, ...descUnits]) u.cards.forEach((c, i) => slot.set(c, [u, i]));
+  for (const link of b.links) {
+    const [p, q] = link.parents.map((c) => slot.get(c));
+    if (p && q && p[0].cards === q[0].cards) lanes = Math.max(lanes, Math.abs(p[1] - q[1]) - 1);
+  }
+  const generation = Math.max(gaps.generation, 2 * (2 * margin + LANE_SPACING * (lanes - 1)));
+  const laneStep = lanes > 1 ? (generation / 2 - 2 * margin) / (lanes - 1) : 0;
+
   const metrics = { card: size.width, couple: gaps.couple, sibling: gaps.sibling };
   const step = size.width + gaps.couple;
-  const rowStep = size.height + gaps.generation;
+  const rowStep = size.height + generation;
   const place = (units: Unit[], sign: number) => {
     tidyLayout(units, metrics);
     for (const u of units) {
@@ -147,7 +168,13 @@ function layoutVertical(
   return {
     focusKey: focus.key,
     nodes,
-    edges: verticalEdges(b.links, b.cards, size, gaps),
+    edges: verticalEdges(
+      b.links,
+      b.cards,
+      size,
+      { ...gaps, generation },
+      { margin, step: laneStep },
+    ),
     labels,
     bounds,
     alternateParentFamilies: b.alternates,
@@ -187,6 +214,7 @@ function verticalEdges(
   cards: Card[],
   size: CardSize,
   gaps: LayoutGaps,
+  lane: { margin: number; step: number },
 ): LayoutEdge[] {
   const { width: w, height: h } = size;
   const half = gaps.generation / 2;
@@ -214,10 +242,15 @@ function verticalEdges(
   const edges: LayoutEdge[] = [];
   const blocks = new Map<number, Drop[]>();
 
-  const childEdges = (link: FamilyLink, group: string, xs: number[], barY: number) => {
+  const childEdges = (
+    link: FamilyLink,
+    group: string,
+    xs: number[],
+    barY: number,
+    lo = Math.min(...xs),
+    hi = Math.max(...xs),
+  ) => {
     const { familyId } = link;
-    const lo = Math.min(...xs);
-    const hi = Math.max(...xs);
     if (lo < hi) {
       edges.push({
         kind: 'sibling-bar',
@@ -229,10 +262,11 @@ function verticalEdges(
         ],
       });
     }
-    link.children.forEach(({ card, rel, half: isHalf }, i) => {
+    link.children.forEach((child, i) => {
+      const { card, rel } = child;
       const edge: LayoutEdge = {
         kind: 'parent-child',
-        familyId,
+        familyId: child.familyId ?? familyId,
         group,
         points: [
           [xs[i]!, barY],
@@ -241,7 +275,8 @@ function verticalEdges(
         child: card.key,
         rel,
       };
-      if (isHalf) edge.half = true;
+      if (child.half) edge.half = true;
+      if (child.sharedParentId) edge.sharedParentId = child.sharedParentId;
       edges.push(edge);
     });
   };
@@ -263,7 +298,9 @@ function verticalEdges(
         ];
         start = [(l.x + w + r.x) / 2, cy];
       } else {
-        const laneY = l.y - (half * between) / (between + 1);
+        // Evenly spaced in the band between the card tops and the sibling bar
+        // above, keeping `margin` from both.
+        const laneY = l.y - lane.margin - (between - 1) * lane.step;
         const sx = l.x + w / 2 + w / 2 / (between + 1);
         // Both ends sit off-centre so drops into the cards' tops stay clear.
         const rx = r.x + w / 2 - w / 2 / (between + 1);
@@ -305,6 +342,12 @@ function verticalEdges(
   for (const drops of blocks.values()) {
     // Ties (one couple with several families) nest by where their children are.
     const order = (a: Drop, b: Drop) => a.start[0] - b.start[0] || a.lo - b.lo;
+    // A drop within SNAP of its children's span goes straight down; the bar
+    // stretches to meet it rather than showing a tiny jog.
+    for (const d of drops) {
+      if (d.start[0] < d.lo && d.start[0] > d.lo - SNAP) d.lo = d.start[0];
+      if (d.start[0] > d.hi && d.start[0] < d.hi + SNAP) d.hi = d.start[0];
+    }
     const right = drops.filter((d) => d.start[0] < d.lo).sort(order);
     const left = drops.filter((d) => d.start[0] > d.hi).sort(order);
     const levels = new Map<Drop, number>();
@@ -329,7 +372,7 @@ function verticalEdges(
         points,
         parents: d.parents.map((p) => p.key),
       });
-      childEdges(d.link, d.group, d.xs, barY);
+      childEdges(d.link, d.group, d.xs, barY, d.lo, d.hi);
     }
   }
   return edges;

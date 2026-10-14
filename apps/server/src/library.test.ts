@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { chmodSync, existsSync, statSync } from 'node:fs';
 import { mkdtemp, readdir } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -149,5 +149,39 @@ describe('tree routes', () => {
     expect((await api.get('/api/trees/.trash')).statusCode).toBe(400);
     expect((await api.patch('/api/trees/Nope', { name: 'X' })).statusCode).toBe(404);
     expect((await api.del('/api/trees/Nope')).statusCode).toBe(404);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('library permissions', () => {
+  const mode = (path: string) => statSync(path).mode & 0o777;
+
+  it('creates the library folder private to its owner', async () => {
+    const root = join(await mkdtemp(join(tmpdir(), 'oa-lib-')), 'Library');
+    const library = new Library(root);
+    library.create('Vale');
+    expect(mode(root)).toBe(0o700);
+    expect(mode(library.dirOf('Vale'))).toBe(0o700);
+    library.closeAll();
+  });
+
+  it('tightens an existing library folder and its trees on open', async () => {
+    const root = join(await mkdtemp(join(tmpdir(), 'oa-lib-')), 'Library');
+    new Library(root).create('Vale');
+    chmodSync(root, 0o755);
+    chmodSync(new Library(root).dirOf('Vale'), 0o755);
+    const library = new Library(root);
+    expect(library.list().map((t) => t.id)).toEqual(['Vale']);
+    expect(mode(root)).toBe(0o700);
+    expect(mode(library.dirOf('Vale'))).toBe(0o700);
+    library.closeAll();
+  });
+
+  it('keeps the trash private', async () => {
+    const root = join(await mkdtemp(join(tmpdir(), 'oa-lib-')), 'Library');
+    const library = new Library(root);
+    library.create('Gone');
+    library.delete('Gone');
+    expect(mode(join(root, '.trash'))).toBe(0o700);
+    library.closeAll();
   });
 });

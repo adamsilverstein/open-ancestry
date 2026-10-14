@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -10,6 +10,35 @@ beforeEach(() => {
 });
 afterEach(() => {
   rmSync(root, { recursive: true, force: true });
+});
+
+const mode = (path: string) => statSync(path).mode & 0o777;
+
+describe.skipIf(process.platform === 'win32')('tree permissions', () => {
+  it('creates the tree private to its owner: folders 0700, database files 0600', () => {
+    const dir = join(root, 'Private.oatree');
+    const store = createTree(dir);
+    store.db.prepare("INSERT INTO meta (key, value) VALUES ('probe', 'x')").run();
+    const paths = treePaths(dir);
+    for (const folder of [dir, paths.media, paths.thumbs]) expect(mode(folder), folder).toBe(0o700);
+    for (const file of [paths.database, `${paths.database}-wal`, `${paths.database}-shm`]) {
+      expect(existsSync(file), file).toBe(true);
+      expect(mode(file), file).toBe(0o600);
+    }
+    store.close();
+  });
+
+  it('tightens an existing tree when it opens', () => {
+    const dir = join(root, 'Old.oatree');
+    createTree(dir).close();
+    const paths = treePaths(dir);
+    for (const folder of [dir, paths.media, paths.thumbs]) chmodSync(folder, 0o755);
+    chmodSync(paths.database, 0o644);
+    const store = openTree(dir);
+    for (const folder of [dir, paths.media, paths.thumbs]) expect(mode(folder), folder).toBe(0o700);
+    expect(mode(paths.database)).toBe(0o600);
+    store.close();
+  });
 });
 
 describe('tree storage layout', () => {

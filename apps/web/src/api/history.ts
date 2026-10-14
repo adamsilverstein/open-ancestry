@@ -1,7 +1,7 @@
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
 import type { ChangeBatchRow } from '@open-ancestry/db';
 import { apiGet, seg } from './client';
-import { editsSettled, invalidateTree } from './edits';
+import { editKey, editScope, invalidateTree } from './edits';
 import { apiSend } from './client';
 import { currentTreeQuery } from './queries';
 
@@ -25,14 +25,21 @@ export async function undoRedo(
   queryClient: QueryClient,
   direction: 'undo' | 'redo',
 ): Promise<ChangeBatchRow | null> {
-  const tree = await queryClient.ensureQueryData(currentTreeQuery);
+  // From the cache when possible: awaiting here would let an edit fired right
+  // after the shortcut join the queue ahead of the undo.
+  const cached = queryClient.getQueryData(currentTreeQuery.queryKey);
+  const tree = cached !== undefined ? cached : await queryClient.ensureQueryData(currentTreeQuery);
   if (!tree) return null;
-  // Undo acts on the latest change on the server, so let edits on their way land first.
-  await editsSettled(queryClient, tree);
-  const { batch } = await apiSend<{ batch: ChangeBatchRow | null }>(
-    'POST',
-    `/trees/${seg(tree)}/${direction}`,
-  );
+  // Undo acts on the latest change on the server, so it joins the edits' queue:
+  // it runs after every edit made before it, and an edit made after it (in the
+  // gap before the request goes out) waits instead of becoming what is undone.
+  const mutation = queryClient.getMutationCache().build(queryClient, {
+    mutationKey: editKey(tree),
+    scope: editScope(tree),
+    mutationFn: () =>
+      apiSend<{ batch: ChangeBatchRow | null }>('POST', `/trees/${seg(tree)}/${direction}`),
+  });
+  const { batch } = await mutation.execute(undefined);
   await invalidateTree(queryClient, tree);
   return batch;
 }

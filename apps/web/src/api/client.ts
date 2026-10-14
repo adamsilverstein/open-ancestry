@@ -48,6 +48,15 @@ function sessionToken() {
  * browser adds `Origin`. `body` is sent as JSON, or as-is for FormData.
  * Resolves to the JSON response, or undefined for 204.
  */
+/** How long a JSON write may take before it is given up as hung. */
+export const SEND_TIMEOUT_MS = 30_000;
+
+/**
+ * Sends a write as JSON (or a FormData upload) and returns the JSON reply.
+ * JSON writes time out after SEND_TIMEOUT_MS: edits run one at a time, so a
+ * hung request would otherwise hold up every later edit and undo for good.
+ * Uploads are left without one, since a large file can take longer.
+ */
 export async function apiSend<T>(method: string, path: string, body?: unknown): Promise<T> {
   let payload: BodyInit | undefined;
   const headers: Record<string, string> = { accept: 'application/json' };
@@ -58,11 +67,23 @@ export async function apiSend<T>(method: string, path: string, body?: unknown): 
   }
   const send = async () => {
     const { token, tokenHeader } = await sessionToken();
-    return fetch(`/api${path}`, {
-      method,
-      headers: { ...headers, [tokenHeader]: token },
-      body: payload,
-    });
+    try {
+      return await fetch(`/api${path}`, {
+        method,
+        headers: { ...headers, [tokenHeader]: token },
+        body: payload,
+        ...(body instanceof FormData ? {} : { signal: AbortSignal.timeout(SEND_TIMEOUT_MS) }),
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'TimeoutError') {
+        throw new ApiError(
+          0,
+          'timeout',
+          `The app did not answer within ${SEND_TIMEOUT_MS / 1000} seconds, so this change may not have been saved`,
+        );
+      }
+      throw error;
+    }
   };
   let response = await send();
   if (response.status === 403) {

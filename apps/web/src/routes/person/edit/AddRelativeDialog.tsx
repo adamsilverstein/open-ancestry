@@ -1,9 +1,10 @@
 import { useDeferredValue, useId, useState } from 'react';
-import { keepPreviousData, queryOptions, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import type { ChildRelationship, Sex } from '@open-ancestry/db';
-import { apiGet, seg } from '../../../api/client';
+import { seg } from '../../../api/client';
 import { useEdit } from '../../../api/edits';
 import { apiSend } from '../../../api/mutations';
+import { searchQuery } from '../../../api/search';
 import type { ApiPersonSummary, PersonDetail } from '../../../api/types';
 import { Button } from '../../../components/Button/Button';
 import { Combobox } from '../../../components/Combobox/Combobox';
@@ -24,19 +25,6 @@ export const RELATIVE_TITLES: Record<RelativeKind, string> = {
   child: 'Add child',
   sibling: 'Add sibling',
 };
-
-/** Same key shape as the people search elsewhere, so results are shared. */
-const searchPeople = (tree: string, q: string) =>
-  queryOptions({
-    queryKey: ['search', tree, q, 10],
-    queryFn: async ({ signal }) =>
-      (
-        await apiGet<{ items: { person: ApiPersonSummary }[] }>(
-          `/trees/${seg(tree)}/search?q=${encodeURIComponent(q)}&limit=10`,
-          signal,
-        )
-      ).items.map((hit) => hit.person),
-  });
 
 function describe(person: ApiPersonSummary): string {
   const lifespan = formatLifespan({
@@ -78,11 +66,12 @@ export function AddRelativeDialog({
 
   const q = useDeferredValue(query.trim());
   const searching = mode === 'existing' && /[\p{L}\p{N}]/u.test(q);
-  const { data: results = [] } = useQuery({
-    ...searchPeople(tree, q),
+  const { data: hits = [] } = useQuery({
+    ...searchQuery(tree, q, 10),
     enabled: searching,
     placeholderData: keepPreviousData,
   });
+  const results = hits.map((hit) => hit.person);
   const options = (searching ? results : [])
     .filter((p) => p.id !== id)
     .map((p) => ({ value: p.id, label: describe(p) }));

@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Tags } from 'lucide-react';
 import type { TagRow } from '@open-ancestry/db';
-import { apiGet, seg } from '../../../api/client';
+import { seg } from '../../../api/client';
 import { useEdit } from '../../../api/edits';
 import { apiSend } from '../../../api/mutations';
+import { tagsQuery } from '../../../api/search';
 import type { PersonDetail } from '../../../api/types';
 import { Button } from '../../../components/Button/Button';
 import { Checkbox } from '../../../components/Checkbox/Checkbox';
@@ -12,13 +13,6 @@ import { Input } from '../../../components/Input/Input';
 import { Popover, PopoverContent, PopoverTrigger } from '../../../components/Popover/Popover';
 import { removeTag } from './optimistic';
 import styles from './Edit.module.css';
-
-/** Same key as the tag list used by the people page. */
-const treeTags = (tree: string) => ({
-  queryKey: ['tags', tree],
-  queryFn: async ({ signal }: { signal: AbortSignal }) =>
-    (await apiGet<{ items: TagRow[] }>(`/trees/${seg(tree)}/tags`, signal)).items,
-});
 
 /** Attach or detach the tree's tags, or create a new one, from the person header. */
 export function TagsEditor({ tree, detail }: { tree: string; detail: PersonDetail }) {
@@ -31,7 +25,7 @@ export function TagsEditor({ tree, detail }: { tree: string; detail: PersonDetai
   const [touched, setTouched] = useState<TagRow[]>([]);
   const remember = (tag: TagRow) =>
     setTouched((list) => (list.some((t) => t.id === tag.id) ? list : [...list, tag]));
-  const { data: tags = [] } = useQuery({ ...treeTags(tree), enabled: open });
+  const { data: tags = [] } = useQuery({ ...tagsQuery(tree), enabled: open });
   // React state for the box the user just clicked: the query cache notifies on a
   // later tick, which would let the controlled checkbox flip back for a moment.
   // It only applies until the detail's tags change (optimistically or refetched).

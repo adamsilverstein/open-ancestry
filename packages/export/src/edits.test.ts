@@ -115,7 +115,10 @@ describe('edited records', () => {
       }),
     );
     store.transact('Retype', (tx) =>
-      names.update(tx, primaryName(store, '@I1@'), { full_text: 'Thaddeus "Tad"  /Ashgrove/ ' }),
+      names.update(tx, primaryName(store, '@I1@'), {
+        full_text: 'Thaddeus "Tad"  /Ashgrove/',
+        nickname: 'Tad',
+      }),
     );
     store.transact('Nick', (tx) =>
       names.update(tx, primaryName(store, '@I1@'), { nickname: 'Taddy' }),
@@ -165,6 +168,35 @@ describe('edited records', () => {
     const v7 = buildGedcomExport(store, { version: '7', now: TODAY }).text;
     expect(recordText(v7, '@I1@')).toContain(`1 NAME Ann ${written('Annie')} /Ash/`);
     expect(v7).not.toMatch(/Nan|Tad/);
+  });
+
+  it.each<[string, string | null, string, string | null]>([
+    // [imported NAME, nickname edit, exported NAME, re-imported nickname]
+    ['Dr. Ann "Nan" /Ash/ Jr.', 'Tad', 'Dr. Ann "Tad" /Ash/ Jr.', 'Tad'],
+    ['Ann (Nan) /Ash/', 'Tad', 'Ann (Tad) /Ash/', 'Tad'],
+    ['Ann (Nan) /Ash/', null, 'Ann /Ash/', null],
+    ['Ann "Nan" /Ash/ "the elder"', 'Tad', 'Ann "Tad" /Ash/ "the elder"', 'Tad'],
+    ['Ann "Nan" /Ash/', 'Big "J"', 'Ann (Big "J") /Ash/', 'Big "J"'],
+  ])('%j with nickname %j exports %j', async (imported, nickname, exported, reread) => {
+    const store = await importInto(ged('0 @I1@ INDI', `1 NAME ${imported}`, '2 NICK Nan'));
+    store.transact('Nick', (tx) => names.update(tx, primaryName(store, '@I1@'), { nickname }));
+    for (const version of ['5.5.1', '7'] as const) {
+      const out = exportGedcom(store, { version, now: TODAY });
+      expect(recordText(out, '@I1@')!.split('\n')[1], version).toBe(`1 NAME ${exported}`);
+      expect(rows(await importInto(out), 'SELECT nickname FROM person_name'), version).toEqual([
+        { nickname: reread },
+      ]);
+    }
+  });
+
+  it('leaves quoted text that is not the nickname alone', async () => {
+    const store = await importInto(ged('0 @I1@ INDI', '1 NAME Ann /Ash/ "the elder"'));
+    store.transact('Nick', (tx) =>
+      names.update(tx, primaryName(store, '@I1@'), { nickname: 'Tad' }),
+    );
+    const out = exportGedcom(store, { now: TODAY });
+    expect(recordText(out, '@I1@')).toContain('1 NAME Ann /Ash/ "the elder"\n');
+    expect(recordText(out, '@I1@')).toContain('2 NICK Tad');
   });
 
   it('an edited event regenerates its owner only', async () => {

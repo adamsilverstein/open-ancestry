@@ -546,10 +546,11 @@ export class Mapper {
     const full = text(node);
     if (!full && !parts.GIVN && !parts.SURN) return;
     this.use(node);
-    // A nickname in parentheses (`Ann (Nan) /Ash/`) that NICK confirms is the nickname, not
-    // part of the given names; the parser only knows quoted ones.
+    // The nickname NICK names comes from NICK; taken out of the text before parsing, it
+    // cannot leak into the given names whatever marks surround it (`Ann (Nan) /Ash/`,
+    // `Ann (Big "J") /Ash/`). The parser alone only knows quoted nicknames.
     const nick = parts.NICK;
-    const parsed = parseName(nick && full ? full.replace(`(${nick})`, `"${nick}"`) : (full ?? ''));
+    const parsed = parseName(nick && full ? withoutNickname(full, nick) : (full ?? ''));
     let surname = parts.SURN ?? (parsed.surname || undefined);
     const surnamePrefix = parts.SPFX;
     if (surnamePrefix && !parts.SURN && surname?.startsWith(surnamePrefix + ' ')) {
@@ -1846,6 +1847,20 @@ export function dateColumns(dateText: string) {
     DATE_CACHE.set(dateText, columns);
   }
   return columns;
+}
+
+/** `full` without the nickname `nick` written in straight or curly quotes or parentheses. */
+function withoutNickname(full: string, nick: string): string {
+  for (const [open, close] of [
+    ['"', '"'],
+    ['“', '”'],
+    ['(', ')'],
+  ]) {
+    const token = `${open}${nick}${close}`;
+    const at = full.indexOf(token);
+    if (at >= 0) return `${full.slice(0, at)} ${full.slice(at + token.length)}`;
+  }
+  return full;
 }
 
 function decodeUri(value: string): string {

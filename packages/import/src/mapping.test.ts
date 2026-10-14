@@ -25,12 +25,16 @@ describe('names', () => {
         '2 NICK Nan',
         '0 @I2@ INDI',
         '1 NAME John (Jr) /Ash/',
+        '0 @I3@ INDI',
+        '1 NAME Bo (Big "J") /Ash/',
+        '2 NICK Big "J"',
       ),
     );
     expect(
       rows(store, 'SELECT given, nickname, full_text FROM person_name ORDER BY full_text'),
     ).toEqual([
       { given: 'Ann', nickname: 'Nan', full_text: 'Ann (Nan) /Ash/' },
+      { given: 'Bo', nickname: 'Big "J"', full_text: 'Bo (Big "J") /Ash/' },
       { given: 'John (Jr)', nickname: null, full_text: 'John (Jr) /Ash/' },
     ]);
   });

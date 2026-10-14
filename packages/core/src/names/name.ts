@@ -95,28 +95,51 @@ export function initials(name: PersonName | string): string {
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+const DELIMITERS: [string, string][] = [
+  ['"', '"'],
+  ['“', '”'],
+  ['(', ')'],
+];
+
 /**
  * A name as written (`Ann "Nan" /Ash/`) with its nickname changed from
- * `previous` to `next`, keeping the marks it was written with: straight or
- * curly quotes, or parentheses around exactly the previous nickname. A
- * cleared nickname takes its marks and space with it. Text that does not
- * spell the nickname out is returned unchanged.
+ * `previous` to `next`. Only the previous nickname itself is touched, in
+ * straight quotes, curly quotes or parentheses, and only among the given
+ * names, so other quoted text (`Ann /Ash/ "the elder"`) survives. The marks are kept unless the new nickname
+ * contains them (`Big "J"` goes in parentheses); a cleared nickname takes
+ * its marks and one space with it. Text that does not spell the previous
+ * nickname out is returned unchanged.
  */
 export function replaceNickname(
   text: string,
   previous: string | null | undefined,
   next: string | null | undefined,
 ): string {
-  const quoted = /(\s*)(["“])[^"“”]*(["”])/;
-  const parens = previous?.trim()
-    ? new RegExp(`(\\s*)(\\()\\s*${escape(previous.trim())}\\s*(\\))`)
-    : undefined;
-  const pattern = quoted.test(text) ? quoted : parens?.test(text) ? parens : undefined;
-  if (!pattern) return text;
-  const value = next?.trim();
-  return text
-    .replace(pattern, (_, space: string, open: string, close: string) =>
-      value ? `${space}${open}${value}${close}` : '',
-    )
-    .trim();
+  const old = previous?.trim();
+  if (!old) return text;
+  for (const [open, close] of DELIMITERS) {
+    const pattern = new RegExp(`(\\s?)${escape(open)}\\s*${escape(old)}\\s*${escape(close)}`);
+    const match = pattern.exec(text);
+    // A nickname sits among the given names; quoted text after the surname is an epithet.
+    const slash = text.indexOf('/');
+    if (!match || (slash >= 0 && match.index > slash)) continue;
+    const value = next?.trim();
+    if (!value) {
+      const before = text.slice(0, match.index);
+      const after = text.slice(match.index + match[0].length);
+      // One space goes with the nickname: the one before it, or else the one after.
+      return (match[1] ? before + after : before + after.replace(/^\s/, '')).trim();
+    }
+    const fits = ([a, b]: [string, string]) => !value.includes(a) && !value.includes(b);
+    // Parentheses first: no name parser reads quote marks inside quotes back reliably.
+    const [o, c] = fits([open, close])
+      ? [open, close]
+      : ([...DELIMITERS].reverse().find(fits) ?? [open, close]);
+    return (
+      text.slice(0, match.index) +
+      `${match[1]}${o}${value}${c}` +
+      text.slice(match.index + match[0].length)
+    );
+  }
+  return text;
 }

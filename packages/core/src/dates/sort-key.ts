@@ -9,7 +9,9 @@
  * - `ABT`, `CAL`, `EST`, `INT`, `FROM` and `TO` sort at the midpoint like exact dates.
  * - `BET` and `FROM .. TO` sort by their earliest day; `sortKeyEnd` is the latest.
  * - Dual years sort by the new-style year (`1750/51` as 1751).
- * - Julian full dates are converted exactly; Hebrew and French Republican are approximate.
+ * - Julian full dates are converted exactly. Partial Julian dates keep their
+ *   Julian year/month (up to ~13 days off), since a month or year has no single
+ *   Gregorian equivalent. Hebrew and French Republican are approximate.
  * - B.C. years are negative; the encoding stays monotonic.
  * - Unparseable text gets UNDATED_SORT_KEY so it sorts after every date.
  */

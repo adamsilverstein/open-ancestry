@@ -374,4 +374,14 @@ describe('parseDate', () => {
       qualifier: 'text',
     });
   });
+
+  it('flags numeric dates that could be read either way', () => {
+    expect(parseDate('05/06/1960').ambiguous).toBe(true);
+    expect(parseDate('5.6.1960')).toMatchObject({ ambiguous: true, start: { month: 6, day: 5 } });
+    expect(parseDate('abt 05/06/1960').ambiguous).toBe(true);
+    expect(parseDate('BET 05/06/1960 AND 1970').ambiguous).toBe(true);
+    expect(parseDate('05/05/1960').ambiguous).toBeUndefined();
+    expect(parseDate('05/28/1960').ambiguous).toBeUndefined();
+    expect(parseDate('5 SEP 1941').ambiguous).toBeUndefined();
+  });
 });

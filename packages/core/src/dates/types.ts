@@ -39,6 +39,11 @@ export interface ParsedDate {
   valid: boolean;
   /** Free text from `INT date (phrase)` or a bare `(phrase)`. */
   phrase?: string;
+  /**
+   * Set when a numeric date like `05/06/1960` could be read either way. It is
+   * parsed US-style (M/D/Y), or D.M.Y when dotted; the UI may ask the user.
+   */
+  ambiguous?: true;
 }
 
 /** Anything the date helpers accept: a parsed date or raw text to parse. */

@@ -80,6 +80,7 @@ const GEDCOM7_CALENDAR: Record<Calendar, string> = {
   julian: 'JULIAN ',
   hebrew: 'HEBREW ',
   french_r: 'FRENCH_R ',
+  // GEDCOM 7 has no keyword for an unknown calendar, so v7 exports the bare date.
   unknown: '',
 };
 

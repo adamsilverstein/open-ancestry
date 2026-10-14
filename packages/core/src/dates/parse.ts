@@ -59,6 +59,7 @@ const WEEKDAY = /^(?:MON|TUE|TUES|WED|THU|THUR|THURS|FRI|SAT|SUN)(?:DAY|NESDAY|S
 interface Point {
   point: DatePoint;
   calendar: Calendar;
+  ambiguous?: boolean;
 }
 
 /**
@@ -181,6 +182,7 @@ function parsePoint(input: string, defaultCalendar: Calendar): Point | undefined
   let day: number | undefined;
   let dual: string | undefined;
   let match: RegExpExecArray | null;
+  let ambiguous = false;
 
   if ((match = ISO.exec(s))) {
     year = Number(match[1]);
@@ -192,6 +194,7 @@ function parsePoint(input: string, defaultCalendar: Calendar): Point | undefined
     // US order (M/D/Y) unless that is impossible; dotted dates are European (D.M.Y).
     const dayFirst = match[2] === '.' ? b <= 12 : a > 12;
     if (dayFirst) [a, b] = [b, a];
+    ambiguous = a !== b && a <= 12 && b <= 12;
     month = a;
     day = b;
     year = Number(match[4]);
@@ -228,7 +231,9 @@ function parsePoint(input: string, defaultCalendar: Calendar): Point | undefined
     }
   }
 
-  return validPoint(calendar, bc, year, month, day, dual);
+  const p = validPoint(calendar, bc, year, month, day, dual);
+  if (p && ambiguous) p.ambiguous = true;
+  return p;
 }
 
 function readYear(token: string): { year?: number; dual?: string } {
@@ -285,6 +290,7 @@ function single(original: string, qualifier: DateQualifier, p: Point, phrase?: s
     valid: true,
   };
   if (phrase) date.phrase = phrase;
+  if (p.ambiguous) date.ambiguous = true;
   return date;
 }
 
@@ -309,7 +315,7 @@ function build(
   const sortKey = pointKey(start.point, start.calendar, 'low');
   const sortKeyEnd = pointKey(end.point, end.calendar, 'high');
   if (sortKey > sortKeyEnd) return undefined;
-  return {
+  const date: ParsedDate = {
     text: original,
     qualifier,
     start: start.point,
@@ -319,6 +325,8 @@ function build(
     sortKeyEnd,
     valid: true,
   };
+  if (start.ambiguous || end.ambiguous) date.ambiguous = true;
+  return date;
 }
 
 function textDate(text: string, phrase?: string): ParsedDate {

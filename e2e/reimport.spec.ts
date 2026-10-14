@@ -279,6 +279,33 @@ test('a partner dropped from the export adds no parent family by default', async
   expect(await parentFamilies('Iris')).toBe(before.iris);
 });
 
+test("a renamed person's export name is offered as an alternate, saying so", async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const thaddeus = (await personByName(request, seeded.tree, 'Thaddeus'))!;
+  const detail = (await (
+    await request.get(`/api/trees/${encodeURIComponent(seeded.tree)}/people/${thaddeus}`)
+  ).json()) as { names: { id: string }[] };
+  const renamed = await request.patch(
+    `/api/trees/${encodeURIComponent(seeded.tree)}/names/${detail.names[0]!.id}`,
+    { headers: seeded.headers, data: { given: 'Thad' } },
+  );
+  expect(renamed.ok()).toBe(true);
+  await startReimport(page, seeded);
+  const keep = card(page, 'Thad Ashgrove').getByRole('checkbox', {
+    name: 'Also keep Thaddeus Ashgrove as an alternate name',
+  });
+  await expect(keep).not.toBeChecked();
+  await expect(
+    card(page, 'Thad Ashgrove').getByText(
+      'The export still calls this person Thaddeus Ashgrove; you renamed them Thad Ashgrove here. Tick to also keep Thaddeus Ashgrove as an alternate name; Thad Ashgrove stays the primary name.',
+    ),
+  ).toBeVisible();
+});
+
 test('discarding a review changes nothing', async ({ page, request, baseURL }, testInfo) => {
   const seeded = await seed(request, baseURL!, testInfo);
   await startReimport(page, seeded);

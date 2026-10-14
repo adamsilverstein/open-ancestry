@@ -1259,3 +1259,27 @@ describe('UX QA (#72): new people who look like someone in the tree', () => {
     }
   });
 });
+
+describe('name conflict wording (#160)', () => {
+  it('gives a name type only when the export states one', async () => {
+    const typed = renumber(
+      SAMPLE.replace(
+        '1 NAME Mercy /Bellweather/\n',
+        '1 NAME Mercy /Bellweather/\n1 NAME Mercy /Ashgrove/\n2 TYPE married\n1 NAME Merry /Bellweather/\n',
+      ),
+    );
+    const s2 = await prepareReimport(store, { bytes: typed }, { today: TODAY });
+    try {
+      const mercy = s2.diff.people.find((p) => p.existingId === pid(store, '@I2@'))!;
+      const names = mercy.changes.flatMap((c) =>
+        c.kind === 'name.add' ? [[c.name, c.nameType]] : [],
+      );
+      expect(names).toEqual([
+        ['Mercy Ashgrove', 'married'],
+        ['Merry Bellweather', null],
+      ]);
+    } finally {
+      closeReimport(s2);
+    }
+  });
+});

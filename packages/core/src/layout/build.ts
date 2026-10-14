@@ -63,8 +63,6 @@ export interface Card {
 
 export interface Unit extends TidyUnit {
   cards: Card[];
-  /** Families hung from this block share it, so their connectors route together. */
-  block: number;
   groups: UnitGroup[];
   downGroups?: UnitGroup[];
   /** An ancestor block on the focus person's own line (not a spouse's). */
@@ -90,8 +88,6 @@ export interface FamilyLink {
     familyId?: string;
     sharedParentId?: string;
   }[];
-  /** Families of one block share a number so their connectors can be routed together. */
-  block: number;
   relationship?: PartnerRelationship;
 }
 
@@ -155,7 +151,6 @@ interface SiblingCandidate {
 export class Builder {
   readonly cards: Card[] = [];
   readonly links: FamilyLink[] = [];
-  private blocks = 0;
   readonly alternates: Record<string, ParentFamilyChoice> = {};
   private readonly primary = new Map<string, string>();
   private readonly dupCount = new Map<string, number>();
@@ -214,7 +209,6 @@ export class Builder {
       groups: [],
       x: 0,
       rel: 0,
-      block: this.blocks++,
     };
   }
 
@@ -243,7 +237,6 @@ export class Builder {
         familyId,
         parents,
         children,
-        block: unit.block,
         relationship: family.relationship,
       });
     if (budget <= 0) {
@@ -285,7 +278,6 @@ export class Builder {
           half: true,
           sharedParentId: shared.personId,
         })),
-        block: unit.block,
         relationship: other.relationship,
       });
     }
@@ -471,7 +463,6 @@ export class Builder {
         familyId: family.id,
         parents: spouse ? [person, spouse] : [person],
         children,
-        block: unit.block,
         relationship: family.relationship,
       });
       if (children.length === 0) continue;

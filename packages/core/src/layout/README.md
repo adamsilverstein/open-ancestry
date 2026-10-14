@@ -122,7 +122,9 @@ bar with no drop. Each direct-line person has a `<id>:siblings` chevron.
 
 Siblings, aunts and uncles have `<id>:down` chevrons. The focus person's siblings reveal nieces
 and nephews (and further, like any descendant) in the children rows. The parents' siblings reveal
-cousins in the focus row, kept on the outer side of their parent:
+cousins in the focus row, on the outer side of their parent. Expanding them never moves the
+parents: the cousins slide outward past the focus row instead, and their parents' lines jog out
+to them:
 
 ```
  gen -1  [aunt]--[husband]  [dad]--[mom]  [uncle]
@@ -178,8 +180,8 @@ two parent families' lines stay apart.
    packed left to right, each pushed just far enough to clear the accumulated contour on every
    shared level, then the block is centered over its groups. A sibling run is part of its
    person's block, so grandparents center over the full siblings. Cousins are `downGroups` of
-   their parent's block, growing back towards the root; when a child subtree reaches the block's
-   own level that way, the block is packed in line between the children on its left and right. Contours are arrays indexed by
+   their parent's block, growing back towards the root. They stay out of the contours: after
+   placement each block's down groups slide outward, as one piece, until they clear their row. Contours are arrays indexed by
    absolute level with a lazy offset, and a merge reuses the deeper contour, so it costs only the
    shallower depth (no quadratic blow-up on long chains).
 3. **Merge**. Ancestors and descendants are two trees rooted at the same focus block, packed

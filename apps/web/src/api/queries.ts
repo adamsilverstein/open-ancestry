@@ -66,6 +66,3 @@ export const ancestorsQuery = (tree: string, id: string) =>
         signal,
       ),
   });
-
-export const mediaUrl = (tree: string, mediaId: string) =>
-  `/api/trees/${seg(tree)}/media/${seg(mediaId)}`;

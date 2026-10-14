@@ -8,6 +8,7 @@ const base: ApiPersonSummary = {
   living: 'dead',
   privacy: 'public',
   primaryMediaId: null,
+  primaryPhotoLocal: false,
   given: 'Ada',
   surname: 'Vale',
   surnamePrefix: null,
@@ -55,9 +56,13 @@ describe('toPersonSummary', () => {
     expect(s.name).toBe('Unknown');
   });
 
-  it('links the primary photo through the media API', () => {
-    const s = toPersonSummary({ ...base, primaryMediaId: 'm1' }, 'my tree');
-    expect(s.photoUrl).toBe('/api/trees/my%20tree/media/m1');
+  it('uses the small thumbnail of a local primary photo, and nothing otherwise', () => {
+    const local = { ...base, primaryMediaId: 'm1', primaryPhotoLocal: true };
+    expect(toPersonSummary(local, 'my tree').photoUrl).toBe(
+      '/api/trees/my%20tree/media/m1/thumb/sm',
+    );
+    const remote = { ...base, primaryMediaId: 'm1', primaryPhotoLocal: false };
+    expect(toPersonSummary(remote, 'my tree').photoUrl).toBeUndefined();
   });
 });
 

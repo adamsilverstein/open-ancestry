@@ -37,6 +37,10 @@ export interface CommandPaletteProps {
   /** Search text changes, for wiring people and place search. */
   onQueryChange?: (query: string) => void;
   placeholder?: string;
+  /** Accessible name of the dialog and list (default "Command palette"). */
+  title?: string;
+  /** Set false when every group is filtered elsewhere (default true). */
+  shouldFilter?: boolean;
   /** Shown under the list, e.g. what Enter and Shift+Enter do. */
   footer?: ReactNode;
   /** Announced and shown while results load. */
@@ -58,6 +62,8 @@ export function CommandPalette({
   groups,
   onQueryChange,
   placeholder = 'Search people, places, actions',
+  title = 'Command palette',
+  shouldFilter = true,
   footer,
   loading = false,
   pending = false,
@@ -80,7 +86,10 @@ export function CommandPalette({
     g.items.filter(
       (i) =>
         !i.disabled &&
-        (g.unfiltered || !query.trim() || substringFilter(i.label, query, i.keywords) > 0),
+        (g.unfiltered ||
+          !shouldFilter ||
+          !query.trim() ||
+          substringFilter(i.label, query, i.keywords) > 0),
     ),
   );
   const visible = visibleItems.map(itemValue);
@@ -149,7 +158,7 @@ export function CommandPalette({
             returnFocus.current.focus();
           }}
         >
-          <RadixDialog.Title className="oa-visually-hidden">Command palette</RadixDialog.Title>
+          <RadixDialog.Title className="oa-visually-hidden">{title}</RadixDialog.Title>
           <Command
             // Server results arrive pre-ranked; local actions match on their label and keywords.
             filter={(itemValue, search, keywords) =>
@@ -161,8 +170,8 @@ export function CommandPalette({
                     keywords,
                   )
             }
-            shouldFilter
-            label="Command palette"
+            shouldFilter={shouldFilter}
+            label={title}
             loop
             value={value}
             onValueChange={setValue}

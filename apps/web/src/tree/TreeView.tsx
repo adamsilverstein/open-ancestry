@@ -22,7 +22,15 @@ import { useToast } from '../components/Toast/Toast';
 import type { PersonSummary } from '../lib/person';
 import { TreeToolbar, type TreeLayout as LayoutKind } from '../components/TreeToolbar/TreeToolbar';
 import { Skeleton } from '../components/Skeleton/Skeleton';
-import { ApiError, fetchHome, fetchNeighborhood, treeKeys, type NeighborhoodRequest } from './api';
+import {
+  ApiError,
+  fetchHome,
+  fetchNeighborhood,
+  MAX_GENERATIONS,
+  parseGenerations,
+  treeKeys,
+  type NeighborhoodRequest,
+} from './api';
 import { usePalette } from '../app/palette';
 import { lifeEvent, toPersonSummary } from './format';
 import { GraphCache } from './graphCache';
@@ -57,6 +65,9 @@ export const DEFAULT_DEPTH: Record<LayoutKind, { up: number; down: number }> = {
   descendants: { up: 0, down: 3 },
   fan: { up: 5, down: 0 },
 };
+
+/** Deeper fans have rings too thin to click; the pedigree goes deeper instead. */
+export const MAX_FAN_GENERATIONS = 6;
 
 const STALE = 5 * 60_000;
 /** How long the pointer or keyboard rests on a card before its layout is prepared. */
@@ -178,8 +189,11 @@ export function TreeView({
   const queryClient = useQueryClient();
   const toast = useToast();
   const kind: LayoutKind = search.layout ?? 'family';
-  const up = search.up ?? DEFAULT_DEPTH[kind].up;
-  const down = search.down ?? DEFAULT_DEPTH[kind].down;
+  // Hand-edited URLs can hold anything: clamp to what the server serves.
+  const requestedUp = parseGenerations(search.up) ?? DEFAULT_DEPTH[kind].up;
+  const fanCapped = kind === 'fan' && requestedUp > MAX_FAN_GENERATIONS;
+  const up = fanCapped ? MAX_FAN_GENERATIONS : requestedUp;
+  const down = parseGenerations(search.down) ?? DEFAULT_DEPTH[kind].down;
 
   const canvas = useRef<TreeCanvasHandle>(null);
   // The page remounts this view per tree, so one cache and worker per tree.
@@ -250,9 +264,10 @@ export function TreeView({
   const requestFor = useCallback(
     (focus: string): NeighborhoodRequest => ({
       focus,
-      // One generation past what is shown, so the next chevron needs no request.
-      up: kind === 'descendants' ? 0 : up + 1,
-      down: kind === 'pedigree' || kind === 'fan' ? 0 : down + 1,
+      // One generation past what is shown, so the next chevron needs no request,
+      // but never past the server's limit.
+      up: kind === 'descendants' ? 0 : Math.min(up + 1, MAX_GENERATIONS),
+      down: kind === 'pedigree' || kind === 'fan' ? 0 : Math.min(down + 1, MAX_GENERATIONS),
       // The family view shows siblings, aunts and uncles (with their spouses).
       siblingsDepth: kind === 'family' ? 2 : 0,
     }),
@@ -675,6 +690,19 @@ export function TreeView({
           <Button size="sm" variant="ghost" onClick={() => void retryMissing()}>
             Retry
           </Button>
+        </div>
+      )}
+      {fanCapped && !missing && (
+        <div className={styles.notice} role="status" data-surface="raised" data-tone="info">
+          The fan shows {MAX_FAN_GENERATIONS} generations.
+          <Link
+            to="/tree/$personId"
+            params={{ personId }}
+            search={(prev) => ({ ...prev, layout: 'pedigree' })}
+            className={styles.noticeLink}
+          >
+            Open the pedigree
+          </Link>
         </div>
       )}
       <TreeToolbar

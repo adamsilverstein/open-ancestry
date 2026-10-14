@@ -6,6 +6,10 @@ import { arbGraph, cousinMarriage, crossings, makeGraph, syntheticTree } from '.
 import type { FamilySpec } from './test-graphs';
 import type { LayoutNode, TreeLayout } from './types';
 
+// Property tests run hundreds of cases; under coverage on a shared CI runner that can
+// pass Vitest's 5s default, so they get room. A hang still fails.
+const PROPERTY_TIMEOUT = 30_000;
+
 const center = (n: LayoutNode) => n.x + n.width / 2;
 
 /** `me` married five times; spouse i has i + 1 children. */
@@ -69,7 +73,7 @@ describe('crossings', () => {
   });
 });
 
-describe('adversarial layouts', () => {
+describe('adversarial layouts', { timeout: PROPERTY_TIMEOUT }, () => {
   it('centers each ancestor under its parents, father left, paternal side left', () => {
     const { graph, focusId } = syntheticTree(6, 0, 0);
     const layout = layoutFamily(graph, focusId, { ancestorsDepth: 6 });

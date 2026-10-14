@@ -800,6 +800,14 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     }
     const key = pendingFocus.current;
     if (key) {
+      // Only while focus is still the tree's to give: the layout for a re-focus can land
+      // after the user has moved on (to the top bar, say), and taking focus back would
+      // also turn the tree's single-key shortcuts back on behind their back.
+      const focused = document.activeElement;
+      if (focused && focused !== document.body && !focused.closest('[data-tree-region]')) {
+        pendingFocus.current = null;
+        return;
+      }
       const el = viewportRef.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`);
       if (el) {
         el.focus({ preventScroll: true });

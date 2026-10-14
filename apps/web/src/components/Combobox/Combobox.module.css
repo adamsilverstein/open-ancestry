@@ -1,5 +1,24 @@
-.content {
+/*
+ * Doubled class: Select's content rules are shared but load in another chunk, and their
+ * max-height comes from Select's own (here unset) variable. The popover caps at the room
+ * Radix reports, keeps the search box, and scrolls the list.
+ */
+.content.content {
+  display: flex;
+  flex-direction: column;
   min-width: var(--radix-popover-trigger-width);
+  max-height: var(--radix-popover-content-available-height, 60dvh);
+}
+
+.command {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.list {
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .input {

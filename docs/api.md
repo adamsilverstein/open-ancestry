@@ -1,6 +1,6 @@
 # HTTP API
 
-`apps/server` serves the web app and a JSON API under `/api` on `127.0.0.1` (port 4317 by default). Trees live in a library folder (`--library`, `OA_LIBRARY`, default `~/OpenAncestry`); a tree's id in URLs is its folder name without `.oatree`.
+`apps/server` serves the web app and a JSON API under `/api` on `127.0.0.1` (port 4317 by default). Trees live in a library folder (`--library`, `OA_LIBRARY`, default `~/OpenAncestry`); a tree's id in URLs is its folder name without `.oatree`, matched exactly (an NFD spelling of the same name is the same tree; another case is not found, even on a case-insensitive disk).
 
 ## Conventions
 
@@ -28,8 +28,8 @@ POST/PUT/PATCH/DELETE /api/...    needs  Origin: <this server>  and  x-oa-token:
 | Paths with percent-encoded unreserved characters, `/`, `\` or `%`, malformed escapes, dot segments or empty segments get 400 before routing; the mutation guard applies to every non-safe method whatever the path | The router decodes paths, so `/%61pi/...` must never dodge the guard. |
 | No CORS headers, ever | |
 | CSP `default-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'`, `nosniff`, `Referrer-Policy: no-referrer`, COOP `same-origin` on every response | |
-| JSON bodies up to 1 MiB; import uploads up to 64 MiB, the importer's own cap (streamed to a temp file); one import at a time, four queued; a full queue (429), a busy tree or a tree that already has data (409) is refused before the upload is read; media uploads up to 1 GiB, with `owner_type` and `owner_id` sent and checked before the file | Bounded memory and disk. |
-| Each import runs in a worker thread with a 2 GiB heap limit and its own connection to the tree; files past 64 KiB lines, 2M records or 100k CONT/CONC lines in one record are refused before parsing | A hostile GEDCOM can fail its own job but never exhaust the server's memory or block its event loop; cancel terminates the worker. |
+| JSON bodies up to 1 MiB; import uploads up to the importer's own caps, 64 MiB for .ged/.gedcom and 1 GiB for a .zip/.gdz with its photos (streamed to a temp file; set with `--max-gedcom-mb` and `--max-archive-mb`); one import at a time, four queued; a full queue (429), a busy tree or a tree that already has data (409) is refused before the upload is read; media uploads up to 1 GiB, with `owner_type` and `owner_id` sent and checked before the file | Bounded memory and disk. |
+| Each import runs in a worker thread with a 2 GiB heap limit (`--import-heap-mb`) and its own connection to the tree; files past 64 KiB lines, 2M records or 100k CONT/CONC lines in one record (counted after decoding UTF-16) are refused before parsing. Server connections wait at most 50 ms for the worker's write lock and answer 409 rather than block; the WAL is truncated after each import commits | A hostile GEDCOM can fail its own job but never exhaust the server's memory or block its event loop; cancel terminates the worker. |
 | Media paths are resolved (following symlinks) inside the tree's `media/` folder. The content type is sniffed from magic bytes against an allowlist (JPEG, PNG, GIF, WebP, AVIF, MP3, WAV, Ogg, FLAC, MP4/M4A, WebM, PDF); `media.mime` and extensions are ignored, anything else is an `application/octet-stream` attachment, and every media response carries `CSP: default-src 'none'; style-src 'unsafe-inline'; sandbox` and `nosniff` | Path traversal and stored-XSS defense; GEDCOM media is untrusted. |
 | Thumbnails decode only real raster images (by magic bytes) with sharp, capped at 100 megapixels, one image at a time in a background queue | Decompression bombs and odd files never reach the decoder or tie up the server. |
 

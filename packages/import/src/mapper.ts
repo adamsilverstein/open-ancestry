@@ -151,6 +151,12 @@ export class Mapper {
   linkedMedia = 0;
   remoteMedia = 0;
   rejectedMedia = 0;
+  /**
+   * FILE lines of media that were not linked (missing, unsafe, too large, not
+   * copied). They stay in unmapped_line for export, but the report lists them
+   * under media and warnings rather than as unmapped tags.
+   */
+  private readonly unlinkedFileLines = new Set<number>();
   readonly recordCounts: Record<string, number> = {};
   homePersonId: string | null = null;
   homePersonSource: 'header' | 'first-person' | null = null;
@@ -1053,6 +1059,8 @@ export class Mapper {
   }
 
   private mapFile(node: GedcomNode, row: InsertRow<'media'>, xref: string | undefined): void {
+    this.unlinkedFileLines.add(node.line);
+    for (const c of node.continuations ?? []) this.unlinkedFileLines.add(c.line);
     let value = node.value!.trim();
     let ref = classifyFile(value);
     if (this.major >= 7 && ref.type !== 'remote') {
@@ -1068,6 +1076,7 @@ export class Mapper {
     if (ref.type === 'remote') {
       row.remote_url = ref.url;
       this.remoteMedia++;
+      this.unlinkedFileLines.delete(node.line);
       this.use(node);
       return;
     }
@@ -1105,6 +1114,7 @@ export class Mapper {
       row.byte_size = bytes.length;
       row.sha256 = hash;
       this.linkedMedia++;
+      this.unlinkedFileLines.delete(node.line);
       this.use(node);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -1735,6 +1745,7 @@ export class Mapper {
       lineText: string,
     ) => {
       preserved++;
+      const listed = !this.unlinkedFileLines.has(line);
       this.sink.insert('unmapped_line', {
         import_batch_id: this.options.batchId,
         owner_type: owner?.type ?? null,
@@ -1743,6 +1754,7 @@ export class Mapper {
         line_no: line,
         line: lineText,
       });
+      if (!listed) return;
       const entry = this.unmappedByPath.get(path);
       if (entry) entry.count++;
       else

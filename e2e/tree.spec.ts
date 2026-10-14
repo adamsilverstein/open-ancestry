@@ -1,3 +1,5 @@
+import { cpSync } from 'node:fs';
+import { join } from 'node:path';
 import AxeBuilder from '@axe-core/playwright';
 import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './fixtures';
@@ -781,6 +783,55 @@ test.describe('family view', () => {
     await expect(page).toHaveURL(new RegExp(`/tree/${seed.perf.focusId}(\\?|$)`));
     await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
     await expect(page.getByText('Ada Vale')).toHaveCount(0);
+  });
+
+  test('Back to a person page after switching trees shows that tree, even with shared ids', async ({
+    page,
+    request,
+    baseURL,
+  }, testInfo) => {
+    const { token } = (await (await request.get('/api/session')).json()) as { token: string };
+    const headers = { origin: baseURL!, 'x-oa-token': token };
+    // A copied tree folder keeps every id: the same person id names a person in both trees.
+    const library = process.env.OA_E2E_LIBRARY!;
+    const folder = `copy ${testInfo.workerIndex} ${Date.now()}`;
+    const copy = `${folder} b`;
+    cpSync(join(library, `${tree}.oatree`), join(library, `${folder}.oatree`), { recursive: true });
+    const api = `/api/trees/${encodeURIComponent(copy)}`;
+    try {
+      const renamed = await request.patch(`/api/trees/${encodeURIComponent(folder)}`, {
+        data: { name: copy },
+        headers,
+      });
+      expect(renamed.ok(), await renamed.text()).toBe(true);
+      const detail = await (await request.get(`${api}/people/${ids.ada}`)).json();
+      const nameId = detail.names[0].id as string;
+      expect(
+        (
+          await request.patch(`${api}/names/${nameId}`, { data: { given: 'Adacopy' }, headers })
+        ).ok(),
+      ).toBe(true);
+
+      await page.addInitScript((t) => localStorage.setItem('oa-tree', t), copy);
+      await page.goto(`/person/${ids.ada}`);
+      await expect(page.getByRole('heading', { level: 1, name: /Adacopy Vale/ })).toBeVisible();
+      // The person URL names its tree, so history entries stay in that tree.
+      await expect(page).toHaveURL(new RegExp(`/person/${ids.ada}\\?.*tree=`));
+      const switcher = page.getByRole('banner').getByRole('button', { name: /Tree:/ });
+      await switcher.click();
+      await page.getByRole('menuitemradio', { name: tree, exact: true }).click();
+      await expect(page).toHaveURL(/\/tree\//);
+      await expect(switcher).toContainText(tree);
+
+      await page.goBack();
+      await expect(page.getByRole('heading', { level: 1, name: /Adacopy Vale/ })).toBeVisible();
+      // The copy is current again, so edits from here go to it.
+      await expect(switcher).toContainText(copy);
+      await page.reload();
+      await expect(page.getByRole('heading', { level: 1, name: /Adacopy Vale/ })).toBeVisible();
+    } finally {
+      await request.delete(api, { headers });
+    }
   });
 
   test('switching trees on the people list stays on the people list', async ({ page }) => {

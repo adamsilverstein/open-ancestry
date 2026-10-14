@@ -21,6 +21,7 @@ import { peopleRoutes } from './routes/people';
 import { treeRoutes } from './routes/trees';
 import { SECURITY_HEADERS, createToken, isLoopbackHost, registerSecurity } from './security';
 import { sendShell } from './shell';
+import { lazyValidatorFactory, plainSerializerFactory } from './validation';
 
 export { Library, defaultLibraryRoot, treeNameProblem } from './library';
 export {
@@ -98,6 +99,13 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     logger: options.logger ?? false,
     bodyLimit: JSON_BODY_LIMIT,
     ajv: { customOptions: { removeAdditional: false, coerceTypes: 'array' } },
+    schemaController: {
+      compilersFactory: {
+        buildValidator: lazyValidatorFactory(),
+        // No route declares a response schema, so skip loading fast-json-stringify.
+        buildSerializer: plainSerializerFactory,
+      },
+    },
     clientErrorHandler: handleClientError,
     // Router-level failures (malformed URL, bad content type) get the typed envelope too.
     frameworkErrors: (error, _request, reply: FastifyReply) => {
@@ -164,7 +172,10 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   if (hasSpa) {
     app.register(fastifyStatic, {
       root: staticDir,
-      wildcard: false,
+      // One wildcard route instead of a route per file, which needs a glob of
+      // the build at startup (cold start, #54). Missing files fall through to
+      // the not-found handler, which serves the shell.
+      wildcard: true,
       setHeaders: staticHeaders,
       // The shell is rendered per request (CSP nonce), never served as a file.
       index: false,

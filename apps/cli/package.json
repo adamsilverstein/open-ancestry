@@ -1,0 +1,21 @@
+{
+  "name": "@open-ancestry/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "open-ancestry": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsx build.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@open-ancestry/db": "*",
+    "@open-ancestry/gedcom": "*",
+    "@open-ancestry/server": "*"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

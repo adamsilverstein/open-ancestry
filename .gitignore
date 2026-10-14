@@ -14,3 +14,6 @@ local-data/
 *.gdz
 !fixtures/**/*.ged
 !fixtures/**/*.gdz
+# Generated synthetic fixtures (regenerate with `npm run fixtures`)
+fixtures/generated/*
+!fixtures/generated/synthetic-1000.ged

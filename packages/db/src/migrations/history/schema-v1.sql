@@ -93,6 +93,8 @@ CREATE TABLE family_child (
   partner1_rel TEXT NOT NULL DEFAULT 'biological' CHECK (partner1_rel IN ('biological', 'adopted', 'step', 'foster', 'related', 'guardian', 'private', 'unknown')),
   partner2_rel TEXT NOT NULL DEFAULT 'biological' CHECK (partner2_rel IN ('biological', 'adopted', 'step', 'foster', 'related', 'guardian', 'private', 'unknown')),
   sort_order INTEGER NOT NULL DEFAULT 0,
+  child_order INTEGER NOT NULL DEFAULT 0,
+  is_preferred INTEGER NOT NULL DEFAULT 0 CHECK (is_preferred IN (0, 1)),
   UNIQUE (family_id, child_id)
 ) STRICT;
 
@@ -309,7 +311,9 @@ CREATE INDEX event_role_person_idx ON event_role (person_id, role);
 
 CREATE INDEX event_type_idx ON event (type);
 
-CREATE INDEX family_child_child_idx ON family_child (child_id);
+CREATE INDEX family_child_child_idx ON family_child (child_id, child_order);
+
+CREATE UNIQUE INDEX family_child_preferred_uq ON family_child (child_id) WHERE is_preferred = 1;
 
 CREATE INDEX family_import_idx ON family (import_batch_id, external_id);
 

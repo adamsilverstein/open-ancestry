@@ -339,6 +339,75 @@ describe('families', () => {
   });
 });
 
+describe('parent families of a child', () => {
+  it('orders parent sets and keeps exactly one preferred', () => {
+    const store = memoryTree();
+    const { result: r } = store.transact('add', (tx) => {
+      const [a, b, c, d, kid] = [1, 2, 3, 4, 5].map(() => persons.create(tx, {}).id) as [
+        string,
+        string,
+        string,
+        string,
+        string,
+      ];
+      const birth = families.create(tx, {
+        partner1_id: a,
+        partner2_id: b,
+        children: [{ child_id: kid }],
+      });
+      const adoptive = families.create(tx, {
+        partner1_id: c,
+        partner2_id: d,
+        children: [{ child_id: kid, partner1_rel: 'adopted', partner2_rel: 'adopted' }],
+      });
+      return { kid, birth, adoptive };
+    });
+    const links = () =>
+      familyChildren
+        .listForChild(store, r.kid)
+        .map((l) => [l.family_id, l.child_order, l.is_preferred]);
+    expect(links()).toEqual([
+      [r.birth.id, 0, 1],
+      [r.adoptive.id, 1, 0],
+    ]);
+    const adoptiveLink = familyChildren.listForChild(store, r.kid)[1]?.id as string;
+    store.transact('prefer', (tx) => familyChildren.setPreferred(tx, adoptiveLink));
+    expect(links()).toEqual([
+      [r.birth.id, 0, 0],
+      [r.adoptive.id, 1, 1],
+    ]);
+    const birthLink = familyChildren.listForChild(store, r.kid)[0]?.id as string;
+    store.transact('prefer via update', (tx) =>
+      familyChildren.update(tx, birthLink, { is_preferred: 1, sort_order: 2 }),
+    );
+    expect(links()).toEqual([
+      [r.birth.id, 0, 1],
+      [r.adoptive.id, 1, 0],
+    ]);
+    // Removing the preferred set promotes the next one.
+    store.transact('remove', (tx) => familyChildren.delete(tx, birthLink));
+    expect(links()).toEqual([[r.adoptive.id, 1, 1]]);
+    expect(() => store.transact('x', (tx) => familyChildren.setPreferred(tx, 'missing'))).toThrow(
+      NotFoundError,
+    );
+    store.close();
+  });
+
+  it('enforces one preferred parent family per child', () => {
+    const store = memoryTree();
+    expect(() =>
+      store.transact('two', (tx) => {
+        const kid = persons.create(tx, {}).id;
+        for (let i = 0; i < 2; i++) {
+          const fam = families.create(tx, {});
+          tx.insert('family_child', { family_id: fam.id, child_id: kid, is_preferred: 1 });
+        }
+      }),
+    ).toThrow(/UNIQUE/);
+    store.close();
+  });
+});
+
 describe('places, sources, citations, media, notes, tags', () => {
   it('supports CRUD with reference cleanup', () => {
     const store = memoryTree();
@@ -429,6 +498,9 @@ describe('meta', () => {
     store.transact('unset', (tx) => meta.delete(tx, 'tree_name'));
     expect(meta.get(store, 'tree_name')).toBeUndefined();
     expect(() => store.transact('x', (tx) => meta.set(tx, 'schema_version', '99'))).toThrow(
+      /schema_version/,
+    );
+    expect(() => store.transact('x', (tx) => meta.delete(tx, 'schema_version'))).toThrow(
       /schema_version/,
     );
     expect(() => store.transact('x', (tx) => meta.setHomePerson(tx, 'missing'))).toThrow(

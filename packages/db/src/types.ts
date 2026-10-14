@@ -132,6 +132,8 @@ export interface FamilyChildRow {
   partner1_rel: ChildRelationship;
   partner2_rel: ChildRelationship;
   sort_order: number;
+  child_order: number;
+  is_preferred: Bit;
 }
 
 export interface RepositoryRow extends Timestamps, Imported {

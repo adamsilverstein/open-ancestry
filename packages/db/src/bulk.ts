@@ -61,6 +61,11 @@ export class BulkWriter {
         UPDATE person_name SET is_primary = 1 WHERE id IN (
           SELECT (SELECT m.id FROM person_name m WHERE m.person_id = n.person_id ORDER BY m.sort_order, m.id LIMIT 1)
           FROM person_name n GROUP BY n.person_id HAVING max(n.is_primary) = 0)`);
+      // Likewise every child gets exactly one preferred parent family.
+      this.store.db.exec(`
+        UPDATE family_child SET is_preferred = 1 WHERE id IN (
+          SELECT (SELECT m.id FROM family_child m WHERE m.child_id = c.child_id ORDER BY m.child_order, m.id LIMIT 1)
+          FROM family_child c GROUP BY c.child_id HAVING max(c.is_preferred) = 0)`);
       rebuildSearchIndex(this.store);
       this.store.db.exec('COMMIT');
     } catch (error) {

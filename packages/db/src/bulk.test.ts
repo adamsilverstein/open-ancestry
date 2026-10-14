@@ -53,8 +53,21 @@ describe('bulk insert', () => {
     writer.insert('person', { id: 'P1' });
     writer.insert('person_name', { person_id: 'P1', given: 'Alder', sort_order: 1 });
     writer.insert('person_name', { person_id: 'P1', given: 'Al', sort_order: 2, type: 'aka' });
+    writer.insert('person', { id: 'P0' });
+    writer.insert('family', { id: 'F1', partner1_id: 'P0' });
+    writer.insert('family', { id: 'F2' });
+    writer.insert('family_child', { family_id: 'F2', child_id: 'P1', child_order: 1 });
+    writer.insert('family_child', { family_id: 'F1', child_id: 'P1', child_order: 0 });
     const counts = writer.commit();
-    expect(counts).toMatchObject({ person: 1, person_name: 2 });
+    expect(counts).toMatchObject({ person: 2, person_name: 2, family_child: 2 });
+    expect(
+      store.db
+        .prepare('SELECT family_id, is_preferred FROM family_child ORDER BY child_order')
+        .all(),
+    ).toEqual([
+      { family_id: 'F1', is_preferred: 1 },
+      { family_id: 'F2', is_preferred: 0 },
+    ]);
     expect(names.list(store, 'P1').map((x) => [x.given, x.is_primary])).toEqual([
       ['Alder', 1],
       ['Al', 0],

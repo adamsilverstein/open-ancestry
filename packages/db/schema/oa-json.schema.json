@@ -502,7 +502,16 @@
     "family_child": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "family_id", "child_id", "partner1_rel", "partner2_rel", "sort_order"],
+      "required": [
+        "id",
+        "family_id",
+        "child_id",
+        "partner1_rel",
+        "partner2_rel",
+        "sort_order",
+        "child_order",
+        "is_preferred"
+      ],
       "properties": {
         "id": {
           "type": "string"
@@ -538,6 +547,12 @@
           ]
         },
         "sort_order": {
+          "type": "integer"
+        },
+        "child_order": {
+          "type": "integer"
+        },
+        "is_preferred": {
           "type": "integer"
         }
       }

@@ -160,8 +160,10 @@ export const persons = {
       tx.delete('event_role', role.id);
       deleteOrphanEvent(tx, role.event_id);
     }
-    for (const link of familyChildren.listForChild(tx.store, id))
-      familyChildren.delete(tx, link.id);
+    for (const link of familyChildren.listForChild(tx.store, id)) {
+      deleteOwned(tx, 'family_child', link.id);
+      tx.delete('family_child', link.id);
+    }
     for (const family of families.listForPartner(tx.store, id)) {
       const patch = family.partner1_id === id ? { partner1_id: null } : { partner2_id: null };
       const updated = tx.update('family', family.id, patch);
@@ -217,13 +219,65 @@ export const familyChildren = {
   ...crud('family_child'),
   listForFamily: (store: TreeStore, familyId: string): FamilyChildRow[] =>
     all(store, 'SELECT * FROM family_child WHERE family_id = ? ORDER BY sort_order, id', familyId),
+  /** A person's parent families, in their order (GEDCOM `FAMC` order). */
   listForChild: (store: TreeStore, childId: string): FamilyChildRow[] =>
-    all(store, 'SELECT * FROM family_child WHERE child_id = ? ORDER BY id', childId),
+    all(store, 'SELECT * FROM family_child WHERE child_id = ? ORDER BY child_order, id', childId),
+
+  /**
+   * Adds a child to a family. The child's first parent family becomes the
+   * preferred one (the default parent set in tree views); `is_preferred: 1`
+   * moves the preference here.
+   */
+  create(tx: Tx, input: InsertRow<'family_child'>): FamilyChildRow {
+    const stats = tx.store
+      .stmt(
+        'SELECT count(*) AS n, max(child_order) AS maxOrder, max(is_preferred) AS hasPreferred FROM family_child WHERE child_id = ?',
+      )
+      .get(input.child_id) as { n: number; maxOrder: number | null; hasPreferred: number | null };
+    const preferred = input.is_preferred === 1 || !stats.hasPreferred;
+    if (preferred && stats.hasPreferred) demotePreferredParents(tx, input.child_id);
+    return tx.insert('family_child', {
+      ...input,
+      is_preferred: preferred ? 1 : 0,
+      child_order: input.child_order ?? (stats.n === 0 ? 0 : (stats.maxOrder ?? 0) + 1),
+    });
+  },
+
+  update(tx: Tx, id: string, patch: PatchRow<'family_child'>): FamilyChildRow {
+    const { is_preferred, ...rest } = patch;
+    if (is_preferred === 1) familyChildren.setPreferred(tx, id);
+    return tx.update('family_child', id, is_preferred === 0 ? patch : rest);
+  },
+
+  /** Makes this the child's preferred parent family. */
+  setPreferred(tx: Tx, id: string): FamilyChildRow {
+    const link = tx.store.getRow('family_child', id);
+    if (!link) throw new NotFoundError('family_child', id);
+    if (link.is_preferred) return link;
+    demotePreferredParents(tx, link.child_id);
+    return tx.update('family_child', id, { is_preferred: 1 });
+  },
+
+  /** Removes a child from a family; if it was the preferred parent set, the next one is promoted. */
   delete(tx: Tx, id: string) {
     deleteOwned(tx, 'family_child', id);
-    return tx.delete('family_child', id);
+    const removed = tx.delete('family_child', id);
+    if (removed.is_preferred) {
+      const next = tx.store
+        .stmt('SELECT id FROM family_child WHERE child_id = ? ORDER BY child_order, id LIMIT 1')
+        .get(removed.child_id) as { id: string } | undefined;
+      if (next) tx.update('family_child', next.id, { is_preferred: 1 });
+    }
+    return removed;
   },
 };
+
+function demotePreferredParents(tx: Tx, childId: string): void {
+  const current = tx.store
+    .stmt('SELECT id FROM family_child WHERE child_id = ? AND is_preferred = 1')
+    .get(childId) as { id: string } | undefined;
+  if (current) tx.update('family_child', current.id, { is_preferred: 0 });
+}
 
 function familyCount(tx: Tx, personId: string | null | undefined): number {
   if (!personId) return 0;
@@ -253,7 +307,7 @@ export const families = {
       ...input,
     });
     children.forEach((c, i) =>
-      tx.insert('family_child', { sort_order: i, ...c, family_id: family.id }),
+      familyChildren.create(tx, { sort_order: i, ...c, family_id: family.id }),
     );
     return family;
   },
@@ -415,6 +469,7 @@ export const meta = {
       : tx.insert('meta', { key, value });
   },
   delete(tx: Tx, key: string) {
+    if (key === 'schema_version') throw new Error('schema_version is managed by migrations');
     return tx.delete('meta', key);
   },
   getHomePersonId(store: TreeStore): string | null {

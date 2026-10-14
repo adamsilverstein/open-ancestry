@@ -84,7 +84,7 @@ Key/value settings for the tree.
 
 | Column | Type | Null | Meaning |
 |---|---|---|---|
-| `key` | TEXT | no | Primary key. Known keys: `schema_version` (written only by migrations), `tree_name`, `created_at`, `home_person_id` (the person relationships are described from), `settings` (JSON object of UI preferences). |
+| `key` | TEXT | no | Primary key. Known keys: `schema_version` (written only by migrations; `meta.set` and `meta.delete` refuse it), `tree_name`, `created_at`, `home_person_id` (the person relationships are described from), `settings` (JSON object of UI preferences). |
 | `value` | TEXT | no | Value as text. |
 
 ### `import_batch`
@@ -225,6 +225,8 @@ A child in a family, with the child's relationship to each partner. A person can
 | `partner1_rel` | TEXT | no | Relationship to partner1: `biological` (default), `adopted`, `step`, `foster`, `related`, `guardian`, `private` or `unknown`. |
 | `partner2_rel` | TEXT | no | Relationship to partner2, same values. |
 | `sort_order` | INTEGER | no | Birth order within the family. |
+| `child_order` | INTEGER | no | Position of this family among the child's parent families (order of `INDI.FAMC`), e.g. birth parents before adoptive parents. |
+| `is_preferred` | INTEGER | no | 1 for the child's preferred parent family, the parent set tree views draw by default. Invariant: a person who is a child in any family has exactly one preferred link (unique partial index `family_child_preferred_uq`); the first link added is preferred, and removing it promotes the next by `child_order`. |
 
 ### `repository`
 
@@ -492,6 +494,7 @@ packages/db does not parse dates; callers pass these fields in.
 | `INDI.BIRT`, `DEAT`, `RESI`, `OCCU`, `_MILT`, `EVEN`/`TYPE`, ... | `event` + `event_role` (`principal`) |
 | `INDI.MARR` duplicating a `FAM.MARR` | deduplicated into the family event |
 | `FAM` | `family`; `HUSB` to `partner1_id`, `WIFE` to `partner2_id` |
+| Order of `INDI.FAMC`; the first (or Ancestry's preferred) parent set | `family_child.child_order`; `family_child.is_preferred` |
 | `FAM.CHIL` + `INDI.FAMC.PEDI`, Ancestry `_FREL`/`_MREL` | `family_child.partner1_rel` / `partner2_rel` (`Natural` to `biological`, `Adopted`, `Step`, `Foster`, `Related`, `Guardian`, `Private`) |
 | `FAM.MARR`, `DIV`, ... | `event` + `event_role` with `family_id` |
 | `PLAC` (and `MAP`) | `place` (deduplicated by `full_name`) |
@@ -503,6 +506,7 @@ packages/db does not parse dates; callers pass these fields in.
 | `NOTE` (record or inline) | `note` + `note_link` |
 | Ancestry `_MTTAG` record (`NAME`, `_MTCAT`) and pointers | `tag` + `tag_link` |
 | `RESN` | `privacy` |
+| `HEAD`, `SUBM`, `TRLR` | `raw_record` only, with null `owner_type`/`owner_id` (no submitter table in v1; `HEAD.SOUR` details also go to `import_batch`) |
 | Every top-level record verbatim | `raw_record` |
 | Anything not mapped | `unmapped_line` |
 | `HEAD.SOUR`, file metadata | `import_batch` |

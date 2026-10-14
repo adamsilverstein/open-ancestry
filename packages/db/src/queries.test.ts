@@ -171,6 +171,8 @@ describe('neighborhood', () => {
       partner1Rel: 'biological',
       partner2Rel: 'biological',
       sortOrder: 0,
+      childOrder: 0,
+      isPreferred: true,
     });
     expect(n.moreUp).toEqual([]);
     expect(n.moreDown).toEqual([]);
@@ -221,6 +223,44 @@ describe('neighborhood', () => {
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids).toContain(r.g1);
     expect(n.people).toHaveLength(9);
+    store.close();
+  });
+
+  it('clamps generations and caps the number of people', () => {
+    const store = memoryTree();
+    const f = seedSmallFamily(store);
+    const negative = getNeighborhood(store, f.me, { up: -5, down: -1 });
+    expect(negative.people.map((p) => p.id).sort()).toEqual([f.me, f.spouse].sort());
+    const huge = getNeighborhood(store, f.me, { up: 1e9, down: Number.NaN });
+    expect(huge.people).toHaveLength(7); // ancestors and siblings; NaN down acts as 0
+    expect(huge.truncated).toBe(false);
+
+    const capped = getNeighborhood(store, f.me, { up: 2, down: 2, maxPeople: 3 });
+    expect(capped.truncated).toBe(true);
+    expect(capped.people).toHaveLength(3);
+    expect(capped.people[0]?.id).toBe(f.me);
+    const kept = new Set(capped.people.map((p) => p.id));
+    for (const fam of capped.families) {
+      for (const partner of [fam.partner1Id, fam.partner2Id]) {
+        if (partner) expect(kept.has(partner)).toBe(true);
+      }
+    }
+    for (const edge of capped.children) expect(kept.has(edge.childId)).toBe(true);
+    store.close();
+  });
+
+  it('marks the preferred parent family on child edges', () => {
+    const store = memoryTree();
+    const f = seedSmallFamily(store);
+    const { result: adoptive } = store.transact('adopt', (tx) =>
+      families.create(tx, { children: [{ child_id: f.me, partner1_rel: 'adopted' }] }),
+    );
+    const n = getNeighborhood(store, f.me, { up: 1, down: 0 });
+    const mine = n.children.filter((c) => c.childId === f.me);
+    expect(mine.map((c) => [c.familyId, c.childOrder, c.isPreferred])).toEqual([
+      [f.parentsFamily, 0, true],
+      [adoptive.id, 1, false],
+    ]);
     store.close();
   });
 

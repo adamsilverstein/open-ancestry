@@ -341,12 +341,13 @@ export function getPersonDetail(store: TreeStore, id: string): PersonDetail | nu
 
   const childLinks = rows<FamilyChildRow>(
     store,
-    'SELECT * FROM family_child WHERE child_id = ? ORDER BY id',
+    'SELECT * FROM family_child WHERE child_id = ? ORDER BY child_order, id',
     id,
   );
   const parentFams = rows<FamilyRow>(
     store,
-    `SELECT f.* FROM family_child fc JOIN family f ON f.id = fc.family_id WHERE fc.child_id = ? ORDER BY fc.id`,
+    `SELECT f.* FROM family_child fc JOIN family f ON f.id = fc.family_id
+     WHERE fc.child_id = ? ORDER BY fc.child_order, fc.id`,
     id,
   );
   const partnerFams = rows<FamilyRow>(
@@ -444,7 +445,12 @@ export interface ChildEdge {
   childId: string;
   partner1Rel: ChildRelationship;
   partner2Rel: ChildRelationship;
+  /** Birth order within the family. */
   sortOrder: number;
+  /** Position among the child's parent families (GEDCOM `FAMC` order). */
+  childOrder: number;
+  /** The child's preferred parent family: the default parent set to draw. */
+  isPreferred: boolean;
 }
 
 export interface Neighborhood {
@@ -459,6 +465,8 @@ export interface Neighborhood {
   moreUp: string[];
   /** People at the bottom edge who have children not included. */
   moreDown: string[];
+  /** True when the slice hit `maxPeople` and stopped early. */
+  truncated: boolean;
 }
 
 export interface NeighborhoodOptions {
@@ -468,7 +476,16 @@ export interface NeighborhoodOptions {
   down?: number;
   /** Include the focus person's siblings (default true). */
   siblings?: boolean;
+  /** Stop expanding past this many people (default and maximum 5000). */
+  maxPeople?: number;
 }
+
+/** Most generations a single neighborhood request walks in each direction. */
+export const MAX_NEIGHBORHOOD_GENERATIONS = 10;
+export const MAX_NEIGHBORHOOD_PEOPLE = 5000;
+
+const clamp = (value: number, min: number, max: number) =>
+  Number.isFinite(value) ? Math.min(max, Math.max(min, Math.trunc(value))) : min;
 
 /**
  * A compact graph slice around a person for the tree views: ancestors `up`
@@ -478,9 +495,19 @@ export interface NeighborhoodOptions {
 export function getNeighborhood(
   store: TreeStore,
   focusId: string,
-  { up = 4, down = 3, siblings = true }: NeighborhoodOptions = {},
+  options: NeighborhoodOptions = {},
 ): Neighborhood {
   if (!store.getRow('person', focusId)) throw new NotFoundError('person', focusId);
+  // Clamp here too, not only in the API, so no caller can walk a whole tree.
+  const up = clamp(options.up ?? 4, 0, MAX_NEIGHBORHOOD_GENERATIONS);
+  const down = clamp(options.down ?? 3, 0, MAX_NEIGHBORHOOD_GENERATIONS);
+  const maxPeople = clamp(options.maxPeople ?? MAX_NEIGHBORHOOD_PEOPLE, 1, MAX_NEIGHBORHOOD_PEOPLE);
+  const siblings = options.siblings ?? true;
+  let truncated = false;
+  const full = () => {
+    if (people.size >= maxPeople) truncated = true;
+    return truncated;
+  };
   const people = new Set<string>([focusId]);
   const families = new Map<string, FamilyEdge>();
   const children = new Map<string, ChildEdge>();
@@ -503,6 +530,8 @@ export function getNeighborhood(
       partner1Rel: c.partner1_rel,
       partner2Rel: c.partner2_rel,
       sortOrder: c.sort_order,
+      childOrder: c.child_order,
+      isPreferred: c.is_preferred === 1,
     });
     people.add(c.child_id);
   };
@@ -512,13 +541,16 @@ export function getNeighborhood(
     partner1_rel: ChildRelationship;
     partner2_rel: ChildRelationship;
     sort_order: number;
+    child_order: number;
+    is_preferred: 0 | 1;
   };
   const parentFamilies = (ids: string[]) =>
     rows<ParentRow>(
       store,
-      `SELECT f.*, fc.id AS link_id, fc.child_id, fc.partner1_rel, fc.partner2_rel, fc.sort_order
+      `SELECT f.*, fc.id AS link_id, fc.child_id, fc.partner1_rel, fc.partner2_rel, fc.sort_order,
+              fc.child_order, fc.is_preferred
        FROM family_child fc JOIN family f ON f.id = fc.family_id
-       WHERE fc.child_id IN (${IDS}) ORDER BY fc.child_id, fc.id`,
+       WHERE fc.child_id IN (${IDS}) ORDER BY fc.child_id, fc.child_order, fc.id`,
       JSON.stringify(ids),
     );
   const partnerFamilies = (ids: string[]) =>
@@ -539,7 +571,7 @@ export function getNeighborhood(
   // Ancestors.
   let frontier = [focusId];
   const seenUp = new Set(frontier);
-  for (let generation = 0; generation < up && frontier.length > 0; generation++) {
+  for (let generation = 0; generation < up && frontier.length > 0 && !full(); generation++) {
     const next: string[] = [];
     const found = parentFamilies(frontier);
     for (const f of found) {
@@ -558,7 +590,7 @@ export function getNeighborhood(
     }
     frontier = next;
   }
-  const moreUp =
+  let moreUp =
     frontier.length === 0
       ? []
       : rows<{ child_id: string }>(
@@ -579,7 +611,7 @@ export function getNeighborhood(
       if (f.partner2_id) people.add(f.partner2_id);
     }
     const kids = fams.length > 0 ? childrenOf(fams.map((f) => f.id)) : [];
-    if (generation === down) {
+    if (generation === down || full()) {
       const frontierSet = new Set(frontier);
       const withKids = new Set(kids.map((k) => k.family_id));
       moreDown = [
@@ -603,13 +635,32 @@ export function getNeighborhood(
     frontier = next;
   }
 
+  // One generation can overshoot the cap: keep the first maxPeople (focus
+  // first, then breadth-first) and only the edges between kept people.
+  let kept = [...people];
+  let familyEdges = [...families.values()];
+  let childEdges = [...children.values()];
+  if (kept.length > maxPeople) {
+    truncated = true;
+    kept = kept.slice(0, maxPeople);
+    const keep = new Set(kept);
+    familyEdges = familyEdges.filter(
+      (f) => (!f.partner1Id || keep.has(f.partner1Id)) && (!f.partner2Id || keep.has(f.partner2Id)),
+    );
+    const keptFamilies = new Set(familyEdges.map((f) => f.id));
+    childEdges = childEdges.filter((c) => keep.has(c.childId) && keptFamilies.has(c.familyId));
+    moreUp = moreUp.filter((id) => keep.has(id));
+    moreDown = moreDown.filter((id) => keep.has(id));
+  }
+
   return {
     focusId,
-    people: getPersonSummaries(store, [...people]),
-    families: [...families.values()],
-    children: [...children.values()],
+    people: getPersonSummaries(store, kept),
+    families: familyEdges,
+    children: childEdges,
     moreUp,
     moreDown,
+    truncated,
   };
 }
 

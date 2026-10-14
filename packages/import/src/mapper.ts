@@ -9,6 +9,7 @@ import type {
   Sex,
   TableName,
 } from '@open-ancestry/db';
+import { CITATION_OWNERS, MEDIA_OWNERS, NOTE_OWNERS, TAG_OWNERS } from '@open-ancestry/db';
 import { serializeNode, type GedcomNode, type ParseResult } from '@open-ancestry/gedcom';
 import { createHash } from 'node:crypto';
 import { classifyFile, kindFromType, mediaType, writeMediaFile, type MediaSource } from './media';
@@ -126,6 +127,8 @@ export const RAW_ONLY = new Set(['HEAD', 'SUBM', 'TRLR']);
 const NOTE_TAGS = new Set(['NOTE', 'SNOTE']);
 const HOME_TAGS = new Set(['_HOME', '_ROOT', '_HOMEPERSON', '_HME']);
 const ADDRESS_PARTS = ['ADR1', 'ADR2', 'ADR3', 'CITY', 'STAE', 'POST', 'CTRY'];
+
+const includes = (list: readonly string[], value: string) => list.includes(value);
 
 const text = (node: GedcomNode | undefined): string | undefined => {
   const value = node?.value;
@@ -667,10 +670,17 @@ export class Mapper {
 
   /** NOTE, SOUR, OBJE and _MTTAG under any owner that accepts them. */
   private mapAttachment(node: GedcomNode, owner: Owner): void {
-    if (NOTE_TAGS.has(node.tag)) this.mapNote(node, owner);
-    else if (node.tag === 'SOUR') this.mapCitation(node, owner);
-    else if (node.tag === 'OBJE') this.mapMediaLink(node, owner);
-    else if (node.tag === '_MTTAG') this.mapTagLink(node, owner);
+    // Each link table accepts only some owners (a SOUR under a SOUR record, an
+    // OBJE under an OBJE); anything else stays unmapped instead of failing.
+    if (NOTE_TAGS.has(node.tag)) {
+      if (includes(NOTE_OWNERS, owner.type)) this.mapNote(node, owner);
+    } else if (node.tag === 'SOUR') {
+      if (includes(CITATION_OWNERS, owner.type)) this.mapCitation(node, owner);
+    } else if (node.tag === 'OBJE') {
+      if (includes(MEDIA_OWNERS, owner.type)) this.mapMediaLink(node, owner);
+    } else if (node.tag === '_MTTAG') {
+      if (includes(TAG_OWNERS, owner.type)) this.mapTagLink(node, owner);
+    }
   }
 
   /** ADDR text (with CONT lines) plus any structured parts not already in it. */

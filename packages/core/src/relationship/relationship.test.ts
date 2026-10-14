@@ -1,6 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { kinshipGraph, relationship } from './index';
+import { fromNeighborhood } from '../layout';
+import { kinshipGraph, relationship, relationshipName } from './index';
 import type { KinshipGraph } from './index';
 import {
   bigFamily,
@@ -284,5 +285,57 @@ describe('marriage chains', () => {
     expect(name(partners, 'a', 'b')).toBe('partner');
     expect(relationship(g, 'broWsis', 'b', { maxGenerations: 0 }).name).toBe('unrelated');
     expect(relationship(g, 'broWsis', 'b', { maxNodes: 3 }).name).toBe('unrelated');
+  });
+});
+
+describe('relationshipName and neighborhood input', () => {
+  it('names a shape directly for callers with their own walk', () => {
+    expect(relationshipName({ up: 2, down: 3 }, 'M')).toBe('1st cousin once removed');
+    expect(relationshipName({ up: 0, down: 5 }, 'F')).toBe('3rd great-grandmother');
+    expect(relationshipName({ up: 1, down: 1 }, 'F', true)).toBe('half-sister');
+  });
+
+  it('runs over a db neighborhood DTO', () => {
+    const person = (id: string, sex: 'M' | 'F') => ({
+      id,
+      sex,
+      living: 'dead',
+      given: id,
+      surname: null,
+      birth: null,
+      death: null,
+    });
+    const graph = kinshipGraph(
+      fromNeighborhood({
+        people: [person('dad', 'M'), person('me', 'F'), person('sis', 'F')],
+        families: [
+          {
+            id: 'F',
+            partner1Id: 'dad',
+            partner2Id: null,
+            relationshipType: 'unknown',
+            partner1Order: 0,
+            partner2Order: 0,
+          },
+        ],
+        children: ['me', 'sis'].map((childId, sortOrder) => ({
+          familyId: 'F',
+          childId,
+          partner1Rel: 'biological' as const,
+          partner2Rel: 'biological' as const,
+          sortOrder,
+          childOrder: 0,
+          isPreferred: true,
+        })),
+        moreUp: [],
+        moreDown: [],
+      }),
+    );
+    expect(relationship(graph, 'sis', 'me').relationships[0]).toMatchObject({
+      name: 'sister',
+      generations: [1, 1],
+      half: false,
+      commonAncestors: ['dad'],
+    });
   });
 });

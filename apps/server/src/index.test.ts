@@ -32,6 +32,11 @@ describe('server', () => {
     expect(await res.json()).toEqual({ ok: true });
   });
 
+  it('brackets IPv6 hosts in the URL', async () => {
+    running = await startServer({ host: '::1', port: 0 });
+    expect(running.url).toMatch(/^http:\/\/\[::1\]:\d+$/);
+  });
+
   it('serves the SPA with history fallback when given a static dir', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'oa-static-'));
     await writeFile(join(dir, 'index.html'), '<!doctype html><title>spa</title>');
@@ -41,6 +46,8 @@ describe('server', () => {
     const deep = await app.inject({ method: 'GET', url: '/tree/123' });
     expect(deep.statusCode).toBe(200);
     expect(deep.body).toContain('<title>spa</title>');
+    const head = await app.inject({ method: 'HEAD', url: '/tree/123' });
+    expect(head.statusCode).toBe(200);
     const api = await app.inject({ method: 'GET', url: '/api/nope' });
     expect(api.statusCode).toBe(404);
   });

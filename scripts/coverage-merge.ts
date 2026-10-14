@@ -22,6 +22,18 @@ const unitFile = join(coverageDir, 'unit', 'coverage-final.json');
 const e2eRawDir = join(coverageDir, 'e2e', 'raw');
 const metricKeys = ['lines', 'statements', 'functions', 'branches'] as const;
 
+/**
+ * Minimum merged (unit + e2e) line coverage. Apps are gated here rather than
+ * in vitest.config.ts so UI code can be covered by e2e instead of shallow unit
+ * tests. Ratchet up, never down.
+ */
+const mergedLineThresholds: Record<string, number> = {
+  total: 80,
+  'apps/web': 80,
+  'apps/server': 80,
+  'apps/cli': 70,
+};
+
 async function e2eFiles(): Promise<string[]> {
   if (!existsSync(e2eRawDir)) return [];
   const names = await readdir(e2eRawDir);
@@ -103,12 +115,19 @@ const mergedDir = await report(
   ['html', 'json-summary', 'text-summary'],
 );
 const merged = await readSummary(mergedDir);
+const groups = aggregate(merged);
+const failures = Object.entries(mergedLineThresholds).flatMap(([key, min]) => {
+  const m = key === 'total' ? merged.total : groups.get(key);
+  if (!m || m.lines.total === 0) return [];
+  const actual = (m.lines.covered / m.lines.total) * 100;
+  return actual < min ? [`${key}: lines ${actual.toFixed(1)}% < ${min}%`] : [];
+});
 const lines = [
   '## Coverage',
   '',
   '| Workspace | Lines | Statements | Functions | Branches |',
   '| --- | --- | --- | --- | --- |',
-  ...[...aggregate(merged)].sort(([a], [b]) => a.localeCompare(b)).map(([k, m]) => row(k, m)),
+  ...[...groups].sort(([a], [b]) => a.localeCompare(b)).map(([k, m]) => row(k, m)),
   row('**Total (unit + e2e)**', merged.total as Metrics),
 ];
 
@@ -121,6 +140,12 @@ if (e2e.length > 0) {
 }
 lines.push(
   '',
+  failures.length > 0
+    ? `**Below merged threshold:** ${failures.join('; ')}`
+    : `Merged line thresholds met (${Object.entries(mergedLineThresholds)
+        .map(([k, v]) => `${k} ${v}%`)
+        .join(', ')}).`,
+  '',
   `Unit inputs: ${unit.length}, e2e inputs: ${e2e.length}. HTML report: \`coverage/merged\`.`,
 );
 
@@ -128,3 +153,7 @@ await rm(join(coverageDir, '.tmp'), { recursive: true, force: true });
 const markdown = `${lines.join('\n')}\n`;
 await writeFile(join(coverageDir, 'summary.md'), markdown);
 console.log(markdown);
+if (failures.length > 0) {
+  console.error(`Merged coverage below threshold: ${failures.join('; ')}`);
+  process.exit(1);
+}

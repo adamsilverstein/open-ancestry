@@ -3,6 +3,9 @@
  * tinybench, prints a table and exits non-zero when any case is over budget.
  *
  * Usage: npm run bench [-- <name filter>]
+ *
+ * TODO: compare against a stored baseline and fail on >20% regressions
+ * (design.md section 6) once real hot paths have suites.
  */
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';

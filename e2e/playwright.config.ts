@@ -1,6 +1,26 @@
+import { createServer } from 'node:net';
 import { defineConfig, devices } from '@playwright/test';
 
-const port = Number(process.env.E2E_PORT ?? 4319);
+/** Asks the OS for a free loopback port so parallel worktrees never collide. */
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      server.close(() =>
+        typeof address === 'object' && address
+          ? resolve(address.port)
+          : reject(new Error('no port')),
+      );
+    });
+  });
+}
+
+// Workers re-load this config, so the port chosen by the runner is pinned in
+// the environment they inherit.
+process.env.E2E_PORT ??= String(await freePort());
+const port = Number(process.env.E2E_PORT);
 const baseURL = `http://127.0.0.1:${port}`;
 const ci = Boolean(process.env.CI);
 

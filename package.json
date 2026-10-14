@@ -7,12 +7,8 @@
     "node": ">=24"
   },
   "workspaces": [
-    "packages/core",
-    "packages/gedcom",
-    "packages/db",
-    "apps/server",
-    "apps/web",
-    "apps/cli"
+    "packages/*",
+    "apps/*"
   ],
   "scripts": {
     "dev": "concurrently -k -n server,web -c blue,green \"npm run dev -w @open-ancestry/server\" \"npm run dev -w @open-ancestry/web\"",
@@ -52,6 +48,7 @@
   },
   "allowScripts": {
     "better-sqlite3@13.0.3": true,
-    "esbuild@0.28.2": true
+    "esbuild@0.28.2": true,
+    "fsevents": false
   }
 }

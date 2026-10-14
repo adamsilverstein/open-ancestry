@@ -36,7 +36,8 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
 
   app.setNotFoundHandler((request, reply) => {
     const isApi = request.url === '/api' || request.url.startsWith('/api/');
-    if (hasSpa && request.method === 'GET' && !isApi) {
+    const isRead = request.method === 'GET' || request.method === 'HEAD';
+    if (hasSpa && isRead && !isApi) {
       // Client-side routes (/tree/:id, /person/:id) all load the SPA shell.
       return reply.sendFile('index.html');
     }
@@ -53,7 +54,7 @@ export async function startServer(options: StartOptions = {}): Promise<RunningSe
   const address = app.server.address();
   const port = typeof address === 'object' && address ? address.port : options.port;
   return {
-    url: `http://${host}:${port}`,
+    url: `http://${host.includes(':') ? `[${host}]` : host}:${port}`,
     app,
     close: () => app.close(),
   };

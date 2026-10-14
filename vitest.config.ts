@@ -18,9 +18,10 @@ export default defineConfig({
         'apps/server/src/dev.ts',
         'apps/cli/src/cli.ts',
       ],
+      // Packages are gated on unit coverage here. Apps are mostly exercised by
+      // e2e, so they are gated on merged coverage in scripts/coverage-merge.ts.
       thresholds: {
         'packages/**': { lines: 80 },
-        'apps/**': { lines: 70 },
       },
     },
   },

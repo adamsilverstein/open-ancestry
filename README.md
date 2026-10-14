@@ -24,7 +24,7 @@ To import, export your tree from Ancestry (below) and load the `.ged` file. Impo
 ## Development
 
 ```sh
-npm run dev           # API (tsx watch, :4318) + web (Vite HMR, :5173, proxies /api)
+npm run dev           # API (tsx watch, :4318 or $OA_PORT) + web (Vite HMR, :5173, proxies /api)
 npm run lint          # ESLint + Prettier check
 npm run format        # Prettier write
 npm run typecheck     # tsc for root scripts and every workspace

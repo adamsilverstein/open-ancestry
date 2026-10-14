@@ -1,0 +1,207 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100dvh - var(--oa-topbar-height));
+}
+
+/* Header band on the canvas, as on the tree. */
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oa-space-5);
+  padding: var(--oa-space-6) var(--oa-space-5);
+  background: var(--oa-canvas);
+  color: var(--oa-canvas-text);
+}
+
+.avatar {
+  border: 3px solid var(--oa-canvas-text);
+}
+
+.identity {
+  display: flex;
+  flex: 1 1 280px;
+  flex-direction: column;
+  gap: var(--oa-space-2);
+  min-width: 0;
+}
+
+.name {
+  font: var(--oa-text-display);
+  font-weight: var(--oa-weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.vitals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oa-space-1) var(--oa-space-6);
+  font-variant-numeric: tabular-nums;
+}
+
+.vital {
+  display: flex;
+  gap: var(--oa-space-2);
+  align-items: baseline;
+}
+
+.vitalLabel {
+  color: var(--oa-canvas-text-muted);
+  font: var(--oa-text-xs);
+  font-weight: var(--oa-weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* One line reserved even while the relationship loads. */
+.relationship {
+  min-height: 22px;
+  color: var(--oa-canvas-text-muted);
+}
+
+.relationship::first-letter {
+  text-transform: uppercase;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oa-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.headerActions {
+  display: flex;
+  gap: var(--oa-space-2);
+  align-self: flex-start;
+}
+
+.headerActions a {
+  text-decoration: none;
+}
+
+.tabBar {
+  padding: 0 var(--oa-space-5);
+  border-bottom: 1px solid var(--oa-border);
+  background: var(--oa-surface);
+  overflow-x: auto;
+}
+
+.tabList {
+  border-bottom: 0;
+}
+
+.body {
+  padding: var(--oa-space-2) var(--oa-space-5) var(--oa-space-7);
+}
+
+@media (width < 640px) {
+  .header,
+  .body,
+  .tabBar {
+    padding-inline: var(--oa-space-4);
+  }
+}
+
+/* Facts: 3 columns at lg, 2 at md (timeline spans both rows), 1 below. */
+.facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--oa-space-5);
+  align-items: start;
+}
+
+@media (width >= 960px) {
+  .facts {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  }
+
+  .timeline {
+    grid-row: span 2;
+  }
+}
+
+@media (width >= 1280px) {
+  .facts {
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .timeline {
+    grid-row: auto;
+  }
+}
+
+.timelineList,
+.plainList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hiddenCount {
+  padding: 0 var(--oa-space-1);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-surface-sunken);
+  font: var(--oa-text-xs);
+}
+
+.filters {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-2);
+}
+
+.muted {
+  color: var(--oa-text-muted);
+}
+
+.readable {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-4);
+  max-width: 760px;
+}
+
+.noteText {
+  white-space: pre-wrap;
+}
+
+.story {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-4);
+  max-width: 68ch;
+  font-family: var(--oa-font-serif);
+  font-size: 18px;
+  line-height: 1.6;
+}
+
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--oa-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.photo {
+  margin: 0;
+}
+
+.photo img {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: var(--oa-radius-md);
+}
+
+.photo figcaption {
+  margin-top: var(--oa-space-1);
+  color: var(--oa-text-muted);
+  font: var(--oa-text-sm);
+}

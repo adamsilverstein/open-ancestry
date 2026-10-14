@@ -73,7 +73,7 @@ export async function buildMediaTree(library: string): Promise<void> {
     const add = (
       row: InsertRow<'media'> & { id: string },
       owner: string,
-      type = 'person',
+      type: 'person' | 'event' = 'person',
       order = 0,
     ) => {
       tx.insert('media', row);

@@ -27,7 +27,7 @@ test('shows local thumbnails and Ancestry placeholders without fetching them', a
   });
   const gallery = await openGallery(page);
   for (const title of PHOTO_TITLES) {
-    const image = tile(gallery, new RegExp(title)).getByRole('img');
+    const image = tile(gallery, new RegExp(title)).locator('img');
     await expect(image).toHaveAttribute('src', /\/thumb\/sm$/);
     await expect
       .poll(() => image.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth))
@@ -36,7 +36,7 @@ test('shows local thumbnails and Ancestry placeholders without fetching them', a
   const placeholder = tile(gallery, /1911 census page/);
   await expect(placeholder).toContainText('On Ancestry');
   await expect(placeholder).toContainText('1911');
-  await expect(placeholder.getByRole('img')).toHaveCount(0);
+  await expect(placeholder.locator('img')).toHaveCount(0);
   await expect(tile(gallery, /Baptism record/)).toContainText('PDF');
   // Media on the person's events are included and say so.
   await expect(tile(gallery, /Christening portrait/)).toContainText('Birth');
@@ -102,7 +102,7 @@ test('placeholders in the lightbox link to Ancestry without loading anything', a
   const link = lightbox.getByRole('link', { name: 'View on Ancestry' });
   await expect(link).toHaveAttribute('href', new RegExp(REMOTE_HOST));
   await expect(link).toHaveAttribute('rel', /noreferrer/);
-  await expect(lightbox.getByRole('img')).toHaveCount(0);
+  await expect(lightbox.locator('img')).toHaveCount(0);
 });
 
 test('attaches a file from disk to the person or an event, once per content', async ({
@@ -125,7 +125,7 @@ test('attaches a file from disk to the person or an event, once per content', as
     .setInputFiles({ name: `${title}.png`, mimeType: 'image/png', buffer: bytes });
   await dialog.getByRole('button', { name: 'Attach' }).click();
   await expect(dialog).toBeHidden();
-  await expect(tile(gallery, new RegExp(title)).getByRole('img')).toHaveAttribute('src', /thumb/);
+  await expect(tile(gallery, new RegExp(title)).locator('img')).toHaveAttribute('src', /thumb/);
 
   await page.getByRole('button', { name: 'Add media' }).click();
   await dialog

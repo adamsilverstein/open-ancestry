@@ -31,7 +31,7 @@ A tree is a folder that can be copied, backed up or synced as a unit:
   Vale Family.oatree/
     tree.sqlite        SQLite database (WAL mode; -wal and -shm files appear while open)
     media/             original media files, referenced by media.local_path
-    thumbs/            generated thumbnails (derived, safe to delete)
+    thumbs/            WebP thumbnails <media id>-<sm|md|lg>.webp (derived, safe to delete)
 ```
 
 Connections use `journal_mode=WAL`, `synchronous=NORMAL`, `foreign_keys=ON`, `temp_store=MEMORY`, a 256 MB `mmap_size`, a 64 MB page cache and a 5 s busy timeout.

@@ -28,6 +28,7 @@ POST/PUT/PATCH/DELETE /api/...    needs  Origin: <this server>  and  x-oa-token:
 | CSP `default-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'`, `nosniff`, `Referrer-Policy: no-referrer`, COOP `same-origin` on every response | |
 | JSON bodies up to 1 MiB; import uploads up to 1 GiB (streamed to a temp file); one import at a time, four queued | Bounded memory and disk. |
 | Media paths are resolved (following symlinks) inside the tree's `media/` folder. The content type is sniffed from magic bytes against an allowlist (JPEG, PNG, GIF, WebP, AVIF, MP3, WAV, Ogg, FLAC, MP4/M4A, WebM, PDF); `media.mime` and extensions are ignored, anything else is an `application/octet-stream` attachment, and every media response carries `CSP: default-src 'none'; style-src 'unsafe-inline'; sandbox` and `nosniff` | Path traversal and stored-XSS defense; GEDCOM media is untrusted. |
+| Thumbnails decode only real raster images (by magic bytes) with sharp, capped at 100 megapixels, one image at a time in a background queue | Decompression bombs and odd files never reach the decoder or tie up the server. |
 
 The SPA fetches the token once at startup and sends it with every mutation; browsers add `Origin` themselves.
 
@@ -60,7 +61,9 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 | `GET /api/jobs/:id` | Job state, progress, result or error. |
 | `GET /api/jobs/:id/events` | Server-sent events: `state` (whole job) and `progress`; ends when the job finishes. |
 | `GET /api/trees/:tree/media/:id` | Original media file with `Range` support. |
-| `GET /api/trees/:tree/media/:id/thumb/:size` | 404 until thumbnails exist. |
+| `GET /api/trees/:tree/media/:id/thumb/:size` | WebP thumbnail, `size` = `sm` (160 px longest edge), `md` (480) or `lg` (1280). Made on demand if missing and cached in the tree's `thumbs/` folder; 404 when the media has no decodable local image (documents, Ancestry placeholders). |
+| `GET /api/trees/:tree/people/:id/media` | `{ items: [{ media, owners }] }`: media on the person and on their events, each once; `owners` lists where it is attached (`{ type: 'person' }` or `{ type: 'event', event: { type, custom_type, date_text, date_sort } }`). |
+| `POST /api/trees/:tree/media` (multipart `owner_type` = `person` or `event`, `owner_id`, then `file`) | Attach a file from disk (201 `{ media, batchId }`). Bytes identical to media already in the tree link that media instead of a copy; new files go to `media/attached/<sha256 prefix>-<name>`. The type comes from the file's bytes; unknown types are stored as `other` and served as attachments. |
 | `POST /api/trees/:tree/people` | Create a person with `names` and `events`. |
 | `PATCH`, `DELETE /api/trees/:tree/people/:id` | Edit sex, living, privacy, primary photo; delete (cascades). |
 | `POST /api/trees/:tree/people/:id/names`; `PATCH`, `DELETE /api/trees/:tree/names/:id` | Names (the last name cannot be deleted). |

@@ -205,30 +205,3 @@
   font-size: 18px;
   line-height: 1.6;
 }
-
-.gallery {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: var(--oa-space-3);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.photo {
-  margin: 0;
-}
-
-.photo img {
-  width: 100%;
-  height: auto;
-  aspect-ratio: 1;
-  object-fit: cover;
-  border-radius: var(--oa-radius-md);
-}
-
-.photo figcaption {
-  margin-top: var(--oa-space-1);
-  color: var(--oa-text-muted);
-  font: var(--oa-text-sm);
-}

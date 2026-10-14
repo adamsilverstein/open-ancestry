@@ -1,9 +1,9 @@
-import { openMemoryTree, undoLast, type TreeStore } from '@open-ancestry/db';
+import { openMemoryTree, redoLast, undoLast, type TreeStore } from '@open-ancestry/db';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { importGedcom } from '../import';
-import { FIXTURES, TODAY, pid, row, rows, value } from '../test-helpers';
+import { FIXTURES, TODAY, ged, pid, row, rows, value } from '../test-helpers';
 import {
   HIGH_CONFIDENCE,
   ReimportStaleError,
@@ -636,6 +636,209 @@ describe('apply', () => {
       expect(again.diff.counts.missingPeople).toBe(1);
     } finally {
       closeReimport(again);
+    }
+  });
+});
+
+describe('review findings (#72)', () => {
+  const COUSINS = [
+    '0 HEAD',
+    '1 GEDC',
+    '2 VERS 5.5.1',
+    '0 @I1@ INDI',
+    '1 NAME Adam /Smith/',
+    '1 SEX M',
+    '1 FAMS @F1@',
+    '0 @I2@ INDI',
+    '1 NAME Bert /Smith/',
+    '1 SEX M',
+    '1 FAMS @F2@',
+    '0 @I3@ INDI',
+    '1 NAME John /Smith/',
+    '1 SEX M',
+    '1 BIRT',
+    '2 DATE 1900',
+    '2 PLAC Ashford',
+    '1 DEAT',
+    '2 DATE 1970',
+    '1 FAMC @F1@',
+    '0 @I4@ INDI',
+    '1 NAME John /Smith/',
+    '1 SEX M',
+    '1 BIRT',
+    '2 DATE 1900',
+    '2 PLAC Ashford',
+    '1 DEAT',
+    '2 DATE 1970',
+    '1 FAMC @F2@',
+    '0 @F1@ FAM',
+    '1 HUSB @I1@',
+    '1 CHIL @I3@',
+    '0 @F2@ FAM',
+    '1 HUSB @I2@',
+    '1 CHIL @I4@',
+    '0 TRLR',
+    '',
+  ].join('\n');
+
+  /** Records in reverse order (Bert's family first), renumbered, and Bert's son now a baker. */
+  function reversedCousins(): string {
+    const records = COUSINS.split(/\n(?=0 )/);
+    const head = records.shift()!;
+    const trlr = records.pop()!;
+    const body = records
+      .reverse()
+      .map((r) =>
+        r.startsWith('0 @I4@') ? r.replace('1 FAMC @F2@', '1 OCCU Baker\n1 FAMC @F2@') : r,
+      );
+    return renumber([head, ...body, trlr].join('\n'), 50);
+  }
+
+  it('does not swap same-name cousins when the export lists them in reverse', async () => {
+    const tree = openMemoryTree();
+    await importGedcom({ bytes: COUSINS }, tree, { today: TODAY });
+    const adamsJohn = pid(tree, '@I3@');
+    const bertsJohn = pid(tree, '@I4@');
+    const s2 = await prepareReimport(tree, { bytes: reversedCousins() }, { today: TODAY });
+    try {
+      const external = (id: string) =>
+        value<string>(s2.incoming, 'SELECT external_id FROM person WHERE id = ?', id);
+      const byExisting = new Map(
+        [...s2.matches.values()].map((m) => [m.existingId, external(m.incomingId)]),
+      );
+      expect(byExisting.get(adamsJohn)).toBe('@I53@');
+      expect(byExisting.get(bertsJohn)).toBe('@I54@');
+      const changes = s2.diff.people.flatMap((p) => p.changes.map((c) => [p.existingId, c.kind]));
+      expect(changes).toEqual([[bertsJohn, 'fact.add']]);
+    } finally {
+      closeReimport(s2);
+      tree.close();
+    }
+  });
+
+  it('keeps a match on name alone below bulk acceptance, with its changes unticked', async () => {
+    const tree = openMemoryTree();
+    await importGedcom({ bytes: ged('0 @I1@ INDI', '1 NAME Mary /Brown/') }, tree, {
+      today: TODAY,
+    });
+    const incoming = ged(
+      '0 @I9@ INDI',
+      '1 NAME Mary /Brown/',
+      '1 BIRT',
+      '2 DATE 1990',
+      '2 PLAC Elsewhere',
+    );
+    const s2 = await prepareReimport(tree, { bytes: incoming }, { today: TODAY });
+    try {
+      const [m] = [...s2.matches.values()];
+      expect(m!.confidence).toBeLessThan(HIGH_CONFIDENCE);
+      const changes = s2.diff.people.flatMap((p) => p.changes);
+      expect(changes.map((c) => [c.kind, c.defaultAccept])).toEqual([['fact.add', false]]);
+    } finally {
+      closeReimport(s2);
+      tree.close();
+    }
+  });
+
+  it('refuses to apply after an undo or redo since the review', async () => {
+    store.transact('Edit', (tx) => tx.update('person', pid(store, '@I2@'), { sex: 'U' }));
+    const first = await prepareReimport(store, { bytes: updatedSample() }, { today: TODAY });
+    try {
+      undoLast(store);
+      expect(() => applyReimport(store, first, defaults(first), 'Re-import')).toThrow(
+        ReimportStaleError,
+      );
+    } finally {
+      closeReimport(first);
+    }
+    const second = await prepareReimport(store, { bytes: updatedSample() }, { today: TODAY });
+    try {
+      redoLast(store);
+      expect(() => applyReimport(store, second, defaults(second), 'Re-import')).toThrow(
+        ReimportStaleError,
+      );
+    } finally {
+      closeReimport(second);
+    }
+  });
+
+  it('does not bring back a name the user renamed, unless asked', async () => {
+    const name = value<string>(
+      store,
+      'SELECT id FROM person_name WHERE person_id = ?',
+      pid(store, '@I2@'),
+    );
+    store.transact('Rename', (tx) => tx.update('person_name', name, { given: 'LocalName' }));
+    const s2 = await prepareReimport(store, { bytes: renumber(SAMPLE) }, { today: TODAY });
+    try {
+      const mercy = s2.diff.people.find((p) => p.existingId === pid(store, '@I2@'))!;
+      expect(mercy.changes).toEqual([
+        expect.objectContaining({ kind: 'name.add', conflict: 'local-edit', defaultAccept: false }),
+      ]);
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  it('offers a person the user deleted unticked, saying so', async () => {
+    const lily = pid(store, '@I26@');
+    store.transact('Delete', (tx) => {
+      for (const id of rows<{ id: string }>(
+        store,
+        'SELECT id FROM person_name WHERE person_id = ?',
+        lily,
+      ))
+        tx.delete('person_name', id.id);
+      for (const r of rows<{ id: string; event_id: string }>(
+        store,
+        'SELECT id, event_id FROM event_role WHERE person_id = ?',
+        lily,
+      )) {
+        tx.delete('event_role', r.id);
+        tx.delete('event', r.event_id);
+      }
+      for (const c of rows<{ id: string }>(
+        store,
+        'SELECT id FROM family_child WHERE child_id = ?',
+        lily,
+      ))
+        tx.delete('family_child', c.id);
+      for (const r of rows<{ id: string }>(
+        store,
+        "SELECT id FROM raw_record WHERE owner_type = 'person' AND owner_id = ?",
+        lily,
+      ))
+        tx.delete('raw_record', r.id);
+      tx.delete('person', lily);
+    });
+    const s2 = await prepareReimport(store, { bytes: renumber(SAMPLE) }, { today: TODAY });
+    try {
+      const review = s2.diff.people.find((p) => p.name === 'Lily Mosswood')!;
+      expect(review.changes.map((c) => [c.kind, c.defaultAccept])).toEqual([
+        ['deleted-here', false],
+        ['person.new', false],
+        ['child.add', true],
+      ]);
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  it('lists partners and parents the export no longer has', async () => {
+    const without = renumber(
+      replaceRecord(SAMPLE.replace('1 FAMS @F7@\n', ''), '@F7@', null)
+        .replace('1 FAMC @F7@\n2 _FREL Step\n2 _MREL Natural\n', '')
+        .replace('1 FAMC @F7@\n', ''),
+    );
+    const s2 = await prepareReimport(store, { bytes: without }, { today: TODAY });
+    try {
+      const kinds = s2.diff.people.flatMap((p) =>
+        p.changes.map((c) => [p.name, c.kind, c.applicable]),
+      );
+      expect(kinds).toContainEqual(['Edith Ashgrove', 'family.missing', false]);
+      expect(kinds).toContainEqual(['Iris Hollowell', 'child.missing', false]);
+    } finally {
+      closeReimport(s2);
     }
   });
 });

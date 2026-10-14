@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react';
 import { useQueries } from '@tanstack/react-query';
-import { SlidersHorizontal } from 'lucide-react';
+import { Pencil, Plus, SlidersHorizontal, UserPlus } from 'lucide-react';
 import { personQuery } from '../../api/queries';
-import type { ApiPersonSummary, PersonDetail } from '../../api/types';
+import type { ApiPersonSummary, EventDetail, PersonDetail } from '../../api/types';
 import { Button } from '../../components/Button/Button';
 import { Checkbox } from '../../components/Checkbox/Checkbox';
 import { EmptyState } from '../../components/EmptyState/EmptyState';
+import { IconButton } from '../../components/IconButton/IconButton';
+import { Menu, MenuContent, MenuItem, MenuTrigger } from '../../components/Menu/Menu';
 import { Panel } from '../../components/Panel/Panel';
 import { Popover, PopoverContent, PopoverTrigger } from '../../components/Popover/Popover';
 import {
@@ -24,14 +26,35 @@ import {
   type TimelineCategory,
   type TimelineEntry,
 } from '../../lib/timeline';
+import { AddRelativeDialog, RELATIVE_TITLES, type RelativeKind } from './edit/AddRelativeDialog';
+import { EventDialog } from './edit/EventDialog';
 import styles from './PersonPage.module.css';
 
 const QUALITY = (q: number | null) =>
   q !== null && q >= 0 && q <= 3 ? (q as 0 | 1 | 2 | 3) : undefined;
 
-function Entry({ entry, variant }: { entry: TimelineEntry; variant?: 'alternate' }) {
+function Entry({
+  entry,
+  variant,
+  onEdit,
+}: {
+  entry: TimelineEntry;
+  variant?: 'alternate';
+  /** Own events are editable; relatives' events are edited on their page. */
+  onEdit?: (() => void) | undefined;
+}) {
   return (
     <TimelineItem
+      actions={
+        onEdit && (
+          <IconButton
+            label={`Edit ${entry.title}`}
+            size="sm"
+            icon={<Pencil size={14} aria-hidden />}
+            onClick={onEdit}
+          />
+        )
+      }
       year={entry.year}
       age={entry.age}
       title={entry.title}
@@ -43,8 +66,31 @@ function Entry({ entry, variant }: { entry: TimelineEntry; variant?: 'alternate'
   );
 }
 
-function TimelineColumn({ detail, half }: { detail: PersonDetail; half: ApiPersonSummary[] }) {
+function TimelineColumn({
+  detail,
+  half,
+  onEditEvent,
+}: {
+  detail: PersonDetail;
+  half: ApiPersonSummary[];
+  /** Opens the event dialog; no item means a new event. */
+  onEditEvent: (item?: EventDetail) => void;
+}) {
   const entries = useMemo(() => buildTimeline(detail, { halfSiblings: half }), [detail, half]);
+  const eventsById = useMemo(
+    () =>
+      new Map(
+        [...detail.events, ...detail.partnerFamilies.flatMap((f) => f.events)].map((e) => [
+          e.event.id,
+          e,
+        ]),
+      ),
+    [detail],
+  );
+  const editFor = (entry: TimelineEntry) => {
+    const item = entry.kind === 'own' ? eventsById.get(entry.id) : undefined;
+    return item ? () => onEditEvent(item) : undefined;
+  };
   const [hidden, setHidden] = useState<ReadonlySet<TimelineCategory>>(new Set());
   const visible = filterTimeline(entries, hidden);
   const toggle = (category: TimelineCategory, show: boolean) =>
@@ -60,30 +106,42 @@ function TimelineColumn({ detail, half }: { detail: PersonDetail; half: ApiPerso
       title="Timeline"
       className={styles.timeline}
       actions={
-        <Popover>
-          <PopoverTrigger asChild>
-            <Button
-              size="sm"
-              variant="ghost"
-              iconStart={<SlidersHorizontal size={14} aria-hidden />}
-            >
-              Filter events
-              {hidden.size > 0 && <span className={styles.hiddenCount}>{hidden.size} hidden</span>}
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent label="Filter events" align="end">
-            <div className={styles.filters}>
-              {timelineCategories.map(({ id, label }) => (
-                <Checkbox
-                  key={id}
-                  label={label}
-                  checked={!hidden.has(id)}
-                  onChange={(event) => toggle(id, event.currentTarget.checked)}
-                />
-              ))}
-            </div>
-          </PopoverContent>
-        </Popover>
+        <>
+          <Button
+            size="sm"
+            variant="ghost"
+            iconStart={<Plus size={14} aria-hidden />}
+            onClick={() => onEditEvent()}
+          >
+            Add event
+          </Button>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                size="sm"
+                variant="ghost"
+                iconStart={<SlidersHorizontal size={14} aria-hidden />}
+              >
+                Filter events
+                {hidden.size > 0 && (
+                  <span className={styles.hiddenCount}>{hidden.size} hidden</span>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent label="Filter events" align="end">
+              <div className={styles.filters}>
+                {timelineCategories.map(({ id, label }) => (
+                  <Checkbox
+                    key={id}
+                    label={label}
+                    checked={!hidden.has(id)}
+                    onChange={(event) => toggle(id, event.currentTarget.checked)}
+                  />
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+        </>
       }
     >
       {visible.length === 0 ? (
@@ -93,9 +151,14 @@ function TimelineColumn({ detail, half }: { detail: PersonDetail; half: ApiPerso
       ) : (
         <ol className={styles.timelineList}>
           {visible.flatMap((entry) => [
-            <Entry key={entry.id} entry={entry} />,
+            <Entry key={entry.id} entry={entry} onEdit={editFor(entry)} />,
             ...entry.alternates.map((alternate) => (
-              <Entry key={alternate.id} entry={alternate} variant="alternate" />
+              <Entry
+                key={alternate.id}
+                entry={alternate}
+                variant="alternate"
+                onEdit={editFor(alternate)}
+              />
             )),
           ])}
         </ol>
@@ -174,10 +237,37 @@ function relationshipGroups(detail: PersonDetail, half: ApiPersonSummary[]): Rel
   return groups;
 }
 
-function RelationshipsColumn({ detail, half }: { detail: PersonDetail; half: ApiPersonSummary[] }) {
+function RelationshipsColumn({
+  detail,
+  half,
+  onAdd,
+}: {
+  detail: PersonDetail;
+  half: ApiPersonSummary[];
+  onAdd: (kind: RelativeKind) => void;
+}) {
   const groups = useMemo(() => relationshipGroups(detail, half), [detail, half]);
   return (
-    <Panel title="Relationships" className={styles.relationships}>
+    <Panel
+      title="Relationships"
+      className={styles.relationships}
+      actions={
+        <Menu>
+          <MenuTrigger asChild>
+            <Button size="sm" variant="ghost" iconStart={<UserPlus size={14} aria-hidden />}>
+              Add family member
+            </Button>
+          </MenuTrigger>
+          <MenuContent align="end">
+            {(Object.keys(RELATIVE_TITLES) as RelativeKind[]).map((kind) => (
+              <MenuItem key={kind} onSelect={() => onAdd(kind)}>
+                {RELATIVE_TITLES[kind]}
+              </MenuItem>
+            ))}
+          </MenuContent>
+        </Menu>
+      }
+    >
       {groups.length === 0 ? (
         <EmptyState title="No family recorded" level={3} />
       ) : (
@@ -208,11 +298,36 @@ function useHalfSiblings(tree: string, detail: PersonDetail): ApiPersonSummary[]
 
 export function FactsTab({ tree, detail }: { tree: string; detail: PersonDetail }) {
   const half = useHalfSiblings(tree, detail);
+  // Dialogs mount only while open, so each opening starts from fresh values.
+  const [eventDialog, setEventDialog] = useState<{ item?: EventDetail | undefined } | null>(null);
+  const [relative, setRelative] = useState<RelativeKind | null>(null);
   return (
     <div className={styles.facts}>
-      <TimelineColumn detail={detail} half={half} />
+      <TimelineColumn
+        detail={detail}
+        half={half}
+        onEditEvent={(item) => setEventDialog({ item })}
+      />
       <SourcesColumn detail={detail} />
-      <RelationshipsColumn detail={detail} half={half} />
+      <RelationshipsColumn detail={detail} half={half} onAdd={setRelative} />
+      {eventDialog && (
+        <EventDialog
+          tree={tree}
+          personId={detail.person.id}
+          item={eventDialog.item}
+          open
+          onOpenChange={(open) => !open && setEventDialog(null)}
+        />
+      )}
+      {relative && (
+        <AddRelativeDialog
+          tree={tree}
+          detail={detail}
+          kind={relative}
+          open
+          onOpenChange={(open) => !open && setRelative(null)}
+        />
+      )}
     </div>
   );
 }

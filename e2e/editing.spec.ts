@@ -143,9 +143,10 @@ test.describe('events', () => {
     await expect(dialog.getByRole('textbox', { name: 'Date' })).toHaveValue('3 NOV 1950');
     await dialog.getByRole('textbox', { name: 'Date' }).fill('4 NOV 1950');
     await dialog.getByRole('button', { name: 'Save' }).click();
-    await expect(
-      timeline(page).getByRole('listitem').filter({ hasText: 'Death' }).first(),
-    ).toContainText('4 Nov 1950');
+    const death = timeline(page)
+      .getByRole('listitem')
+      .filter({ has: page.locator('[data-title]', { hasText: /^Death$/ }) });
+    await expect(death).toContainText('4 Nov 1950');
     await expect(page.getByTestId('person-header')).toContainText('4 Nov 1950');
 
     await timeline(page).getByRole('button', { name: 'Edit Death' }).click();
@@ -268,10 +269,10 @@ test.describe('history and errors', () => {
     const history = page.getByRole('dialog', { name: 'History' });
     await expect(history.getByRole('listitem').first()).toContainText('Edit name');
     await history.getByRole('button', { name: 'Undo' }).click();
-    await expect(h1(page)).toHaveText('Rowan Ashdown');
+    await expect(page.locator('h1')).toHaveText('Rowan Ashdown');
     await expect(history.getByRole('listitem').first()).toContainText('undone');
     await history.getByRole('button', { name: 'Redo' }).click();
-    await expect(h1(page)).toHaveText('Rowan Ashdowne');
+    await expect(page.locator('h1')).toHaveText('Rowan Ashdowne');
   });
 
   test('shows edits immediately and rolls back when the server fails', async ({ page }) => {

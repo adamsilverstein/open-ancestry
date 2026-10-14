@@ -79,6 +79,13 @@
   text-transform: uppercase;
 }
 
+.tagRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oa-space-2);
+}
+
 .tags {
   display: flex;
   flex-wrap: wrap;

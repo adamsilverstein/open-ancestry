@@ -3,7 +3,8 @@ import { getRouteApi } from '@tanstack/react-router';
 import { personQuery } from '../../api/queries';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/Tabs/Tabs';
 import { FactsTab } from './FactsTab';
-import { GalleryTab, LifeStoryTab, NotesTab, SourcesTab } from './OtherTabs';
+import { NotesTab } from './edit/NotesTab';
+import { GalleryTab, LifeStoryTab, SourcesTab } from './OtherTabs';
 import { PersonHeader } from './PersonHeader';
 import type { PersonTab } from './search';
 import styles from './PersonPage.module.css';
@@ -57,7 +58,7 @@ export function PersonPage() {
             <GalleryTab tree={tree} detail={detail} />
           </TabsContent>
           <TabsContent value="notes">
-            <NotesTab detail={detail} />
+            <NotesTab tree={tree} detail={detail} />
           </TabsContent>
           <TabsContent value="lifestory">
             <LifeStoryTab detail={detail} />

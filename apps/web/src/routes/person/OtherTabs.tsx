@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { BookMarked, BookOpenText, Image, NotebookPen } from 'lucide-react';
+import { BookMarked, BookOpenText, Image } from 'lucide-react';
 import { mediaUrl } from '../../api/queries';
 import type { PersonDetail } from '../../api/types';
 import { EmptyState } from '../../components/EmptyState/EmptyState';
@@ -7,7 +7,6 @@ import { Panel } from '../../components/Panel/Panel';
 import { SourceItem } from '../../components/SourceItem/SourceItem';
 import { lifeStory } from '../../lib/lifeStory';
 import { collectCitations, groupBySource } from '../../lib/sources';
-import { eventLabel } from '../../lib/timeline';
 import styles from './PersonPage.module.css';
 
 export function GalleryTab({ tree, detail }: { tree: string; detail: PersonDetail }) {
@@ -39,31 +38,6 @@ export function GalleryTab({ tree, detail }: { tree: string; detail: PersonDetai
         </li>
       ))}
     </ul>
-  );
-}
-
-export function NotesTab({ detail }: { detail: PersonDetail }) {
-  const notes = [
-    ...detail.notes.map((note) => ({ note, about: null as string | null })),
-    ...detail.events.flatMap(({ event, notes: eventNotes }) =>
-      eventNotes.map((note) => ({ note, about: eventLabel(event.type, event.custom_type) })),
-    ),
-  ];
-  if (notes.length === 0) {
-    return <EmptyState icon={<NotebookPen size={24} aria-hidden />} title="No notes yet" />;
-  }
-  return (
-    <div className={styles.readable}>
-      {notes.map(({ note, about }) => (
-        <Panel
-          key={`${about}:${note.id}`}
-          title={about ? `Note on ${about}` : undefined}
-          headingLevel={2}
-        >
-          <p className={styles.noteText}>{note.text}</p>
-        </Panel>
-      ))}
-    </div>
   );
 }
 

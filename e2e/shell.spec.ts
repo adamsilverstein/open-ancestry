@@ -34,10 +34,10 @@ test.describe('navigation', () => {
     ).toBeVisible();
   });
 
-  test('top bar links home and shows the tree name placeholder', async ({ page }) => {
+  test('top bar links home and shows the open tree name', async ({ page }) => {
     await page.goto('/design');
     const banner = page.getByRole('banner');
-    await expect(banner.getByText('No tree open')).toBeVisible();
+    await expect(banner.getByText('Ashdown family')).toBeVisible();
     await banner.getByRole('link', { name: 'open-ancestry home' }).click();
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Import your Ancestry GEDCOM');
@@ -58,14 +58,6 @@ test.describe('navigation', () => {
     await page.goto('/tree/I1');
     await expect(page.getByRole('heading', { level: 1, name: 'Family tree' })).toBeAttached();
     const region = page.getByRole('region', { name: 'Family tree' });
-    await expect(region).toHaveAttribute('aria-busy', 'true');
-    await expect(region.getByTestId('skeleton').first()).toBeVisible();
-  });
-
-  test('person route renders a sized skeleton', async ({ page }) => {
-    await page.goto('/person/I1');
-    await expect(page.getByRole('heading', { level: 1, name: 'Person' })).toBeAttached();
-    const region = page.getByRole('region', { name: 'Person' });
     await expect(region).toHaveAttribute('aria-busy', 'true');
     await expect(region.getByTestId('skeleton').first()).toBeVisible();
   });

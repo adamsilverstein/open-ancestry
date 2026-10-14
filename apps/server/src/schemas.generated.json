@@ -2062,6 +2062,18 @@
     },
     "additionalProperties": false
   },
+  "ExportQuery": {
+    "type": "object",
+    "properties": {
+      "version": {
+        "enum": ["5.5.1", "7"]
+      },
+      "privatize": {
+        "type": "boolean"
+      }
+    },
+    "additionalProperties": false
+  },
   "FamilyChildPatch": {
     "type": "object",
     "properties": {
@@ -2135,6 +2147,15 @@
       },
       "privacy": {
         "enum": ["public", "private", "confidential", "locked"]
+      }
+    },
+    "additionalProperties": false
+  },
+  "GedzipQuery": {
+    "type": "object",
+    "properties": {
+      "privatize": {
+        "type": "boolean"
       }
     },
     "additionalProperties": false

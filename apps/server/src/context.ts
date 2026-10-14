@@ -8,6 +8,7 @@ import type {
 } from 'fastify';
 import type { Importer, JobManager } from './jobs';
 import type { Library } from './library';
+import type { ThumbnailQueue } from './thumbnails';
 
 export type Api = FastifyInstance<
   RawServerDefault,
@@ -24,4 +25,6 @@ export interface Deps {
   importer: Importer | undefined;
   /** Largest accepted import upload, in bytes. */
   uploadLimit: number;
+  /** Background WebP thumbnails for media. */
+  thumbnails: ThumbnailQueue;
 }

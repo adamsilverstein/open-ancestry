@@ -1,3 +1,4 @@
+import { GedcomSerializeError } from '@open-ancestry/gedcom';
 import { describe, expect, it } from 'vitest';
 import { createServer } from './index';
 import { HOST } from './test/helpers';
@@ -19,6 +20,17 @@ describe('error envelope', () => {
     expect(res.statusCode).toBe(500);
     expect(res.json()).toEqual({
       error: { code: 'internal_error', message: 'Internal server error' },
+    });
+  });
+
+  it('explains data an export cannot write as GEDCOM', async () => {
+    const res = await throwing(new GedcomSerializeError('invalid-tag', 'Invalid tag at line 0'));
+    expect(res.statusCode).toBe(409);
+    expect(res.json()).toEqual({
+      error: {
+        code: 'conflict',
+        message: 'The tree cannot be exported as GEDCOM: Invalid tag at line 0',
+      },
     });
   });
 

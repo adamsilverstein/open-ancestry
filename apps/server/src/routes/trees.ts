@@ -8,9 +8,10 @@ import {
   undoLast,
   type TreeStore,
 } from '@open-ancestry/db';
+import { buildGedcomExport, buildGedzipExport } from '@open-ancestry/export';
 import type { Api, Deps } from '../context';
 import { edit } from '../edits';
-import { HistoryQuery, HomeBody, TreeBody, TreeParams } from '../schemas';
+import { ExportQuery, GedzipQuery, HistoryQuery, HomeBody, TreeBody, TreeParams } from '../schemas';
 
 function treeDetail(deps: Deps, id: string) {
   const store = deps.library.open(id);
@@ -20,6 +21,33 @@ function treeDetail(deps: Deps, id: string) {
     peopleCount: n,
     homePersonId: meta.getHomePersonId(store),
     schemaVersion: LATEST_SCHEMA_VERSION,
+  };
+}
+
+/**
+ * Content-Disposition for a download named after the tree: an ASCII fallback
+ * (anything outside letters, digits, space, dot, dash and underscore becomes
+ * `_`, so no quote or header syntax gets through) plus the exact UTF-8 name.
+ */
+export function attachment(tree: string, extension: string): string {
+  const ascii = tree.replace(/[^A-Za-z0-9 ._-]/g, '_');
+  // RFC 8187 ext-value: encodeURIComponent leaves ' ( ) * as they are, which are not allowed.
+  const utf8 = encodeURIComponent(tree).replace(
+    /['()*]/g,
+    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `attachment; filename="${ascii}.${extension}"; filename*=UTF-8''${utf8}.${extension}`;
+}
+
+/** Export warnings shown by the dialog: the count, and the first few as percent-encoded JSON. */
+export const WARNING_COUNT_HEADER = 'x-oa-export-warning-count';
+export const WARNINGS_HEADER = 'x-oa-export-warnings';
+const MAX_HEADER_WARNINGS = 20;
+
+function warningHeaders(warnings: string[]): Record<string, string> {
+  return {
+    [WARNING_COUNT_HEADER]: String(warnings.length),
+    [WARNINGS_HEADER]: encodeURIComponent(JSON.stringify(warnings.slice(0, MAX_HEADER_WARNINGS))),
   };
 }
 
@@ -115,11 +143,41 @@ export function treeRoutes(app: Api, deps: Deps): void {
       const json = exportJsonString(library.open(tree));
       return reply
         .type('application/json; charset=utf-8')
-        .header(
-          'content-disposition',
-          `attachment; filename="tree.json"; filename*=UTF-8''${encodeURIComponent(tree)}.json`,
-        )
+        .header('content-disposition', attachment(tree, 'json'))
         .send(json);
+    },
+  );
+
+  app.get(
+    '/api/trees/:tree/export.ged',
+    { schema: { params: TreeParams, querystring: ExportQuery } },
+    async (request, reply) => {
+      const { tree } = request.params;
+      const { text, warnings } = buildGedcomExport(library.open(tree), {
+        version: request.query.version ?? '5.5.1',
+        privatizeLiving: request.query.privatize ?? false,
+      });
+      return reply
+        .type('text/vnd.familysearch.gedcom; charset=utf-8')
+        .header('content-disposition', attachment(tree, 'ged'))
+        .headers(warningHeaders(warnings))
+        .send(text);
+    },
+  );
+
+  app.get(
+    '/api/trees/:tree/export.gdz',
+    { schema: { params: TreeParams, querystring: GedzipQuery } },
+    async (request, reply) => {
+      const { tree } = request.params;
+      const { bytes, warnings } = buildGedzipExport(library.open(tree), {
+        privatizeLiving: request.query.privatize ?? false,
+      });
+      return reply
+        .type('application/vnd.familysearch.gedcom+zip')
+        .header('content-disposition', attachment(tree, 'gdz'))
+        .headers(warningHeaders(warnings))
+        .send(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
     },
   );
 }

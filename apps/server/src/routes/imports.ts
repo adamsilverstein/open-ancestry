@@ -33,7 +33,7 @@ export async function sweepStaleUploads(now = Date.now(), dir = tmpdir()): Promi
 
 /** Import uploads (multipart, streamed to a temp file) and job status over JSON and SSE. */
 export function importRoutes(app: Api, deps: Deps): void {
-  const { library, jobs, importer, uploadLimit } = deps;
+  const { library, jobs, importer, uploadLimit, thumbnails } = deps;
 
   /** Streams the one uploaded file to a private temp folder. */
   async function receive(request: FastifyRequest) {
@@ -79,12 +79,14 @@ export function importRoutes(app: Api, deps: Deps): void {
         { tree, fileName: upload.fileName, createdTree: marker !== null },
         (signal, onProgress) =>
           library.whileBusy(tree, async () => {
-            const result = await importer!(upload.path, library.open(tree), {
+            const store = library.open(tree);
+            const result = await importer!(upload.path, store, {
               mediaDir: treePaths(library.dirOf(tree)).media,
               onProgress,
               signal,
             });
             if (marker) library.clearImportPending(tree, marker);
+            thumbnails.enqueueTree(store, library.dirOf(tree));
             return result;
           }),
         async () => {

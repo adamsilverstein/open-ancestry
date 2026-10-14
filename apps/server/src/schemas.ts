@@ -24,6 +24,8 @@ export const {
   ChildRel,
   RelationshipType,
   PeopleQuery,
+  ExportQuery,
+  GedzipQuery,
   NeighborhoodQuery,
   SearchQuery,
   HistoryQuery,

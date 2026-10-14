@@ -289,6 +289,88 @@ describe('after people were merged in the tree (#70)', () => {
     }
   });
 
+  it('still folds a weak duplicate after every xref is renumbered, by moved names and _APIDs', async () => {
+    // A weaker duplicate: a nickname, no dates, but a census record (_APID) of its own.
+    const weak = SAMPLE.replace(
+      '0 @I2@ INDI',
+      [
+        '0 @I30@ INDI',
+        '1 NAME Thad /Ashgrove/',
+        '1 SEX M',
+        '1 SOUR @S1@',
+        '2 PAGE Year: 1880; Millbrook',
+        '2 _APID 1,7602::70000001',
+        '0 @I2@ INDI',
+      ].join('\n'),
+    );
+    const tree = openMemoryTree();
+    await importGedcom({ bytes: weak }, tree, { today: TODAY });
+    const other = pid(tree, '@I30@');
+    const keep = pid(tree, '@I1@');
+    // Like #70: the duplicate's name and citation move to the kept person.
+    tree.transact('Merge', (tx) => {
+      for (const n of rows<{ id: string }>(
+        tree,
+        'SELECT id FROM person_name WHERE person_id = ?',
+        other,
+      )) {
+        tx.update('person_name', n.id, { person_id: keep, is_primary: 0, sort_order: 5 });
+      }
+      for (const l of rows<{ id: string }>(
+        tree,
+        "SELECT id FROM citation_link WHERE owner_type = 'person' AND owner_id = ?",
+        other,
+      )) {
+        tx.update('citation_link', l.id, { owner_id: keep });
+      }
+      for (const r of rows<{ id: string }>(
+        tree,
+        "SELECT id FROM raw_record WHERE owner_type = 'person' AND owner_id = ?",
+        other,
+      )) {
+        tx.update('raw_record', r.id, { owner_id: keep });
+      }
+      tx.delete('person', other);
+    });
+
+    const later = renumber(weak, 500);
+    const merged = await prepareReimport(tree, { bytes: later }, { today: TODAY });
+    try {
+      // Every incoming xref is new: none can be looked up in the last import.
+      const oldXrefs = new Set(
+        rows<{ xref: string }>(tree, 'SELECT xref FROM raw_record WHERE xref IS NOT NULL').map(
+          (r) => r.xref,
+        ),
+      );
+      const incomingXrefs = rows<{ external_id: string }>(
+        merged.incoming,
+        'SELECT external_id FROM person',
+      ).map((r) => r.external_id);
+      expect(incomingXrefs.some((x) => oldXrefs.has(x))).toBe(false);
+
+      expect(merged.diff.counts.newPeople).toBe(0);
+      const onto = [...merged.matches.values()].filter((m) => m.existingId === keep);
+      expect(onto).toHaveLength(2);
+      const thad = onto.find((m) =>
+        rows<{ given: string }>(
+          merged.incoming,
+          'SELECT given FROM person_name WHERE person_id = ?',
+          m.incomingId,
+        ).some((n) => n.given === 'Thad'),
+      )!;
+      expect(thad.reasons).toContain('1 shared Ancestry record');
+      expect(thad.reasons).toContain('merged in this tree');
+      applyReimport(tree, merged, defaults(merged), 'Re-import');
+      expect(
+        value(tree, "SELECT count(*) FROM person_name WHERE given IN ('Thad', 'Thaddeus')"),
+      ).toBe(2);
+      expect(value(tree, 'SELECT count(*) FROM person')).toBe(26);
+    } finally {
+      closeReimport(merged);
+      tree.close();
+    }
+  });
+
   it("uses the previous import's xrefs as a hint when Ancestry keeps them", async () => {
     const same = await prepareReimport(store, { bytes: SAMPLE }, { today: TODAY });
     try {

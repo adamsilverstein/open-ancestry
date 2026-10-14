@@ -51,6 +51,8 @@ export const {
   MediaThumbParams,
   BatchOperation,
   BatchBody,
+  CheckKey,
+  DismissBody,
 } = schemas;
 
 export type NameBody = Source.NameBody;

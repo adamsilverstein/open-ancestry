@@ -53,6 +53,6 @@
 }
 
 .iconButton[data-demo-focus] {
-  outline: var(--oa-focus-ring);
+  outline: var(--oa-focus-width) solid var(--oa-focus);
   outline-offset: var(--oa-focus-offset);
 }

@@ -26,7 +26,10 @@
   --oa-accent: light-dark(#2f6f4e, #5fb98a);
   --oa-accent-hover: light-dark(#255a3f, #77c79c);
   --oa-accent-contrast: light-dark(#ffffff, #0d1f16);
-  --oa-focus: light-dark(#2f6f4e, #7fd3a8);
+  /* Focus ring color depends on what it sits on; see [data-surface] below. */
+  --oa-focus-surface: light-dark(#2f6f4e, #7fd3a8);
+  --oa-focus-canvas: #7fd3a8;
+  --oa-focus: var(--oa-focus-surface);
   --oa-person-male: light-dark(#5b7fa6, #7fa3cb);
   --oa-person-female: light-dark(#c0664a, #e08a6e);
   --oa-person-unknown: light-dark(#7b7f87, #9aa0a8);
@@ -97,8 +100,23 @@
 
   /* Layout */
   --oa-topbar-height: 48px;
-  --oa-focus-ring: 2px solid var(--oa-focus);
+  /* Use as `outline: var(--oa-focus-width) solid var(--oa-focus)`. Not a
+     composite token: it would freeze --oa-focus at :root and ignore surfaces. */
+  --oa-focus-width: 2px;
   --oa-focus-offset: 2px;
+}
+
+/*
+ * The light-theme focus green is 1.7:1 on the slate canvas, so canvas areas
+ * switch to the canvas focus color (5.7:1 light, 8.5:1 dark). Surfaces placed
+ * on the canvas (toolbars, minimap frame) switch back.
+ */
+[data-surface='canvas'] {
+  --oa-focus: var(--oa-focus-canvas);
+}
+
+[data-surface='raised'] {
+  --oa-focus: var(--oa-focus-surface);
 }
 
 :root[data-theme='light'] {

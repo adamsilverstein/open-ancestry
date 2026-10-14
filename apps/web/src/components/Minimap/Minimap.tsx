@@ -76,7 +76,8 @@ export function Minimap({
       ctx.fillStyle = color(sexToken[node.sex ?? 'U']);
       ctx.fillRect(...project(node));
     }
-    ctx.strokeStyle = color('--oa-focus');
+    // The viewport sits on the canvas color, so it uses the canvas focus color.
+    ctx.strokeStyle = color('--oa-focus-canvas');
     ctx.lineWidth = 2;
     ctx.strokeRect(...project(viewport));
   }, [nodes, bounds, viewport, transform, width, height, theme]);
@@ -104,7 +105,7 @@ export function Minimap({
   }
 
   return (
-    <div className={cx(styles.minimap, className)}>
+    <div className={cx(styles.minimap, className)} data-surface="raised">
       {/* A 2D pan surface has no fitting widget role; application passes arrow keys through. */}
       {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
       <div

@@ -48,7 +48,7 @@
 
 .control:focus-visible,
 .control[data-demo-focus] {
-  outline: var(--oa-focus-ring);
+  outline: var(--oa-focus-width) solid var(--oa-focus);
   outline-offset: 0;
   border-color: var(--oa-focus);
 }

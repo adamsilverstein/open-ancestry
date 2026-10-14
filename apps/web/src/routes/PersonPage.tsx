@@ -16,7 +16,7 @@ export function PersonPage() {
       <h1 id={headingId} className="oa-visually-hidden">
         Person
       </h1>
-      <div className={styles.header}>
+      <div className={styles.header} data-surface="canvas">
         <Skeleton shape="circle" width={120} height={120} />
         <div className={styles.headerText}>
           <Skeleton shape="text" width={320} height={42} />

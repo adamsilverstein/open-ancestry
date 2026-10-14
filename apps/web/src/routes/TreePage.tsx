@@ -9,11 +9,16 @@ const rows = [4, 2, 2, 3];
 export function TreePage() {
   const headingId = useId();
   return (
-    <section aria-labelledby={headingId} aria-busy="true" className={styles.canvas}>
+    <section
+      aria-labelledby={headingId}
+      aria-busy="true"
+      className={styles.canvas}
+      data-surface="canvas"
+    >
       <h1 id={headingId} className="oa-visually-hidden">
         Family tree
       </h1>
-      <div className={styles.toolbar}>
+      <div className={styles.toolbar} data-surface="raised">
         {Array.from({ length: 6 }, (_, i) => (
           <Skeleton key={i} width={36} height={36} />
         ))}

@@ -62,6 +62,7 @@ export function Toolbar({
     <div
       ref={ref}
       role="toolbar"
+      data-surface="raised"
       aria-label={label}
       aria-orientation={orientation}
       className={cx(styles.toolbar, styles[orientation], className)}

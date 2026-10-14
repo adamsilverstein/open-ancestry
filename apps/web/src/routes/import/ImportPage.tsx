@@ -25,6 +25,9 @@ const PHASES: Record<ImportProgress['phase'], string> = {
   done: 'Finishing',
 };
 
+/** Moves focus to an element when it appears (the Cancel button it replaced is gone). */
+const focusOnMount = (element: HTMLElement | null) => element?.focus();
+
 const finished = (job: ImportJob | null) => job?.state === 'completed' || job?.state === 'failed';
 
 /** Follows an import job over server-sent events and shows its report. */
@@ -111,7 +114,9 @@ export function ImportPage() {
   if (job?.state === 'failed' && job.cancelled) {
     return (
       <div className={styles.page}>
-        <h1 className={styles.title}>Import cancelled</h1>
+        <h1 className={styles.title} ref={focusOnMount} tabIndex={-1}>
+          Import cancelled
+        </h1>
         <p className={styles.note}>
           Nothing was imported from {job.fileName}.
           {job.createdTree && ' The tree made for it was removed, and the uploaded file deleted.'}
@@ -161,7 +166,7 @@ export function ImportPage() {
       </p>
       {job && !finished(job) && (
         <div className={styles.actions}>
-          <CancelImportButton jobId={job.id} />
+          <CancelImportButton job={job} />
         </div>
       )}
     </div>

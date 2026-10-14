@@ -163,6 +163,8 @@ test.describe('family view', () => {
     await page.keyboard.press('Escape');
     await expect(editor).toHaveCount(0);
     await expect(page).toHaveURL(new RegExp(`/person/${ids.bram}$`));
+    // Focus lands on the header's Edit person button, not lost on the page.
+    await expect(page.getByRole('button', { name: 'Edit person' })).toBeFocused();
   });
 
   test('quick view says Living once (#134)', async ({ page }) => {

@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   MAX_SCALE,
   MIN_SCALE,
+  READABLE_FAN_SCALE,
   centerOn,
   clampScale,
   fitBounds,
+  fitFan,
   interpolate,
   toScreen,
   visibleWorld,
@@ -77,5 +79,38 @@ describe('viewport math', () => {
     expect(wheelKind({ ...e, deltaX: 4, deltaY: 60 })).toBe('pan');
     expect(wheelKind({ ...e, deltaY: 100, shiftKey: true })).toBe('pan');
     expect(wheelKind({ ...e, deltaY: -8, ctrlKey: true })).toBe('pinch');
+  });
+});
+
+describe('fitFan', () => {
+  // A six-ring fan (radius 460) of which only three rings are drawn (radius 220).
+  const fan = {
+    segments: [{ outerRadius: 60 }, { outerRadius: 140 }, { outerRadius: 220 }],
+    bounds: { minX: -460, minY: -460, width: 920, height: 460 },
+  };
+
+  it('frames the drawn rings, not the whole sector', () => {
+    const t = fitFan(fan, 1440, 900, 64);
+    expect(t.scale).toBe(1);
+    // Centered on the drawn half-disc: 440 wide, 220 tall.
+    expect(t.x).toBe(720);
+    expect(t.y).toBe(450 + 110);
+  });
+
+  it('keeps names readable on a phone, the fan’s base at the bottom', () => {
+    const t = fitFan(fan, 390, 844, 64);
+    expect(t.scale).toBe(READABLE_FAN_SCALE);
+    expect(t.x).toBe(195);
+    expect(t.y).toBe(844 - 64);
+  });
+
+  it('copes with an empty fan', () => {
+    const t = fitFan(
+      { segments: [], bounds: { minX: 0, minY: 0, width: 0, height: 0 } },
+      800,
+      600,
+      64,
+    );
+    expect(Number.isFinite(t.x) && Number.isFinite(t.y)).toBe(true);
   });
 });

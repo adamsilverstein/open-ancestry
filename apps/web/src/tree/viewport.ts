@@ -110,3 +110,33 @@ export function wheelKind(e: {
   if (e.deltaMode !== 0) return 'wheel';
   return e.deltaX === 0 && Number.isInteger(e.deltaY) && Math.abs(e.deltaY) >= 50 ? 'wheel' : 'pan';
 }
+
+/** The zoom below which the fan's 12px names would render under 10px. */
+export const READABLE_FAN_SCALE = 10 / 12;
+
+interface FanExtent {
+  segments: readonly { outerRadius: number }[];
+  bounds: { minX: number; minY: number; width: number; height: number };
+}
+
+/**
+ * Frames the fan's drawn rings, not the empty slots and unused rings past
+ * them. When that would shrink names below READABLE_FAN_SCALE (a phone),
+ * it keeps them readable instead, with the base of the fan, where the focus
+ * person sits, at the bottom of the view.
+ */
+export function fitFan(fan: FanExtent, width: number, height: number, padding: number): Transform {
+  const b = fan.bounds;
+  // The bounds are a sector around the origin: scale them to the drawn radius.
+  const full = Math.max(-b.minX, b.minX + b.width, -b.minY, b.minY + b.height, 1);
+  const k = Math.min(1, Math.max(0, ...fan.segments.map((s) => s.outerRadius)) / full);
+  const drawn = { minX: b.minX * k, minY: b.minY * k, width: b.width * k, height: b.height * k };
+  const fit = fitBounds(drawn, width, height, padding);
+  if (fit.scale >= READABLE_FAN_SCALE) return fit;
+  const scale = READABLE_FAN_SCALE;
+  return {
+    x: width / 2 - (drawn.minX + drawn.width / 2) * scale,
+    y: height - padding - (drawn.minY + drawn.height) * scale,
+    scale,
+  };
+}

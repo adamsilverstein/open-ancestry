@@ -18,6 +18,11 @@ export interface TablePlan {
   /** Column defaults from the DDL, already converted to JS values. */
   defaults: Record<string, unknown>;
   hasUpdatedAt: boolean;
+  columnSet: ReadonlySet<string>;
+  /** Per column: how to fill it when the input leaves it out. */
+  fill: readonly ('id' | 'now' | 'default')[];
+  defaultValues: readonly unknown[];
+  insert?: Statement;
 }
 
 export interface StoreOptions {
@@ -83,11 +88,17 @@ export class TreeStore {
       }[];
       if (info.length === 0) throw new Error(`Unknown table ${table}`);
       const key = info.find((c) => c.pk === 1)?.name ?? 'id';
+      const columns = info.map((c) => c.name);
       plan = {
         key,
-        columns: info.map((c) => c.name),
+        columns,
         defaults: Object.fromEntries(info.map((c) => [c.name, parseDefault(c.dflt_value)])),
-        hasUpdatedAt: info.some((c) => c.name === 'updated_at'),
+        hasUpdatedAt: columns.includes('updated_at'),
+        columnSet: new Set(columns),
+        fill: columns.map((c) =>
+          c === key && c === 'id' ? 'id' : TIMESTAMP_COLUMNS.has(c) ? 'now' : 'default',
+        ),
+        defaultValues: info.map((c) => parseDefault(c.dflt_value)),
       };
       this.plans.set(table, plan);
     }
@@ -100,27 +111,42 @@ export class TreeStore {
     return this.stmt(`SELECT * FROM ${table} WHERE ${key} = ?`).get(id) as TableRows[T] | undefined;
   }
 
-  /** A complete row for `table` from a partial input: ids, timestamps and DDL defaults filled in. */
-  completeRow(table: string, input: Record<string, unknown>, now: string): Record<string, unknown> {
+  /**
+   * Column values (in table order) for a partial input: ids, timestamps and
+   * DDL defaults filled in. Unknown input keys are refused. This is the bulk
+   * loader's hot path, so it works on arrays and cached plan data.
+   */
+  rowValues(table: string, input: Record<string, unknown>, now: string): unknown[] {
     const plan = this.plan(table);
-    const unknown = Object.keys(input).find((column) => !plan.columns.includes(column));
-    if (unknown !== undefined) throw new Error(`Unknown column ${table}.${unknown}`);
-    const row: Record<string, unknown> = {};
-    for (const column of plan.columns) {
-      const value = input[column];
-      if (value !== undefined) row[column] = value;
-      else if (column === plan.key && column === 'id') row[column] = this.newId();
-      else if (TIMESTAMP_COLUMNS.has(column)) row[column] = now;
-      else row[column] = plan.defaults[column];
+    for (const column in input) {
+      if (!plan.columnSet.has(column)) throw new Error(`Unknown column ${table}.${column}`);
     }
+    const { columns, fill, defaultValues } = plan;
+    const values = new Array<unknown>(columns.length);
+    for (let i = 0; i < columns.length; i++) {
+      const value = input[columns[i] as string];
+      if (value !== undefined) values[i] = value;
+      else if (fill[i] === 'id') values[i] = this.newId();
+      else if (fill[i] === 'now') values[i] = now;
+      else values[i] = defaultValues[i];
+    }
+    return values;
+  }
+
+  /** Like `rowValues`, as an object keyed by column. */
+  completeRow(table: string, input: Record<string, unknown>, now: string): Record<string, unknown> {
+    const values = this.rowValues(table, input, now);
+    const row: Record<string, unknown> = {};
+    this.plan(table).columns.forEach((column, i) => (row[column] = values[i]));
     return row;
   }
 
   insertStatement(table: string): Statement {
-    const { columns } = this.plan(table);
-    return this.stmt(
-      `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`,
+    const plan = this.plan(table);
+    plan.insert ??= this.db.prepare(
+      `INSERT INTO ${table} (${plan.columns.join(', ')}) VALUES (${plan.columns.map(() => '?').join(', ')})`,
     );
+    return plan.insert;
   }
 
   /**

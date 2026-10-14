@@ -45,10 +45,11 @@ export class BulkWriter {
   insertAny(table: string, input: Record<string, unknown>): string {
     if (!this.open) throw new Error('BulkWriter already finished');
     if (!HISTORY_TABLES.includes(table)) assertDataTable(table);
-    const row = this.store.completeRow(table, input, this.now);
-    this.store.insertStatement(table).run(Object.values(row));
+    const values = this.store.rowValues(table, input, this.now);
+    this.store.insertStatement(table).run(values);
     this.counts[table] = (this.counts[table] ?? 0) + 1;
-    return row[this.store.plan(table).key] as string;
+    const { key, columns } = this.store.plan(table);
+    return values[columns.indexOf(key)] as string;
   }
 
   /** Fixes up primary names, rebuilds search, and commits (rolling back on any failure). */

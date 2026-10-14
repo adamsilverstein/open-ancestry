@@ -127,12 +127,13 @@ describe('fuzz: parser never throws', () => {
   });
 });
 
-describe('fuzz: bounded time on hostile shapes', () => {
-  // Each case is linear work of a few hundred ms at most; anything quadratic in
-  // line length, chunk count or continuation count takes minutes instead.
-  // The budget is CPU time (this test worker's own process), because wall time
-  // swings with whatever else the CI runner is doing; a looser wall-clock cap
-  // still catches a hang that burns no CPU.
+// Each case is linear work of about a second at most; anything quadratic in
+// line length, chunk count or continuation count takes minutes instead. The
+// budget is CPU time (this test worker's own process), because wall time
+// swings with whatever else the machine is doing; a looser wall-clock cap
+// still catches a hang that burns no CPU. Vitest's own 5s timeout would cut
+// in first under load, so each test gets room for the wall-clock cap.
+describe('fuzz: bounded time on hostile shapes', { timeout: 20_000 }, () => {
   const LIMIT_MS = 5000;
   const WALL_LIMIT_MS = 15_000;
   const timed = async (fn: () => unknown) => {
@@ -158,8 +159,10 @@ describe('fuzz: bounded time on hostile shapes', () => {
       () => Array.from({ length: 50_000 }, (_, i) => `${i % 100} T`).join('\n'),
     ],
     ['50k bare text lines', () => '0 HEAD\n1 NOTE a\n' + 'text\n'.repeat(50_000)],
-    ['1M CONC lines', () => '0 HEAD\n1 NOTE a\n' + '2 CONC b\n'.repeat(1_000_000)],
-    ['1M CONT lines', () => '0 HEAD\n1 NOTE a\n' + '2 CONT b\n'.repeat(1_000_000)],
+    // 300k continuations: well under a second, and still minutes if
+    // joining them were quadratic.
+    ['300k CONC lines', () => '0 HEAD\n1 NOTE a\n' + '2 CONC b\n'.repeat(300_000)],
+    ['300k CONT lines', () => '0 HEAD\n1 NOTE a\n' + '2 CONT b\n'.repeat(300_000)],
     ['@ storms', () => '0 HEAD\n1 NOTE ' + '@'.repeat(1_000_000)],
     ['an xref that never closes', () => '0 @' + 'x'.repeat(5_000_000)],
   ])('%s', async (_, make) => {

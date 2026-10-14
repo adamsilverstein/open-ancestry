@@ -1047,9 +1047,14 @@ export class Mapper {
     let value = node.value!.trim();
     let ref = classifyFile(value);
     if (this.major >= 7 && ref.type !== 'remote') {
-      // GEDCOM 7 FILE values are URI references, so local paths are percent-encoded.
-      value = decodeUri(value);
-      ref = classifyFile(value);
+      // GEDCOM 7 FILE values are URI references, so local paths are percent-encoded. An
+      // encoded scheme (`http%3A%2F%2F...`) stays a local name rather than becoming a URL.
+      const decoded = decodeUri(value);
+      const decodedRef = classifyFile(decoded);
+      if (decodedRef.type !== 'remote') {
+        value = decoded;
+        ref = decodedRef;
+      }
     }
     if (ref.type === 'remote') {
       row.remote_url = ref.url;

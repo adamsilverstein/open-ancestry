@@ -77,6 +77,15 @@ describe('GEDCOM 7 phrases', () => {
     ]);
   });
 
+  it('does not decode a percent-encoded URL into a remote address', async () => {
+    const { store } = await importInto(
+      ged7('0 @O1@ OBJE', '1 FILE http%3A%2F%2Fevil.example%2Fa.jpg', '2 FORM image/jpeg'),
+    );
+    expect(rows(store, 'SELECT remote_url, local_path FROM media')).toEqual([
+      { remote_url: null, local_path: null },
+    ]);
+  });
+
   it('leaves PHRASE alone in GEDCOM 5.5.1, where it is not a standard tag', async () => {
     const { store } = await importInto(
       [

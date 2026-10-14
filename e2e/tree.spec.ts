@@ -753,6 +753,47 @@ test.describe('family view', () => {
     await expect(card(page, 'Ada Vale')).toHaveCount(0);
   });
 
+  test('switching trees from a tree view opened without ?tree opens the new tree', async ({
+    page,
+  }) => {
+    // The family tree is the current one (runs after the fixture's own init script).
+    await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+    await page.goto(`/tree/${ids.ada}`);
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    const switcher = page.getByRole('banner').getByRole('button', { name: /Tree:/ });
+    await switcher.click();
+    await page.getByRole('menuitemradio', { name: seed.perf.tree }).click();
+    await expect(page).toHaveURL(new RegExp(`/tree/${seed.perf.focusId}(\\?|$)`));
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    await expect(card(page, 'Ada Vale')).toHaveCount(0);
+    await expect(page.getByText('Person not found')).toHaveCount(0);
+  });
+
+  test('switching trees from a person page opens the new tree, never the old person', async ({
+    page,
+  }) => {
+    await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+    await page.goto(`/person/${ids.ada}`);
+    await expect(page.getByRole('heading', { level: 1, name: /Ada Vale/ })).toBeVisible();
+    const switcher = page.getByRole('banner').getByRole('button', { name: /Tree:/ });
+    await switcher.click();
+    await page.getByRole('menuitemradio', { name: seed.perf.tree }).click();
+    await expect(page).toHaveURL(new RegExp(`/tree/${seed.perf.focusId}(\\?|$)`));
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    await expect(page.getByText('Ada Vale')).toHaveCount(0);
+  });
+
+  test('switching trees on the people list stays on the people list', async ({ page }) => {
+    await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+    await page.goto('/people');
+    await expect(page.getByRole('cell', { name: 'Abel Vale' })).toBeVisible();
+    const switcher = page.getByRole('banner').getByRole('button', { name: /Tree:/ });
+    await switcher.click();
+    await page.getByRole('menuitemradio', { name: seed.perf.tree }).click();
+    await expect(page).toHaveURL(/\/people/);
+    await expect(page.getByRole('cell', { name: 'Abel Vale' })).toHaveCount(0);
+  });
+
   test('/tree/home opens the home person', async ({ page }) => {
     await page.goto(`/tree/home?tree=${encodeURIComponent(tree)}`);
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.ada}\\?`));

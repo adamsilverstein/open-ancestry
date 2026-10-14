@@ -1,8 +1,10 @@
-import { inferLiving, replaceNickname } from '@open-ancestry/core';
+import { ancestorWord, descendantWord, inferLiving, replaceNickname } from '@open-ancestry/core';
 import {
+  ancestorGenerations,
   events,
   names,
   persons,
+  toNFC,
   type EventRow,
   type PersonNameRow,
   type InsertRow,
@@ -18,7 +20,7 @@ import {
   dateColumns as importDateColumns,
   surnameKey as importSurnameKey,
 } from '@open-ancestry/import';
-import { badRequest, notFound } from './errors';
+import { badRequest, conflict, notFound } from './errors';
 import type { EventBody, EventPatch, NameBody, PersonBody, RelativeBody } from './schemas';
 
 /*
@@ -96,7 +98,8 @@ export function dateColumns(dateText: string | null | undefined) {
 
 /** Finds a place by its full name (case-insensitive) or creates it. */
 export function placeId(tx: Tx, fullName: string | null | undefined): string | null {
-  const name = fullName?.trim();
+  // NFC so a decomposed spelling finds the stored (NFC) place instead of adding a twin.
+  const name = fullName === null || fullName === undefined ? undefined : toNFC(fullName.trim());
   if (!name) return null;
   const existing = tx.store
     .stmt('SELECT id FROM place WHERE full_name = ? COLLATE NOCASE ORDER BY id LIMIT 1')
@@ -328,6 +331,36 @@ export function personLabel(store: TreeStore, personId: string | null | undefine
     .filter((p) => p?.trim())
     .join(' ');
   return text || 'unnamed person';
+}
+
+/**
+ * Refuses making each of `parents` a parent of each of `children` when that
+ * would make someone their own ancestor (#95). The message describes the
+ * person being added: a parent who is already a descendant, or a child who is
+ * already an ancestor.
+ */
+export function refuseCycles(
+  store: TreeStore,
+  parents: readonly (string | null | undefined)[],
+  children: readonly string[],
+  added: 'parent' | 'child',
+): void {
+  for (const parent of parents) {
+    if (!parent) continue;
+    for (const child of children) {
+      const p = personLabel(store, parent);
+      const c = personLabel(store, child);
+      if (parent === child)
+        throw conflict(`${p} is a child in this family, so cannot be a parent in it`);
+      const up = ancestorGenerations(store, child, parent);
+      if (up === null) continue;
+      throw conflict(
+        added === 'parent'
+          ? `${p} is a ${descendantWord(up, undefined)} of ${c}, so cannot also be their parent`
+          : `${c} is a ${ancestorWord(up, undefined)} of ${p}, so cannot also be their child`,
+      );
+    }
+  }
 }
 
 /** `Ada Vale and Dan Reed` for a family. */

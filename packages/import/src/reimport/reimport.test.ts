@@ -1297,3 +1297,112 @@ describe('comparing again (#163)', () => {
     }
   });
 });
+
+describe('trustworthy confidence and reasons (#159)', () => {
+  it('is below 100% when a fact differs, and 100% when nothing does', async () => {
+    const s2 = await prepareReimport(store, { bytes: renumber(updatedSample()) }, { today: TODAY });
+    try {
+      const of = (xref: string) =>
+        [...s2.matches.values()].find((m) => m.existingId === pid(store, xref))!;
+      // Thaddeus: birth refined from Abt. 1842 to 12 MAR 1842.
+      expect(of('@I1@').confidence).toBeLessThan(1);
+      expect(of('@I1@').confidence).toBeGreaterThanOrEqual(HIGH_CONFIDENCE);
+      expect(of('@I1@').reasons).toContain('different birth date');
+      // Mercy: nothing differs.
+      expect(of('@I2@').confidence).toBe(1);
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  it('tells the primary name apart from other names and from a similar one', async () => {
+    const thaddeus = pid(store, '@I1@');
+    const name = value<string>(store, 'SELECT id FROM person_name WHERE person_id = ?', thaddeus);
+    store.transact('Rename', (tx) => {
+      tx.update('person_name', name, { given: 'Thad', is_primary: 0, type: 'aka' } as never);
+      tx.insert('person_name', {
+        person_id: thaddeus,
+        given: 'Teddy',
+        surname: 'Ashgrove',
+        is_primary: 1,
+      } as never);
+    });
+    const mercy = pid(store, '@I2@');
+    const mercyName = value<string>(store, 'SELECT id FROM person_name WHERE person_id = ?', mercy);
+    store.transact('Rename', (tx) =>
+      tx.update('person_name', mercyName, { given: 'Mercey' } as never),
+    );
+    const s2 = await prepareReimport(store, { bytes: renumber(SAMPLE) }, { today: TODAY });
+    try {
+      const reasons = (id: string) =>
+        [...s2.matches.values()].find((m) => m.existingId === id)!.reasons;
+      expect(reasons(mercy)).toContain('similar name (Mercey Bellweather / Mercy Bellweather)');
+      expect(reasons(mercy)).not.toContain('same name');
+      expect(reasons(pid(store, '@I3@'))).toContain('same name');
+      // "Thaddeus" is none of Thaddeus's names now; the closest is the old one, Thad.
+      expect(reasons(thaddeus).some((r) => r.startsWith('similar to another name (Thad'))).toBe(
+        true,
+      );
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  it('names the closest tree person for a new person, and starts them unticked', async () => {
+    const tree = openMemoryTree();
+    await importGedcom(
+      {
+        bytes: ged(
+          '0 @I1@ INDI',
+          '1 NAME Mary /Brown/',
+          '1 SEX F',
+          '1 BIRT',
+          '2 DATE 1900',
+          '2 PLAC Ashford',
+          '1 DEAT',
+          '2 DATE 1970',
+        ),
+      },
+      tree,
+      { today: TODAY },
+    );
+    const incoming = ged(
+      '0 @I1@ INDI',
+      '1 NAME Mary /Brown/',
+      '1 SEX F',
+      '1 BIRT',
+      '2 DATE 1900',
+      '2 PLAC Ashford',
+      '1 DEAT',
+      '2 DATE 1970',
+      '0 @I2@ INDI',
+      '1 NAME Mary /Brown/',
+      '1 SEX F',
+      '1 BIRT',
+      '2 DATE 1904',
+      '2 PLAC Elsewhere',
+      '1 DEAT',
+      '2 DATE 1990',
+      '0 @I3@ INDI',
+      '1 NAME Quill /Vexbury/',
+      '1 BIRT',
+      '2 DATE 1950',
+    );
+    const s2 = await prepareReimport(tree, { bytes: incoming }, { today: TODAY });
+    try {
+      const fresh = s2.diff.people.filter((p) => p.status === 'new');
+      const mary = fresh.find((p) => p.name === 'Mary Brown')!;
+      expect(mary.changes.map((c) => [c.kind, c.defaultAccept])).toEqual([
+        ['possible-match', false],
+        ['person.new', false],
+      ]);
+      expect(mary.reasons.some((r) => /^closest: Mary Brown, \d+%$/.test(r))).toBe(true);
+      const quill = fresh.find((p) => p.name === 'Quill Vexbury')!;
+      expect(quill.changes.map((c) => [c.kind, c.defaultAccept])).toEqual([['person.new', true]]);
+      expect(quill.reasons).toEqual(['no one with a similar name in your tree']);
+    } finally {
+      closeReimport(s2);
+      tree.close();
+    }
+  });
+});

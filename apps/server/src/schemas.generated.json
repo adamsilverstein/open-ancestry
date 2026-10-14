@@ -1853,8 +1853,30 @@
       }
     ]
   },
+  "CheckKey": {
+    "type": "string",
+    "maxLength": 300,
+    "pattern": "^[a-z-]+:[0-9A-Za-z_+:-]+$"
+  },
   "ChildRel": {
     "enum": ["biological", "adopted", "step", "foster", "related", "guardian", "private", "unknown"]
+  },
+  "DismissBody": {
+    "type": "object",
+    "required": ["keys"],
+    "properties": {
+      "keys": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "maxLength": 300,
+          "pattern": "^[a-z-]+:[0-9A-Za-z_+:-]+$"
+        },
+        "minItems": 1,
+        "maxItems": 5000
+      }
+    },
+    "additionalProperties": false
   },
   "EventBody": {
     "type": "object",
@@ -2229,6 +2251,91 @@
         "maxLength": 16
       }
     }
+  },
+  "MergeBody": {
+    "type": "object",
+    "required": ["otherId"],
+    "properties": {
+      "otherId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      },
+      "choices": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "keep"
+              },
+              {
+                "type": "string",
+                "const": "other"
+              }
+            ]
+          },
+          "sex": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "keep"
+              },
+              {
+                "type": "string",
+                "const": "other"
+              }
+            ]
+          },
+          "living": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "keep"
+              },
+              {
+                "type": "string",
+                "const": "other"
+              }
+            ]
+          },
+          "privacy": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "keep"
+              },
+              {
+                "type": "string",
+                "const": "other"
+              }
+            ]
+          },
+          "preferred": {
+            "type": "object",
+            "patternProperties": {
+              "^[A-Z_][A-Z0-9_]{0,31}$": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "keep"
+                  },
+                  {
+                    "type": "string",
+                    "const": "other"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "additionalProperties": false
   },
   "NameBody": {
     "type": "object",

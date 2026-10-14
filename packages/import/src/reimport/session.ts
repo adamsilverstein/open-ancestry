@@ -3,7 +3,7 @@ import { importGedcom } from '../import';
 import type { ImportInput, ImportOptions, ImportReport } from '../types';
 import { treeRevision } from './apply';
 import { diffTrees, localHistory, type ReimportDiff } from './diff';
-import { matchPeople, type PersonMatch } from './match';
+import { matchPeople, type NearMiss, type PersonMatch } from './match';
 import { snapshot } from './snapshot';
 
 /** An updated export read and compared with a tree, waiting for the user's review. */
@@ -57,7 +57,7 @@ export async function prepareReimport(
 function compare(store: TreeStore, incoming: TreeStore) {
   const existingSnap = snapshot(store);
   const incomingSnap = snapshot(incoming);
-  const nearMisses = new Map<string, string>();
+  const nearMisses = new Map<string, NearMiss>();
   const matches = matchPeople(existingSnap, incomingSnap, nearMisses);
   const diff = diffTrees(existingSnap, incomingSnap, matches, localHistory(store), nearMisses);
   return { matches, diff, baseRevision: treeRevision(store) };

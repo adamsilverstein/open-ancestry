@@ -1,5 +1,5 @@
 import type { FamilyRow, MediaRow, TableName, TreeStore } from '@open-ancestry/db';
-import { HIGH_CONFIDENCE, type PersonMatch } from './match';
+import { HIGH_CONFIDENCE, POSSIBLE_MATCH, type NearMiss, type PersonMatch } from './match';
 import {
   mediaKey,
   norm,
@@ -82,7 +82,15 @@ export type ReimportChange =
   /** A new person whose every link into the tree starts unticked: added alone, they'd have no family. */
   | { kind: 'unlinked-new' }
   /** An unmatched record that looks like someone already matched to another record. */
-  | { kind: 'possible-match'; existingId: string; existingName: string };
+  | {
+      kind: 'possible-match';
+      existingId: string;
+      existingName: string;
+      /** How close, 0..1. */
+      confidence: number;
+      /** That tree person is matched to another record in this export. */
+      taken: boolean;
+    };
 
 export type ReviewChange = ReimportChange & {
   id: string;
@@ -533,7 +541,7 @@ export function diffTrees(
   incoming: Snapshot,
   matches: Map<string, PersonMatch>,
   local: LocalHistory,
-  nearMisses: Map<string, string> = new Map(),
+  nearMisses: Map<string, NearMiss> = new Map(),
 ): ReimportDiff {
   const { edited } = local;
   const gone = local.removed;
@@ -713,12 +721,20 @@ export function diffTrees(
     if (deletedHere) {
       adder(r, { applicable: false, defaultAccept: false })({ kind: 'deleted-here' });
     }
-    const lookalike = suspect ? undefined : nearMisses.get(i.row.id);
+    // Why there is no match: the closest tree person, if any. A close one may be a duplicate.
+    const near = nearMisses.get(i.row.id);
+    const nearName = near && displayName(existing.people.get(near.existingId)!);
+    r.reasons = near
+      ? [`closest: ${nearName}, ${Math.round(near.score * 100)}%`]
+      : ['no one with a similar name in your tree'];
+    const lookalike = !suspect && near && near.score >= POSSIBLE_MATCH ? near : undefined;
     if (lookalike) {
       adder(r, { applicable: false, defaultAccept: false })({
         kind: 'possible-match',
-        existingId: lookalike,
-        existingName: displayName(existing.people.get(lookalike)!),
+        existingId: lookalike.existingId,
+        existingName: nearName!,
+        confidence: lookalike.score,
+        taken: lookalike.taken,
       });
     }
     if (suspect) {

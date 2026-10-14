@@ -3,6 +3,7 @@ import {
   events,
   names,
   persons,
+  toNFC,
   type EventRow,
   type PersonNameRow,
   type InsertRow,
@@ -96,7 +97,8 @@ export function dateColumns(dateText: string | null | undefined) {
 
 /** Finds a place by its full name (case-insensitive) or creates it. */
 export function placeId(tx: Tx, fullName: string | null | undefined): string | null {
-  const name = fullName?.trim();
+  // NFC so a decomposed spelling finds the stored (NFC) place instead of adding a twin.
+  const name = fullName === null || fullName === undefined ? undefined : toNFC(fullName.trim());
   if (!name) return null;
   const existing = tx.store
     .stmt('SELECT id FROM place WHERE full_name = ? COLLATE NOCASE ORDER BY id LIMIT 1')

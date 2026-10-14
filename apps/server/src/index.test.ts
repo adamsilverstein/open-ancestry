@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { connect } from 'node:net';
 import { join } from 'node:path';
@@ -133,6 +133,46 @@ describe('server', () => {
     // Other responses keep the plain policy.
     const api = await app.inject({ method: 'GET', url: '/api/health' });
     expect(String(api.headers['content-security-policy'])).not.toContain('nonce');
+    await app.close();
+  });
+
+  it('serves only regular, non-dot files of the build, matched exactly', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'oa-static-'));
+    await writeFile(join(dir, 'index.html'), '<!doctype html><title>spa</title>');
+    await mkdir(join(dir, 'assets'));
+    await writeFile(join(dir, 'assets', 'app-abc123.js'), 'console.log(1)');
+    await writeFile(join(dir, '.env'), 'SECRET=1');
+    await mkdir(join(dir, '.git'));
+    await writeFile(join(dir, '.git', 'config'), '[core]');
+    await mkdir(join(dir, 'assets', '.cache'));
+    await writeFile(join(dir, 'assets', '.cache', 'x.js'), 'hidden');
+    const outside = await mkdtemp(join(tmpdir(), 'oa-outside-'));
+    await writeFile(join(outside, 'secret.txt'), 'OUTSIDE');
+    await symlink(outside, join(dir, 'linked'));
+    const app = createServer({ staticDir: dir });
+
+    const asset = await app.inject({ method: 'GET', url: '/assets/app-abc123.js' });
+    expect(asset.statusCode).toBe(200);
+    expect(asset.body).toBe('console.log(1)');
+
+    for (const url of [
+      '/.env',
+      '/.git/config',
+      '/%2eenv',
+      '/assets/.cache/x.js',
+      '/assets/',
+      '/assets',
+      '/INDEX.html',
+      '/index.html',
+      '/ASSETS/app-abc123.js',
+      '/assets/APP-abc123.js',
+      '/linked/secret.txt',
+    ]) {
+      const res = await app.inject({ method: 'GET', url });
+      expect(res.body, url).not.toMatch(/SECRET|\[core\]|hidden|OUTSIDE/);
+      expect([200, 400, 404], url).toContain(res.statusCode);
+      if (res.statusCode === 200) expect(res.body, url).toContain('<title>spa</title>');
+    }
     await app.close();
   });
 });

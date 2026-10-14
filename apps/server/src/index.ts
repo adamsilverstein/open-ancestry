@@ -25,6 +25,8 @@ import { galleryRoutes } from './routes/gallery';
 import { ThumbnailQueue } from './thumbnails';
 import { SECURITY_HEADERS, createToken, isLoopbackHost, registerSecurity } from './security';
 import { sendShell } from './shell';
+import { staticFileIndex } from './static-files';
+import { lazyValidatorFactory, plainSerializerFactory } from './validation';
 
 export { Library, defaultLibraryRoot, treeNameProblem } from './library';
 export {
@@ -102,6 +104,13 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     logger: options.logger ?? false,
     bodyLimit: JSON_BODY_LIMIT,
     ajv: { customOptions: { removeAdditional: false, coerceTypes: 'array' } },
+    schemaController: {
+      compilersFactory: {
+        buildValidator: lazyValidatorFactory(),
+        // No route declares a response schema, so skip loading fast-json-stringify.
+        buildSerializer: plainSerializerFactory,
+      },
+    },
     clientErrorHandler: handleClientError,
     // Router-level failures (malformed URL, bad content type) get the typed envelope too.
     frameworkErrors: (error, _request, reply: FastifyReply) => {
@@ -169,16 +178,30 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   const { staticDir } = options;
   const hasSpa = staticDir !== undefined && existsSync(join(staticDir, 'index.html'));
   const indexHtml = hasSpa ? readFileSync(join(staticDir, 'index.html'), 'utf8') : '';
+  const isBuildFile = hasSpa ? staticFileIndex(staticDir) : () => false;
   if (hasSpa) {
     app.register(fastifyStatic, {
       root: staticDir,
-      wildcard: false,
+      // One wildcard route instead of a route per file, which needs a glob of
+      // the build at startup (cold start, #54). Only exact files of the build
+      // are served; everything else (missing, dotfiles, directories, case
+      // variants, the raw index.html) falls through to the shell.
+      wildcard: true,
       setHeaders: staticHeaders,
-      // The shell is rendered per request (CSP nonce), never served as a file.
       index: false,
-      allowedPath: (pathName) => pathName !== '/index.html',
+      dotfiles: 'deny',
+      allowedPath: (pathName) => isBuildFile(pathName),
     });
     app.get('/', (_request, reply) => sendShell(reply, indexHtml));
+    // Any other read that is not exactly a file of the build gets the shell
+    // before @fastify/static sees it, so it never serves dotfiles, directories
+    // or case aliases, and its own 403s never surface.
+    app.addHook('onRequest', async (request, reply) => {
+      if (request.method !== 'GET' && request.method !== 'HEAD') return;
+      const path = request.url.split('?', 1)[0]!;
+      if (path === '/' || path === '/api' || path.startsWith('/api/') || isBuildFile(path)) return;
+      return sendShell(reply, indexHtml);
+    });
   }
 
   app.setNotFoundHandler((request, reply) => {
@@ -193,9 +216,13 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
       .send(errorBody('not_found', `No route for ${request.method} ${request.url}`));
   });
 
-  app.addHook('onClose', async () => {
+  // Before the HTTP server stops: aborting jobs ends their event streams, which
+  // close() would otherwise wait on forever, and runs their cleanup.
+  app.addHook('preClose', async () => {
     await jobs.shutdown();
     await deps.thumbnails.idle();
+  });
+  app.addHook('onClose', async () => {
     deps.reimports.closeAll();
     library.closeAll();
   });

@@ -55,6 +55,8 @@ export type JobEvent =
 interface Job extends JobView {
   run: (signal: AbortSignal) => Promise<unknown>;
   controller: AbortController;
+  /** A queued job being cancelled: cleaning up, never to run. */
+  cancelling?: boolean;
   cleanup: () => Promise<void>;
 }
 
@@ -131,12 +133,33 @@ export class JobManager {
     return () => this.events.off(id, listener);
   }
 
-  /** Aborts running jobs and waits for them to settle (server shutdown). */
+  /**
+   * Cancels a queued or running job: a queued one fails at once (after its
+   * cleanup), a running one is aborted through its signal and fails when the
+   * work stops. Returns false for unknown or finished jobs.
+   */
+  cancel(id: string): boolean {
+    const job = this.jobs.get(id);
+    if (!job || (job.state !== 'queued' && job.state !== 'running')) return false;
+    job.controller.abort();
+    if (job.state === 'queued' && !job.cancelling) {
+      // Never picked up by pump(): it skips jobs that are cancelling.
+      job.cancelling = true;
+      job.error = 'Cancelled';
+      void job
+        .cleanup()
+        .catch(() => {})
+        .then(() => this.setState(job, 'failed'));
+    }
+    return true;
+  }
+
+  /** Cancels every active job and waits for them to settle (server shutdown). */
   async shutdown(): Promise<void> {
     const active = [...this.jobs.values()].filter(
       (j) => j.state === 'queued' || j.state === 'running',
     );
-    for (const job of active) job.controller.abort();
+    for (const job of active) this.cancel(job.id);
     await Promise.all(active.map((job) => this.settled(job.id)));
   }
 
@@ -167,7 +190,7 @@ export class JobManager {
 
   private pump(): void {
     while (this.running < this.concurrency) {
-      const next = [...this.jobs.values()].find((j) => j.state === 'queued');
+      const next = [...this.jobs.values()].find((j) => j.state === 'queued' && !j.cancelling);
       if (!next) return;
       this.running++;
       void this.execute(next).finally(() => {

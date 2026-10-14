@@ -288,7 +288,12 @@ function useTagHighlight(tree: string, tagId: string | undefined) {
   return useMemo(() => {
     const tag = tags?.find((t) => t.id === tagId);
     if (!tag || !people) return null;
-    return { personIds: new Set(people.personIds), label: `tagged ${tag.name}` };
+    return {
+      /** In id order, for stepping through them. */
+      ids: people.personIds,
+      personIds: new Set(people.personIds),
+      label: `tagged ${tag.name}`,
+    };
   }, [tags, people, tagId]);
 }
 
@@ -497,6 +502,17 @@ export function TreeView({
 
   const shownResult = result && result.focus === personId && result.kind === kind ? result : null;
   const busy = !shownResult || rendered !== shownResult;
+  // How many highlighted people are laid out, and the next one (in id order) to step to.
+  const highlightShown = useMemo(() => {
+    if (!highlight || !shownResult) return 0;
+    const shown = new Set<string>();
+    for (const node of shownResult.layout?.nodes ?? []) shown.add(node.personId);
+    for (const segment of shownResult.fan?.segments ?? []) shown.add(segment.personId);
+    return highlight.ids.filter((id) => shown.has(id)).length;
+  }, [highlight, shownResult]);
+  const nextTagged = highlight
+    ? (highlight.ids.find((id) => id > personId) ?? highlight.ids.find((id) => id !== personId))
+    : undefined;
 
   // Until a reset's new layout arrives, the cards on screen keep their details.
   const shownCache = shownResult?.cache ?? cache;
@@ -878,7 +894,25 @@ export function TreeView({
       )}
       {highlight && (
         <div className={styles.highlight} role="status" data-surface="raised">
-          Highlighting people {highlight.label}
+          <span>
+            Highlighting people {highlight.label}: {highlight.ids.length} tagged, {highlightShown}{' '}
+            shown
+          </span>
+          {nextTagged && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() =>
+                void navigate({
+                  to: '/tree/$personId',
+                  params: { personId: nextTagged },
+                  search: (prev) => cleanSearch(prev),
+                })
+              }
+            >
+              Next tagged person
+            </Button>
+          )}
           <Button
             size="sm"
             variant="ghost"

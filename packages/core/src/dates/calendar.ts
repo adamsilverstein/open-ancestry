@@ -140,14 +140,87 @@ function jdnToGregorian(jdn: number): Required<Pick<DatePoint, 'year' | 'month' 
   };
 }
 
-// Hebrew months mapped to the Gregorian month they mostly fall in (Tishri ~ September).
-const HEBREW_TO_GREGORIAN_MONTH = [9, 10, 11, 12, 1, 2, 3, 3, 4, 5, 6, 7, 8];
+// Hebrew calendar (Dershowitz and Reingold, Calendrical Calculations): the
+// molad of Tishri plus the postponement rules gives each year's new year day.
+const HEBREW_EPOCH_JDN = 347998;
+
+function hebrewElapsedDays(year: number): number {
+  const months = Math.floor((235 * year - 234) / 19);
+  const parts = 12084 + 13753 * months;
+  const day = 29 * months + Math.floor(parts / 25920);
+  return (3 * (day + 1)) % 7 < 3 ? day + 1 : day;
+}
+
+function hebrewNewYear(year: number): number {
+  const ny0 = hebrewElapsedDays(year - 1);
+  const ny1 = hebrewElapsedDays(year);
+  const ny2 = hebrewElapsedDays(year + 1);
+  const delay = ny2 - ny1 === 356 ? 2 : ny1 - ny0 === 382 ? 1 : 0;
+  return HEBREW_EPOCH_JDN + ny1 + delay;
+}
+
+/** JDN of a Hebrew date; months in GEDCOM order (TSH = 1 .. ELL = 13). */
+function hebrewToJdn(year: number, month: number, day: number): number {
+  const newYear = hebrewNewYear(year);
+  const length = hebrewNewYear(year + 1) - newYear;
+  const leap = (7 * year + 1) % 19 < 7;
+  // TSH CSH KSL TVT SHV ADR ADS NSN IYR SVN TMZ AAV ELL; ADS only exists in leap years.
+  const lengths = [
+    30,
+    length % 10 === 5 ? 30 : 29,
+    length % 10 === 3 ? 29 : 30,
+    29,
+    30,
+    leap ? 30 : 29,
+    leap ? 29 : 0,
+    30,
+    29,
+    30,
+    29,
+    30,
+    29,
+  ];
+  // Outside a leap year ADS can only mean the one Adar.
+  const m = !leap && month === 7 ? 6 : month;
+  let offset = 0;
+  for (let i = 0; i < m - 1; i++) offset += lengths[i]!;
+  return newYear + offset + day - 1;
+}
+
+// French Republican calendar: year I began on 22 Sep 1792 and years III, VII
+// and XI were sextile (366 days). Later years follow the Romme rule.
 const FRENCH_EPOCH_JDN = gregorianToJdn(1792, 9, 22);
+const romme = (n: number) => Math.floor(n / 4) - Math.floor(n / 100) + Math.floor(n / 400);
+
+function frenchToJdn(year: number, month: number, day: number): number {
+  const sextiles =
+    year <= 15 ? [3, 7, 11].filter((y) => y < year).length : 3 + romme(year - 1) - romme(14);
+  return FRENCH_EPOCH_JDN + 365 * (year - 1) + sextiles + (month - 1) * 30 + day - 1;
+}
+
+/**
+ * Exact days in a Hebrew or French Republican month, for range bounds.
+ * (Parsing stays lenient and accepts day 30 / COMP 6 in every year.)
+ */
+export function exactMonthDays(
+  calendar: 'hebrew' | 'french_r',
+  year: number,
+  month: number,
+): number {
+  if (calendar === 'french_r') {
+    return month < 13 ? 30 : frenchToJdn(year + 1, 1, 1) - frenchToJdn(year, 13, 1);
+  }
+  const leap = (7 * year + 1) % 19 < 7;
+  const m = !leap && month === 7 ? 6 : month;
+  const next =
+    m === 13 ? hebrewNewYear(year + 1) : hebrewToJdn(year, !leap && m === 6 ? 8 : m + 1, 1);
+  return next - hebrewToJdn(year, m, 1);
+}
 
 /**
  * Gregorian year/month/day for a fully specified date in any calendar.
- * Julian is exact; Hebrew and French Republican are approximate (within a few
- * weeks), which is enough to sort them among Gregorian dates.
+ * Julian and Hebrew are exact; French Republican is exact for the years it was
+ * in use (I to XIV).
  */
 export function toGregorian(
   calendar: Calendar,
@@ -158,14 +231,10 @@ export function toGregorian(
   switch (calendar) {
     case 'julian':
       return jdnToGregorian(julianToJdn(astronomical(year), month, day));
-    case 'hebrew': {
-      const m = HEBREW_TO_GREGORIAN_MONTH[month - 1]!;
-      return { year: m >= 9 ? year - 3761 : year - 3760, month: m, day: Math.min(day, 28) };
-    }
+    case 'hebrew':
+      return jdnToGregorian(hebrewToJdn(year, month, day));
     case 'french_r':
-      return jdnToGregorian(
-        FRENCH_EPOCH_JDN + Math.floor((year - 1) * 365.2425) + (month - 1) * 30 + day - 1,
-      );
+      return jdnToGregorian(frenchToJdn(year, month, day));
     default:
       return { year, month, day };
   }

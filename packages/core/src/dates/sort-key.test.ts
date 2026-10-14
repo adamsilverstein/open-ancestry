@@ -41,15 +41,45 @@ describe('sortKey', () => {
     expect(parseDate('1941').sortKeyEnd).toBeUndefined();
   });
 
-  it('approximates Hebrew and French Republican dates onto the Gregorian timeline', () => {
-    const hebrew = parseDate('@#DHEBREW@ 1 TSH 5700').sortKey;
-    expect(hebrew).toBeGreaterThan(19390800);
-    expect(hebrew).toBeLessThan(19391100);
-    const french = parseDate('@#DFRENCH R@ 1 VEND 1').sortKey;
-    expect(french).toBeGreaterThan(17920800);
-    expect(french).toBeLessThan(17921100);
-    expect(parseDate('@#DFRENCH R@ 1 PLUV 1').sortKey).toBeGreaterThan(17930100);
-    expect(parseDate('@#DHEBREW@ 5700').sortKey).toBeGreaterThan(19390000);
+  it.each([
+    // Hebrew, checked against published calendars.
+    ['@#DHEBREW@ 1 TSH 5700', 19390914],
+    ['@#DHEBREW@ 1 TSH 5780', 20190930],
+    ['@#DHEBREW@ 25 KSL 5784', 20231208],
+    ['@#DHEBREW@ 14 ADR 5783', 20230307],
+    ['@#DHEBREW@ 14 ADS 5783', 20230307],
+    ['@#DHEBREW@ 14 ADR 5784', 20240223],
+    ['@#DHEBREW@ 14 ADS 5784', 20240324],
+    ['@#DHEBREW@ 15 NSN 5785', 20250413],
+    ['@#DHEBREW@ 9 AAV 5784', 20240813],
+    ['@#DHEBREW@ 29 ELL 5784', 20241002],
+    ['@#DHEBREW@ 1 TSH 5785', 20241003],
+    // French Republican, including the sextile years III, VII and XI.
+    ['@#DFRENCH R@ 1 VEND 1', 17920922],
+    ['@#DFRENCH R@ 1 VEND 2', 17930922],
+    ['@#DFRENCH R@ 9 THER 2', 17940727],
+    ['@#DFRENCH R@ 6 COMP 3', 17950922],
+    ['@#DFRENCH R@ 1 VEND 4', 17950923],
+    ['@#DFRENCH R@ 18 BRUM 8', 17991109],
+    ['@#DFRENCH R@ 11 FRIM 13', 18041202],
+    ['@#DFRENCH R@ 1 VEND 14', 18050923],
+  ])('converts %s exactly -> %i', (input, key) => {
+    expect(parseDate(input).sortKey).toBe(key);
+  });
+
+  it('bounds Hebrew and French years and months by their real lengths', () => {
+    expect(parseDate('BET @#DHEBREW@ 5784 AND @#DHEBREW@ 5784')).toMatchObject({
+      sortKey: 20230916,
+      sortKeyEnd: 20241002,
+    });
+    expect(parseDate('AFT @#DHEBREW@ ELL 5784').sortKey).toBe(20241003);
+    expect(parseDate('BEF @#DHEBREW@ TSH 5785').sortKey).toBe(20241002);
+    expect(parseDate('BET @#DFRENCH R@ COMP 2 AND @#DFRENCH R@ COMP 2')).toMatchObject({
+      sortKey: 17940917,
+      sortKeyEnd: 17940921,
+    });
+    expect(parseDate('@#DHEBREW@ 5700').sortKey).toBeGreaterThan(19390914);
+    expect(parseDate('@#DHEBREW@ 5700').sortKey).toBeLessThan(19400902);
   });
 
   it('uses the undated key for text', () => {

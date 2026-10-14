@@ -56,3 +56,13 @@ export function clampGenerations(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.min(MAX_GENERATIONS, Math.max(0, Math.round(value)));
 }
+
+/**
+ * A generation count from a hand-editable URL value, clamped, or undefined when
+ * it isn't a number (`abc`, empty) so the caller falls back to its default.
+ */
+export function parseGenerations(value: unknown): number | undefined {
+  if (typeof value === 'string' && value.trim() === '') return undefined;
+  const n = typeof value === 'string' ? Number(value) : value;
+  return typeof n === 'number' && Number.isFinite(n) ? clampGenerations(n) : undefined;
+}

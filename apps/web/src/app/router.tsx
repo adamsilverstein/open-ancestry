@@ -16,6 +16,7 @@ import { HomePage } from '../routes/HomePage';
 import { NotFoundPage } from '../routes/NotFoundPage';
 import { RouteErrorPage } from '../routes/RouteErrorPage';
 import { validatePeopleSearch } from '../routes/people/search';
+import { parseGenerations } from '../tree/api';
 
 const rootRoute = createRootRoute({
   component: AppShell,
@@ -43,14 +44,6 @@ interface TreeSearch {
   up?: number;
   down?: number;
 }
-/** A number of generations from the URL, clamped to what the server serves (0-10). */
-const generations = (value: unknown) => {
-  const n = typeof value === 'string' ? Number(value) : value;
-  return typeof n === 'number' && Number.isFinite(n)
-    ? Math.min(10, Math.max(0, Math.round(n)))
-    : undefined;
-};
-
 const treeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/tree/$personId',
@@ -61,10 +54,10 @@ const treeRoute = createRoute({
     if (treeLayouts.includes(search.layout as TreeLayoutKind)) {
       valid.layout = search.layout as TreeLayoutKind;
     }
-    const up = generations(search.up);
-    if (up !== undefined) valid.up = up;
-    const down = generations(search.down);
-    if (down !== undefined) valid.down = down;
+    // Set even when undefined: the root route passes the raw search through,
+    // so an unset key would let `up=abc` reach the view as a string.
+    valid.up = parseGenerations(search.up);
+    valid.down = parseGenerations(search.down);
     return valid;
   },
   component: lazyRouteComponent(() => import('../routes/TreePage'), 'TreePage'),

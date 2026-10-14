@@ -24,10 +24,10 @@ import { TreeToolbar, type TreeLayout as LayoutKind } from '../components/TreeTo
 import { Skeleton } from '../components/Skeleton/Skeleton';
 import {
   ApiError,
-  clampGenerations,
   fetchHome,
   fetchNeighborhood,
   MAX_GENERATIONS,
+  parseGenerations,
   treeKeys,
   type NeighborhoodRequest,
 } from './api';
@@ -164,8 +164,8 @@ export function TreeView({
   const toast = useToast();
   const kind: LayoutKind = search.layout ?? 'family';
   // Hand-edited URLs can hold anything: clamp to what the server serves.
-  const up = clampGenerations(search.up ?? DEFAULT_DEPTH[kind].up);
-  const down = clampGenerations(search.down ?? DEFAULT_DEPTH[kind].down);
+  const up = parseGenerations(search.up) ?? DEFAULT_DEPTH[kind].up;
+  const down = parseGenerations(search.down) ?? DEFAULT_DEPTH[kind].down;
 
   const canvas = useRef<TreeCanvasHandle>(null);
   // The page remounts this view per tree, so one cache and worker per tree.

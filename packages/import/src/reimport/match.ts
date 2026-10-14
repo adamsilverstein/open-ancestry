@@ -60,8 +60,15 @@ function yearScore(a: number | null, b: number | null): number | null {
   return d === 0 ? 1 : d <= 2 ? 0.7 : d <= 5 ? 0.3 : 0;
 }
 
-/** Evidence score of a pair, without relatives. */
-function baseScore(e: SnapPerson, i: SnapPerson): { score: number; reasons: string[] } {
+/**
+ * Evidence score of a pair, without relatives. `corroboration` counts the
+ * independent agreements beyond the name (birth year, death year, birth
+ * place; a shared Ancestry record counts twice).
+ */
+function baseScore(
+  e: SnapPerson,
+  i: SnapPerson,
+): { score: number; reasons: string[]; corroboration: number } {
   const reasons: string[] = [];
   const shared = [...i.apids].filter((apid) => e.apids.has(apid));
   const given = jaroWinkler(e.given, i.given);
@@ -101,7 +108,12 @@ function baseScore(e: SnapPerson, i: SnapPerson): { score: number; reasons: stri
     score = Math.max(score, Math.min(0.99, 0.9 + 0.03 * shared.length));
     reasons.push(`${shared.length} shared Ancestry record${shared.length > 1 ? 's' : ''}`);
   }
-  return { score, reasons };
+  const corroboration =
+    ((yearScore(e.birthYear, i.birthYear) ?? 0) >= 0.7 ? 1 : 0) +
+    ((yearScore(e.deathYear, i.deathYear) ?? 0) >= 0.7 ? 1 : 0) +
+    (e.birthPlace && e.birthPlace === i.birthPlace ? 1 : 0) +
+    (shared.length ? 2 : 0);
+  return { score, reasons, corroboration };
 }
 
 /**
@@ -125,9 +137,19 @@ const blockKeys = (p: SnapPerson): string[] => {
 interface Candidate {
   e: string;
   i: string;
+  /** Ranking score: uncapped, so confirming relatives can separate pairs that tie on evidence. */
   score: number;
   reasons: string[];
+  corroboration: number;
+  agree: number;
 }
+
+/** Without at least this much agreement beyond the name, a match is never "high confidence". */
+const MIN_CORROBORATION = 2;
+/** Confidence given to matches that are possible but must be checked by the user. */
+const CHECK_CONFIDENCE = 0.8;
+/** Two candidates closer than this are a tie the user has to settle. */
+const TIE_MARGIN = 0.05;
 
 /**
  * One-to-one, best scores first, except that a person merged in the tree
@@ -183,46 +205,83 @@ export function matchPeople(existing: Snapshot, incoming: Snapshot): Map<string,
       let { score } = base;
       const reasons = [...base.reasons];
       if (id === sameXref) {
-        score = Math.min(1, score + 0.15);
+        score += 0.15;
         reasons.push('same xref as the last import');
       }
-      if (score >= MATCH_THRESHOLD - 0.4) candidates.push({ e: id, i: i.row.id, score, reasons });
+      if (score >= MATCH_THRESHOLD - 0.4) {
+        candidates.push({
+          e: id,
+          i: i.row.id,
+          score,
+          reasons,
+          corroboration: base.corroboration,
+          agree: 0,
+        });
+      }
     }
   }
 
   // Second pass: relatives that were matched to each other confirm (or tell apart) a pair.
   const first = assign(candidates, capacityOf);
   const toExisting = new Map([...first.values()].map((c) => [c.i, c.e]));
-  const related = (ids: string[]) => new Set(ids);
   for (const c of candidates) {
     const e = existing.people.get(c.e)!;
     const i = incoming.people.get(c.i)!;
     let agree = 0;
+    let contradict = 0;
     for (const [incomingRelatives, existingRelatives] of [
-      [i.parents, related(e.parents)],
-      [i.spouses, related(e.spouses)],
-      [i.children, related(e.children)],
+      [i.parents, new Set(e.parents)],
+      [i.spouses, new Set(e.spouses)],
+      [i.children, new Set(e.children)],
     ] as const) {
       for (const r of incomingRelatives) {
         const mapped = toExisting.get(r);
-        if (mapped && existingRelatives.has(mapped)) agree++;
+        if (!mapped) continue;
+        // A relative matched to someone who is not this person's relative argues against the pair.
+        if (existingRelatives.has(mapped)) agree++;
+        else if (existingRelatives.size) contradict++;
       }
     }
-    if (agree) {
-      c.score = Math.min(1, c.score + 0.1 * Math.min(agree, 3));
-      c.reasons = [...c.reasons, `${agree} matching relative${agree > 1 ? 's' : ''}`];
+    c.agree = agree;
+    c.score += 0.1 * Math.min(agree, 3) - 0.15 * Math.min(contradict, 3);
+    if (agree) c.reasons = [...c.reasons, `${agree} matching relative${agree > 1 ? 's' : ''}`];
+    if (contradict) {
+      c.reasons = [...c.reasons, `${contradict} relative${contradict > 1 ? 's' : ''} disagree`];
     }
   }
   const final = assign(candidates, capacityOf);
+  // Close runners-up: another tree person for this record, or another record for this person.
+  const best = (key: 'e' | 'i', id: string, except: Candidate) =>
+    Math.max(
+      -Infinity,
+      ...candidates
+        .filter(
+          (x) =>
+            x[key] === id && x !== except && (key === 'i' ? x.e !== except.e : x.i !== except.i),
+        )
+        .map((x) => x.score),
+    );
   const perExisting = new Map<string, number>();
   for (const c of final.values()) perExisting.set(c.e, (perExisting.get(c.e) ?? 0) + 1);
   const result = new Map<string, PersonMatch>();
   for (const c of final.values()) {
-    if ((perExisting.get(c.e) ?? 0) > 1) c.reasons = [...c.reasons, 'merged in this tree'];
+    const merged = (perExisting.get(c.e) ?? 0) > 1;
+    if (merged) c.reasons = [...c.reasons, 'merged in this tree'];
+    let confidence = Math.max(0, Math.min(1, c.score));
+    // Name alone (or one detail) is not enough to merge records in bulk.
+    if (c.corroboration + (c.agree ? 1 : 0) < MIN_CORROBORATION) {
+      confidence = Math.min(confidence, CHECK_CONFIDENCE);
+      c.reasons = [...c.reasons, 'little evidence beyond the name'];
+    }
+    const rival = Math.max(best('i', c.i, c), merged ? -Infinity : best('e', c.e, c));
+    if (rival >= c.score - TIE_MARGIN) {
+      confidence = Math.min(confidence, CHECK_CONFIDENCE);
+      c.reasons = [...c.reasons, 'another person is as likely'];
+    }
     result.set(c.i, {
       existingId: c.e,
       incomingId: c.i,
-      confidence: Math.round(c.score * 100) / 100,
+      confidence: Math.round(confidence * 100) / 100,
       reasons: c.reasons,
     });
   }

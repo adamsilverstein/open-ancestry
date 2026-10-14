@@ -4,6 +4,7 @@ coverage/
 .nyc_output/
 playwright-report/
 test-results/
+perf-results/
 *.tsbuildinfo
 .DS_Store
 .env*

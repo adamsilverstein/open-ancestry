@@ -32,8 +32,13 @@ URL focus ──> TreeView ──fetchQuery──> GET /api/trees/:tree/neighbor
   card text is unreadable, so cards and edges are painted on one canvas each frame and nothing
   mounts while panning; only the keyboard's active card stays in the DOM, and clicking a painted
   card zooms in on it.
-- **Framing.** The first view centers the focus card across and frames grandparents to children
-  down the screen (zooming out to fit them).
+- **Framing.** The first view of each layout frames it the way it reads. Family view: the focus
+  card centered across, grandparents to children down the screen (zooming out to fit them).
+  Pedigree: the focus person at the left, clear of the toolbar, with the whole chart fitted, on
+  compact cards so four generations of ancestors fit. Descendants: the focus person at the top
+  center, the generations below fitted. Fan: the whole fan fitted. Re-focusing keeps the zoom.
+- **Fan.** Unknown parents of shown ancestors (within the generations shown) are drawn as empty
+  dashed slots, so the fan reads as complete; they are decorative and hidden from screen readers.
 - **Pointer.** Drag pans. A mouse wheel or pinch (ctrl + wheel, Safari gestures) zooms around the
   pointer; a trackpad's two-finger scroll and Shift + wheel pan (`wheelKind` in `viewport.ts`).
 - **Re-focus.** The view jumps so the new focus card sits where it was, then tweens 180ms to the
@@ -49,8 +54,20 @@ URL focus ──> TreeView ──fetchQuery──> GET /api/trees/:tree/neighbor
 
 ## Budgets
 
-`e2e/tree-perf.spec.ts` on the seeded 10,000-person tree (Chromium, 1440x900): re-focus with
-cached data (fetch, worker layout, render) from the `oa-tree-refocus` performance measure with
-500+ people on screen, and frame times from `requestAnimationFrame` during a scripted pan and
-pinch over 2,796 laid-out cards, both at fit (2,000+ painted on screen) and just above the canvas
-threshold with cards mounted. The world layer reports `data-visible-count` for these checks.
+`e2e/tree-perf.spec.ts` (`npm run e2e:perf`, Chromium, 1440x900) checks design.md section 7 on
+seeded synthetic trees of 10,000 and 100,000 people. The 100k tree (only with `OA_PERF_100K=1`,
+which the script sets) uses another seed and its densest view, so its checks lay out more cards
+than the 10k ones, and they assert that.
+
+| Measure | Budget |
+| --- | --- |
+| First paint: home person's family view, navigation to first rendered layout, median of 5 cold loads | < 1s |
+| Re-focus with cached data, key press to painted frame, median of 30 (p95 reported): at fit (500+ painted) and at 35-45% zoom (cards mounted) | < 50ms |
+| Pan and pinch with 2,000+ laid out, at fit (all painted) and at 35-45% (cards mounted) | median >= 58fps, < 5% of frames over 33ms (long tasks and the longest frame reported) |
+| JS heap after GC, each round of re-focuses and pans after the first | < 2MB growth |
+
+Time budgets (and the allowed share of frames over 33ms) scale by `OA_BENCH_FACTOR` (CI: 2.5); the fps and memory budgets do not. The spec only runs with `OA_PERF=1`, which `npm run e2e:perf` and the CI `perf` job set. Results go to
+`perf-results/tree-view.md`, which CI's `perf` job adds to its summary. The app marks
+`oa-tree-first-paint` once and `oa-tree-ready` (replaced each time) when a layout's frame has
+painted, and measures `oa-tree-refocus` from the re-focus action to that mark, keeping at most
+100 of them; the world layer reports `data-visible-count`.

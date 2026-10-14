@@ -35,6 +35,12 @@
   contain: layout paint style;
 }
 
+/* Mid zoom: name and dates only, centered; avatar and badges are too small to see. */
+.world .lightCard {
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
 /* Far zoomed out, every card is painted here instead of mounted. */
 .lodLayer {
   position: absolute;
@@ -141,7 +147,9 @@
 
 .labelColumn {
   transform: translate(0, -100%);
-  padding-bottom: var(--oa-space-1);
+  /* Clear of the expand chevrons that sit on the top cards' edges. */
+  padding-bottom: calc(var(--oa-space-1) + 14px);
+  white-space: normal;
 }
 
 .edges,
@@ -177,6 +185,14 @@
 
 .fanSegment {
   cursor: pointer;
+}
+
+/* An unknown parent: the slot is kept, outlined, so the fan reads as complete. */
+.fanEmpty {
+  fill: none;
+  stroke: var(--oa-canvas-line);
+  stroke-dasharray: 4 4;
+  stroke-width: 1.5;
 }
 
 .fanSegment path {

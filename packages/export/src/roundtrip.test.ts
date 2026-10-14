@@ -8,6 +8,7 @@ import {
   FIXTURE_FILES,
   TODAY,
   domainSnapshot,
+  ged,
   gedcom7Problems,
   importInto,
   importedSnapshot,
@@ -104,4 +105,39 @@ describe('GEDCOM 5.5.1 export that is generated, not copied', { timeout: 30_000 
       );
     },
   );
+});
+
+describe('decade and century periods', () => {
+  const periods = [
+    'FROM 1850s',
+    'TO 1850s',
+    'FROM 1850s TO 1860s',
+    'FROM 1700s TO 1800s',
+    'TO 2000s',
+  ];
+
+  it('keep their text and parsed columns through a GEDCOM 5.5.1 and 7 round trip', async () => {
+    const store = await importInto(
+      ged(
+        '0 @I1@ INDI',
+        '1 NAME Odile /Fernsby/',
+        ...periods.flatMap((date) => ['1 RESI', `2 DATE ${date}`]),
+      ),
+    );
+    const columns = (s: typeof store) =>
+      rows(
+        s,
+        `SELECT date_text, date_qualifier, date_sort, date_sort_end, calendar FROM event
+         JOIN event_role r ON r.event_id = event.id ORDER BY r.sort_order`,
+      );
+    const before = columns(store);
+    expect(before.map((e) => e.date_qualifier)).toEqual(['from', 'to', 'from_to', 'from_to', 'to']);
+    const seven = exportGedcom(store, { version: '7', now: TODAY });
+    expect(seven).toContain('2 DATE FROM 1850\n3 PHRASE FROM 1850s');
+    expect(seven).toContain('2 DATE FROM 1850 TO 1869\n3 PHRASE FROM 1850s TO 1860s');
+    expect(gedcom7Problems(seven)).toEqual([]);
+    expect(columns(await importInto(seven))).toEqual(before);
+    store.db.exec('DELETE FROM raw_record');
+    expect(columns(await importInto(exportGedcom(store, { now: TODAY })))).toEqual(before);
+  });
 });

@@ -114,12 +114,20 @@ describe('layout properties', () => {
         assertNoOverlap(layout.nodes);
         assertVerticalEdges(layout);
         expect(crossings(layout.edges)).toEqual([]);
-        const anyRow = layout.nodes.find((n) => n.generation !== 0);
-        const rowStep = anyRow ? anyRow.y / anyRow.generation : 0;
-        expect(rowStep === 0 || rowStep >= 150 + 64).toBe(true);
+        // One y per generation, in order, at least a card and the default gap apart
+        // (a gap grows only to fit couple lanes or crowded connectors).
+        const rowY = new Map<number, number>();
         for (const n of layout.nodes) {
-          // Rows are evenly spaced (the gap grows only to fit couple lanes).
-          expect(n.y).toBe(n.generation * rowStep);
+          expect(rowY.get(n.generation) ?? n.y).toBe(n.y);
+          rowY.set(n.generation, n.y);
+        }
+        const rows = [...rowY].sort((p, q) => p[0] - q[0]);
+        for (let i = 1; i < rows.length; i++) {
+          const [g0, y0] = rows[i - 1]!;
+          const [g1, y1] = rows[i]!;
+          expect(y1 - y0).toBeGreaterThanOrEqual((g1 - g0) * (150 + 64));
+        }
+        for (const n of layout.nodes) {
           if (n.isDuplicate) expect(layout.nodes.some((p) => p.key === n.duplicateOf)).toBe(true);
         }
       }),

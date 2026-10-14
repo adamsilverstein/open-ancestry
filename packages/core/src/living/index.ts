@@ -11,12 +11,16 @@
  * Without a usable birth date the birth year is estimated from relatives:
  * parent + 25, spouse + 0, child - 25 years. Every date counts at its latest
  * possible year and the latest estimate wins, again erring toward living.
+ * An estimate alone only proves death when it rests on at least two dated
+ * relatives and clears the threshold by ESTIMATE_MARGIN_YEARS, so one
+ * mistyped relative's date cannot hide a living person's privacy.
  * With no dates at all the person is living, as on Ancestry.
  */
 import { parseDate } from '../dates';
 import type { DateInput, ParsedDate } from '../dates';
 
 export const GENERATION_YEARS = 25;
+export const ESTIMATE_MARGIN_YEARS = 10;
 
 export interface LivingInput {
   birth?: DateInput;
@@ -31,7 +35,12 @@ export interface LivingInput {
 }
 
 export type LivingReason =
-  'death-facts' | 'birth-within-threshold' | 'birth-beyond-threshold' | 'no-dates';
+  | 'death-facts'
+  | 'birth-within-threshold'
+  | 'birth-beyond-threshold'
+  /** Relatives suggest an old birth, but not strongly enough to expose details. */
+  | 'insufficient-evidence'
+  | 'no-dates';
 
 export interface LivingResult {
   living: boolean;
@@ -55,7 +64,7 @@ function latestYear(date: unknown): number | undefined {
   return Number.isFinite(year) ? year : undefined;
 }
 
-function estimateBirthYear(input: LivingInput): number | undefined {
+function estimateBirthYear(input: LivingInput): { year: number; sources: number } | undefined {
   const estimates: number[] = [];
   const add = (dates: unknown, offset: number) => {
     if (!Array.isArray(dates)) return;
@@ -67,7 +76,7 @@ function estimateBirthYear(input: LivingInput): number | undefined {
   add(input.parentBirths, GENERATION_YEARS);
   add(input.spouseBirths, 0);
   add(input.childBirths, -GENERATION_YEARS);
-  return estimates.length ? Math.max(...estimates) : undefined;
+  return estimates.length ? { year: Math.max(...estimates), sources: estimates.length } : undefined;
 }
 
 export function inferLiving(
@@ -80,17 +89,32 @@ export function inferLiving(
     return { living: false, reason: 'death-facts', estimated: false };
   }
   const own = latestYear(facts.birth);
-  const birthYear = own ?? estimateBirthYear(facts);
+  const estimate = own === undefined ? estimateBirthYear(facts) : undefined;
+  const birthYear = own ?? estimate?.year;
   const currentYear = today instanceof Date ? today.getFullYear() : NaN;
   if (birthYear === undefined || !Number.isFinite(currentYear)) {
     return { living: true, reason: 'no-dates', estimated: false };
   }
   const threshold = Number.isFinite(thresholdYears) && thresholdYears > 0 ? thresholdYears : 100;
-  const living = !(currentYear - birthYear >= threshold);
+  const age = currentYear - birthYear;
+  if (estimate) {
+    const proven = estimate.sources >= 2 && age >= threshold + ESTIMATE_MARGIN_YEARS;
+    return {
+      living: !proven,
+      reason: proven
+        ? 'birth-beyond-threshold'
+        : age >= threshold
+          ? 'insufficient-evidence'
+          : 'birth-within-threshold',
+      estimated: true,
+      birthYear,
+    };
+  }
+  const living = !(age >= threshold);
   return {
     living,
     reason: living ? 'birth-within-threshold' : 'birth-beyond-threshold',
-    estimated: own === undefined,
+    estimated: false,
     birthYear,
   };
 }

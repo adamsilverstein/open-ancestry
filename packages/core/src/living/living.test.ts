@@ -48,9 +48,24 @@ describe('inferLiving', () => {
     ],
     ['unparseable birth, no relatives', { birth: 'unknown' }, { living: true, reason: 'no-dates' }],
     [
-      'parent born 1890',
+      'one parent born 1890 is not enough',
       { parentBirths: ['1890'] },
-      { living: false, estimated: true, birthYear: 1915 },
+      { living: true, reason: 'insufficient-evidence', estimated: true, birthYear: 1915 },
+    ],
+    [
+      'two parents born 1880s',
+      { parentBirths: ['1880', '1885'] },
+      { living: false, reason: 'birth-beyond-threshold', estimated: true, birthYear: 1910 },
+    ],
+    [
+      'two old relatives within the margin',
+      { parentBirths: ['1880', '1895'] },
+      { living: true, reason: 'insufficient-evidence', birthYear: 1920 },
+    ],
+    [
+      'single mistyped child date',
+      { childBirths: ['1801'] },
+      { living: true, reason: 'insufficient-evidence', birthYear: 1776 },
     ],
     [
       'parent born 1950',
@@ -63,14 +78,14 @@ describe('inferLiving', () => {
       { living: true, estimated: true, birthYear: 1935 },
     ],
     [
-      'child born 1900',
-      { childBirths: ['1900'] },
-      { living: false, estimated: true, birthYear: 1875 },
+      'children born 1900 and 1905',
+      { childBirths: ['1900', '1905'] },
+      { living: false, estimated: true, birthYear: 1880 },
     ],
     [
-      'spouse born 1920',
+      'spouse born 1920 alone',
       { spouseBirths: ['1920'] },
-      { living: false, estimated: true, birthYear: 1920 },
+      { living: true, reason: 'insufficient-evidence', birthYear: 1920 },
     ],
     [
       'spouse born 1940',
@@ -117,6 +132,12 @@ describe('inferLiving', () => {
     ['non-boolean death flag', { hasDeathFacts: 'true' } as unknown as LivingInput],
     ['relatives as a string, not a list', { parentBirths: '1800' } as unknown as LivingInput],
     ['open-ended parent birth', { parentBirths: ['AFT 1800'] }],
+    ['decade birth', { birth: '1920s' }],
+    ['year-range birth', { birth: '1900-2010' }],
+    ['FROM..TO birth', { birth: 'FROM 1900 TO 2000' }],
+    ['BET birth', { birth: 'BET 1900 AND 2000' }],
+    ['open-ended child births', { childBirths: ['AFT 1900', 'AFT 1850'] }],
+    ['ranged child births', { childBirths: ['BET 1900 AND 1990', '1910'] }],
     ['forged parsed birth', { birth: { ...parseDate('1800'), sortKey: NaN } }],
     ['forged invalid parsed birth', { birth: { ...parseDate('1800'), valid: false } }],
     ['numeric birth', { birth: 1800 } as unknown as LivingInput],
@@ -175,7 +196,9 @@ describe('inferLiving fails closed (properties)', () => {
         const t = Number.isFinite(threshold) && threshold > 0 ? threshold : 100;
         expect(result.reason).toBe('birth-beyond-threshold');
         expect(Number.isFinite(result.birthYear)).toBe(true);
-        expect((now as Date).getFullYear() - result.birthYear!).toBeGreaterThanOrEqual(t);
+        // An undefined argument falls back to the default of the current date.
+        const current = (now === undefined ? new Date() : (now as Date)).getFullYear();
+        expect(current - result.birthYear!).toBeGreaterThanOrEqual(t);
       }),
       { numRuns: 1000 },
     );

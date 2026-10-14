@@ -189,6 +189,49 @@ test.describe('fonts and network', () => {
   });
 });
 
+test.describe('layout stability', () => {
+  test.skip(
+    ({ browserName }) => browserName !== 'chromium',
+    'Layout shift entries are Chromium only',
+  );
+
+  test('the recent trees list appears without moving anything on the home page', async ({
+    page,
+  }) => {
+    // Hold the tree list until the page has painted with its fonts, so only its arrival is measured.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route('**/api/trees', async (route) => {
+      await held;
+      await route.continue();
+    });
+    await page.goto('/');
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+    // Fonts swap in when they finish loading; let that layout land before measuring.
+    const since = await page.evaluate(async () => {
+      await document.fonts.ready;
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      return performance.now();
+    });
+    release();
+    await expect(page.getByRole('navigation', { name: 'Recent trees' })).toBeVisible();
+    const shift = await page.evaluate(
+      (after) =>
+        new Promise<number>((resolve) => {
+          let total = 0;
+          new PerformanceObserver((list) => {
+            for (const e of list.getEntries() as (PerformanceEntry & { value: number })[]) {
+              if (e.startTime >= after) total += e.value;
+            }
+          }).observe({ type: 'layout-shift', buffered: true });
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve(total)));
+        }),
+      since,
+    );
+    expect(shift).toBe(0);
+  });
+});
+
 test.describe('performance', () => {
   test.skip(
     ({ browserName }) => browserName !== 'chromium',

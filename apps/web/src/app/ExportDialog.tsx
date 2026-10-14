@@ -5,6 +5,7 @@ import { Button } from '../components/Button/Button';
 import { Checkbox } from '../components/Checkbox/Checkbox';
 import { Dialog, DialogClose } from '../components/Dialog/Dialog';
 import { Select } from '../components/Select/Select';
+import { currentTreeQuery, treesQuery } from '../library/api';
 import {
   EXPORT_FORMATS,
   canPrivatize,
@@ -14,17 +15,6 @@ import {
   type ExportFormat,
 } from '../lib/exportUrl';
 import styles from './ExportDialog.module.css';
-
-interface TreeInfo {
-  id: string;
-  name: string;
-}
-
-async function fetchTrees(): Promise<TreeInfo[]> {
-  const res = await fetch('/api/trees');
-  if (!res.ok) throw new Error(`Could not list trees (${res.status})`);
-  return ((await res.json()) as { trees: TreeInfo[] }).trees;
-}
 
 export interface ExportDialogProps {
   open: boolean;
@@ -57,13 +47,18 @@ function save(blob: Blob, name: string) {
  * what the export could not carry over, or why it failed.
  */
 export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogProps) {
-  const trees = useQuery({ queryKey: ['trees'], queryFn: fetchTrees, enabled: open });
+  const trees = useQuery({ ...treesQuery, enabled: open });
+  const { data: current = null } = useQuery(currentTreeQuery);
   const [tree, setTree] = useState<string | undefined>();
   const [format, setFormat] = useState<ExportFormat>('gedcom-5.5.1');
   const [privatize, setPrivatize] = useState(false);
   const [state, setState] = useState<ExportState>({ status: 'idle' });
   const list = trees.data ?? [];
-  const selected = tree ?? (list.length === 1 ? list[0]!.id : undefined);
+  // The open tree by default, or the only one there is.
+  const selected =
+    tree ??
+    (current && list.some((t) => t.id === current) ? current : undefined) ??
+    (list.length === 1 ? list[0]!.id : undefined);
 
   const changeOpen = (next: boolean) => {
     if (!next) setState({ status: 'idle' });

@@ -530,7 +530,7 @@ The importer is `packages/import` (`importGedcom`); see its README for the API a
 
 ## Export
 
-`packages/export` writes GEDCOM 5.5.1, GEDCOM 7 and GEDZIP; see its [README](../packages/export/README.md). A record nothing has changed since import (no `change_log` row in an applied batch touches it or a row written inside it) is copied from `raw_record` when the export is in the version it was imported from, so custom tags survive; everything else is generated from the tables above, with top-level unmapped extension lines merged back. Imported xrefs (`external_id`, `raw_record.xref`) are reused. "Privatize living" uses `isLiving()` and generates every record.
+`packages/export` writes GEDCOM 5.5.1, GEDCOM 7 and GEDZIP; see its [README](../packages/export/README.md). A record nothing has changed since import (no `change_log` row in an applied batch touches it or a row written inside it) is copied from `raw_record` when the export is in the version it was imported from, so custom tags survive; everything else is generated from the tables above, with each `unmapped_line` put back under the structure it came from (or reported as an export warning when it cannot be). Imported xrefs (`external_id`, `raw_record.xref`) are reused. "Privatize living" uses `isLiving()`, generates every record, and cuts living people and their families down to an allowlist of lines.
 
 ## Change log, undo and redo
 

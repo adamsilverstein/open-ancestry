@@ -157,6 +157,8 @@ export class Mapper {
   private readonly persons = new Map<string, PersonState>();
   private readonly families = new Map<string, FamilyState>();
   private readonly childLinks = new Map<string, ChildLink>();
+  /** Families by partner, built at the start of finalize. */
+  private readonly partnerFamilies = new Map<string, FamilyState[]>();
   private readonly linkKeys = new Set<string>();
   private readonly linkOrder = new Map<string, number>();
   private readonly citationKeys = new Map<string, string>();
@@ -1246,6 +1248,14 @@ export class Mapper {
   /** Resolves cross-record structure and writes buffered rows. Call once, after every mapRecord. */
   finalize(): void {
     this.linkPartners();
+    for (const family of this.families.values()) {
+      for (const partner of [family.partner1, family.partner2]) {
+        if (!partner) continue;
+        const list = this.partnerFamilies.get(partner);
+        if (list) list.push(family);
+        else this.partnerFamilies.set(partner, [family]);
+      }
+    }
     this.resolveChildLinks();
     this.resolveMarriages();
     this.writeFamilies();
@@ -1330,9 +1340,7 @@ export class Mapper {
   private resolveMarriages(): void {
     for (const person of this.persons.values()) {
       if (!person.marriages.length) continue;
-      const families = [...this.families.values()].filter(
-        (f) => f.partner1 === person.id || f.partner2 === person.id,
-      );
+      const families = this.partnerFamilies.get(person.id) ?? [];
       for (const node of person.marriages) {
         const date = normalizeDate(text(this.child(node, 'DATE')));
         const placeNode = this.child(node, 'PLAC');
@@ -1428,7 +1436,7 @@ export class Mapper {
     for (const person of this.persons.values()) {
       if (!person.untypedNames.length) continue;
       const spouseSurnames = new Set<string>();
-      for (const family of this.families.values()) {
+      for (const family of this.partnerFamilies.get(person.id) ?? []) {
         const spouse =
           family.partner1 === person.id
             ? family.partner2

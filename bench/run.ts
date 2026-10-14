@@ -26,7 +26,14 @@ const rows = [];
 let failed = false;
 for (const c of cases) {
   await c.setup?.();
-  const bench = new Bench({ iterations: c.iterations ?? 10, time: c.time ?? 500 });
+  const bench = new Bench({
+    iterations: c.iterations ?? 10,
+    time: c.time ?? 500,
+    ...(c.warmupIterations !== undefined && {
+      warmup: c.warmupIterations > 0,
+      warmupIterations: c.warmupIterations,
+    }),
+  });
   bench.add(c.name, c.fn);
   await bench.run();
   const result = bench.tasks[0]?.result;

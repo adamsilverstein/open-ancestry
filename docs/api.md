@@ -55,7 +55,7 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 | `GET /api/trees/:tree/search?q&limit` | Ranked search `{ items: [{ person, match, score }] }`: exact words, then prefixes (years within two), then surnames by sound (`match` says which). Every word is required (`or`/`and` are ordinary words); input is NFC-normalized, only its first 100 characters and 8 distinct words are used, and a one-character word matches only as a whole word (an initial). Responses carry `Server-Timing: app;dur=<ms>`. |
 | `GET`, `PUT /api/trees/:tree/home` `{ personId }` | Home person. |
 | `GET /api/trees/:tree/tags` | Tags with person counts. |
-| `GET /api/trees/:tree/history?limit` | Change batches, `canUndo`, `canRedo`. |
+| `GET /api/trees/:tree/history?limit` | Change batches, newest first in commit order (`seq`, not the ULID, so clock changes cannot reorder them), `canUndo`, `canRedo`. |
 | `POST /api/trees/:tree/undo`, `/redo` | Undo or redo the latest batch; `{ batch }` (null if none). |
 | `GET /api/trees/:tree/export.json` | Full open-ancestry JSON download. |
 | `GET /api/trees/:tree/export.ged?version&privatize` | GEDCOM download (`text/vnd.familysearch.gedcom`); `version` is `5.5.1` (default, Ancestry-compatible) or `7`; `privatize=true` writes living people, and anyone marked private or confidential, as "Private" with only their family links, and names the download `private-tree.ged` instead of after the tree. |

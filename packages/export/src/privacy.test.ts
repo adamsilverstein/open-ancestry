@@ -90,14 +90,16 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
-async function tree() {
+async function tree(gedcom: string[] = lines) {
   const root = mkdtempSync(join(tmpdir(), 'oa-privacy-'));
   dirs.push(root);
   const dir = join(root, 'Canaryfamilyname.oatree');
   const archive = zipSync({
-    'gedcom.ged': new TextEncoder().encode(lines.join('\n')),
+    'gedcom.ged': new TextEncoder().encode(gedcom.join('\n')),
     'photos/canary-zelda-portrait.png': PNG,
     'photos/copy.png': PNG,
+    'photos/canary-linked.png': new Uint8Array([...PNG, 1]),
+    'photos/canary-record.png': new Uint8Array([...PNG, 2]),
   });
   await importGedcom({ gedzip: archive }, { dir }, { today: TODAY });
   return openTree(dir);
@@ -187,6 +189,106 @@ describe('privatized exports withhold every marked record', () => {
     expect(out).not.toContain('Canaryfamilyname');
     expect(out).toMatch(/^1 SOUR open-ancestry\n2 NAME open-ancestry\n1 DATE/m);
     expect(buildGedcomExport(store, { now: TODAY }).text).toContain('Canaryfamilyname');
+    store.close();
+  });
+});
+
+/*
+ * Parser-differential canaries (re-review 2026-10-14): RESN text the importer
+ * could misread as public, RESN nested below the record level, and pointers
+ * or xrefs written in ways a strict reader takes as text. Everyone here is
+ * deceased, so only RESN or the pointer decides.
+ */
+const dead = (xref: string, name: string, ...rest: string[]) => [
+  `0 ${xref} INDI`,
+  `1 NAME ${name}`,
+  ...rest,
+  '1 BIRT',
+  '2 DATE 1801',
+  '1 DEAT',
+  '2 DATE 1870',
+];
+const tricky = [
+  '0 HEAD',
+  '1 GEDC',
+  '2 VERS 5.5.1',
+  '1 CHAR UTF-8',
+  ...dead('@I1@', 'Lockedprivacy /Canaryone/', '1 RESN locked, privacy'),
+  ...dead('@I2@', 'Twolines /Canarytwo/', '1 RESN locked', '1 RESN confidential'),
+  ...dead('@I3@', 'Continued /Canarythree/', '1 RESN confidential', '2 CONT (family request)'),
+  ...dead('@I4@', 'Spaced /Canaryfour/', '1 RESN locked confidential'),
+  ...dead('@I5@', 'Punctuated /Canaryfive/', '1 RESN privacy.'),
+  ...dead('@I6@', 'Unknownword /Canarysix/', '1 RESN restricted'),
+  // Nested RESN: the guarded name, citation, media link, or record.
+  ...dead('@I7@', 'Guardedname /Canaryseven/', '2 RESN confidential'),
+  ...dead(
+    '@I8@',
+    'Citer /Plainone/',
+    '1 SOUR @S1@',
+    '2 PAGE Canarypage',
+    '2 RESN confidential',
+  ),
+  ...dead('@I9@', 'Linker /Plaintwo/', '1 OBJE @O1@', '2 RESN privacy'),
+  ...dead('@I10@', 'Noter /Plainthree/', '1 NOTE @N1@', '1 SOUR @S2@', '1 OBJE @O2@'),
+  // A public person with a spaced pointer to a living one, and an escaped xref in a note.
+  ...dead(
+    '@I11@',
+    'Petra /Publicwell/',
+    '1 ASSO  @ZELDASPACED@ ',
+    '2 RELA Canaryrela',
+    '1 NOTE See @@ZELDASPACED@@ and @@ZELDAOTHER@@',
+  ),
+  '0 @ZELDASPACED@ INDI',
+  '1 NAME Zelda /Canaryliving/',
+  '0 @ZELDAOTHER@ INDI',
+  '1 NAME Zeldaother /Canaryliving/',
+  '1 RESN privacy',
+  '0 @S1@ SOUR',
+  '1 TITL Plain source',
+  '0 @S2@ SOUR',
+  '1 TITL Canarysourcetitle',
+  '1 RESN confidential',
+  '0 @N1@ NOTE Canarynoterecord',
+  '1 RESN confidential',
+  '0 @O1@ OBJE',
+  '1 FILE photos/canary-linked.png',
+  '2 FORM png',
+  '2 TITL Canarylinkedtitle',
+  '0 @O2@ OBJE',
+  '1 FILE photos/canary-record.png',
+  '2 FORM png',
+  '1 RESN confidential',
+  '0 TRLR',
+  '',
+];
+
+describe('privatized exports read RESN and pointers the way the strictest reader would', () => {
+  it('5.5.1, 7 and GEDZIP carry no canary, in the file or the warnings', async () => {
+    const store = await tree(tricky);
+    for (const version of ['5.5.1', '7'] as const) {
+      const out = buildGedcomExport(store, { version, privatizeLiving: true, now: TODAY });
+      expect(canaries(out.text), version).toEqual([]);
+      expect(canaries(out.warnings.join('\n')), version).toEqual([]);
+      if (version === '7') expect(gedcom7Problems(out.text)).toEqual([]);
+      // No raw RESN line survives below the record level.
+      expect(out.text, version).not.toMatch(/^[2-9] RESN/m);
+      // Plain records and the public person stay.
+      expect(out.text, version).toContain('Petra /Publicwell/');
+      expect(out.text, version).toContain('Plain source');
+    }
+    const zip = buildGedzipExport(store, { privatizeLiving: true, now: TODAY });
+    const files = unzipSync(zip.bytes);
+    expect(canaries(Object.keys(files).join('\n'))).toEqual([]);
+    expect(canaries(new TextDecoder().decode(files['gedcom.ged']))).toEqual([]);
+    expect(canaries(zip.warnings.join('\n'))).toEqual([]);
+    store.close();
+  });
+
+  it('writes nested RESN as GEDCOM 7 restrictions when not privatizing', async () => {
+    const store = await tree(tricky);
+    const out = buildGedcomExport(store, { version: '7', now: TODAY }).text;
+    expect(gedcom7Problems(out).filter((p) => p.startsWith('bad RESN'))).toEqual([]);
+    expect(out).toMatch(/^2 RESN CONFIDENTIAL$/m);
     store.close();
   });
 });

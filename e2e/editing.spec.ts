@@ -149,6 +149,9 @@ test.describe('person', () => {
     await expect(toasts(page).filter({ hasText: 'Deleted Rowan Ashdown' })).toBeVisible();
 
     await page.keyboard.press(`${mod}+z`);
+    await expect(
+      toasts(page).filter({ hasText: 'Undid Delete person: Rowan Ashdown' }),
+    ).toBeVisible();
     await page.goto(`/person/${seeded.rowan}`);
     await expect(h1(page)).toHaveText('Rowan Ashdown');
   });

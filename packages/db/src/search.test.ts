@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { events, names, persons, places, rebuildSearchIndex, searchPeople } from './index';
+import {
+  MAX_SEARCH_WORDS,
+  events,
+  names,
+  persons,
+  places,
+  rebuildSearchIndex,
+  searchPeople,
+} from './index';
 import { memoryTree, seedSmallFamily } from './test/helpers';
 
 describe('searchPeople', () => {
@@ -148,6 +156,22 @@ describe('searchPeople', () => {
     const all = searchPeople(store, 'vale', { phoneticKeys: () => ['VAL'] });
     expect(new Set(all.map((r) => r.person.id)).size).toBe(all.length);
     expect(searchPeople(store, 'va', { limit: 3 })).toHaveLength(3);
+    store.close();
+  });
+
+  it('normalizes decomposed input and bounds repeated or excess words', () => {
+    const store = memoryTree();
+    const { result: p } = store.transact('add', (tx) =>
+      persons.create(tx, { names: [{ given: 'José', surname: 'Müller' }] }),
+    );
+    // NFD: "e" + combining acute, "u" + combining diaeresis.
+    expect(searchPeople(store, 'Jose\u0301 Mu\u0308ller').map((r) => r.person.id)).toEqual([p.id]);
+    // Repeated words count once, so this is just "jose".
+    expect(searchPeople(store, 'jose '.repeat(100)).map((r) => r.person.id)).toEqual([p.id]);
+    // Only the first MAX_SEARCH_WORDS distinct words are used.
+    const many = ['jose', 'muller', ...Array.from({ length: 20 }, (_, i) => `zz${i}`)].join(' ');
+    expect(searchPeople(store, many)).toEqual([]);
+    expect(MAX_SEARCH_WORDS).toBe(8);
     store.close();
   });
 });

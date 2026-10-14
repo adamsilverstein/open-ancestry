@@ -1,4 +1,4 @@
-import { monthCode } from './calendar';
+import { daysInMonth, monthCode, monthsInYear } from './calendar';
 import { parseDate } from './parse';
 import type { Calendar, DateInput, DatePoint, ParsedDate } from './types';
 
@@ -6,7 +6,7 @@ export type DateStyle = 'long' | 'year';
 export type GedcomVersion = '5.5.1' | '7';
 
 export const asParsed = (date: DateInput): ParsedDate =>
-  typeof date === 'string' ? parseDate(date) : date;
+  typeof date === 'object' && date !== null ? date : parseDate(date);
 
 const DISPLAY_PREFIX: Partial<Record<ParsedDate['qualifier'], string>> = {
   about: 'abt. ',
@@ -83,18 +83,48 @@ const GEDCOM7_CALENDAR: Record<Calendar, string> = {
   unknown: '',
 };
 
+const CALENDARS = new Set<Calendar>(['gregorian', 'julian', 'hebrew', 'french_r', 'unknown']);
+
+/** Guards against hand-built ParsedDate objects carrying non-numeric parts into an export. */
+function isSafePoint(p: DatePoint | undefined, calendar: Calendar): boolean {
+  if (!p || !Number.isSafeInteger(p.year) || p.year === 0 || Math.abs(p.year) > 9999) return false;
+  if (p.month !== undefined) {
+    if (!Number.isSafeInteger(p.month) || p.month < 1 || p.month > monthsInYear(calendar))
+      return false;
+  }
+  if (p.day !== undefined) {
+    if (p.month === undefined || !Number.isSafeInteger(p.day) || p.day < 1) return false;
+    if (p.day > daysInMonth(calendar, p.year, p.month)) return false;
+  }
+  return p.dualYear === undefined || p.dualYear === p.year + 1;
+}
+
 /**
- * GEDCOM DATE payload. Version 7 has no dual years, INT or date phrases in the
- * value: dual years keep the first year, and the caller should write the
- * original text as a PHRASE when the result is empty or the date was interpreted.
+ * Makes free text safe inside a GEDCOM `(phrase)`: one line, no control or
+ * format characters, no parentheses, and `@` doubled as GEDCOM 5.5.1 requires.
+ */
+export function gedcomPhrase(text: unknown): string {
+  return String(text ?? '')
+    .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}()]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/@/g, '@@');
+}
+
+/**
+ * GEDCOM DATE payload, always a single line. Version 7 has no dual years, INT
+ * or date phrases in the value: dual years keep the first year, and the caller
+ * should write the original text as a PHRASE (escaped by its own writer) when
+ * the result is empty or the date was interpreted.
  */
 export function toGedcom(date: DateInput, version: GedcomVersion = '5.5.1'): string {
   const parsed = asParsed(date);
-  const { start, end, calendar } = parsed;
+  const { start, end } = parsed;
+  const calendar = CALENDARS.has(parsed.calendar) ? parsed.calendar : 'gregorian';
   const v7 = version === '7';
-  if (!start) {
+  if (!isSafePoint(start, calendar) || (end !== undefined && !isSafePoint(end, calendar))) {
     if (v7) return '';
-    const phrase = (parsed.phrase ?? parsed.text).replace(/[()]/g, '').replace(/\s+/g, ' ').trim();
+    const phrase = gedcomPhrase(parsed.phrase ?? parsed.text);
     return phrase && `(${phrase})`;
   }
   const point = (p: DatePoint): string => {
@@ -105,14 +135,13 @@ export function toGedcom(date: DateInput, version: GedcomVersion = '5.5.1'): str
     return parts.join('');
   };
   if (end) {
-    return parsed.qualifier === 'between'
-      ? `BET ${point(start)} AND ${point(end)}`
-      : `FROM ${point(start)} TO ${point(end)}`;
+    return parsed.qualifier === 'from_to'
+      ? `FROM ${point(start!)} TO ${point(end)}`
+      : `BET ${point(start!)} AND ${point(end)}`;
   }
   if (parsed.qualifier === 'interpreted' && !v7) {
-    return parsed.phrase
-      ? `INT ${point(start)} (${parsed.phrase.replace(/[()]/g, '')})`
-      : `INT ${point(start)}`;
+    const phrase = gedcomPhrase(parsed.phrase);
+    return phrase ? `INT ${point(start!)} (${phrase})` : `INT ${point(start!)}`;
   }
-  return (GEDCOM_QUALIFIER[parsed.qualifier] ?? '') + point(start);
+  return (GEDCOM_QUALIFIER[parsed.qualifier] ?? '') + point(start!);
 }

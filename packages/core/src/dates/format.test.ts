@@ -145,3 +145,82 @@ describe('round trips', () => {
     );
   });
 });
+
+describe('toGedcom output safety', () => {
+  // Every byte of a DATE payload ends up on one GEDCOM line, so user text must
+  // not be able to start a new line, smuggle control characters or a bare `@`.
+  const CAL551 = '(?:@#D(?:JULIAN|HEBREW|FRENCH R|UNKNOWN)@ )?';
+  const CAL7 = '(?:(?:JULIAN|HEBREW|FRENCH_R) )?';
+  const grammar = (cal: string, era: string, dual: string) => {
+    const point = `${cal}(?:\\d{1,2} )?(?:[A-Z]{3,4} )?\\d{1,4}${dual}(?: ${era})?`;
+    return new RegExp(
+      `^(?:(?:ABT |CAL |EST |BEF |AFT |FROM |TO |INT )?${point}|BET ${point} AND ${point}|FROM ${point} TO ${point})$`,
+    );
+  };
+  const DATE_551 = grammar(CAL551, 'B\\.C\\.', '(?:/\\d{2})?');
+  const DATE_7 = grammar(CAL7, 'BCE', '');
+  const PHRASE = /^\((?:[^()@\p{Cc}\p{Cf}\p{Zl}\p{Zp}]|@@)+\)$/u;
+  const INT_551 = new RegExp(`^INT .+ \\((?:[^()@\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]|@@)+\\)$`, 'u');
+
+  const check551 = (out: string) => {
+    expect(out).not.toMatch(/[\p{Cc}\p{Zl}\p{Zp}]/u);
+    expect(out === '' || DATE_551.test(out) || PHRASE.test(out) || INT_551.test(out)).toBe(true);
+  };
+  const check7 = (out: string) => {
+    expect(out === '' || DATE_7.test(out)).toBe(true);
+  };
+
+  it.each([
+    ['unknown\r\n0 @I1@ INDI', '(unknown 0 @@I1@@ INDI)'],
+    ['INT 1941 (war\n1 NOTE injected)', 'INT 1941 (war 1 NOTE injected)'],
+    ['INT 1941 (email a@b.example)', 'INT 1941 (email a@@b.example)'],
+    ['(a b\u0000c​d)', '(a b c d)'],
+    ['\u0085\u000b', ''],
+  ])('%j -> %j', (input, output) => {
+    expect(toGedcom(input)).toBe(output);
+    check551(toGedcom(input));
+    check7(toGedcom(input, '7'));
+  });
+
+  it('falls back to a safe phrase for hand-built dates with bad parts', () => {
+    const forged = {
+      ...parseDate('1941'),
+      text: 'x\n0 TRLR',
+      start: { year: '1941\n0 TRLR' as unknown as number },
+    };
+    expect(toGedcom(forged)).toBe('(x 0 TRLR)');
+    expect(toGedcom(forged, '7')).toBe('');
+    const badMonth = { ...parseDate('SEP 1941'), start: { year: 1941, month: 13 } };
+    expect(toGedcom(badMonth)).toBe('(SEP 1941)');
+    const badDay = { ...parseDate('5 SEP 1941'), start: { year: 1941, month: 9, day: 31 } };
+    expect(toGedcom(badDay)).toBe('(5 SEP 1941)');
+    const badDual = { ...parseDate('1750/51'), start: { year: 1750, dualYear: 1760 } };
+    expect(toGedcom(badDual)).toBe('(1750/51)');
+    const badEnd = { ...parseDate('BET 1890 AND 1895'), end: { year: 0 } };
+    expect(toGedcom(badEnd)).toBe('(BET 1890 AND 1895)');
+    const noMonth = { ...parseDate('5 SEP 1941'), start: { year: 1941, day: 5 } };
+    expect(toGedcom(noMonth)).toBe('(5 SEP 1941)');
+    const badCalendar = { ...parseDate('1941'), calendar: 'x\n' as unknown as 'gregorian' };
+    expect(toGedcom(badCalendar)).toBe('1941');
+    const badPhrase = { ...parseDate('INT 1941'), phrase: 'a)\r\n0 @X@ NOTE' };
+    expect(toGedcom(badPhrase)).toBe('INT 1941 (a 0 @@X@@ NOTE)');
+  });
+
+  it('is always one line in the GEDCOM date grammar or a safe phrase', () => {
+    const noisy = fc.string({
+      unit: fc.oneof(
+        fc.constantFrom('\r', '\n', ' ', '\u0000', '\u0085', '@', '(', ')', ' ', '/', '.'),
+        fc.constantFrom(...'0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'),
+        fc.string({ unit: 'binary', minLength: 1, maxLength: 1 }),
+      ),
+      maxLength: 60,
+    });
+    fc.assert(
+      fc.property(fc.oneof(arbDateText, noisy, fc.string({ unit: 'binary' })), (text) => {
+        check551(toGedcom(text));
+        check7(toGedcom(text, '7'));
+      }),
+      { numRuns: 2000 },
+    );
+  });
+});

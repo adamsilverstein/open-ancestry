@@ -97,7 +97,8 @@ both. `relationshipName({ up, down }, sex, half?, modifier?, style?)` names a sh
    exists. Half relatives are hyphenated (`half-sister`, `half-uncle`) except cousins (`half 1st
    cousin`).
 3. **Marriage.** Partners are named directly (`husband`, `wife`, `partner`) and listed alongside
-   any blood relationship. Otherwise a bidirectional breadth-first search over parent, child and
+   any blood relationship, as are in-laws through A's or B's own partner (`niece and also
+   daughter-in-law`, `aunt and also mother-in-law`), unless they only restate a blood tie. Otherwise a bidirectional breadth-first search over parent, child and
    partner links finds the shortest path with one or two marriages. Common shapes get their own
    words (`father-in-law`, `sister-in-law`, `stepmother`, `stepbrother`, `step-grandmother`,
    `step-granddaughter`). Longer paths are named from the first marriage on and extended, with

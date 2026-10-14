@@ -81,6 +81,7 @@ function ancestors(g: KinshipGraph, start: string, maxGenerations: number, maxNo
   const found = new Map<string, Arrival[]>();
   const first: Arrival = { id: start, depth: 0, path: [start], steps: [], bio: true };
   found.set(start, [first]);
+  const parents: Arrival[] = [];
   let frontier = [first];
   let count = 1;
   let depth = 1;
@@ -103,6 +104,7 @@ function ancestors(g: KinshipGraph, start: string, maxGenerations: number, maxNo
         };
         list.push(reached);
         found.set(parent.id, list);
+        if (depth === 1) parents.push(reached);
         next.push(reached);
         count++;
       }
@@ -111,7 +113,7 @@ function ancestors(g: KinshipGraph, start: string, maxGenerations: number, maxNo
   }
   // Stopped early with people still to walk.
   const cut = frontier.length > 0 && (count >= maxNodes || depth > maxGenerations);
-  return { found, cut: cut && frontier.some((a) => g.parents(a.id).length > 0) };
+  return { found, parents, cut: cut && frontier.some((a) => g.parents(a.id).length > 0) };
 }
 
 interface Line {
@@ -153,7 +155,8 @@ function isHalf(g: KinshipGraph, childA: string, childB: string, bio: boolean): 
 }
 
 /** The ancestors of one person: walked fresh, or from a calculator's cache. */
-type Walk = (id: string) => ReturnType<typeof ancestors>;
+/** Ancestor walk of `id`, `generations` deep (default: the query's maxGenerations). */
+type Walk = (id: string, generations?: number) => ReturnType<typeof ancestors>;
 
 function bloodRelationships(
   g: KinshipGraph,
@@ -466,6 +469,78 @@ function marriageName(g: KinshipGraph, path: RelationshipPath, style: NameStyle)
   return chain(words, style);
 }
 
+/**
+ * Parent, child (a few generations) and sibling paths from x to y, found
+ * cheaply from the two ancestor walks and shared parents.
+ */
+function nearPaths(g: KinshipGraph, x: string, y: string, walkX: Walk, walkY: Walk) {
+  const self = (id: string): Arrival => ({ id, depth: 0, path: [id], steps: [], bio: true });
+  const paths: RelationshipPath[] = [];
+  const up = walkX(x).found.get(y)?.[0];
+  if (up && up.depth > 0) paths.push(joinPath(up, self(y)));
+  const down = walkY(y).found.get(x)?.[0];
+  if (down && down.depth > 0) paths.push(joinPath(self(x), down));
+  for (const px of walkX(x).parents) {
+    const py = walkY(y).parents.find((p) => p.id === px.id);
+    if (!py || x === y) continue;
+    paths.push({
+      ids: [x, px.id, y],
+      steps: [
+        { kind: 'parent', rel: px.steps[0]!.rel },
+        { kind: 'child', rel: py.steps[0]!.rel },
+      ],
+      generations: [1, 1],
+    });
+    break;
+  }
+  return paths;
+}
+
+/** Generations searched above a partner for in-law names beside a blood tie. */
+const IN_LAW_GENERATIONS = 3;
+
+/**
+ * In-law names beside a blood or spouse relationship ("niece and also
+ * daughter-in-law", "aunt and also mother-in-law"): A a parent, child or
+ * sibling of B's partner, or the partner of B's parent, child or sibling.
+ * A step name that only restates a blood tie (a son is not also a stepson)
+ * is left out.
+ */
+function inLaws(
+  g: KinshipGraph,
+  a: string,
+  b: string,
+  walk: Walk,
+  style: NameStyle,
+  known: Relationship[],
+): Relationship[] {
+  const out: Relationship[] = [];
+  const near: Walk = (id) => walk(id, IN_LAW_GENERATIONS);
+  // "stepson", "adopted son" and "son" are one tie, named once.
+  const base = (name: string) => name.replace(/^(?:step-?|adopted |adoptive |foster |half-)/, '');
+  const taken = new Set(known.map((r) => base(r.name)));
+  const add = (path: RelationshipPath) => {
+    const plain = { ids: path.ids, steps: path.steps };
+    const name = marriageName(g, plain, style);
+    if (taken.has(base(name))) return;
+    taken.add(base(name));
+    out.push({ name, kind: 'marriage', paths: [plain], pathCount: 1 });
+  };
+  for (const s of g.partners(b)) {
+    if (s.id === a) continue;
+    for (const p of nearPaths(g, a, s.id, walk, near)) {
+      add({ ids: [...p.ids, b], steps: [...p.steps, { kind: 'spouse' }] });
+    }
+  }
+  for (const s of g.partners(a)) {
+    if (s.id === b) continue;
+    for (const p of nearPaths(g, s.id, b, near, walk)) {
+      add({ ids: [a, ...p.ids], steps: [{ kind: 'spouse' }, ...p.steps] });
+    }
+  }
+  return out;
+}
+
 /** What A is to B, with every connecting path. */
 export function relationship(
   g: KinshipGraph,
@@ -475,7 +550,9 @@ export function relationship(
 ): RelationshipResult {
   const maxGenerations = options.maxGenerations ?? 20;
   const maxNodes = options.maxNodes ?? 50_000;
-  return compute(g, a, b, options, (id) => ancestors(g, id, maxGenerations, maxNodes));
+  return compute(g, a, b, options, (id, generations = maxGenerations) =>
+    ancestors(g, id, generations, maxNodes),
+  );
 }
 
 export interface CalculatorOptions extends RelationshipOptions {
@@ -496,13 +573,13 @@ export function relationshipCalculator(g: KinshipGraph, defaults: CalculatorOpti
     const merged = { ...defaults, ...options };
     const maxGenerations = merged.maxGenerations ?? 20;
     const maxNodes = merged.maxNodes ?? 50_000;
-    const walk: Walk = (id) => {
-      const key = `${id}|${maxGenerations}|${maxNodes}`;
+    const walk: Walk = (id, generations = maxGenerations) => {
+      const key = `${id}|${generations}|${maxNodes}`;
       let found = cache.get(key);
       if (found) {
         cache.delete(key);
       } else {
-        found = ancestors(g, id, maxGenerations, maxNodes);
+        found = ancestors(g, id, generations, maxNodes);
         if (cache.size >= cacheSize) cache.delete(cache.keys().next().value!);
       }
       cache.set(key, found);
@@ -558,9 +635,18 @@ function compute(
       pathCount: 1,
     });
   }
-  const blood = bloodRelationships(g, a, b, walk, style);
+  const walks = new Map<string, ReturnType<Walk>>();
+  const once: Walk = (id, generations) => {
+    const key = `${id}|${generations ?? ''}`;
+    let w = walks.get(key);
+    if (!w) walks.set(key, (w = walk(id, generations)));
+    return w;
+  };
+  const blood = bloodRelationships(g, a, b, once, style);
   found.push(...blood.relationships);
-  if (found.length) return result(found, blood.cut);
+  if (found.length) {
+    return result([...found, ...inLaws(g, a, b, once, style, found)], blood.cut);
+  }
 
   const search = marriagePath(g, a, b, maxMarriages, 2 * maxGenerations + maxMarriages, maxNodes);
   if (!search.path) return result([], blood.cut || search.cut);

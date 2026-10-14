@@ -1,0 +1,106 @@
+import { parseGedcom } from '@open-ancestry/gedcom';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { buildGedcomExport, exportGedcom } from './index';
+import {
+  FIXTURES,
+  FIXTURE_FILES,
+  TODAY,
+  domainSnapshot,
+  gedcom7Problems,
+  importInto,
+  importedSnapshot,
+  normalizeGedcom,
+  rows,
+} from './test-helpers';
+
+const read = (file: string) => readFileSync(join(FIXTURES, file));
+const ownVersion = (bytes: Uint8Array) =>
+  (parseGedcom(bytes).header.majorVersion ?? 5) >= 7 ? ('7' as const) : ('5.5.1' as const);
+
+describe('export in the version the file was imported from', () => {
+  it.each(FIXTURE_FILES)('%s: normalized diff with the original is empty', async (file) => {
+    const bytes = read(file);
+    const store = await importInto(bytes);
+    const out = exportGedcom(store, { version: ownVersion(bytes), now: TODAY });
+    expect(normalizeGedcom(out)).toBe(normalizeGedcom(bytes));
+  });
+
+  it('5.5.1 output keeps Ancestry custom tags and declares UTF-8', async () => {
+    const store = await importInto(read('ancestry-sample.ged'));
+    const out = exportGedcom(store, { version: '5.5.1', now: TODAY });
+    const head = parseGedcom(out).header;
+    expect(head.charset).toBe('UTF-8');
+    expect(head.version).toBe('5.5.1');
+    expect(head.form).toBe('LINEAGE-LINKED');
+    expect(head.source?.system).toBe('Ancestry.com Family Trees');
+    for (const tag of ['_APID', '_MTTAG', '_OID', '_PHOTO', '_PRIM', '_FREL', '_MREL', '_MILT']) {
+      expect(out).toContain(` ${tag} `);
+    }
+  });
+
+  it('rewrites an ANSEL header to UTF-8 and keeps the decoded text', async () => {
+    const store = await importInto(read('gedcom/ansel.ged'));
+    const out = exportGedcom(store, { version: '5.5.1', now: TODAY });
+    expect(out).toContain('1 CHAR UTF-8');
+    expect(out).not.toContain('ANSEL');
+    expect(parseGedcom(new TextEncoder().encode(out)).warnings).toEqual([]);
+  });
+});
+
+describe('GEDCOM 7 export', () => {
+  it.each(FIXTURE_FILES)(
+    '%s: valid GEDCOM 7 that re-imports to the same domain model',
+    async (file) => {
+      const store = await importInto(read(file));
+      const out = buildGedcomExport(store, { version: '7', now: TODAY });
+      expect(gedcom7Problems(out.text)).toEqual([]);
+      const again = await importInto(out.text);
+      expect(rows(again, 'SELECT format FROM import_batch')).toEqual([{ format: 'gedcom-7' }]);
+      expect(importedSnapshot(again)).toEqual(
+        domainSnapshot(store, (_table, id) => out.xrefs.get(id)!),
+      );
+    },
+  );
+
+  it('writes dates, ages and names in GEDCOM 7 grammar with the original as PHRASE', async () => {
+    const store = await importInto(read('ancestry-sample.ged'));
+    const out = exportGedcom(store, { version: '7', now: TODAY });
+    expect(out).toContain('2 DATE ABT 1842\n3 PHRASE Abt. 1842');
+    expect(out).toContain('2 DATE 28 MAY 1960\n3 PHRASE 05/28/1960');
+    expect(out).toContain('2 DATE 4 NOV 1911\n3 PHRASE 4 Nov 1911');
+    expect(out).toContain('2 DATE BEF 1920\n');
+    expect(out).not.toContain('PHRASE BEF 1920');
+    expect(out).toMatch(/^1 SCHMA\n(2 TAG _\w+ https:\/\/\S+\n)+/m);
+    expect(out.startsWith('0 HEAD\n1 GEDC\n2 VERS 7.0\n')).toBe(true);
+  });
+
+  it('re-exports a GEDCOM 7 import as GEDCOM 5.5.1 that re-imports the same', async () => {
+    const store = await importInto(read('gedcom/gedcom7.ged'));
+    const out = buildGedcomExport(store, { version: '5.5.1', now: TODAY });
+    expect(out.text).toContain('1 NOTE @@handle on the forum');
+    expect(out.text).toContain('1 _SKYPEID quill.b');
+    const again = await importInto(out.text);
+    expect(importedSnapshot(again)).toEqual(
+      domainSnapshot(store, (_table, id) => out.xrefs.get(id)!),
+    );
+  });
+});
+
+describe('GEDCOM 5.5.1 export that is generated, not copied', () => {
+  it.each(FIXTURE_FILES)(
+    '%s: privatize off, every record regenerated, same domain',
+    async (file) => {
+      const store = await importInto(read(file));
+      // Dropping raw_record forces every record through the canonical writer.
+      store.db.exec('DELETE FROM raw_record');
+      const out = buildGedcomExport(store, { version: '5.5.1', now: TODAY });
+      expect(out.stats.verbatim).toBe(0);
+      const again = await importInto(out.text);
+      expect(importedSnapshot(again)).toEqual(
+        domainSnapshot(store, (_table, id) => out.xrefs.get(id)!),
+      );
+    },
+  );
+});

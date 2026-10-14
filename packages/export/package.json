@@ -1,0 +1,21 @@
+{
+  "name": "@open-ancestry/export",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@open-ancestry/core": "*",
+    "@open-ancestry/db": "*",
+    "@open-ancestry/gedcom": "*",
+    "fflate": "^0.8.3"
+  },
+  "devDependencies": {
+    "@open-ancestry/import": "*"
+  }
+}

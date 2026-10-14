@@ -16,6 +16,8 @@ import { JobManager, type Importer } from './jobs';
 import { Library, defaultLibraryRoot } from './library';
 import { editRoutes } from './routes/edit';
 import { importRoutes, sweepStaleUploads } from './routes/imports';
+import { reimportRoutes } from './routes/reimports';
+import { ReimportSessions } from './reimports';
 import { mediaRoutes } from './routes/media';
 import { peopleRoutes } from './routes/people';
 import { treeRoutes } from './routes/trees';
@@ -138,6 +140,7 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     importer: options.importer,
     uploadLimit: options.uploadLimit ?? DEFAULT_UPLOAD_LIMIT,
     thumbnails: new ThumbnailQueue(),
+    reimports: new ReimportSessions(),
   };
 
   registerErrorHandling(app);
@@ -162,11 +165,19 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
 
   app.register(async (api) => {
     const typed = api.withTypeProvider<TypeBoxTypeProvider>();
+    // No write may reach a tree while it imports: it would run inside the
+    // import's transaction and share its fate (issue #96). Reads still work.
+    typed.addHook('preHandler', async (request) => {
+      if (request.method === 'GET' || request.method === 'HEAD') return;
+      const tree = (request.params as { tree?: unknown } | undefined)?.tree;
+      if (typeof tree === 'string') library.assertIdle(tree);
+    });
     typed.get('/api/health', async () => ({ ok: true }));
     treeRoutes(typed, deps);
     peopleRoutes(typed, deps);
     editRoutes(typed, deps);
     importRoutes(typed, deps);
+    reimportRoutes(typed, deps);
     mediaRoutes(typed, deps);
     galleryRoutes(typed, deps);
   });
@@ -219,6 +230,7 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     await deps.thumbnails.idle();
   });
   app.addHook('onClose', async () => {
+    deps.reimports.closeAll();
     library.closeAll();
   });
 

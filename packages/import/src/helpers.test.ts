@@ -21,7 +21,7 @@ import {
   suffixedPath,
 } from './media';
 import { coordinate, placeParts, Places } from './places';
-import { childRelationship, nameType, privacy, relationshipStatus } from './tags';
+import { childRelationship, morePrivate, nameType, privacy, relationshipStatus } from './tags';
 import { dateColumns, surnameKey } from './index';
 import { ged } from './test-helpers';
 
@@ -43,13 +43,31 @@ describe('tags', () => {
     expect(nameType(undefined)).toBe('other');
   });
 
-  it('maps RESN to the most restrictive privacy level', () => {
+  it('maps RESN to the most restrictive privacy level, locked below private', () => {
     expect(privacy('privacy')).toBe('private');
-    expect(privacy('CONFIDENTIAL, LOCKED')).toBe('locked');
-    expect(privacy('LOCKED, PRIVACY')).toBe('locked');
+    expect(privacy('locked')).toBe('locked');
+    expect(privacy('CONFIDENTIAL, LOCKED')).toBe('confidential');
+    expect(privacy('LOCKED, PRIVACY')).toBe('private');
+    expect(privacy('locked, privacy')).toBe('private');
     expect(privacy('public')).toBeUndefined();
     expect(privacy('')).toBeUndefined();
     expect(privacy(undefined)).toBeUndefined();
+  });
+
+  it('fails closed on RESN text it cannot read exactly', () => {
+    expect(privacy('locked confidential')).toBe('confidential');
+    expect(privacy('privacy.')).toBe('private');
+    expect(privacy('confidential\n(family request)')).toBe('confidential');
+    expect(privacy('Confidentiality')).toBe('confidential');
+    expect(privacy('restricted')).toBe('private');
+    expect(privacy('locked; do not share')).toBe('private');
+  });
+
+  it('orders privacy levels with locked below private', () => {
+    expect(morePrivate('locked', 'private')).toBe('private');
+    expect(morePrivate('confidential', 'locked')).toBe('confidential');
+    expect(morePrivate('public', 'locked')).toBe('locked');
+    expect(morePrivate(undefined, 'private')).toBe('private');
   });
 
   it('maps _STAT relationship status', () => {

@@ -12,6 +12,10 @@ import {
   randomTree,
 } from './test-family';
 
+// Property tests run hundreds of cases; under coverage on a shared CI runner that can
+// pass Vitest's 5s default, so they get room. A hang still fails.
+const PROPERTY_TIMEOUT = 30_000;
+
 const family = kinshipGraph(bigFamily());
 const name = (g: KinshipGraph, a: string, b: string) => relationship(g, a, b).name;
 
@@ -129,7 +133,7 @@ describe('relationship names (A is B’s ...)', () => {
   });
 });
 
-describe('paths and pedigree collapse', () => {
+describe('paths and pedigree collapse', { timeout: PROPERTY_TIMEOUT }, () => {
   it('returns the path from A up to the common ancestors and down to B', () => {
     const r = relationship(family, 'cousin1', 'me');
     expect(r.relationships).toHaveLength(1);

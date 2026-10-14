@@ -2713,6 +2713,21 @@
   "Privacy": {
     "enum": ["public", "private", "confidential", "locked"]
   },
+  "ReimportApplyBody": {
+    "type": "object",
+    "required": ["accept"],
+    "properties": {
+      "accept": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "maxItems": 1000000
+      }
+    },
+    "additionalProperties": false
+  },
   "RelationshipType": {
     "enum": ["married", "civil_union", "partners", "unknown"]
   },

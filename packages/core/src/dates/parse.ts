@@ -50,7 +50,12 @@ const SIMPLE_QUALIFIERS: Record<string, DateQualifier> = {
 const YEAR_RANGE = /^(\d{3,4}) ?(?:-|–|TO) ?(\d{2}|\d{4})$/;
 /**
  * `1850S`, `1700S`, `1850'S`, `1850S-1860S`: decades, or centuries when ending
- * in 00 before 2000 (`2000S` is the decade 2000-2009).
+ * in 00 before 2000 (`2000S` is the decade 2000-2009). In a two-sided span the
+ * left side gives the first year. A right side ending in 00s is read at the
+ * left side's granularity (`1660S-1700S` is 1660-1709, `1700S-1800S` is
+ * 1700-1899); any other right side is a decade (`1700S-1750S` is 1700-1759).
+ * After a plain year the right side is read alone (`FROM 1850 TO 1900S` is
+ * 1850-1999).
  */
 const DECADES = /^(\d{1,3}0)'?S(?: ?(?:-|–|TO) ?(\d{1,3}0)'?S)?$/;
 const ISO = /^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$/;
@@ -120,11 +125,13 @@ function parseNormalized(
   if ((match = FROM_TO.exec(s))) return range(original, 'from_to', match[1]!, match[2]!, calendar);
   if ((match = FROM.exec(s))) {
     const p = parsePoint(match[1]!, calendar);
-    return p && single(original, 'from', p);
+    if (p) return single(original, 'from', p);
+    return periodSpan(original, 'from', match[1]!, calendar);
   }
   if ((match = TO.exec(s))) {
     const p = parsePoint(match[1]!, calendar);
-    return p && single(original, 'to', p);
+    if (p) return single(original, 'to', p);
+    return periodSpan(original, 'to', match[1]!, calendar);
   }
   if ((match = BET_SPAN.exec(s))) {
     const span = yearSpan(match[1]!);
@@ -143,16 +150,30 @@ function parseNormalized(
   return p && single(original, 'exact', p);
 }
 
+/** `1700s` alone is the eighteenth century; 21st-century `2000s` is a decade (#52). */
+const isCentury = (first: number) => first % 100 === 0 && first < 2000;
+
+/**
+ * Last year of `<first>s`: a century when asked for and `<first>` can be one,
+ * so `2000s` stays the decade 2000-2009 even after a century (#52).
+ */
+const lastYear = (first: number, century: boolean) =>
+  first + (century && isCentury(first) ? 99 : 9);
+
 /**
  * Years written as one span: `1850S` (decade), `1700S` (century), `1850S-1860S`,
  * `1850-1860` or `1850-60`. Undefined when `s` is not a span.
  */
-function yearSpan(s: string): [number, number] | undefined {
+function yearSpan(s: string, centuries?: boolean): [number, number] | undefined {
   let match = DECADES.exec(s);
   if (match) {
     const start = Number(match[1]);
-    const last = match[2] === undefined ? start : Number(match[2]);
-    const end = last + (last % 100 === 0 && last < 2000 ? 99 : 9);
+    const end =
+      match[2] === undefined
+        ? lastYear(start, centuries ?? isCentury(start))
+        : // A right side ending in 00s borrows the left side's granularity (`1660s-1700s`
+          // is 1660-1709, `1700s-1800s` 1700-1899); any other right side is a decade.
+          lastYear(Number(match[2]), isCentury(start));
     return start > 0 && end >= start ? [start, end] : undefined;
   }
   // `1890-95` is a range but `1890-09` is ISO year-month.
@@ -188,6 +209,39 @@ function spanDate(
     { point: { year: start }, calendar },
     { point: { year: end }, calendar },
   );
+}
+
+/**
+ * `FROM` or `TO` a span. A span written as a range (`FROM 1850s-1860s`,
+ * `FROM 1850-60`) is the whole period. A single decade or century is read
+ * loosely, as with BEF and AFT: from its first year (`FROM 1850s` is
+ * `FROM 1850`), to its last (`TO 1850s` is `TO 1859`). TO a range keeps
+ * only its end (`TO 1850-60` is `TO 1860`): the period ends there, and
+ * where it began is not part of a TO date.
+ */
+function periodSpan(
+  original: string,
+  qualifier: 'from' | 'to',
+  s: string,
+  calendar: Calendar,
+): ParsedDate | undefined {
+  // `TO 1850s TO 1860s` repeats the keyword; that is no period.
+  if (/(?:^| )(?:FROM|TO) /.test(s)) return undefined;
+  const span = yearSpan(s);
+  if (!span) return undefined;
+  const [start, end] = span;
+  if (qualifier === 'from' && /-|–| TO /.test(s)) {
+    return build(
+      original,
+      'from_to',
+      { point: { year: start }, calendar },
+      { point: { year: end }, calendar },
+    );
+  }
+  return single(original, qualifier, {
+    point: { year: qualifier === 'from' ? start : end },
+    calendar,
+  });
 }
 
 /** Reads a leading calendar escape or keyword. Null means an unknown calendar. */
@@ -340,8 +394,13 @@ function range(
   calendar: Calendar,
 ): ParsedDate | undefined {
   // Either side may be a span itself: `BET 1850S AND 1860S` runs 1850-1869.
+  // As in a hyphenated span, a right side ending in 00s borrows the left side's
+  // granularity (`BET 1660s AND 1700s` ends in 1709, `FROM 1700s TO 1800s` in 1899) and
+  // any other right side is a decade. After a plain year the right side is read alone.
+  const left = DECADES.exec(a);
+  const centuries = left ? isCentury(Number(left[2] ?? left[1])) : undefined;
   const side = (s: string, i: 0 | 1): Point | undefined => {
-    const span = yearSpan(s);
+    const span = yearSpan(s, i === 1 ? centuries : undefined);
     return parsePoint(s, calendar) ?? (span && { point: { year: span[i] }, calendar });
   };
   const start = side(a, 0);

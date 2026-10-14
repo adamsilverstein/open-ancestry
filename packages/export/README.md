@@ -65,14 +65,19 @@ Tests (`src/roundtrip.test.ts`) run every fixture through:
 
 ## Privatize living
 
-Privatize is an allowlist, not a filter. Every record is generated (never copied, since raw text can mention anyone), and a privatized record is cut down after generation to:
+Privatize is an allowlist, not a filter. Every record is generated (never copied, since raw text can mention anyone) and gets a fresh xref (`@I1@`, `@F1@`, ...), because imported ids can spell names (`@ZELDAQUIXBY@`). Then:
 
-- a living person: `NAME Private`, `SEX`, `FAMC`, `FAMS` (nothing under them);
-- a family with a living partner: `HUSB`, `WIFE`, `CHIL`.
+- **Withheld people:** anyone who may be living (`isLiving()`: living, inferred living or unknown), and anyone marked `private` or `confidential` (GEDCOM `RESN privacy` / `confidential`). They are written as `NAME Private`, `SEX`, `FAMC` and `FAMS`, with nothing under them. `RESN locked` means "do not change this record", not private, so locked records are exported as usual.
+- **Withheld families:** a family with a withheld partner, or marked private or confidential, keeps only `HUSB`, `WIFE` and `CHIL`.
+- **Withheld events:** an event marked private or confidential is left out, even under someone who is otherwise exported.
+- **Notes and media:** anything attached to a withheld person, family or event (directly, or through their names, child links or citations) is left out of the whole export, even where someone else shares it. A media file shared with a withheld item is withheld too; the importer stores identical files once, and the name is often the person's.
+- **Imported lines:** no unmapped or extension line is merged into a withheld record. A line elsewhere that points at a withheld record (an `ASSO` and its `RELA`) is dropped, and warnings name only the record and the tag path, never the text.
+- **Shared records:** sources, repositories and tags are written only if something still written points at them, or nothing in the tree uses them at all.
+- **Header:** the submitter (usually the user) is replaced by a generic one. `HEAD` has no tree name (often a surname) and no `_HOME` pointing at a withheld home person. The server names a privatized download `private-tree.ged` / `.gdz`.
 
-No unmapped or extension line is merged into either. Notes and media are personal, so one attached anywhere to a living person or a private family (directly, or through their names, events, child links or citations) is left out of the whole export, even where a deceased relative shares it, and an unmapped pointer to it is reported, not written. Sources, repositories and tags are written only if something still written points at them, or nothing in the tree uses them at all. The submitter (usually the user) is replaced by a generic one, and `HEAD` has no `_HOME` pointing at a privatized home person.
+The export dialog turns privatize on whenever the tree has anyone it would hide, fails closed (privatize stays on, and Export waits, until the tree has been checked; if the check fails it stays on with a warning), and warns how many people a full export includes when it is turned off. The API takes `privatize=true` explicitly.
 
-Tests put a unique canary in every kind of line a living person and their family can have (names, events, places, notes, citations with `_APID`, inline and shared media, `_PHOTO`, tags, top-level and nested extension lines, `ASSO`, child-link notes, family events and extensions) and assert none reaches 5.5.1, 7 or GEDZIP output, edited or not. Every fixture is also searched for every word that appears only in living people's data, raw and unmapped lines included.
+Tests put a unique canary in every kind of line a withheld person and their family can have, including private and confidential records (and a locked one that must still be exported), name-like xrefs, an association's `RELA`, a shared photo file and the tree name. They assert that none reaches 5.5.1, 7 or GEDZIP output, the warnings or the archive's file names. Every fixture is also searched for every word that appears only in living people's data.
 
 ## GEDZIP
 

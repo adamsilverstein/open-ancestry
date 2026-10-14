@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
+import { useQueries } from '@tanstack/react-query';
 import { SlidersHorizontal } from 'lucide-react';
-import type { PersonDetail } from '../../api/types';
+import { personQuery } from '../../api/queries';
+import type { ApiPersonSummary, PersonDetail } from '../../api/types';
 import { Button } from '../../components/Button/Button';
 import { Checkbox } from '../../components/Checkbox/Checkbox';
 import { EmptyState } from '../../components/EmptyState/EmptyState';
@@ -12,6 +14,7 @@ import {
 } from '../../components/RelationshipList/RelationshipList';
 import { SourceItem } from '../../components/SourceItem/SourceItem';
 import { TimelineItem } from '../../components/TimelineItem/TimelineItem';
+import { halfSiblings, parentIds } from '../../lib/halfSiblings';
 import { fullName, toPersonSummary } from '../../lib/person';
 import { collectCitations } from '../../lib/sources';
 import {
@@ -40,8 +43,8 @@ function Entry({ entry, variant }: { entry: TimelineEntry; variant?: 'alternate'
   );
 }
 
-function TimelineColumn({ detail }: { detail: PersonDetail }) {
-  const entries = useMemo(() => buildTimeline(detail), [detail]);
+function TimelineColumn({ detail, half }: { detail: PersonDetail; half: ApiPersonSummary[] }) {
+  const entries = useMemo(() => buildTimeline(detail, { halfSiblings: half }), [detail, half]);
   const [hidden, setHidden] = useState<ReadonlySet<TimelineCategory>>(new Set());
   const visible = filterTimeline(entries, hidden);
   const toggle = (category: TimelineCategory, show: boolean) =>
@@ -128,7 +131,7 @@ function SourcesColumn({ detail }: { detail: PersonDetail }) {
   );
 }
 
-function relationshipGroups(detail: PersonDetail): RelationshipGroup[] {
+function relationshipGroups(detail: PersonDetail, half: ApiPersonSummary[]): RelationshipGroup[] {
   const groups: RelationshipGroup[] = [];
   const seen = new Set<string>();
   detail.parentFamilies.forEach((family, index) => {
@@ -150,6 +153,13 @@ function relationshipGroups(detail: PersonDetail): RelationshipGroup[] {
       collapsible: true,
     });
   }
+  if (half.length > 0) {
+    groups.push({
+      title: 'Half siblings',
+      people: half.map((p) => toPersonSummary(p)),
+      collapsible: true,
+    });
+  }
   const many = detail.partnerFamilies.length > 1;
   for (const { family, partner, children } of detail.partnerFamilies) {
     const title = many
@@ -164,8 +174,8 @@ function relationshipGroups(detail: PersonDetail): RelationshipGroup[] {
   return groups;
 }
 
-function RelationshipsColumn({ detail }: { detail: PersonDetail }) {
-  const groups = useMemo(() => relationshipGroups(detail), [detail]);
+function RelationshipsColumn({ detail, half }: { detail: PersonDetail; half: ApiPersonSummary[] }) {
+  const groups = useMemo(() => relationshipGroups(detail, half), [detail, half]);
   return (
     <Panel title="Relationships" className={styles.relationships}>
       {groups.length === 0 ? (
@@ -178,12 +188,31 @@ function RelationshipsColumn({ detail }: { detail: PersonDetail }) {
 }
 
 /** Timeline, Sources and Relationships: three columns at lg, two at md, one below. */
-export function FactsTab({ detail }: { detail: PersonDetail }) {
+const NONE: ApiPersonSummary[] = [];
+
+/** All parent details, or null until every one has loaded. Module level so the result is memoized. */
+const allDetails = (results: { data?: PersonDetail | undefined }[]) =>
+  results.every((r) => r.data) ? results.map((r) => r.data as PersonDetail) : null;
+
+/**
+ * Half siblings come from the parents' other partnerships, which only the
+ * parents' own details carry; they load after the page renders.
+ */
+function useHalfSiblings(tree: string, detail: PersonDetail): ApiPersonSummary[] {
+  const parents = useQueries({
+    queries: parentIds(detail).map((id) => personQuery(tree, id)),
+    combine: allDetails,
+  });
+  return useMemo(() => (parents ? halfSiblings(detail, parents) : NONE), [detail, parents]);
+}
+
+export function FactsTab({ tree, detail }: { tree: string; detail: PersonDetail }) {
+  const half = useHalfSiblings(tree, detail);
   return (
     <div className={styles.facts}>
-      <TimelineColumn detail={detail} />
+      <TimelineColumn detail={detail} half={half} />
       <SourcesColumn detail={detail} />
-      <RelationshipsColumn detail={detail} />
+      <RelationshipsColumn detail={detail} half={half} />
     </div>
   );
 }

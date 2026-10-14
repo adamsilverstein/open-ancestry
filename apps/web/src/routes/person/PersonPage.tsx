@@ -51,7 +51,7 @@ export function PersonPage() {
         </div>
         <div className={styles.body}>
           <TabsContent value="facts">
-            <FactsTab detail={detail} />
+            <FactsTab tree={tree} detail={detail} />
           </TabsContent>
           <TabsContent value="gallery">
             <GalleryTab tree={tree} detail={detail} />

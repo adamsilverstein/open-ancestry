@@ -33,6 +33,8 @@ const PERSON_KEYS = [
   'lena',
   'arthur',
   'pip',
+  'gideon',
+  'nell',
 ] as const;
 type PersonKey = (typeof PERSON_KEYS)[number];
 
@@ -188,6 +190,10 @@ function buildFamily(data: FixtureData) {
   family(tobias, null, [wendell]);
   family(rowan, iris, [lena, arthur], '14 JUN 1905');
   family(arthur, null, [pip]);
+  // Clara remarried after Edmund died: Nell is Rowan's half sister.
+  const gideon = person('gideon', 'M', 'Gideon', 'Marsh', '1855', '1925');
+  const nell = person('nell', 'F', 'Nell', 'Marsh', 'MAR 1903', '1990');
+  family(gideon, clara, [nell], '1902');
 
   const birth = event({ person_id: rowan }, 'BIRT', '12 MAR 1880', places.brackenford);
   event({ person_id: rowan }, 'BIRT', 'ABT 1879', places.wexmoor, { is_preferred: 0 });
@@ -260,6 +266,8 @@ function buildFamily(data: FixtureData) {
     lena,
     arthur,
     pip,
+    gideon,
+    nell,
   };
 }
 

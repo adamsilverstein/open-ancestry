@@ -161,10 +161,11 @@ describe('undo / redo', { timeout: PROPERTY_TIMEOUT }, () => {
         /key does not match/,
       ],
       [
-        `UPDATE change_log SET after_json = json_set(after_json, '$."sex = ''F'' --"', 1) WHERE batch_id = ?`,
+        "UPDATE change_log SET after_json = json_remove(after_json, '$.created_at') WHERE batch_id = ?",
         [],
-        /columns/,
+        /missing created_at/,
       ],
+      ['UPDATE change_log SET schema_version = 99 WHERE batch_id = ?', [], /newer/],
       [
         "UPDATE change_log SET after_json = json_set(after_json, '$.sex', json('{}')) WHERE batch_id = ?",
         [],
@@ -179,6 +180,19 @@ describe('undo / redo', { timeout: PROPERTY_TIMEOUT }, () => {
       expect(listBatches(store).find((b) => b.id === batchId)?.state).toBe('applied');
       store.close();
     }
+  });
+
+  it('ignores unknown keys in a logged image, so they never reach SQL', () => {
+    const store = memoryTree();
+    const { batchId, result: p } = store.transact('add', (tx) => persons.create(tx, { sex: 'M' }));
+    store.db
+      .prepare(
+        `UPDATE change_log SET after_json = json_set(after_json, '$."sex = ''F'' --"', 1) WHERE batch_id = ?`,
+      )
+      .run(batchId);
+    undo(store, batchId);
+    expect(persons.get(store, p.id)).toBeUndefined();
+    store.close();
   });
 
   it('restores a cascading person delete exactly', () => {
@@ -381,6 +395,29 @@ describe('undo / redo', { timeout: PROPERTY_TIMEOUT }, () => {
     store.db.exec('COMMIT');
     expect(store.getRow('person', '01OUTER')).toBeDefined();
     expect(listBatches(store)[0]).toMatchObject({ id: batchId, state: 'applied' });
+    store.close();
+  });
+});
+
+describe('owner links (#164 review)', () => {
+  it('refuses to undo a batch that would delete a row a later note still links to', () => {
+    const store = memoryTree();
+    const { batchId: addPat, result: pat } = store.transact('Add Pat', (tx) =>
+      persons.create(tx, { names: [{ given: 'Pat', surname: 'Ash' }] }),
+    );
+    store.transact('Add note', (tx) => {
+      const note = tx.insert('note', { text: 'Pat moved' });
+      tx.insert('note_link', { note_id: note.id, owner_type: 'person', owner_id: pat.id });
+    });
+    expect(() => undo(store, addPat)).toThrow(UndoConflictError);
+    expect(() => undo(store, addPat)).toThrow(
+      /still links to the person it would remove \(note link\)/,
+    );
+    expect(store.getRow('person', pat.id)).toBeDefined();
+    // Undoing the note first frees Pat.
+    undoLast(store);
+    undo(store, addPat);
+    expect(store.getRow('person', pat.id)).toBeUndefined();
     store.close();
   });
 });

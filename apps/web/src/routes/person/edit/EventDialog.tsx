@@ -58,10 +58,19 @@ interface EventDialogProps {
   item?: EventDetail | undefined;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Where focus goes on close if the opener is gone (the event was deleted). */
+  returnFocusFallback?: () => HTMLElement | null | undefined;
 }
 
 /** Add or edit an event: type, date with the parser's live preview, place and details. */
-export function EventDialog({ tree, personId, item, open, onOpenChange }: EventDialogProps) {
+export function EventDialog({
+  tree,
+  personId,
+  item,
+  open,
+  onOpenChange,
+  returnFocusFallback,
+}: EventDialogProps) {
   const base = `/trees/${seg(tree)}`;
   const edit = useEdit(tree);
   const event = item?.event;
@@ -116,6 +125,7 @@ export function EventDialog({ tree, personId, item, open, onOpenChange }: EventD
         open={open}
         onOpenChange={onOpenChange}
         title={event ? 'Edit event' : 'Add event'}
+        {...(returnFocusFallback ? { returnFocusFallback } : {})}
         footer={
           <div className={styles.footer}>
             {event && (

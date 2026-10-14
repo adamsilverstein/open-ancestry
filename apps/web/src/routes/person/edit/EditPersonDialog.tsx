@@ -5,7 +5,7 @@ import { Plus, Trash2 } from 'lucide-react';
 import type { ChildRelationship, LivingStatus, NameType, Sex } from '@open-ancestry/db';
 import { seg } from '../../../api/client';
 import { useEdit } from '../../../api/edits';
-import { apiSend } from '../../../api/client';
+import { ApiError, apiSend } from '../../../api/client';
 import { rememberDeletedPerson, undoRedo } from '../../../api/history';
 import { personQuery } from '../../../api/queries';
 import type { PersonDetail } from '../../../api/types';
@@ -17,6 +17,7 @@ import { Input } from '../../../components/Input/Input';
 import { Select } from '../../../components/Select/Select';
 import { useToast } from '../../../components/Toast/Toast';
 import { fullName, isLivingStatus, nearestRelative } from '../../../lib/person';
+import { useOpenRestored } from '../../../lib/useOpenRestored';
 import { applyNames, applyPerson, nameChanges, toDraft, type NameDraft } from './optimistic';
 import { SaveError, useSaveState } from './SaveError';
 import styles from './Edit.module.css';
@@ -103,6 +104,7 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
   const saveState = useSaveState(() => onOpenChange(false));
   const toast = useToast();
   const navigate = useNavigate();
+  const onRestored = useOpenRestored();
   const queryClient = useQueryClient();
   const [names, setNames] = useState<NameDraft[]>(() => detail.names.map(toDraft));
   const [sex, setSex] = useState<Sex>(detail.person.sex);
@@ -190,15 +192,25 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
           duration: 8000,
           action: {
             label: 'Undo',
+            // This delete only: refused if anything was changed after it.
             onClick: () =>
-              void undoRedo(queryClient, 'undo').then(
-                (batch) => batch && toast({ title: `Undid ${batch.label}`, duration: 3000 }),
+              void undoRedo(queryClient, 'undo', { expect: batchId, onRestored }).then(
+                ({ batch }) => batch && toast({ title: `Undid ${batch.label}`, duration: 3000 }),
                 (error: unknown) =>
-                  toast({
-                    title: 'Could not undo',
-                    description: error instanceof Error ? error.message : String(error),
-                    variant: 'error',
-                  }),
+                  toast(
+                    error instanceof ApiError && error.code === 'not_newest'
+                      ? {
+                          title: "Can't undo the delete",
+                          description:
+                            'Newer changes were made since. Undo them first from History.',
+                          variant: 'error',
+                        }
+                      : {
+                          title: 'Could not undo',
+                          description: error instanceof Error ? error.message : String(error),
+                          variant: 'error',
+                        },
+                  ),
               ),
           },
         });

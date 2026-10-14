@@ -48,7 +48,10 @@ const SIMPLE_QUALIFIERS: Record<string, DateQualifier> = {
   AFT: 'after',
 };
 const YEAR_RANGE = /^(\d{3,4}) ?(?:-|–|TO) ?(\d{2}|\d{4})$/;
-/** `1850S`, `1700S`, `1850'S`, `1850S-1860S`: decades, or centuries when ending in 00. */
+/**
+ * `1850S`, `1700S`, `1850'S`, `1850S-1860S`: decades, or centuries when ending
+ * in 00 before 2000 (`2000S` is the decade 2000-2009).
+ */
 const DECADES = /^(\d{1,3}0)'?S(?: ?(?:-|–|TO) ?(\d{1,3}0)'?S)?$/;
 const ISO = /^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$/;
 const NUMERIC = /^(\d{1,2})([/.-])(\d{1,2})\2(\d{3,4})$/;
@@ -149,7 +152,7 @@ function yearSpan(s: string): [number, number] | undefined {
   if (match) {
     const start = Number(match[1]);
     const last = match[2] === undefined ? start : Number(match[2]);
-    const end = last + (last % 100 === 0 ? 99 : 9);
+    const end = last + (last % 100 === 0 && last < 2000 ? 99 : 9);
     return start > 0 && end >= start ? [start, end] : undefined;
   }
   // `1890-95` is a range but `1890-09` is ISO year-month.
@@ -158,14 +161,18 @@ function yearSpan(s: string): [number, number] | undefined {
     const start = Number(match[1]);
     let end = Number(match[2]);
     if (match[2]!.length === 2) end += start - (start % 100);
-    return [start, end];
+    // Inverted ranges (`1850-13`) are typos, never a span, whatever qualifier precedes them.
+    return end >= start ? [start, end] : undefined;
   }
   return undefined;
 }
 
 /**
  * A qualified span. GEDCOM has no "about between", so approximate spans keep
- * their range; before a span is before its last year, after it after its first.
+ * their range and the "about" survives only in `text`. Before a span is
+ * before its last year and after it after its first: the loose reading, so
+ * living inference never assumes more than was written, though `BEF 1850s`
+ * exports as the weaker `BEF 1859`.
  */
 function spanDate(
   original: string,
@@ -332,8 +339,13 @@ function range(
   b: string,
   calendar: Calendar,
 ): ParsedDate | undefined {
-  const start = parsePoint(a, calendar);
-  const end = start && parsePoint(b, calendar);
+  // Either side may be a span itself: `BET 1850S AND 1860S` runs 1850-1869.
+  const side = (s: string, i: 0 | 1): Point | undefined => {
+    const span = yearSpan(s);
+    return parsePoint(s, calendar) ?? (span && { point: { year: span[i] }, calendar });
+  };
+  const start = side(a, 0);
+  const end = start && side(b, 1);
   return end && build(original, qualifier, start!, end);
 }
 

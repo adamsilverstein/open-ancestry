@@ -1,4 +1,5 @@
 /** Issue #33: century and decade forms and hyphenated ranges with a qualifier. */
+import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { inferLiving } from '../living';
 import { formatDate, parseDate, toGedcom } from './index';
@@ -44,6 +45,12 @@ describe('decades, centuries and hyphenated ranges', () => {
     ['bef 1850s', 'BEF 1859'],
     ['Aft. 1850-1860', 'AFT 1850'],
     ['aft 1700s', 'AFT 1700'],
+    // 21st-century "00s" is the decade, as everyone means it.
+    ['2000s', 'BET 2000 AND 2009'],
+    ['abt 2000s', 'BET 2000 AND 2009'],
+    ['1900s', 'BET 1900 AND 1999'],
+    // Spans on either side of a written-out range.
+    ['BET 1850s AND 1860s', 'BET 1850 AND 1869'],
   ])('%j means %s', (input, gedcom) => {
     const date = parseDate(input);
     expect(date.text).toBe(input);
@@ -71,6 +78,38 @@ describe('decades, centuries and hyphenated ranges', () => {
   );
 });
 
+describe('inverted ranges', () => {
+  it.each(['BEF 1850-13', 'AFT 1850-13', 'BEF 1950-1913', 'abt 1950-13', 'Bet. 1950-13'])(
+    '%j stays text whatever qualifier comes first',
+    (input) => {
+      expect(parseDate(input).qualifier).toBe('text');
+    },
+  );
+
+  it('never reads a typed range as earlier than it is written', () => {
+    const today = new Date('2026-10-14T12:00:00Z');
+    fc.assert(
+      fc.property(
+        fc.constantFrom('', 'BEF ', 'AFT ', 'ABT ', 'BET ', 'c. ', 'Est. '),
+        fc.integer({ min: 1000, max: 2026 }),
+        fc.oneof(fc.integer({ min: 0, max: 99 }), fc.integer({ min: 1000, max: 2026 })),
+        (qualifier, start, end) => {
+          const tail = end < 100 ? String(end).padStart(2, '0') : String(end);
+          const date = parseDate(`${qualifier}${start}-${tail}`);
+          if (date.valid && date.end)
+            expect(date.end.year).toBeGreaterThanOrEqual(date.start!.year);
+          // Fail closed: when the latest year written is recent, the person stays living.
+          const full = end < 100 ? end + start - (start % 100) : end;
+          if (Math.max(start, full) > 1926) {
+            expect(inferLiving({ birth: `${qualifier}${start}-${tail}` }, today).living).toBe(true);
+          }
+        },
+      ),
+      { numRuns: 2000 },
+    );
+  });
+});
+
 describe('living inference with wide ranges', () => {
   const today = new Date('2026-10-14T12:00:00Z');
 
@@ -83,6 +122,8 @@ describe('living inference with wide ranges', () => {
     ['1800s', false],
     ['Bet. 1850-1860', false],
     ['Aft. 1800-1810', true],
+    ['BEF 1950-13', true],
+    ['2000s', true],
   ])('born %j: living %s', (birth, living) => {
     expect(inferLiving({ birth }, today).living).toBe(living);
   });

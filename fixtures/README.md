@@ -77,6 +77,19 @@ Line numbers count the BOM-prefixed `0 HEAD` as line 1.
 | `_MTTAG` records with `NAME` and `_MTCAT` category                                               | 467-472                   |
 | `SUBM` record                                                                                    | 473-474                   |
 
+## Parser edge cases (`gedcom/`)
+
+Tiny files for encodings and malformed input, written by `npx tsx fixtures/gedcom/build.ts` (edit that script, then rerun it). Tested in `packages/gedcom/src/fixtures.test.ts`.
+
+| File                  | What                                                                                                    |
+| --------------------- | ------------------------------------------------------------------------------------------------------- |
+| `gedcom7.ged`         | GEDCOM 7.0.14, CRLF, no `CHAR`, `SCHMA` extension tag, `@VOID@`, leading `@@` escape                    |
+| `ansel.ged`           | `CHAR ANSEL`, CR line endings, combining diacritics (including two stacked) and ANSEL spacing characters |
+| `utf16le.ged`         | UTF-16 LE with BOM, CRLF, non-Latin text                                                                |
+| `cp1252.ged`          | `CHAR ANSI` with Windows-1252 bytes (accents, curly quotes, euro)                                       |
+| `ancestry-quirks.ged` | Ancestry bare-text note lines (one after a blank line), CONC mid-word and before a space, indentation, a 500+ character line |
+| `malformed.ged`       | Text before `HEAD`, invalid UTF-8 bytes, a level jump, misplaced `CONC`, duplicate xref, no `TRLR`       |
+
 ## Generator output
 
 `generateGedcom` builds a multi-generation tree from founding couples (1780-1820) to the present and includes, at scale: varied date formats (`ABT`, `BEF`, `AFT`, `BET .. AND`, `MM/DD/YYYY`, ISO, `MON YYYY`, year only, decade ranges like `1950-1959`), invented places, second marriages, adopted and step children (`_FREL`/`_MREL`), living people, `_MILT`, `RESI` with structured notes, citations with `_APID` and `DATA.WWW`, `MARR` repeated on `INDI`, `CONC`/`CONT` notes, `_MTTAG`/`_MTCAT` tags, and `OBJE` records with remote `FILE` URLs and `_OID`.

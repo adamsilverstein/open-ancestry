@@ -1,0 +1,13 @@
+this is not gedcom
+0 HEAD
+1 CHAR UTF-8
+0 @I1@ INDI
+1 NAME Badÿþ /Bytes/
+1 BIRT
+3 DATE 1900
+1 SEX M
+1 CONC orphaned continuation
+0 @I1@ INDI
+1 NAME Duplicate /Record/
+0 @I2@ INDI
+1 NAME Truncated /File/

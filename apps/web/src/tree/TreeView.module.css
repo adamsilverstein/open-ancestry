@@ -310,3 +310,14 @@
   font: var(--oa-text-sm);
   transform: translateX(-50%);
 }
+
+/* A note rather than a warning: the view works, another goes further. */
+.notice[data-tone='info'] {
+  border-left-color: var(--oa-accent);
+}
+
+.noticeLink {
+  padding: var(--oa-space-1) var(--oa-space-2);
+  color: var(--oa-accent);
+  font-weight: var(--oa-weight-medium);
+}

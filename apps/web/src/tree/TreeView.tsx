@@ -66,6 +66,9 @@ export const DEFAULT_DEPTH: Record<LayoutKind, { up: number; down: number }> = {
   fan: { up: 5, down: 0 },
 };
 
+/** Deeper fans have rings too thin to click; the pedigree goes deeper instead. */
+export const MAX_FAN_GENERATIONS = 6;
+
 const STALE = 5 * 60_000;
 const NO_KIN: Record<string, string> = {};
 const REFOCUS_MARK = 'oa-tree-refocus-start';
@@ -164,7 +167,9 @@ export function TreeView({
   const toast = useToast();
   const kind: LayoutKind = search.layout ?? 'family';
   // Hand-edited URLs can hold anything: clamp to what the server serves.
-  const up = parseGenerations(search.up) ?? DEFAULT_DEPTH[kind].up;
+  const requestedUp = parseGenerations(search.up) ?? DEFAULT_DEPTH[kind].up;
+  const fanCapped = kind === 'fan' && requestedUp > MAX_FAN_GENERATIONS;
+  const up = fanCapped ? MAX_FAN_GENERATIONS : requestedUp;
   const down = parseGenerations(search.down) ?? DEFAULT_DEPTH[kind].down;
 
   const canvas = useRef<TreeCanvasHandle>(null);
@@ -583,6 +588,19 @@ export function TreeView({
           <Button size="sm" variant="ghost" onClick={() => void retryMissing()}>
             Retry
           </Button>
+        </div>
+      )}
+      {fanCapped && !missing && (
+        <div className={styles.notice} role="status" data-surface="raised" data-tone="info">
+          The fan shows {MAX_FAN_GENERATIONS} generations.
+          <Link
+            to="/tree/$personId"
+            params={{ personId }}
+            search={(prev) => ({ ...prev, layout: 'pedigree' })}
+            className={styles.noticeLink}
+          >
+            Open the pedigree
+          </Link>
         </div>
       )}
       <TreeToolbar

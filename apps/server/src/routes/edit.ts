@@ -33,6 +33,7 @@ import {
   resolveRelative,
 } from '../edits';
 import { badRequest, conflict, notFound } from '../errors';
+import { mergePeople } from '../merge';
 import {
   addName,
   createTag,
@@ -50,6 +51,7 @@ import {
   AddSiblingBody,
   AddSpouseBody,
   BatchBody,
+  MergeBody,
   EventBody,
   EventPatch,
   FamilyChildPatch,
@@ -537,6 +539,24 @@ export function editRoutes(app: Api, { library }: Deps): void {
       const label = `Untag ${personLabel(store, id)}: ${store.getRow('tag', tagId)?.name ?? tagId}`;
       const { batchId } = edit(store, label, (tx) => untagPerson(tx, id, tagId));
       return { batchId };
+    },
+  );
+
+  // ------------------------------------------------------------ merge
+
+  /** Merges another person into this one: one transaction, one undo step. */
+  app.post(
+    '/api/trees/:tree/people/:id/merge',
+    { schema: { params: TreeIdParams, body: MergeBody } },
+    async (request) => {
+      const store = open(request.params.tree);
+      const { id } = request.params;
+      const { otherId, choices } = request.body;
+      requireRow(store, 'person', id);
+      requireRow(store, 'person', otherId);
+      const label = `Merge ${personLabel(store, otherId)} into ${personLabel(store, id)}`;
+      const { batchId } = edit(store, label, (tx) => mergePeople(tx, id, otherId, choices));
+      return { batchId, person: summary(store, id) };
     },
   );
 

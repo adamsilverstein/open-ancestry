@@ -36,6 +36,7 @@ import {
   PopoverContent,
   PopoverTrigger,
   QuickViewPopover,
+  RelationshipChart,
   RelationshipList,
   Select,
   Skeleton,
@@ -658,6 +659,20 @@ export function DesignPage() {
           ]}
         />
         <Status>{relationship}</Status>
+      </Section>
+
+      <Section title="RelationshipChart">
+        {/* Rafferty is Eleanor's 1st cousin 1x removed through Thaddeus and Wilhelmina's line. */}
+        <RelationshipChart
+          cells={[
+            { person: rafferty, row: 3, col: 0, role: 'person' },
+            { person: eleanor, row: 2, col: 0, role: 'between' },
+            { person: null, row: 1, col: 0, role: 'between' },
+            { person: wilhelmina, row: 0, col: 0, role: 'common-ancestor' },
+            { person: thaddeus, row: 1, col: 1, role: 'between' },
+            { person: unknown, row: 2, col: 1, role: 'home' },
+          ]}
+        />
       </Section>
 
       <Section title="SourceItem">

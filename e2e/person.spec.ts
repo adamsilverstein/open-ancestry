@@ -50,7 +50,7 @@ test.describe('header', () => {
 
   test('shows how a relative connects to the home person', async ({ page }) => {
     await openPerson(page, people.felix);
-    await page.getByRole('button', { name: 'Show relationship path' }).click();
+    await page.getByRole('button', { name: 'Show path' }).click();
     const chart = page.getByRole('dialog', { name: 'Relationship path' });
     await expect(chart.getByRole('listitem')).toHaveText([
       /^Felix Ashdown/,
@@ -67,7 +67,7 @@ test.describe('header', () => {
   test('offers no path for the home person', async ({ page }) => {
     await openPerson(page, people.rowan);
     await expect(page.getByTestId('relationship')).toHaveText('Home person');
-    await expect(page.getByRole('button', { name: 'Show relationship path' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Show path' })).toHaveCount(0);
   });
 
   test('shows Living for a living person', async ({ page }) => {

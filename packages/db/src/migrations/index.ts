@@ -1,6 +1,7 @@
 import type { Database } from 'better-sqlite3';
 import v001 from './v001-initial';
 import v002 from './v002-history-order';
+import * as v003 from './v003-nfc-text';
 
 /** How a migration changed one table's columns, so rows written before it can be upgraded. */
 export interface ColumnChanges {
@@ -41,6 +42,12 @@ export interface Migration {
    * tables it does not touch.
    */
   upgradeRow?: (table: string, row: Record<string, unknown>) => Record<string, unknown>;
+  /**
+   * For rewrites SQL cannot express (such as Unicode normalization): runs in
+   * the migration's transaction right after `sql`. Writes here are part of the
+   * upgrade, not edits, so they are not change-logged.
+   */
+  run?: (db: Database) => void;
 }
 
 /** v2: number existing batches by commit order, mirroring the SQL backfill. */
@@ -73,6 +80,14 @@ export const MIGRATIONS: readonly Migration[] = [
     sql: v002,
     columns: { change_batch: { added: { seq: 0 } }, change_log: { added: { schema_version: 1 } } },
     upgradeTables: numberBatches,
+  },
+  {
+    version: 3,
+    name: 'nfc-text',
+    sql: '',
+    run: v003.normalizeText,
+    upgradeRow: v003.upgradeRow,
+    upgradeTables: v003.upgradeTables,
   },
 ];
 

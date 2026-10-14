@@ -22,6 +22,7 @@ export {
   Tx,
   type StoreOptions,
 } from './store';
+export { isNfcColumn, nfcRow, toNFC } from './nfc';
 export {
   TREE_EXTENSION,
   createTree,

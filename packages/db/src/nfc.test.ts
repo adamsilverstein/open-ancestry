@@ -6,6 +6,8 @@ import {
   BulkWriter,
   LATEST_SCHEMA_VERSION,
   createTree,
+  exportJson,
+  importJson,
   listBatches,
   openMemoryTree,
   openTree,
@@ -13,7 +15,9 @@ import {
   places,
   searchPeople,
   toNFC,
+  redo,
   undo,
+  UndoConflictError,
   type TreeStore,
 } from './index';
 
@@ -93,7 +97,7 @@ describe('Tx writes', () => {
   });
 });
 
-describe('schema v2: NFC normalization of existing trees', () => {
+describe('schema v3: NFC normalization of existing trees', () => {
   let dir: string;
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -112,37 +116,37 @@ describe('schema v2: NFC normalization of existing trees', () => {
     ids.nfcPlace = w.insert('place', {
       name: NFC('Zürich'),
       full_name: NFC('Zürich, Schweiz'),
-      parent_id: ids.schweiz,
+      parent_id: ids.schweiz!,
     });
     ids.nfdPlace = w.insert('place', {
       name: NFD('Zürich'),
       full_name: NFD('Zürich, Schweiz'),
-      parent_id: ids.schweiz,
+      parent_id: ids.schweiz!,
       latitude: 47.37,
       longitude: 8.54,
     });
     ids.nfdChild = w.insert('place', {
       name: 'Altstadt',
       full_name: NFD('Altstadt, Zürich, Schweiz'),
-      parent_id: ids.nfdPlace,
+      parent_id: ids.nfdPlace!,
     });
-    w.insert('person_name', {
-      person_id: ids.person,
+    ids.name = w.insert('person_name', {
+      person_id: ids.person!,
       given: NFD('José'),
       surname: NFD('Müller'),
       is_primary: 1,
     });
-    w.insert('person_name', { person_id: ids.other, given: 'Ann', surname: 'Ash', is_primary: 1 });
+    w.insert('person_name', { person_id: ids.other!, given: 'Ann', surname: 'Ash', is_primary: 1 });
     for (const [person, place] of [
-      [ids.person, ids.nfdPlace],
-      [ids.other, ids.nfcPlace],
+      [ids.person!, ids.nfdPlace!],
+      [ids.other!, ids.nfcPlace!],
     ] as const) {
       const event = w.insert('event', { type: 'BIRT', place_id: place });
       w.insert('event_role', { event_id: event, person_id: person, role: 'principal' });
     }
     const note = w.insert('note', { text: NFD('Notizen über Zürich') });
-    w.insert('note_link', { note_id: note, owner_type: 'place', owner_id: ids.nfdPlace });
-    w.insert('note_link', { note_id: note, owner_type: 'place', owner_id: ids.nfcPlace });
+    w.insert('note_link', { note_id: note, owner_type: 'place', owner_id: ids.nfdPlace! });
+    w.insert('note_link', { note_id: note, owner_type: 'place', owner_id: ids.nfcPlace! });
     ids.media = w.insert('media', {
       kind: 'photo',
       local_path: NFD('photos/Zoë.jpg'),
@@ -150,9 +154,9 @@ describe('schema v2: NFC normalization of existing trees', () => {
     });
     ids.nfcTag = w.insert('tag', { name: NFC('Geprüft'), category: 'Status' });
     ids.nfdTag = w.insert('tag', { name: NFD('Geprüft'), category: 'Status' });
-    w.insert('tag_link', { tag_id: ids.nfcTag, owner_type: 'person', owner_id: ids.person });
-    w.insert('tag_link', { tag_id: ids.nfdTag, owner_type: 'person', owner_id: ids.person });
-    w.insert('tag_link', { tag_id: ids.nfdTag, owner_type: 'person', owner_id: ids.other });
+    w.insert('tag_link', { tag_id: ids.nfcTag!, owner_type: 'person', owner_id: ids.person! });
+    w.insert('tag_link', { tag_id: ids.nfdTag!, owner_type: 'person', owner_id: ids.person! });
+    w.insert('tag_link', { tag_id: ids.nfdTag!, owner_type: 'person', owner_id: ids.other! });
     w.insert('raw_record', {
       import_batch_id: batch,
       seq: 0,
@@ -163,8 +167,16 @@ describe('schema v2: NFC normalization of existing trees', () => {
     store.db
       .prepare("UPDATE meta SET value = ? WHERE key = 'tree_name'")
       .run(NFD('Familie Müller'));
-    // Pretend this tree was written before v2.
-    store.db.prepare("UPDATE meta SET value = '1' WHERE key = 'schema_version'").run();
+    // Edits made before the upgrade: their change_log images hold NFD text.
+    ids.edit = store.transact('Add nickname', (tx) =>
+      tx.update('person_name', ids.name!, { nickname: 'Pepe' }),
+    ).batchId;
+    ids.placeEdit = store.transact('Set type', (tx) =>
+      tx.update('place', ids.nfdChild!, { type: 'District' }),
+    ).batchId;
+    // Pretend this tree and its history were written by version 2.
+    store.db.prepare("UPDATE meta SET value = '2' WHERE key = 'schema_version'").run();
+    store.db.prepare('UPDATE change_log SET schema_version = 2').run();
     store.close();
     return { path, ids };
   }
@@ -222,28 +234,62 @@ describe('schema v2: NFC normalization of existing trees', () => {
     store.close();
   });
 
-  it('logs the normalization as one undoable batch', () => {
+  it('is an upgrade, not an edit: History is unchanged', () => {
     const { path, ids } = legacyTree();
     const store = openTree(path);
-    const [batch] = listBatches(store);
-    expect(batch?.label).toMatch(/NFC/);
-    undo(store, batch!.id);
-    expect(
-      isNFD(one(store, 'SELECT given FROM person_name WHERE person_id = ?', ids.person) as string),
-    ).toBe(true);
-    expect(store.getRow('place', ids.nfdPlace!)).toBeDefined();
-    expect(store.getRow('tag', ids.nfdTag!)).toBeDefined();
+    expect(listBatches(store).map((b) => b.id)).toEqual([ids.placeEdit, ids.edit]);
+    expect(one(store, 'SELECT count(*) FROM change_log WHERE schema_version = 3')).toBe(0);
     store.close();
-    // Reopening does not normalize again: it ran once, as part of the upgrade.
-    const reopened = openTree(path);
-    expect(listBatches(reopened)).toHaveLength(1);
-    reopened.close();
+  });
+
+  it('still undoes and redoes an edit made before the upgrade', () => {
+    const { path, ids } = legacyTree();
+    const store = openTree(path);
+    // The upgrade merged this place's parent, so its image names a parent that is gone:
+    // undo refuses it as a conflict and changes nothing.
+    expect(() => undo(store, ids.placeEdit!)).toThrow(UndoConflictError);
+    expect(store.getRow('place', ids.nfdChild!)?.type).toBe('District');
+    // Text-only normalization is upgraded in the images, so other edits undo cleanly.
+    undo(store, ids.edit!);
+    expect(store.getRow('person_name', ids.name!)).toMatchObject({
+      nickname: null,
+      given: NFC('José'),
+    });
+    redo(store, ids.edit!);
+    expect(store.getRow('person_name', ids.name!)?.nickname).toBe('Pepe');
+    store.close();
+  });
+
+  it('normalizes and merges an older JSON backup on import, without a change batch', () => {
+    dir = mkdtempSync(join(tmpdir(), 'oa-nfc-'));
+    const source = openMemoryTree();
+    const w = new BulkWriter(source);
+    w.insert('person', { id: 'P1' } as never);
+    w.insert('person_name', { person_id: 'P1', given: NFD('José'), surname: NFD('Müller') });
+    w.insert('place', { id: 'A', name: NFC('Zürich'), full_name: NFC('Zürich') } as never);
+    w.insert('place', { id: 'B', name: NFD('Zürich'), full_name: NFD('Zürich') } as never);
+    const event = w.insert('event', { type: 'BIRT', place_id: 'B' });
+    w.insert('event_role', { event_id: event, person_id: 'P1', role: 'principal' });
+    w.insert('tag', { id: 'T1', name: NFC('Geprüft') } as never);
+    w.insert('tag', { id: 'T2', name: NFD('Geprüft') } as never);
+    w.insert('tag_link', { tag_id: 'T1', owner_type: 'person', owner_id: 'P1' });
+    w.insert('tag_link', { tag_id: 'T2', owner_type: 'person', owner_id: 'P1' });
+    w.commit();
+    const doc = { ...exportJson(source), schemaVersion: 2 };
+    const target = openMemoryTree();
+    importJson(target, doc);
+    expect(one(target, 'SELECT given FROM person_name')).toBe(NFC('José'));
+    expect(all(target, 'SELECT id FROM place')).toEqual([{ id: 'A' }]);
+    expect(one(target, 'SELECT place_id FROM event')).toBe('A');
+    expect(all(target, 'SELECT tag_id FROM tag_link')).toEqual([{ tag_id: 'T1' }]);
+    expect(listBatches(target)).toEqual([]);
+    source.close();
+    target.close();
   });
 
   it('does nothing visible on a fresh tree', () => {
     const store = openMemoryTree();
     expect(listBatches(store)).toEqual([]);
-    expect(one(store, "SELECT count(*) FROM meta WHERE key LIKE '%nfc%'")).toBe(0);
     store.close();
   });
 });

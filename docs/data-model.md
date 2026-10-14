@@ -1,10 +1,10 @@
 # open-ancestry data model
 
-Current schema version: **2**
+Current schema version: **3**
 
 This is the reference for the local data format: the SQLite schema inside every tree, the rules the code keeps on top of it, and the JSON interchange format. It is owned by `packages/db`. `packages/db/src/data-model-doc.test.ts` fails if a table or column exists in the live database but not here (or the other way round), or if an enum value is missing, so this document cannot drift from the DDL.
 
-- DDL: `packages/db/src/migrations/v001-initial.ts` and `v002-history-order.ts` (frozen dumps and history fixtures: `packages/db/src/migrations/history/schema-vN.sql`, `oa-vN.json`)
+- DDL: `packages/db/src/migrations/v001-initial.ts` and `v002-history-order.ts`; `v003-nfc-text.ts` changes no tables (see [Text normalization](#text-normalization)) (frozen dumps and history fixtures: `packages/db/src/migrations/history/schema-vN.sql`, `oa-vN.json`)
 - Row types: `packages/db/src/types.ts`; enums: `packages/db/src/enums.ts`
 - JSON Schema for interchange: `packages/db/schema/oa-json.schema.json`
 
@@ -21,7 +21,8 @@ This is the reference for the local data format: the SQLite schema inside every 
 9. [Change log, undo and redo](#change-log-undo-and-redo)
 10. [Search index](#search-index)
 11. [JSON interchange](#json-interchange)
-12. [Versioning policy](#versioning-policy)
+12. [Text normalization](#text-normalization)
+13. [Versioning policy](#versioning-policy)
 
 ## Storage layout
 
@@ -590,6 +591,15 @@ Each result reports its `match` tier. Within a tier, BM25 ranks names 10, phonet
 - Import requires an empty tree. A document from an older `schemaVersion` is upgraded through each later migration (its column map, then any `upgradeTables` step) before validation; one from a newer version is refused. Import loads everything in one transaction and rebuilds the search index.
 - The JSON Schema in `packages/db/schema/oa-json.schema.json` is generated from the live schema (`npm run generate:json-schema -w @open-ancestry/db`); a test fails if it is stale, and exports are validated against it.
 
+## Text normalization
+
+Human text is stored in Unicode NFC, so the same name, place or tag written composed (`ü`) or decomposed (`u` + combining diaeresis, as macOS file names and text pasted from PDFs produce) is one value (#99).
+
+- `Tx.insert` and `Tx.update` normalize string columns (`nfcRow` in `packages/db/src/nfc.ts`), and the GEDCOM importer normalizes every mapped value, so all edits and imports store NFC.
+- Left byte-exact: `raw_record`, `unmapped_line` and `import_batch` (the original GEDCOM and import bookkeeping, so exports stay verbatim), `change_batch` and `change_log` (images are upgraded per migration instead), derived search tables, `media.local_path`, `remote_url`, `sha256` and `mime` (they name files and URLs outside the database), and ids, keys and timestamps.
+- Migration 3 changes no tables. It rewrites existing text in place inside the migration transaction, without a change batch, so nothing appears in History. Places whose `full_name` is then identical merge into the oldest row: events, child places and media and note links move to it, and it inherits missing coordinates. Tags whose category and name are then identical merge the same way. The search index is rebuilt. `upgradeRow` normalizes older change_log images, so earlier edits still undo; the exception is an edit whose image refers to a place or tag the upgrade merged away, which undo refuses as a conflict without changing anything. Older JSON backups are normalized and merged the same way on import.
+- Export compares values after NFC, so a record whose stored text only changed form (for example by this upgrade) is still written verbatim from `raw_record`.
+
 ## Versioning policy
 
 - `meta.schema_version` holds the applied migration number. Migrations are forward-only: a database is never downgraded, and opening a database newer than the app is refused.
@@ -614,6 +624,9 @@ Each result reports its `match` tier. Within a tier, BM25 ranks names 10, phonet
     upgradeRow: (table, row) => row,
     // Optional, for values computed from other rows (v2 numbers batches this way):
     upgradeTables: (tables) => { /* edit an older JSON document's rows in place */ },
+    // Optional, for rewrites SQL cannot express (v3 normalizes Unicode this way): runs in the
+    // migration's transaction after `sql`. Its writes are an upgrade, so they are not change-logged.
+    run: (db) => {},
   }
   ```
 

@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { Network, Pencil } from 'lucide-react';
-import { ancestorsQuery, mediaUrl, treeQuery } from '../../api/queries';
+import { ancestorsQuery, treeQuery } from '../../api/queries';
+import { avatarUrl } from '../../lib/media';
 import type { PersonDetail } from '../../api/types';
 import { Avatar } from '../../components/Avatar/Avatar';
 import { Popover, PopoverContent, PopoverTrigger } from '../../components/Popover/Popover';
@@ -115,7 +116,7 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
         name={name}
         sex={sex}
         size={120}
-        src={summary.primaryMediaId ? mediaUrl(tree, summary.primaryMediaId) : undefined}
+        src={avatarUrl(tree, summary)}
         className={styles.avatar}
       />
       <div className={styles.identity}>

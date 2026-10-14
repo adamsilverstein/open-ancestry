@@ -17,6 +17,24 @@ import {
 const codes = (warnings: { code: string }[]) => warnings.map((w) => w.code);
 
 describe('names', () => {
+  it('reads a parenthesized nickname that NICK confirms as the nickname', async () => {
+    const { store } = await importInto(
+      ged(
+        '0 @I1@ INDI',
+        '1 NAME Ann (Nan) /Ash/',
+        '2 NICK Nan',
+        '0 @I2@ INDI',
+        '1 NAME John (Jr) /Ash/',
+      ),
+    );
+    expect(
+      rows(store, 'SELECT given, nickname, full_text FROM person_name ORDER BY full_text'),
+    ).toEqual([
+      { given: 'Ann', nickname: 'Nan', full_text: 'Ann (Nan) /Ash/' },
+      { given: 'John (Jr)', nickname: null, full_text: 'John (Jr) /Ash/' },
+    ]);
+  });
+
   it('maps TYPE, NPFX, NSFX, NICK, SPFX and _MARNM variants', async () => {
     const { store, report } = await importInto(
       ged(

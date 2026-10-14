@@ -546,7 +546,10 @@ export class Mapper {
     const full = text(node);
     if (!full && !parts.GIVN && !parts.SURN) return;
     this.use(node);
-    const parsed = parseName(full ?? '');
+    // A nickname in parentheses (`Ann (Nan) /Ash/`) that NICK confirms is the nickname, not
+    // part of the given names; the parser only knows quoted ones.
+    const nick = parts.NICK;
+    const parsed = parseName(nick && full ? full.replace(`(${nick})`, `"${nick}"`) : (full ?? ''));
     let surname = parts.SURN ?? (parsed.surname || undefined);
     const surnamePrefix = parts.SPFX;
     if (surnamePrefix && !parts.SURN && surname?.startsWith(surnamePrefix + ' ')) {

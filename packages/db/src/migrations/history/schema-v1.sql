@@ -309,8 +309,6 @@ CREATE INDEX event_role_family_idx ON event_role (family_id);
 
 CREATE INDEX event_role_person_idx ON event_role (person_id, role);
 
-CREATE INDEX event_type_idx ON event (type);
-
 CREATE INDEX family_child_child_idx ON family_child (child_id, child_order);
 
 CREATE UNIQUE INDEX family_child_preferred_uq ON family_child (child_id) WHERE is_preferred = 1;
@@ -336,8 +334,6 @@ CREATE INDEX person_name_person_idx ON person_name (person_id, sort_order);
 CREATE UNIQUE INDEX person_name_primary_uq ON person_name (person_id) WHERE is_primary = 1;
 
 CREATE INDEX person_name_surname_idx ON person_name (surname COLLATE NOCASE, given COLLATE NOCASE);
-
-CREATE INDEX person_name_surname_key_idx ON person_name (surname_key);
 
 CREATE INDEX person_primary_media_idx ON person (primary_media_id);
 

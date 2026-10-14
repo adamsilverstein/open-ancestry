@@ -39,7 +39,9 @@ export default [
       bulkInsert(s, data);
       s.close();
     },
-    budgetMs: 1000,
+    // About 400ms on an M-series laptop; shared CI runners have measured 700-950ms.
+    // Spec budget for the whole 10k import (parse + map + load) is 3s.
+    budgetMs: 1500,
     metric: 'mean',
     iterations: 5,
     time: 0,

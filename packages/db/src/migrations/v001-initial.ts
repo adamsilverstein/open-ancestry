@@ -57,7 +57,6 @@ CREATE INDEX person_name_person_idx ON person_name (person_id, sort_order);
 CREATE UNIQUE INDEX person_name_primary_uq ON person_name (person_id) WHERE is_primary = 1;
 CREATE INDEX person_name_surname_idx ON person_name (surname COLLATE NOCASE, given COLLATE NOCASE);
 CREATE INDEX person_name_given_idx ON person_name (given COLLATE NOCASE);
-CREATE INDEX person_name_surname_key_idx ON person_name (surname_key);
 
 CREATE TABLE place (
   id TEXT PRIMARY KEY NOT NULL,
@@ -94,7 +93,6 @@ CREATE TABLE event (
 ) STRICT;
 CREATE INDEX event_date_sort_idx ON event (date_sort);
 CREATE INDEX event_place_idx ON event (place_id);
-CREATE INDEX event_type_idx ON event (type);
 
 CREATE TABLE family (
   id TEXT PRIMARY KEY NOT NULL,

@@ -36,6 +36,7 @@ function multipart(content: string) {
 
 let api: TestApi;
 beforeEach(async () => {
+  held.started = false;
   api = await testApi({ importer: importFile });
 });
 afterEach(() => {
@@ -58,5 +59,20 @@ it('keeps the tree from being renamed or deleted while a re-import compares', as
   expect((await api.patch(base, { name: 'Other' })).statusCode).toBe(409);
   held.release();
   expect((await finished(res.json().jobId)).state).toBe('completed');
+  expect((await api.patch(base, { name: 'Other' })).statusCode).toBe(200);
+});
+
+it('cancels a running compare: no review is kept and the tree is free again', async () => {
+  const imported = await api.inject({ method: 'POST', url: '/api/import', ...multipart(SAMPLE) });
+  const base = `/api/trees/${encodeURIComponent((await finished(imported.json().jobId)).tree)}`;
+  const res = await api.inject({ method: 'POST', url: `${base}/reimport`, ...multipart(SAMPLE) });
+  await vi.waitFor(() => expect(held.started).toBe(true));
+  const jobId = res.json().jobId as string;
+  expect((await api.del(`/api/jobs/${jobId}`)).statusCode).toBe(202);
+  held.release();
+  const job = await finished(jobId);
+  expect(job).toMatchObject({ state: 'failed', kind: 'reimport' });
+  expect(job.result ?? null).toBeNull();
+  expect(job.error).toMatch(/cancel/i);
   expect((await api.patch(base, { name: 'Other' })).statusCode).toBe(200);
 });

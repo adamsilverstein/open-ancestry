@@ -12,7 +12,14 @@ import type { PartnerRelationship, Sex } from '../layout/types';
 /** `adopted` when A was adopted on the way, `adoptive` when B's side was. */
 export type Modifier = 'step' | 'adopted' | 'adoptive' | 'foster' | undefined;
 
-export const APOSTROPHE = '’s ';
+/**
+ * A chain of relationships read outward from B, as a phrase: formal is
+ * possessive ("brother’s husband’s sister"), Ancestry reads it back with
+ * "of" ("sister of husband of brother").
+ */
+export function chain(parts: string[], style: NameStyle): string {
+  return style === 'ancestry' ? [...parts].reverse().join(' of ') : parts.join('’s ');
+}
 
 export type NameStyle = 'ancestry' | 'formal';
 
@@ -121,9 +128,11 @@ export function spouseOfRelative(
   }
   if (isDescendant(shape)) return `${descendantWord(shape.up, sex)}-in-law`;
   if (isSibling(shape)) return `${pick(sex, 'brother', 'sister', 'sibling')}-in-law`;
+  const spouse = spouseWord(sex, relationship);
+  if (style === 'ancestry') return chain([relativeName, spouse], style);
   if (isAuntOrUncle(shape)) return `${auntWord(shape.down, sex, style)} by marriage`;
   if (isNieceOrNephew(shape)) return `${nieceWord(shape.up, sex, style)} by marriage`;
-  return relativeName + APOSTROPHE + spouseWord(sex, relationship);
+  return chain([relativeName, spouse], style);
 }
 
 /** A is a relative of B's spouse S, where A is to S as `shape`. */
@@ -141,9 +150,10 @@ export function relativeOfSpouse(
       : `step-${descendantWord(shape.up, sex)}`;
   }
   if (isSibling(shape)) return `${pick(sex, 'brother', 'sister', 'sibling')}-in-law`;
+  if (style === 'ancestry') return chain([spouse, relativeName], style);
   if (isAuntOrUncle(shape)) return `${auntWord(shape.down, sex, style)} by marriage`;
   if (isNieceOrNephew(shape)) return `${nieceWord(shape.up, sex, style)} by marriage`;
-  return spouse + APOSTROPHE + relativeName;
+  return chain([spouse, relativeName], style);
 }
 
 export function stepSiblingWord(sex: Sex | undefined): string {

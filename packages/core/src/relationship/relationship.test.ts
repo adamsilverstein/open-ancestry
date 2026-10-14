@@ -108,13 +108,13 @@ describe('relationship names (A is B’s ...)', () => {
     ['me', 'stepdau', 'stepmother'],
     ['stepsib', 'me', 'stepbrother'],
     ['stepmom', 'son', 'step-grandmother'],
-    ['uncleW', 'me', 'aunt by marriage'],
-    ['auntH', 'me', 'uncle by marriage'],
+    ['uncleW', 'me', 'wife of uncle', 'aunt by marriage'],
+    ['auntH', 'me', 'husband of aunt', 'uncle by marriage'],
     ['sisH', 'bro', 'brother-in-law'],
-    ['c1w', 'me', '1st cousin’s wife'],
-    ['cousin1', 'hus', 'wife’s 1st cousin'],
-    ['husSisH', 'me', 'sister-in-law’s husband'],
-    ['me', 'uncleW', 'niece by marriage'],
+    ['c1w', 'me', 'wife of 1st cousin', '1st cousin’s wife'],
+    ['cousin1', 'hus', '1st cousin of wife', 'wife’s 1st cousin'],
+    ['husSisH', 'me', 'husband of sister-in-law', 'sister-in-law’s husband'],
+    ['me', 'uncleW', 'niece of husband', 'niece by marriage'],
     ['gson', 'hus', 'grandson'],
     ['dadStep', 'gf', 'step-grandson'],
     ['fosterkid', 'cousin1', 'foster sister'],
@@ -279,10 +279,13 @@ describe('marriage chains', () => {
       .build(),
   );
 
-  it('names longer marriage paths as a possessive chain', () => {
-    expect(name(g, 'broWsis', 'b')).toBe('brother’s wife’s sister');
+  it('names longer marriage paths as a chain', () => {
+    const formal = (a: string, b: string) => relationship(g, a, b, { style: 'formal' }).name;
+    expect(name(g, 'broWsis', 'b')).toBe('sister of wife of brother');
+    expect(formal('broWsis', 'b')).toBe('brother’s wife’s sister');
     // x's son by a different, unpartnered father.
-    expect(name(g, 'a', 'other')).toBe('son’s mother’s husband');
+    expect(name(g, 'a', 'other')).toBe('husband of mother of son');
+    expect(formal('a', 'other')).toBe('son’s mother’s husband');
   });
 
   it('calls unmarried partners partners and respects the depth bound', () => {

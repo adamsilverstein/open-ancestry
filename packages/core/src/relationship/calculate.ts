@@ -17,13 +17,13 @@
  *
  * Without a blood relationship, a breadth-first search over parent, child
  * and partner links finds the shortest path with at least one marriage,
- * which is named as in-law, step, "by marriage" or a possessive chain
+ * which is named as in-law, step, "by marriage" or a chain of relationships
  * ("husband’s sister’s husband").
  */
 import {
-  APOSTROPHE,
   ancestorWord,
   bloodName,
+  chain,
   descendantWord,
   isAncestor,
   isCousin,
@@ -413,17 +413,16 @@ function marriageName(g: KinshipGraph, path: RelationshipPath, style: NameStyle)
     const near = blood[0]!;
     const nearRun = single(near);
     if (empty(near)) {
-      const rest = slice(path, at + 1);
-      return (
-        marriageName(g, rest, style) + APOSTROPHE + spouseWord(g.sex(path.ids[0]!), partner(at))
-      );
+      const rest = marriageName(g, slice(path, at + 1), style);
+      return chain([rest, spouseWord(g.sex(path.ids[0]!), partner(at))], style);
     }
     if (nearRun) {
-      return marriageName(g, slice(path, at), style) + APOSTROPHE + runName(g, nearRun, style).name;
+      const rest = marriageName(g, slice(path, at), style);
+      return chain([rest, runName(g, nearRun, style).name], style);
     }
   }
 
-  // Possessive chain from B: "husband’s sister’s husband".
+  // A chain from B: "husband’s sister’s husband" / "husband of sister of husband".
   const words: string[] = [];
   for (let k = blood.length - 1; k >= 0; k--) {
     for (const run of [...blood[k]!].reverse()) {
@@ -434,7 +433,7 @@ function marriageName(g: KinshipGraph, path: RelationshipPath, style: NameStyle)
       words.push(spouseWord(g.sex(path.ids[at]!), partner(at)));
     }
   }
-  return words.join(APOSTROPHE);
+  return chain(words, style);
 }
 
 /** What A is to B, with every connecting path. */

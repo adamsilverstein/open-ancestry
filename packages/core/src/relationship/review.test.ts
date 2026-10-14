@@ -86,17 +86,18 @@ b.family('Fgg', 'ggf', 'ggm', ['gf', 'gUncle'])
 const g = kinshipGraph(b.build());
 
 describe('review: tricky names', () => {
-  it.each<[string, string, string]>([
-    ['cousKid', 'me', '1st cousin 1x removed'],
-    ['me', 'cousKid', '1st cousin 1x removed'],
-    ['cousGK', 'me', '1st cousin 2x removed'],
-    ['me', 'cousGK', '1st cousin 2x removed'],
+  // [A, B, Ancestry-style name, formal name when it differs]
+  it.each<[string, string, string, string?]>([
+    ['cousKid', 'me', '1st cousin 1x removed', '1st cousin once removed'],
+    ['me', 'cousKid', '1st cousin 1x removed', '1st cousin once removed'],
+    ['cousGK', 'me', '1st cousin 2x removed', '1st cousin twice removed'],
+    ['me', 'cousGK', '1st cousin 2x removed', '1st cousin twice removed'],
     ['halfCous', 'me', 'half 1st cousin'],
     ['me', 'halfCous', 'half 1st cousin'],
-    ['halfUncle', 'me', 'half uncle'],
-    ['gUncle', 'me', 'granduncle'],
-    ['me', 'gUncle', 'grandniece'],
-    ['gUncleKid', 'me', '1st cousin 1x removed'],
+    ['halfUncle', 'me', 'half uncle', 'half-uncle'],
+    ['gUncle', 'me', 'granduncle', 'great-uncle'],
+    ['me', 'gUncle', 'grandniece', 'great-niece'],
+    ['gUncleKid', 'me', '1st cousin 1x removed', '1st cousin once removed'],
     ['gUncle', 'kid', 'great-granduncle'],
     ['dcous', 'me', 'double 1st cousin'],
     ['me', 'dcous', 'double 1st cousin'],
@@ -104,8 +105,8 @@ describe('review: tricky names', () => {
     ['sibH', 'sib', 'husband'],
     ['sibH', 'me', 'brother-in-law'],
     ['me', 'sibH', 'sister-in-law'],
-    ['sibHsis', 'me', 'brother’s husband’s sister'],
-    ['me', 'sibHsis', 'brother’s husband’s sister'],
+    ['sibHsis', 'me', 'sister of husband of brother', 'brother’s husband’s sister'],
+    ['me', 'sibHsis', 'sister of husband of brother', 'brother’s husband’s sister'],
     ['sibU', 'me', 'sibling'],
     ['sibX', 'me', 'sibling'],
     ['me', 'sibU', 'sister'],
@@ -127,31 +128,32 @@ describe('review: tricky names', () => {
     ['smKid', 'me', 'stepsister'],
     ['smMom', 'me', 'step-grandmother'],
     ['me', 'smMom', 'step-granddaughter'],
-    ['smEx', 'me', 'stepmother’s husband'],
-    ['auntH', 'me', 'uncle by marriage'],
-    ['me', 'auntH', 'niece by marriage'],
-    ['cw', 'me', '1st cousin’s wife'],
+    ['smEx', 'me', 'husband of stepmother', 'stepmother’s husband'],
+    ['auntH', 'me', 'husband of aunt', 'uncle by marriage'],
+    ['me', 'auntH', 'niece of wife', 'niece by marriage'],
+    ['cw', 'me', 'wife of 1st cousin', '1st cousin’s wife'],
     ['ex', 'me', 'husband'],
     ['ex', 'kid', 'father'],
     ['kid', 'wife', 'stepson'],
     ['wife', 'kid', 'stepmother'],
     ['wife', 'gkid', 'step-grandmother'],
     ['wifeBro', 'me', 'brother-in-law'],
-    ['wbWife', 'me', 'brother-in-law’s wife'],
-    ['me', 'wbWife', 'sister-in-law’s wife'],
-    ['wbwSis', 'me', 'brother-in-law’s wife’s sister'],
+    ['wbWife', 'me', 'wife of brother-in-law', 'brother-in-law’s wife'],
+    ['me', 'wbWife', 'wife of sister-in-law', 'sister-in-law’s wife'],
+    ['wbwSis', 'me', 'sister of wife of brother-in-law', 'brother-in-law’s wife’s sister'],
     ['wbwsHus', 'me', 'unrelated'],
-    ['mgf', 'gf', 'son’s wife’s father'],
+    ['mgf', 'gf', 'father of wife of son', 'son’s wife’s father'],
     ['me', 'me', 'self'],
     ['gkid', 'ggf', '3rd great-granddaughter'],
     ['ggf', 'gkid', '3rd great-grandfather'],
-  ])('%s is %s’s %s', (a, c, expected) => {
-    expect(relationship(g, a, c).name).toBe(expected);
+  ])('%s is %s’s %s', (a, c, ancestry, formal = ancestry) => {
+    expect(relationship(g, a, c).name).toBe(ancestry);
+    expect(relationship(g, a, c, { style: 'formal' }).name).toBe(formal);
   });
 
   it('allows a third marriage when asked', () => {
     expect(relationship(g, 'wbwsHus', 'me', { maxMarriages: 3 }).name).toBe(
-      'brother-in-law’s wife’s sister’s husband',
+      'husband of sister of wife of brother-in-law',
     );
   });
 });

@@ -56,9 +56,12 @@ sibling. `style: 'formal'` keeps the textbook forms.
 | (2, 3)                 | 1st cousin 1x removed           | 1st cousin once removed   |
 | (2, 5)                 | 1st cousin 3x removed           | 1st cousin 3 times removed |
 | half sibling           | half sister                     | half-sister               |
+| uncle's wife           | wife of uncle                   | aunt by marriage          |
+| marriage chains        | sister of wife of brother       | brother’s wife’s sister   |
 
-Everything else (`3rd great-grandfather`, `2nd cousin`, `stepmother`, `sister-in-law`) is the same
-in both. `relationshipName({ up, down }, sex, half?, modifier?, style?)` names a shape directly.
+Ancestry phrases relatives by marriage with "of" (`wife of 1st cousin`, `niece of husband`,
+`husband of sister-in-law`); formal uses possessives and "by marriage". Everything else
+(`3rd great-grandfather`, `2nd cousin`, `stepmother`, `sister-in-law`) is the same in both. `relationshipName({ up, down }, sex, half?, modifier?, style?)` names a shape directly.
 
 ## Algorithm
 
@@ -90,8 +93,9 @@ in both. `relationshipName({ up, down }, sex, half?, modifier?, style?)` names a
    any blood relationship. Otherwise a bidirectional breadth-first search over parent, child and
    partner links finds the shortest path with one or two marriages. Common shapes get their own
    words (`father-in-law`, `sister-in-law`, `stepmother`, `stepbrother`, `step-grandmother`,
-   `step-granddaughter`, `aunt by marriage`, `niece by marriage`). Longer paths are named from the
-   first marriage on and extended (`stepmother’s husband`, `brother-in-law’s wife’s sister`).
+   `step-granddaughter`). Longer paths are named from the first marriage on and extended, with
+   "of" in the Ancestry style (`husband of stepmother`, `sister of wife of brother-in-law`) and
+   possessives in the formal one (`stepmother’s husband`).
    Adoption reads `adopted` when A was adopted on the way and `adoptive` when B's side was.
 
 Bench (`npm run bench -- relationship`): any-to-any in a 10k-person tree, p99 about 1ms against a

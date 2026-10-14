@@ -1,5 +1,5 @@
 import type { ComponentProps } from 'react';
-import { BookMarked, CircleCheck, Link2, Lock, Mars, UserRound, Venus } from 'lucide-react';
+import { BookMarked, CircleCheck, Link2, Lock, Mars, Tag, UserRound, Venus } from 'lucide-react';
 import { cx } from '../../lib/cx';
 import { formatLifespan } from '../../lib/lifespan';
 import { sexLabel, type PersonSummary } from '../../lib/person';
@@ -20,6 +20,10 @@ export interface PersonCardProps extends Omit<ComponentProps<'button'>, 'childre
   duplicate?: boolean;
   /** Living person hidden for privacy: name and dates are withheld. */
   isPrivate?: boolean;
+  /** Among the people a tree highlight picks out (a ring and a tag badge). */
+  highlighted?: boolean;
+  /** Outside a tree highlight: no color or shadow, text at full contrast. */
+  dimmed?: boolean;
 }
 
 const sexIcon = { M: Mars, F: Venus, U: UserRound } as const;
@@ -55,6 +59,8 @@ export function PersonCard({
   focusPerson = false,
   duplicate = false,
   isPrivate = false,
+  highlighted = false,
+  dimmed = false,
   className,
   type = 'button',
   ...rest
@@ -71,9 +77,13 @@ export function PersonCard({
         selected && styles.selected,
         focusPerson && styles.focusPerson,
         duplicate && styles.duplicate,
+        highlighted && styles.highlighted,
+        dimmed && styles.dimmed,
         className,
       )}
       data-selected={selected || undefined}
+      data-highlighted={highlighted || undefined}
+      data-dimmed={dimmed || undefined}
       {...rest}
     >
       <span className={styles.avatarWrap}>
@@ -100,6 +110,9 @@ export function PersonCard({
       <span className={styles.name}>{isPrivate ? 'Private' : person.name}</span>
       {!isPrivate && <LifespanText className={styles.lifespan} {...person} />}
       <span className={styles.badges} aria-hidden>
+        {highlighted && (
+          <Tag size={12} className={styles.highlightBadge} data-testid="tag-highlight" />
+        )}
         {selected && <CircleCheck size={12} className={styles.selectedBadge} />}
         {duplicate && <Link2 size={12} />}
         {!isPrivate && person.sourceCount ? <BookMarked size={12} /> : null}

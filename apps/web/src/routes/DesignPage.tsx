@@ -594,6 +594,8 @@ export function DesignPage() {
             <PersonCard person={wilhelmina} duplicate />
             <PersonCard person={rafferty} />
             <PersonCard person={rafferty} isPrivate />
+            <PersonCard person={thaddeus} highlighted />
+            <PersonCard person={eleanor} dimmed />
           </Row>
           <Row>
             <PersonCard person={thaddeus} size="compact" />

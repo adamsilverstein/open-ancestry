@@ -151,7 +151,8 @@ interface CardProps {
   lod: boolean;
   light: boolean;
   alternate: ParentFamilyChoice | undefined;
-  /** Not among the highlighted people. */
+  /** A tag highlight is on: this person is in it, or is dimmed. */
+  highlighted: boolean;
   dimmed: boolean;
 }
 
@@ -165,13 +166,13 @@ const TreeCard = memo(function TreeCard({
   lod,
   light,
   alternate,
+  highlighted,
   dimmed,
 }: CardProps) {
   const tabIndex = tabbable ? 0 : -1;
   const common = {
     'data-key': node.key,
     'data-generation': node.generation,
-    'data-dimmed': dimmed || undefined,
     'aria-label': label,
     'aria-haspopup': node.isDuplicate ? undefined : ('dialog' as const),
     'aria-expanded': node.isDuplicate ? undefined : expanded,
@@ -191,6 +192,8 @@ const TreeCard = memo(function TreeCard({
           className={styles.lodCard}
           data-sex={person.sex}
           data-focus={node.isFocus || undefined}
+          data-highlighted={highlighted || undefined}
+          data-dimmed={dimmed || undefined}
           {...common}
         />
       ) : light ? (
@@ -202,9 +205,13 @@ const TreeCard = memo(function TreeCard({
             cardStyles[`sex${person.sex}`],
             node.isFocus && cardStyles.focusPerson,
             node.isDuplicate && cardStyles.duplicate,
+            highlighted && cardStyles.highlighted,
+            dimmed && cardStyles.dimmed,
             styles.card,
             styles.lightCard,
           )}
+          data-highlighted={highlighted || undefined}
+          data-dimmed={dimmed || undefined}
           {...common}
         >
           <span className={cardStyles.name}>{person.name}</span>
@@ -216,6 +223,8 @@ const TreeCard = memo(function TreeCard({
           size={node.width < 120 ? 'compact' : 'regular'}
           focusPerson={node.isFocus}
           duplicate={node.isDuplicate}
+          highlighted={highlighted}
+          dimmed={dimmed}
           className={styles.card}
           {...common}
         />
@@ -1326,12 +1335,19 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
                 lod={shown.lod}
                 light={shown.light}
                 alternate={layout.alternateParentFamilies[node.personId]}
+                highlighted={highlighted}
                 dimmed={highlight !== null && !highlighted}
               />
             );
           })}
         {fan && visible.source === fan && (
-          <FanChart fan={fan} focusPersonId={focusPersonId} person={person} onRefocus={refocus} />
+          <FanChart
+            fan={fan}
+            focusPersonId={focusPersonId}
+            person={person}
+            onRefocus={refocus}
+            highlight={highlight}
+          />
         )}
       </div>
       {/* Row labels stay in a column beside the toolbar and follow their rows as you pan. */}

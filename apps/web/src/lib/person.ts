@@ -1,5 +1,5 @@
 import type { LivingStatus } from '@open-ancestry/db';
-import type { ApiPersonSummary, EventBrief } from '../api/types';
+import type { ApiPersonSummary, EventBrief, PersonDetail } from '../api/types';
 import type { LifeDate } from './lifespan';
 
 export type Sex = 'M' | 'F' | 'U';
@@ -75,4 +75,14 @@ export function toPersonSummary(person: ApiPersonSummary, photoUrl?: string): Pe
     living: !person.death && isLivingStatus(person.living),
     photoUrl,
   };
+}
+
+/** The closest relative to show after this person is deleted: a parent, partner, child, then sibling. */
+export function nearestRelative(detail: PersonDetail): string | undefined {
+  const parents = detail.parentFamilies.flatMap((f) => [f.partner1, f.partner2]);
+  const partners = detail.partnerFamilies.map((f) => f.partner);
+  const children = detail.partnerFamilies.flatMap((f) => f.children.map((c) => c.person));
+  const siblings = detail.parentFamilies.flatMap((f) => f.siblings.map((s) => s.person));
+  const self = detail.person.id;
+  return [...parents, ...partners, ...children, ...siblings].find((p) => p && p.id !== self)?.id;
 }

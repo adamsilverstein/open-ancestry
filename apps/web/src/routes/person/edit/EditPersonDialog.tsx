@@ -6,6 +6,7 @@ import type { ChildRelationship, LivingStatus, NameType, Sex } from '@open-ances
 import { seg } from '../../../api/client';
 import { useEdit } from '../../../api/edits';
 import { apiSend } from '../../../api/client';
+import { rememberDeletedPerson, undoRedo } from '../../../api/history';
 import { personQuery } from '../../../api/queries';
 import type { PersonDetail } from '../../../api/types';
 import { Button } from '../../../components/Button/Button';
@@ -15,7 +16,7 @@ import { IconButton } from '../../../components/IconButton/IconButton';
 import { Input } from '../../../components/Input/Input';
 import { Select } from '../../../components/Select/Select';
 import { useToast } from '../../../components/Toast/Toast';
-import { fullName, isLivingStatus } from '../../../lib/person';
+import { fullName, isLivingStatus, nearestRelative } from '../../../lib/person';
 import { applyNames, applyPerson, nameChanges, toDraft, type NameDraft } from './optimistic';
 import { SaveError, useSaveState } from './SaveError';
 import styles from './Edit.module.css';
@@ -171,14 +172,36 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
 
   function deletePerson() {
     onOpenChange(false);
+    const nearby = nearestRelative(detail);
     edit.mutate({
       label: 'Delete person',
-      send: () => apiSend('DELETE', `${base}/people/${id}`),
-      onDone: () => {
-        // Leave first, so the page does not refetch a person who is gone.
-        void navigate({ to: '/' });
+      send: () => apiSend<{ batchId: string }>('DELETE', `${base}/people/${id}`),
+      onDone: ({ batchId }) => {
+        rememberDeletedPerson(batchId, id);
+        // Leave first, so the page does not refetch a person who is gone. Stay
+        // near where the user was working: a relative, else the people list.
+        void (nearby
+          ? navigate({ to: '/person/$personId', params: { personId: nearby } })
+          : navigate({ to: '/people' }));
         queryClient.removeQueries({ queryKey: personQuery(tree, id).queryKey });
-        toast({ title: `Deleted ${name}`, description: 'Press Ctrl+Z (⌘Z on a Mac) to undo.' });
+        toast({
+          title: `Deleted ${name}`,
+          description: 'Press Ctrl+Z (⌘Z on a Mac) to undo.',
+          duration: 8000,
+          action: {
+            label: 'Undo',
+            onClick: () =>
+              void undoRedo(queryClient, 'undo').then(
+                (batch) => batch && toast({ title: `Undid ${batch.label}`, duration: 3000 }),
+                (error: unknown) =>
+                  toast({
+                    title: 'Could not undo',
+                    description: error instanceof Error ? error.message : String(error),
+                    variant: 'error',
+                  }),
+              ),
+          },
+        });
       },
     });
   }

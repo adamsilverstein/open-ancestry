@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { ApiPersonSummary } from '../api/types';
 import { fixtureDetail } from './fixtureDetail.test-utils';
-import { fullName, initials, isLivingStatus, lifeDate, toPersonSummary } from './person';
+import {
+  fullName,
+  initials,
+  isLivingStatus,
+  lifeDate,
+  nearestRelative,
+  toPersonSummary,
+} from './person';
 
 describe('initials', () => {
   it('uses the first and last name', () => {
@@ -79,5 +86,20 @@ describe('API person adapters', () => {
     expect(isLivingStatus('unknown')).toBe(true);
     expect(isLivingStatus('dead')).toBe(false);
     expect(isLivingStatus('inferred_dead')).toBe(false);
+  });
+});
+
+describe('nearestRelative', () => {
+  it('prefers a parent, then a partner, then nobody', () => {
+    const rowan = fixtureDetail('rowan');
+    const parent = rowan.parentFamilies[0]!;
+    expect(nearestRelative(rowan)).toBe((parent.partner1 ?? parent.partner2)!.id);
+
+    const noParents = { ...rowan, parentFamilies: [] };
+    const partner = rowan.partnerFamilies.find((f) => f.partner)!.partner!;
+    expect(nearestRelative(noParents)).toBe(partner.id);
+
+    const childless = { ...noParents, partnerFamilies: [] };
+    expect(nearestRelative(childless)).toBeUndefined();
   });
 });

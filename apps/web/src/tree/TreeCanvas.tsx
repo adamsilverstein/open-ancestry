@@ -269,6 +269,18 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   const helpId = useId();
   const worldRef = useRef<HTMLDivElement>(null);
   const lodRef = useRef<HTMLCanvasElement>(null);
+  const gutterRef = useRef<HTMLDivElement>(null);
+  /** Moves the row labels to their rows' screen positions. */
+  const placeGutter = () => {
+    const t = transform.current;
+    const gutter = gutterRef.current;
+    // Rows closer than a label's height would overlap: hide them when zoomed far out.
+    if (gutter) gutter.hidden = t.scale < 0.15;
+    for (const el of gutter?.children ?? []) {
+      const label = el as HTMLElement;
+      label.style.transform = `translateY(${Number(label.dataset.y) * t.scale + t.y}px) translateY(-50%)`;
+    }
+  };
   const transform = useRef<Transform>({ x: 0, y: 0, scale: 1 });
   const size = useRef({ width: 0, height: 0 });
   const frame = useRef(0);
@@ -433,6 +445,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         world.dataset.y = String(t.y);
         world.dataset.scale = String(t.scale);
       }
+      placeGutter();
       if (!frame.current) {
         frame.current = requestAnimationFrame(() => {
           frame.current = 0;
@@ -649,6 +662,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   const active = activeKey && relations?.nodes.has(activeKey) ? activeKey : focusPersonId;
 
   useLayoutEffect(() => {
+    placeGutter();
     if (visible.source && visible.source === source && renderedFor.current !== source) {
       renderedFor.current = source;
       onRendered();
@@ -937,6 +951,8 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   const focusName = person(focusPersonId)?.name ?? '';
   // Labels are relative to the focus person, as on Ancestry: "Ada’s grandparents".
   const focusGiven = focusName.split(' ')[0] ?? '';
+  const relativeLabel = (text: string) =>
+    focusGiven ? `${focusGiven}’s ${text.toLowerCase()}` : text;
 
   const shown = visible.source === layout && layout ? visible : null;
   const cardIndexes = useMemo(() => {
@@ -997,17 +1013,13 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         data-testid="tree-world"
         data-node-count={layout?.nodes.length ?? fan?.segments.length ?? 0}
       >
-        {layout?.labels.map((l) => (
-          <div
-            key={l.generation}
-            className={l.anchor === 'right-middle' ? styles.labelGutter : styles.labelColumn}
-            style={{ left: l.x, top: l.y }}
-          >
-            <GenerationLabel>
-              {focusGiven ? `${focusGiven}’s ${l.text.toLowerCase()}` : l.text}
-            </GenerationLabel>
-          </div>
-        ))}
+        {layout?.labels
+          .filter((l) => l.anchor !== 'right-middle')
+          .map((l) => (
+            <div key={l.generation} className={styles.labelColumn} style={{ left: l.x, top: l.y }}>
+              <GenerationLabel>{relativeLabel(l.text)}</GenerationLabel>
+            </div>
+          ))}
         {edgePaths && (
           <svg className={styles.edges} data-testid="tree-edges" aria-hidden>
             <path className={styles.edgeSolid} d={edgePaths.solid.join('')} />
@@ -1043,6 +1055,16 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         {fan && visible.source === fan && (
           <FanChart fan={fan} focusPersonId={focusPersonId} person={person} onRefocus={refocus} />
         )}
+      </div>
+      {/* Row labels stay in a column beside the toolbar and follow their rows as you pan. */}
+      <div ref={gutterRef} className={styles.gutter}>
+        {layout?.labels
+          .filter((l) => l.anchor === 'right-middle')
+          .map((l) => (
+            <div key={l.generation} className={styles.labelGutter} data-y={l.y}>
+              <GenerationLabel>{relativeLabel(l.text)}</GenerationLabel>
+            </div>
+          ))}
       </div>
       {children}
     </div>

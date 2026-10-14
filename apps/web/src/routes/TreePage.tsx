@@ -1,9 +1,9 @@
 import { useEffect, useId } from 'react';
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileUp } from 'lucide-react';
 import { EmptyState } from '../components/EmptyState/EmptyState';
-import { currentTreeQuery } from '../api/queries';
+import { CURRENT_TREE_KEY, currentTreeQuery } from '../api/queries';
 import { fetchHome, treeKeys } from '../tree/api';
 import { TreeView } from '../tree/TreeView';
 import styles from '../tree/TreeView.module.css';
@@ -23,6 +23,18 @@ export function TreePage() {
     queryFn: ({ signal }) => fetchHome(tree!, signal),
     enabled: Boolean(tree) && wantsHome,
   });
+
+  // A shared link opens its tree: make it the current one (top bar, next visit).
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!search.tree) return;
+    try {
+      localStorage.setItem(CURRENT_TREE_KEY, search.tree);
+    } catch {
+      // Storage may be unavailable; the URL still says which tree.
+    }
+    queryClient.setQueryData(currentTreeQuery.queryKey, search.tree);
+  }, [search.tree, queryClient]);
 
   useEffect(() => {
     if (!wantsHome || !home.data || !tree) return;

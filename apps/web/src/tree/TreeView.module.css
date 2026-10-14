@@ -122,8 +122,21 @@
   white-space: nowrap;
 }
 
+/* Left of the canvas, clear of the toolbar; rows set each label's translateY. */
+.gutter {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: calc(var(--oa-space-4) + 56px);
+  pointer-events: none;
+}
+
 .labelGutter {
-  transform: translate(-100%, -50%);
+  top: 0;
+  left: 0;
+  padding: 2px var(--oa-space-2);
+  border-radius: var(--oa-radius-sm);
+  background: color-mix(in oklab, var(--oa-canvas) 85%, transparent);
 }
 
 .labelColumn {

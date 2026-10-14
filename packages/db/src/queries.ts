@@ -9,6 +9,7 @@ import type {
   FamilyRow,
   MediaLinkRow,
   MediaRow,
+  NoteLinkRow,
   NoteRow,
   PersonNameRow,
   PersonRow,
@@ -304,17 +305,23 @@ function citationDetails(store: TreeStore, ownerType: string, ownerIdsJson: stri
 }
 
 function noteDetails(store: TreeStore, ownerType: string, ownerIdsJson: string) {
-  const found = rows<NoteRow & { owner_id: string }>(
+  const links = rows<NoteLinkRow>(
     store,
-    `SELECT n.*, l.owner_id FROM note_link l JOIN note n ON n.id = l.note_id
-     WHERE l.owner_type = ? AND l.owner_id IN (${IDS}) ORDER BY l.sort_order, l.id`,
+    `SELECT * FROM note_link WHERE owner_type = ? AND owner_id IN (${IDS}) ORDER BY sort_order, id`,
     ownerType,
     ownerIdsJson,
   );
+  const notes = byId(
+    rows<NoteRow>(
+      store,
+      `SELECT * FROM note WHERE id IN (${IDS})`,
+      JSON.stringify(links.map((l) => l.note_id)),
+    ),
+  );
   return new Map(
-    [...groupBy(found, (n) => n.owner_id)].map(([owner, list]) => [
+    [...groupBy(links, (l) => l.owner_id)].map(([owner, list]) => [
       owner,
-      list.map(({ owner_id: _owner, ...note }) => note as NoteRow),
+      list.map((l) => notes.get(l.note_id) as NoteRow),
     ]),
   );
 }

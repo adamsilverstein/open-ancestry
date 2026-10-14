@@ -14,7 +14,6 @@ import {
   noteLinks,
   notes,
   persons,
-  places,
   sources,
   tagLinks,
   tags,

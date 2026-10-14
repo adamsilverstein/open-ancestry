@@ -136,6 +136,24 @@ describe('re-import', () => {
     ).toBe(404);
   });
 
+  it('reports a stale review and compares it again (#163)', async () => {
+    const base = await importedTree();
+    const { reimportId } = await startReimport(base);
+    expect((await api.get(`/api/reimports/${reimportId}/status`)).json()).toEqual({ stale: false });
+    const people = (await api.get(`${base}/people?limit=1`)).json();
+    await api.patch(`${base}/people/${people.items[0].id}`, { sex: 'X' });
+    expect((await api.get(`/api/reimports/${reimportId}/status`)).json()).toEqual({ stale: true });
+    expect((await api.get(`/api/reimports/${reimportId}`)).json().stale).toBe(true);
+    const again = await api.post(`/api/reimports/${reimportId}/refresh`);
+    expect(again.statusCode).toBe(200);
+    expect(again.json()).toMatchObject({ id: reimportId, stale: false });
+    expect(again.json().diff.people.length).toBeGreaterThan(0);
+    expect((await api.post(`/api/reimports/${reimportId}/apply`, { accept: [] })).statusCode).toBe(
+      200,
+    );
+    expect((await api.post(`/api/reimports/${reimportId}/refresh`)).statusCode).toBe(404);
+  });
+
   it('can be discarded, and fails cleanly on a bad file', async () => {
     const base = await importedTree();
     const { reimportId } = await startReimport(base);

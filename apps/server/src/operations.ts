@@ -12,7 +12,7 @@ import {
   type Tx,
 } from '@open-ancestry/db';
 import { nameRow, refreshLiving, requireRow } from './edits';
-import { conflict, notFound } from './errors';
+import { badRequest, conflict, notFound, stale } from './errors';
 import { sniffMediaType } from './routes/media';
 import type { BatchOperation, NameBody } from './schemas';
 import type { Static } from 'typebox';
@@ -51,13 +51,25 @@ function profilePhotoProblem(store: TreeStore, media: MediaRow): string | null {
   return null;
 }
 
+type Seen = Record<string, string | number | null>;
+
+/** Refuses a write made from a copy of the row that no longer matches the stored one. */
+function requireSeen(row: object, seen: Seen | undefined, what: string): void {
+  for (const [column, value] of Object.entries(seen ?? {})) {
+    if (!(column in row)) throw badRequest(`Unknown column ${column} in expect`);
+    if ((row as Record<string, unknown>)[column] !== value) {
+      throw stale(`The ${what} changed after it was loaded`);
+    }
+  }
+}
+
 /*
  * Edits shared by their single routes and POST /batch. Each runs inside the
  * caller's transaction and throws an ApiError to abort the whole batch.
  */
 
-export function updatePerson(tx: Tx, id: string, patch: Static<typeof PersonPatch>) {
-  requireRow(tx.store, 'person', id);
+export function updatePerson(tx: Tx, id: string, patch: Static<typeof PersonPatch>, seen?: Seen) {
+  requireSeen(requireRow(tx.store, 'person', id), seen, 'person');
   if (patch.primary_media_id) {
     const media = tx.store.getRow('media', patch.primary_media_id);
     if (!media) throw notFound(`media ${patch.primary_media_id} not found`);
@@ -75,13 +87,15 @@ export function addName(tx: Tx, personId: string, body: NameBody) {
   return names.add(tx, personId, nameRow(body));
 }
 
-export function updateName(tx: Tx, id: string, body: NameBody) {
+export function updateName(tx: Tx, id: string, body: NameBody, seen?: Seen) {
   const existing = requireRow(tx.store, 'person_name', id);
+  requireSeen(existing, seen, 'name');
   return names.update(tx, id, nameRow(body, existing));
 }
 
-export function deleteName(tx: Tx, id: string) {
+export function deleteName(tx: Tx, id: string, seen?: Seen) {
   const name = requireRow(tx.store, 'person_name', id);
+  requireSeen(name, seen, 'name');
   const { n } = tx.store
     .stmt('SELECT count(*) AS n FROM person_name WHERE person_id = ?')
     .get(name.person_id) as { n: number };
@@ -89,8 +103,13 @@ export function deleteName(tx: Tx, id: string) {
   names.delete(tx, id);
 }
 
-export function updateFamilyChild(tx: Tx, id: string, patch: Static<typeof FamilyChildPatch>) {
-  requireRow(tx.store, 'family_child', id);
+export function updateFamilyChild(
+  tx: Tx,
+  id: string,
+  patch: Static<typeof FamilyChildPatch>,
+  seen?: Seen,
+) {
+  requireSeen(requireRow(tx.store, 'family_child', id), seen, 'relationship to a parent');
   const { is_preferred, ...rest } = patch;
   if (is_preferred) familyChildren.setPreferred(tx, id);
   return familyChildren.update(tx, id, rest);
@@ -118,15 +137,15 @@ export function untagPerson(tx: Tx, personId: string, tagId: string) {
 export function runOperation(tx: Tx, operation: BatchOperation): unknown {
   switch (operation.op) {
     case 'person.update':
-      return updatePerson(tx, operation.id, operation.patch);
+      return updatePerson(tx, operation.id, operation.patch, operation.expect);
     case 'name.add':
       return addName(tx, operation.personId, operation.name);
     case 'name.update':
-      return updateName(tx, operation.id, operation.name);
+      return updateName(tx, operation.id, operation.name, operation.expect);
     case 'name.delete':
-      return deleteName(tx, operation.id) ?? null;
+      return deleteName(tx, operation.id, operation.expect) ?? null;
     case 'familyChild.update':
-      return updateFamilyChild(tx, operation.id, operation.patch);
+      return updateFamilyChild(tx, operation.id, operation.patch, operation.expect);
     case 'tag.create':
       return createTag(tx, operation.tag, operation.attachTo);
     case 'person.tag':

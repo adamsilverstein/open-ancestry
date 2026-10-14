@@ -1048,6 +1048,26 @@
                     }
                   },
                   "additionalProperties": false
+                },
+                "expect": {
+                  "type": "object",
+                  "patternProperties": {
+                    "^[a-z0-9_]{1,40}$": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 10000
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "maxProperties": 30
                 }
               },
               "additionalProperties": false
@@ -1256,6 +1276,26 @@
                     }
                   },
                   "additionalProperties": false
+                },
+                "expect": {
+                  "type": "object",
+                  "patternProperties": {
+                    "^[a-z0-9_]{1,40}$": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 10000
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "maxProperties": 30
                 }
               },
               "additionalProperties": false
@@ -1273,6 +1313,26 @@
                   "minLength": 1,
                   "maxLength": 64,
                   "pattern": "^[0-9A-Za-z_-]+$"
+                },
+                "expect": {
+                  "type": "object",
+                  "patternProperties": {
+                    "^[a-z0-9_]{1,40}$": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 10000
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "maxProperties": 30
                 }
               },
               "additionalProperties": false
@@ -1329,6 +1389,26 @@
                     }
                   },
                   "additionalProperties": false
+                },
+                "expect": {
+                  "type": "object",
+                  "patternProperties": {
+                    "^[a-z0-9_]{1,40}$": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 10000
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "maxProperties": 30
                 }
               },
               "additionalProperties": false
@@ -1475,6 +1555,26 @@
               }
             },
             "additionalProperties": false
+          },
+          "expect": {
+            "type": "object",
+            "patternProperties": {
+              "^[a-z0-9_]{1,40}$": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 10000
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "maxProperties": 30
           }
         },
         "additionalProperties": false
@@ -1683,6 +1783,26 @@
               }
             },
             "additionalProperties": false
+          },
+          "expect": {
+            "type": "object",
+            "patternProperties": {
+              "^[a-z0-9_]{1,40}$": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 10000
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "maxProperties": 30
           }
         },
         "additionalProperties": false
@@ -1700,6 +1820,26 @@
             "minLength": 1,
             "maxLength": 64,
             "pattern": "^[0-9A-Za-z_-]+$"
+          },
+          "expect": {
+            "type": "object",
+            "patternProperties": {
+              "^[a-z0-9_]{1,40}$": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 10000
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "maxProperties": 30
           }
         },
         "additionalProperties": false
@@ -1756,6 +1896,26 @@
               }
             },
             "additionalProperties": false
+          },
+          "expect": {
+            "type": "object",
+            "patternProperties": {
+              "^[a-z0-9_]{1,40}$": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 10000
+                  },
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "maxProperties": 30
           }
         },
         "additionalProperties": false

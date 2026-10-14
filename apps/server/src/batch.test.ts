@@ -19,7 +19,6 @@ type Detail = {
     surname: string | null;
     type: string;
     full_text: string | null;
-    updated_at: string;
   }[];
   tags: { name: string }[];
   parentFamilies: { link: { id: string; partner1_rel: string } }[];
@@ -105,6 +104,8 @@ describe('batch', () => {
   it('refuses operations made from stale data with 409 stale, changing nothing', async () => {
     const seen = await detail(s.ada);
     const name = seen.names[0]!;
+    const sawName = { given: name.given, surname: name.surname };
+    const sawPerson = { updated_at: seen.person.updated_at };
     // Timestamps have millisecond resolution; make sure the next edit gets a new one.
     await new Promise((resolve) => setTimeout(resolve, 5));
     // Another window renames Ada after this one loaded her.
@@ -115,13 +116,13 @@ describe('batch', () => {
     expect(res.statusCode).toBe(200);
 
     for (const operation of [
-      { op: 'name.update', id: name.id, name: { surname: 'Ashby' }, expect: name.updated_at },
-      { op: 'name.delete', id: name.id, expect: name.updated_at },
+      { op: 'name.update', id: name.id, name: { surname: 'Ashby' }, expect: sawName },
+      { op: 'name.delete', id: name.id, expect: sawName },
     ]) {
       res = await api.post(`${s.base}/batch`, {
         label: 'Stale',
         operations: [
-          { op: 'person.update', id: s.ada, patch: { sex: 'X' }, expect: seen.person.updated_at },
+          { op: 'person.update', id: s.ada, patch: { sex: 'X' }, expect: sawPerson },
           operation,
         ],
       });
@@ -138,8 +139,8 @@ describe('batch', () => {
     res = await api.post(`${s.base}/batch`, {
       label: 'Fresh',
       operations: [
-        { op: 'name.update', id: name.id, name: { surname: 'Ashby' }, expect: name.updated_at },
-        { op: 'person.update', id: s.ada, patch: { sex: 'X' }, expect: seen.person.updated_at },
+        { op: 'name.update', id: name.id, name: { surname: 'Ashby' }, expect: sawName },
+        { op: 'person.update', id: s.ada, patch: { sex: 'X' }, expect: sawPerson },
       ],
     });
     expect(res.statusCode).toBe(200);
@@ -185,6 +186,14 @@ describe('batch', () => {
       { label: 'x', operations: [{ op: 'person.drop', id: s.ada }] },
       { label: 'x', operations: [{ op: 'person.update', id: s.ada, patch: { sex: 'Q' } }] },
       { operations: [{ op: 'person.update', id: s.ada, patch: {} }] },
+      {
+        label: 'x',
+        operations: [{ op: 'person.update', id: s.ada, patch: {}, expect: { 'x; DROP': 1 } }],
+      },
+      {
+        label: 'x',
+        operations: [{ op: 'person.update', id: s.ada, patch: {}, expect: { nope: 1 } }],
+      },
     ]) {
       const res = await api.post(`${s.base}/batch`, body);
       expect(res.statusCode, JSON.stringify(body)).toBe(400);

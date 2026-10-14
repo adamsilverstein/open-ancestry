@@ -39,7 +39,8 @@ npm run fixtures      # regenerate synthetic GEDCOM in fixtures/generated
 | --- | --- |
 | `packages/core` | Pure domain logic (dates, names, layout) |
 | `packages/db` | SQLite schema and repositories (better-sqlite3) |
-| `packages/gedcom` | GEDCOM parsing, mapping, export |
+| `packages/gedcom` | GEDCOM parsing, export, GEDZIP |
+| `packages/import` | GEDCOM/GEDZIP import into a tree (Ancestry adapter) |
 | `apps/server` | Fastify API and static SPA hosting |
 | `apps/web` | Vite + React 19 SPA |
 | `apps/cli` | `open-ancestry serve`, bundled with the web build |

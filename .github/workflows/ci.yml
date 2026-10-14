@@ -62,6 +62,9 @@ jobs:
 
       - name: Benchmarks
         run: npm run bench
+        env:
+          # Budgets are for an M-series laptop; shared runners are about 2-3x slower.
+          OA_BENCH_FACTOR: '2.5'
 
       - name: Upload Playwright report
         if: ${{ failure() }}

@@ -4,6 +4,10 @@
  *
  * Usage: npm run bench [-- <name filter>]
  *
+ * Budgets are the design.md section 7 numbers for an M-series laptop.
+ * OA_BENCH_FACTOR multiplies every budget for slower machines (default 1;
+ * CI sets 2.5, since shared runners measure about 2-3x slower).
+ *
  * TODO: compare against a stored baseline and fail on >20% regressions
  * (design.md section 6) once real hot paths have suites.
  */
@@ -15,6 +19,9 @@ import type { BenchCase } from './types';
 
 const suitesDir = join(import.meta.dirname, 'suites');
 const filter = process.argv[2];
+const factor = Number(process.env.OA_BENCH_FACTOR ?? 1);
+if (!(factor > 0))
+  throw new Error(`OA_BENCH_FACTOR must be a positive number, got ${process.env.OA_BENCH_FACTOR}`);
 
 const cases: BenchCase[] = [];
 for (const file of (await readdir(suitesDir)).filter((f) => f.endsWith('.bench.ts')).sort()) {
@@ -26,7 +33,14 @@ const rows = [];
 let failed = false;
 for (const c of cases) {
   await c.setup?.();
-  const bench = new Bench({ iterations: c.iterations ?? 10, time: c.time ?? 500 });
+  const bench = new Bench({
+    iterations: c.iterations ?? 10,
+    time: c.time ?? 500,
+    ...(c.warmupIterations !== undefined && {
+      warmup: c.warmupIterations > 0,
+      warmupIterations: c.warmupIterations,
+    }),
+  });
   bench.add(c.name, c.fn);
   await bench.run();
   const result = bench.tasks[0]?.result;
@@ -38,13 +52,14 @@ for (const c of cases) {
   }
   const metric = c.metric ?? 'p99';
   const value = result.latency[metric];
-  const ok = value <= c.budgetMs;
+  const budget = c.budgetMs * factor;
+  const ok = value <= budget;
   failed ||= !ok;
   rows.push({
     name: c.name,
     'mean ms': result.latency.mean.toFixed(2),
     'p99 ms': result.latency.p99.toFixed(2),
-    budget: `${metric} <= ${c.budgetMs}ms`,
+    budget: `${metric} <= ${budget}ms`,
     samples: result.latency.samplesCount,
     status: ok ? 'ok' : 'OVER BUDGET',
   });

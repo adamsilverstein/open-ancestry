@@ -67,8 +67,9 @@ Observed in Ancestry (owner's account, read-only) and their help docs:
 |---|---|---|
 | `packages/core` | Pure TS domain logic, no I/O: genealogical dates, name handling, living inference, relationship calculator, tree layout engines. Runs in Node and in a Web Worker. | none |
 | `packages/db` | SQLite schema, versioned migrations, typed repositories, FTS search, change log / undo. | core |
-| `packages/gedcom` | Streaming GEDCOM 5.5.1 + 7 tokenizer/parser, GEDCOM to domain mapper, Ancestry adapter, GEDCOM/JSON exporters, GEDZIP. | core |
-| `apps/server` | Fastify HTTP API, import jobs, media serving, static SPA, security headers. | core, db, gedcom |
+| `packages/gedcom` | Streaming GEDCOM 5.5.1 + 7 tokenizer/parser, GEDCOM/JSON exporters, GEDZIP. | core |
+| `packages/import` | GEDCOM/GEDZIP to domain mapper with the Ancestry adapter, import report, media linking. | core, db, gedcom |
+| `apps/server` | Fastify HTTP API, import jobs, media serving, static SPA, security headers. | core, db, gedcom, import |
 | `apps/web` | React SPA: design system components, tree views, person page, search, editing, import UI. | core (types, layout in worker) |
 | `apps/cli` | `open-ancestry serve`, `import <file>`, `export`, `bench`. | server, db, gedcom |
 | `e2e/` | Playwright tests against a real server with synthetic fixture trees. | all |

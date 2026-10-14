@@ -1,15 +1,18 @@
 import type { Database } from 'better-sqlite3';
 
 /**
- * `expr` without invisible characters the tokenizer would split a word at
- * (zero-width space, non-joiner and joiner, word joiner, BOM, soft hyphen),
- * so "Ro\u200bwan" is indexed as "Rowan" (#190).
+ * Invisible format characters the tokenizer would split a word at, the same
+ * ones the query drops (core's \p{Cf} strip covers them): zero-width space,
+ * non-joiner and joiner, direction marks, word joiner, BOM, soft hyphen,
+ * embeddings, overrides and isolates. So "Ro\u200bwan" is indexed as "Rowan" (#190).
  */
+const INVISIBLE = [
+  0xad, 0x61c, 0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e,
+  0x2060, 0x2066, 0x2067, 0x2068, 0x2069, 0xfeff,
+];
+
 const visible = (expr: string) =>
-  [0x200b, 0x200c, 0x200d, 0x2060, 0xfeff, 0xad].reduce(
-    (sql, code) => `replace(${sql}, char(${code}), '')`,
-    expr,
-  );
+  INVISIBLE.reduce((sql, code) => `replace(${sql}, char(${code}), '')`, expr);
 
 /** The search document columns (names, phonetic, places, years) for `search_doc d`. */
 export const DOC_COLUMNS = `

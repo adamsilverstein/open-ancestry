@@ -6,11 +6,15 @@
  * imported file, is cleaned for display (`displayText`).
  */
 
-/** C0 controls (tab and newline included), DEL and C1 controls. */
+/**
+ * C0 controls (tab and newline included), DEL, C1 controls, the line and
+ * paragraph separators (U+2028, U+2029: line breaks, and U+2029 ends every
+ * embedding) and the obsolete format controls U+206A-U+206F.
+ */
 // eslint-disable-next-line no-control-regex -- matching control characters is the point
-const CONTROL = /[\u0000-\u001f\u007f-\u009f]/u;
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u206a-\u206f]/u;
 // eslint-disable-next-line no-control-regex -- as above
-const CONTROLS = /[\u0000-\u001f\u007f-\u009f]/gu;
+const CONTROLS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u206a-\u206f]/gu;
 /** LRE, RLE, PDF, LRO, RLO: embeddings and overrides, which leak past the text they are in. */
 const EMBEDDING = /[‪-‮]/u;
 const EMBEDDINGS = /[‪-‮]/gu;

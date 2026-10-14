@@ -60,6 +60,8 @@ function Vital({
 interface RelationshipToHome {
   /** `father of Rowan Ashdown`, `Home person`; null while loading or unrelated. */
   text: string | null;
+  /** The home person's name after `text` ("father of "), shown isolated. */
+  of?: string;
   /** One mini chart per connecting path, for blood relatives (several with pedigree collapse). */
   charts: { label: string; cells: RelationshipChartCell[] }[];
 }
@@ -85,7 +87,7 @@ function useRelationshipToHome(tree: string, detail: PersonDetail): Relationship
   if (spouseOfHome) {
     const role =
       detail.summary.sex === 'M' ? 'husband' : detail.summary.sex === 'F' ? 'wife' : 'spouse';
-    return { text: `${role} of ${fullName(spouseOfHome)}`, charts: [] };
+    return { text: `${role} of `, of: fullName(spouseOfHome), charts: [] };
   }
   const people = new Map(
     [...(homeAncestors.data?.people ?? []), ...(personAncestors.data?.people ?? [])].map((p) => [
@@ -102,7 +104,7 @@ function useRelationshipToHome(tree: string, detail: PersonDetail): Relationship
       return { ...cell, person: person ? toPersonSummary(person) : null };
     }),
   }));
-  return { text: `${found.name} of ${fullName(homePerson)}`, charts };
+  return { text: `${found.name} of `, of: fullName(homePerson), charts };
 }
 
 export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDetail }) {
@@ -137,6 +139,8 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
         <div className={styles.relationshipRow}>
           <p className={styles.relationship} data-testid="relationship">
             {relationship.text}
+            {/* Isolated, so a right-to-left name keeps "father of" in order. */}
+            {relationship.of && <PersonName name={relationship.of} />}
           </p>
           {relationship.charts.length > 0 && (
             <Popover>

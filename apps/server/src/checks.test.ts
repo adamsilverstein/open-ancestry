@@ -137,3 +137,23 @@ describe('tree checker', () => {
     }
   });
 });
+
+describe('dismissals in the JSON interchange', () => {
+  it('round-trip through export and import', async () => {
+    await person('Ned', 'Vale', 'M', [['BIRT', '1900']]);
+    const [issue] = (await checks()).items;
+    await api.post(`${base}/checks/dismiss`, { keys: [issue!.key] });
+
+    const exported = await api.get(`${base}/export.json`);
+    const doc = JSON.parse(exported.body) as { tables: { meta: { key: string }[] } };
+    expect(doc.tables.meta.map((m) => m.key)).toContain(`check.dismissed:${issue!.key}`);
+
+    const { openMemoryTree, importJson } = await import('@open-ancestry/db');
+    const copy = openMemoryTree();
+    importJson(copy, doc);
+    const { checkTree } = await import('./checks');
+    const report = checkTree(copy);
+    expect(report.items).toEqual([]);
+    expect(report.dismissed.map((i) => i.key)).toEqual([issue!.key]);
+  });
+});

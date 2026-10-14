@@ -69,6 +69,9 @@ function fileType(media: MediaRow): string {
   return 'File';
 }
 
+/** Pixel size of the `sm` thumbnail's longer edge. */
+const THUMB_SM = 160;
+
 /** Thumbnails that failed to load (a corrupt or unreadable file), shared by tiles and lightbox. */
 type ThumbFailures = { has: (id: string) => boolean; add: (id: string) => void };
 
@@ -81,17 +84,33 @@ function Preview({
   media: MediaRow;
   failures: ThumbFailures;
 }) {
+  // An image no bigger than the small thumbnail gains nothing from `md`, and a 480w
+  // descriptor would make the browser draw its 40px file at 40 * 190/480 px.
+  const [small, setSmall] = useState(media.width !== null && media.width <= THUMB_SM);
   if (hasThumbnail(media) && !failures.has(media.id)) {
     // Decorative: the tile's caption already names it.
     return (
       <img
+        // A new element when the srcset goes: browsers keep the old density for the same URL.
+        key={small ? 'small' : 'srcset'}
         src={thumbUrl(tree, media.id, 'sm')}
         // Tiles are about 190px wide: 2x screens pick the 480px thumbnail.
-        srcSet={`${thumbUrl(tree, media.id, 'sm')} 160w, ${thumbUrl(tree, media.id, 'md')} 480w`}
-        sizes="190px"
+        srcSet={
+          small
+            ? undefined
+            : `${thumbUrl(tree, media.id, 'sm')} ${THUMB_SM}w, ${thumbUrl(tree, media.id, 'md')} 480w`
+        }
+        sizes={small ? undefined : '190px'}
         alt=""
         loading="lazy"
         decoding="async"
+        onLoad={(event) => {
+          // Size unknown until now (most imports): drop the srcset for a small original.
+          const img = event.currentTarget;
+          if (!small && img.naturalWidth < THUMB_SM && img.naturalHeight < THUMB_SM) {
+            setSmall(true);
+          }
+        }}
         onError={() => failures.add(media.id)}
       />
     );

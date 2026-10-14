@@ -58,15 +58,34 @@ test.describe('person', () => {
     ).toHaveValue('Ashe');
     await dialog.getByRole('button', { name: 'Cancel' }).click();
 
-    // Undo the added name, then the first edit (two batches: name, sex).
+    // Each dialog save is one undo step: the added name, then name and sex together.
     await page.keyboard.press(`${mod}+z`);
-    await expect(toasts(page).filter({ hasText: 'Undid Add name' })).toBeVisible();
-    await page.keyboard.press(`${mod}+z`);
+    await expect(toasts(page).filter({ hasText: 'Undid Edit Rowan James Ashdown' })).toBeVisible();
+    dialog = await editPerson(page);
+    await expect(dialog.getByRole('group', { name: 'Name 2' })).toHaveCount(0);
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
     await page.keyboard.press(`${mod}+z`);
     await expect(h1(page)).toHaveText('Rowan Ashdown');
-    await page.keyboard.press(`Shift+${mod}+z`);
+    await expect(
+      page.getByTestId('person-header').getByRole('img', { name: 'Rowan Ashdown, male' }),
+    ).toBeVisible();
     await page.keyboard.press(`Shift+${mod}+z`);
     await expect(h1(page)).toHaveText('Rowan James Ashdown');
+    await expect(page.getByTestId('person-header').getByRole('img', { name: /sex unknown/ })).toBeVisible();
+  });
+
+  test('undoing the creation of the person on screen leaves their page', async ({ page }) => {
+    await openSeeded(page, seeded);
+    await relationships(page).getByRole('button', { name: 'Add family member' }).click();
+    await page.getByRole('menuitem', { name: 'Add sibling' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Add sibling' });
+    await dialog.getByRole('textbox', { name: 'Given names' }).fill('Tobias');
+    await dialog.getByRole('button', { name: 'Add' }).click();
+    await relationships(page).getByRole('link', { name: /Tobias/ }).click();
+    await expect(h1(page)).toHaveText('Tobias');
+    await page.keyboard.press(`${mod}+z`);
+    await expect(page).toHaveURL(new RegExp(`/person/${seeded.rowan}$`));
+    await expect(toasts(page).filter({ hasText: 'Tobias is no longer in the tree' })).toBeVisible();
   });
 
   test('Cmd/Ctrl-Z inside a text field is left to the field', async ({ page }) => {
@@ -254,6 +273,8 @@ test.describe('notes and tags', () => {
     await expect(header.getByText('Blacksmiths')).toBeVisible();
     await popover.getByRole('checkbox', { name: 'Blacksmiths' }).uncheck();
     await expect(header.getByText('Blacksmiths')).toHaveCount(0);
+    await popover.getByRole('checkbox', { name: 'Blacksmiths' }).check();
+    await expect(header.getByText('Blacksmiths')).toBeVisible();
   });
 });
 

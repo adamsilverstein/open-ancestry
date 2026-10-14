@@ -1,6 +1,6 @@
 import type { MediaKind } from '@open-ancestry/db';
 import { safeEntryPath } from '@open-ancestry/gedcom';
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 
 /** What a GEDCOM `FILE` value points at. */
@@ -172,19 +172,50 @@ export class MediaSource {
   }
 }
 
+/** `photos/a.jpg` -> `photos/a-2.jpg`. */
+export function suffixedPath(relPath: string, n: number): string {
+  const slash = relPath.lastIndexOf('/');
+  const dot = relPath.lastIndexOf('.');
+  const cut = dot > slash + 1 ? dot : relPath.length;
+  return `${relPath.slice(0, cut)}-${n}${relPath.slice(cut)}`;
+}
+
+export interface StoredMedia {
+  /** Path relative to the media folder where the bytes now live. */
+  path: string;
+  /** True when this call wrote the file (false when identical bytes were already there). */
+  written: boolean;
+  /** First folder created for it, if any. */
+  folder: string | undefined;
+}
+
 /**
- * Writes a media file under the tree's media folder, refusing anything that
- * would land outside it. Returns the first folder it had to create, if any.
+ * Stores a media file under the tree's media folder without ever overwriting
+ * one: identical bytes already at the path are reused, different bytes get a
+ * `-2`, `-3`, ... suffix. Refuses anything that would land outside the folder.
  */
-export function writeMediaFile(
+export function storeMediaFile(
   mediaRoot: string,
   relPath: string,
   bytes: Uint8Array,
-): string | undefined {
+  sha256: (bytes: Uint8Array) => string,
+): StoredMedia {
   const root = resolve(mediaRoot);
-  const target = resolve(root, ...relPath.split('/'));
-  if (!target.startsWith(root + sep)) throw new Error(`unsafe media path ${relPath}`);
-  const created = mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, bytes);
-  return created;
+  const hash = sha256(bytes);
+  for (let n = 1; n <= 1000; n++) {
+    const candidate = n === 1 ? relPath : suffixedPath(relPath, n);
+    const target = resolve(root, ...candidate.split('/'));
+    if (!target.startsWith(root + sep)) throw new Error(`unsafe media path ${relPath}`);
+    if (existsSync(target)) {
+      if (statSync(target).isFile() && sha256(readFileSync(target)) === hash) {
+        return { path: candidate, written: false, folder: undefined };
+      }
+      continue;
+    }
+    const folder = mkdirSync(dirname(target), { recursive: true });
+    // `wx` fails rather than replace a file that appeared since the check.
+    writeFileSync(target, bytes, { flag: 'wx' });
+    return { path: candidate, written: true, folder };
+  }
+  throw new Error(`no free name for ${relPath}`);
 }

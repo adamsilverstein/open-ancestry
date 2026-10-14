@@ -59,6 +59,8 @@ export const DEFAULT_DEPTH: Record<LayoutKind, { up: number; down: number }> = {
 };
 
 const STALE = 5 * 60_000;
+/** How long the pointer or keyboard rests on a card before its layout is prepared. */
+const PREFETCH_DWELL_MS = 120;
 const NO_KIN: Record<string, string> = {};
 const REFOCUS_MARK = 'oa-tree-refocus-start';
 
@@ -234,7 +236,11 @@ export function TreeView({
    * valid only for the graph version it was computed on.
    */
   const speculative = useRef(
-    new Map<string, { version: number; response: Promise<WorkerResponse> }>(),
+    new Map<string, { version: number; response: Promise<WorkerResponse>; id: number }>(),
+  );
+  /** The guess being prepared: its pending dwell timer and neighborhood request. */
+  const guess = useRef<{ timer: ReturnType<typeof setTimeout>; request?: NeighborhoodRequest }>(
+    null,
   );
   const speculationKey = useCallback(
     (focus: string) => `${kind}|${focus}|${up}|${down}`,
@@ -298,14 +304,21 @@ export function TreeView({
       Object.keys(current.parents).length === 0;
     const ahead = pristine ? speculative.current.get(speculationKey(personId)) : undefined;
     const id = ++latestRequest.current;
-    const response =
-      ahead && ahead.version === cache.version
-        ? ahead.response
-        : client.layout({
-            kind,
-            focusId: personId,
-            options: layoutOptions(kind, up, down, current),
-          });
+    const fresh = () =>
+      client.layout({
+        kind,
+        focusId: personId,
+        options: layoutOptions(kind, up, down, current),
+      });
+    let response: Promise<WorkerResponse>;
+    if (ahead && ahead.version === cache.version) {
+      // The guess was right: send it now if it is still waiting for an idle worker,
+      // and fall back to a normal layout if it was superseded.
+      client.prioritize(ahead.id);
+      response = ahead.response.catch(fresh);
+    } else {
+      response = fresh();
+    }
     response.then(
       (response) => {
         if (id !== latestRequest.current) return;
@@ -454,37 +467,74 @@ export function TreeView({
     setPopoverKey((key) => (key === node.key ? null : node.key));
   }, []);
 
-  // A likely next focus person (hovered or reached by keyboard): load their
-  // neighborhood and lay it out ahead, so re-focusing on them is instant.
+  // A likely next focus person (hovered or reached by keyboard): after a short
+  // dwell, load their neighborhood and lay it out ahead, so re-focusing on them
+  // skips the worker round trip. One guess at a time: a newer one cancels the
+  // older one's fetch, and the client keeps guesses behind real layouts.
   const onPrefetch = useCallback(
     (id: string) => {
+      const previous = guess.current;
+      if (previous) {
+        clearTimeout(previous.timer);
+        if (previous.request) {
+          void queryClient.cancelQueries({
+            queryKey: treeKeys.neighborhood(tree, previous.request),
+          });
+        }
+      }
+      guess.current = null;
       if (id === personId) return;
       const key = speculationKey(id);
-      void ensure(requestFor(id), { quiet: true })
-        .then(() => {
-          const known = speculative.current.get(key);
-          if (known?.version === cache.version || !cache.has(id)) return;
-          const response = client.layout({
-            kind,
-            focusId: id,
-            options: layoutOptions(kind, up, down, EMPTY_VIEW),
+      const timer = setTimeout(() => {
+        const request = requestFor(id);
+        const mine = { timer, request };
+        guess.current = mine;
+        void ensure(request, { quiet: true })
+          .then(() => {
+            if (guess.current === mine) guess.current = null;
+            const known = speculative.current.get(key);
+            if (known?.version === cache.version || !cache.has(id)) return;
+            const response = client.layout(
+              { kind, focusId: id, options: layoutOptions(kind, up, down, EMPTY_VIEW) },
+              { speculative: true },
+            );
+            // A failed or superseded guess just falls back to a normal layout.
+            response.catch(() => {
+              if (speculative.current.get(key)?.id === response.id) {
+                speculative.current.delete(key);
+              }
+            });
+            speculative.current.delete(key);
+            speculative.current.set(key, { version: cache.version, response, id: response.id });
+            // Keep the few most recent guesses.
+            for (const old of speculative.current.keys()) {
+              if (speculative.current.size <= 4) break;
+              speculative.current.delete(old);
+            }
+          })
+          .catch(() => {
+            // Prefetching is best effort; a cancelled fetch lands here.
           });
-          // A failed guess just falls back to a normal layout.
-          response.catch(() => speculative.current.delete(key));
-          speculative.current.delete(key);
-          speculative.current.set(key, { version: cache.version, response });
-          // Keep the few most recent guesses.
-          for (const old of speculative.current.keys()) {
-            if (speculative.current.size <= 4) break;
-            speculative.current.delete(old);
-          }
-        })
-        .catch(() => {
-          // Prefetching is best effort.
-        });
+      }, PREFETCH_DWELL_MS);
+      guess.current = { timer };
     },
-    [personId, speculationKey, ensure, requestFor, cache, client, kind, up, down],
+    [
+      personId,
+      speculationKey,
+      ensure,
+      requestFor,
+      cache,
+      client,
+      kind,
+      up,
+      down,
+      queryClient,
+      tree,
+    ],
   );
+
+  // A new focus (or leaving the view) drops a guess still waiting out its dwell.
+  useEffect(() => () => clearTimeout(guess.current?.timer), [personId]);
 
   const onInteract = useCallback(() => setPopoverKey(null), []);
 

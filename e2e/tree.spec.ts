@@ -312,6 +312,30 @@ test.describe('family view', () => {
     await expect(card(page, 'Bram Vale').locator('svg').first()).toBeAttached();
   });
 
+  test('sweeping the pointer across cards prepares only where it rests', async ({ page }) => {
+    await open(page);
+    await fit(page);
+    const requests: string[] = [];
+    page.on('request', (r) => {
+      const url = new URL(r.url());
+      if (url.pathname.startsWith('/api/') && url.pathname.endsWith('/neighborhood')) {
+        requests.push(url.searchParams.get('focus')!);
+      }
+    });
+    // Pass over six cards without stopping (all within one task, so no dwell can
+    // elapse even on a busy machine), then rest on the last one.
+    const keys = [ids.otto, ids.greta, ids.piers, ids.rhea, ids.elsa, ids.tilda];
+    await page.evaluate((list) => {
+      for (const key of list) {
+        document
+          .querySelector(`[data-key="${key}"]`)!
+          .dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' }));
+      }
+    }, keys);
+    await page.waitForTimeout(600);
+    expect(requests).toEqual([ids.tilda]);
+  });
+
   test('a click on empty canvas keeps the tree shortcuts working', async ({ page }) => {
     await open(page);
     const viewport = await box(canvas(page));

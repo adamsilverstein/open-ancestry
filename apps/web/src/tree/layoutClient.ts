@@ -45,6 +45,10 @@ export class LayoutClient {
   private worker: Worker | null = null;
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
+  /** Requests posted to the worker and not answered yet. */
+  private readonly posted = new Set<number>();
+  /** The newest speculative request, held until the worker is idle. */
+  private queued: number | null = null;
   private readonly snapshot: () => ApiNeighborhood;
 
   constructor(snapshot: () => ApiNeighborhood) {
@@ -60,6 +64,8 @@ export class LayoutClient {
     worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
       const request = this.pending.get(event.data.id);
       this.pending.delete(event.data.id);
+      this.posted.delete(event.data.id);
+      this.drain();
       if (!request) return;
       if (event.data.error) request.reject(new Error(`Layout failed: ${event.data.error}`));
       else request.resolve(event.data);
@@ -70,6 +76,8 @@ export class LayoutClient {
       if (this.worker === worker) this.worker = null;
       for (const request of this.pending.values()) request.reject(new Error(reason));
       this.pending.clear();
+      this.posted.clear();
+      this.queued = null;
     };
     worker.onerror = (event) => {
       event.preventDefault();
@@ -77,9 +85,25 @@ export class LayoutClient {
     };
     worker.onmessageerror = () => fail('Layout worker could not read a message');
     worker.postMessage({ type: 'merge', slice: this.snapshot() } satisfies WorkerRequest);
-    for (const { message } of this.pending.values()) worker.postMessage(message);
     this.worker = worker;
+    for (const [id, { message }] of this.pending) {
+      if (id === this.queued) continue;
+      this.posted.add(id);
+      worker.postMessage(message);
+    }
+    this.drain();
     return worker;
+  }
+
+  /** Posts the waiting speculative request once nothing else is in the worker. */
+  private drain() {
+    const id = this.queued;
+    if (id === null || this.posted.size > 0 || !this.worker) return;
+    const request = this.pending.get(id);
+    this.queued = null;
+    if (!request) return;
+    this.posted.add(id);
+    this.worker.postMessage(request.message);
   }
 
   /** Sends a new slice to a running worker; a new worker gets it in its snapshot. */
@@ -87,20 +111,60 @@ export class LayoutClient {
     this.worker?.postMessage({ type: 'merge', slice } satisfies WorkerRequest);
   }
 
-  layout(request: LayoutRequest): Promise<WorkerResponse> {
+  /**
+   * Lays out in the worker. A `speculative` request (a guess at the next
+   * focus) never delays a real one: it waits until the worker is idle, and a
+   * newer guess replaces it (the older one rejects). Returns the request id
+   * for `prioritize`.
+   */
+  layout(
+    request: LayoutRequest,
+    { speculative = false } = {},
+  ): Promise<WorkerResponse> & { id: number } {
     const id = this.nextId++;
-    return new Promise((resolve, reject) => {
+    const promise = new Promise<WorkerResponse>((resolve, reject) => {
       const message: WorkerRequest = { type: 'layout', id, ...request };
-      const running = this.worker;
       this.pending.set(id, { resolve, reject, message });
-      // A new worker re-sends everything pending, this request included.
-      if (running) running.postMessage(message);
-      else this.start();
     });
+    if (speculative) {
+      const superseded = this.queued !== null ? this.pending.get(this.queued) : undefined;
+      if (superseded && this.queued !== null) {
+        this.pending.delete(this.queued);
+        superseded.reject(new Error('Superseded by a newer guess'));
+      }
+      this.queued = id;
+      if (this.worker) this.drain();
+      else this.start();
+    } else {
+      this.post(id);
+    }
+    return Object.assign(promise, { id });
+  }
+
+  /** Sends a waiting speculative request now: it turned out to be the real one. */
+  prioritize(id: number) {
+    if (this.queued !== id) return;
+    this.queued = null;
+    this.post(id);
+  }
+
+  private post(id: number) {
+    const running = this.worker;
+    // A new worker sends everything pending, this request included.
+    if (!running) {
+      this.start();
+      return;
+    }
+    const request = this.pending.get(id);
+    if (!request) return;
+    this.posted.add(id);
+    running.postMessage(request.message);
   }
 
   dispose() {
     this.worker?.terminate();
     this.worker = null;
+    // Posted requests are re-sent by the next worker.
+    this.posted.clear();
   }
 }

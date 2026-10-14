@@ -1020,16 +1020,14 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     if (node && !node.isDuplicate && !node.isFocus) refocus(node.personId);
   }
 
-  const hover = useRef<{ key: string; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const hovered = useRef<string | null>(null);
   function onPointerOver(event: PointerEvent<HTMLDivElement>) {
     if (drag.current?.moved) return;
     const node = nodeOf(event.target);
-    if (!node || hover.current?.key === node.key) return;
-    if (hover.current) clearTimeout(hover.current.timer);
-    hover.current = {
-      key: node.key,
-      timer: setTimeout(() => latest.current.onPrefetch(node.personId), 120),
-    };
+    if (!node || hovered.current === node.key) return;
+    hovered.current = node.key;
+    // The view waits for the pointer to rest before preparing anything.
+    if (!node.isDuplicate) latest.current.onPrefetch(node.personId);
   }
 
   const arrows: Record<string, Direction> = {

@@ -97,7 +97,11 @@ if (unit.length === 0 && e2e.length === 0) {
   process.exit(1);
 }
 
-const mergedDir = await report('merged', [...unit, ...e2e], ['html', 'json-summary', 'text-summary']);
+const mergedDir = await report(
+  'merged',
+  [...unit, ...e2e],
+  ['html', 'json-summary', 'text-summary'],
+);
 const merged = await readSummary(mergedDir);
 const lines = [
   '## Coverage',
@@ -115,7 +119,10 @@ if (e2e.length > 0) {
   const e2eDir = await report('e2e', e2e, ['json-summary']);
   lines.push(row('E2E only (web)', (await readSummary(e2eDir)).total as Metrics));
 }
-lines.push('', `Unit inputs: ${unit.length}, e2e inputs: ${e2e.length}. HTML report: \`coverage/merged\`.`);
+lines.push(
+  '',
+  `Unit inputs: ${unit.length}, e2e inputs: ${e2e.length}. HTML report: \`coverage/merged\`.`,
+);
 
 await rm(join(coverageDir, '.tmp'), { recursive: true, force: true });
 const markdown = `${lines.join('\n')}\n`;

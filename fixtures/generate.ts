@@ -429,7 +429,7 @@ export function generateGedcom({ people: target, seed = 1, currentYear = 2026 }:
   line('1 NAME Synthetic Submitter');
   line('0 TRLR');
 
-  return `﻿${out.join('\n')}\n`;
+  return `\uFEFF${out.join('\n')}\n`;
 }
 
 async function main() {

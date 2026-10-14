@@ -5,3 +5,5 @@ test-results/
 .nyc_output/
 package-lock.json
 *.ged
+# Markdown tables reflow on every edit, which makes parallel PRs conflict.
+*.md

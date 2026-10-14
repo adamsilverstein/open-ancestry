@@ -13,7 +13,7 @@ interface Line {
 /** Minimal line splitter for sanity checks; the real parser lives in packages/gedcom. */
 function lines(text: string): Line[] {
   return text
-    .replace(/^﻿/, '')
+    .replace(/^\uFEFF/, '')
     .split('\n')
     .filter(Boolean)
     .map((raw) => {

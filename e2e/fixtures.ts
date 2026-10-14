@@ -17,7 +17,7 @@ export const test = base.extend<{ collectCoverage: void }>({
       await use();
       if (process.env.E2E_COVERAGE !== '1') return;
       const coverage = await page
-        .evaluate(() => (window as unknown as { __coverage__?: unknown }).__coverage__)
+        .evaluate(() => (globalThis as unknown as { __coverage__?: unknown }).__coverage__)
         .catch(() => undefined);
       if (!coverage) return;
       await mkdir(rawCoverageDir, { recursive: true });

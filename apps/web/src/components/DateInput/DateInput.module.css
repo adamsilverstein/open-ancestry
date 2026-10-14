@@ -1,0 +1,26 @@
+/* One line reserved so the form does not jump as the preview appears. */
+.preview {
+  display: flex;
+  align-items: center;
+  gap: var(--oa-space-1);
+  min-height: 18px;
+  color: var(--oa-text-muted);
+  font: var(--oa-text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.valid {
+  color: var(--oa-text);
+}
+
+.valid svg {
+  color: var(--oa-accent);
+}
+
+.ambiguous svg {
+  color: var(--oa-info);
+}
+
+.invalid svg {
+  color: var(--oa-warning);
+}

@@ -229,7 +229,7 @@ describe('media', () => {
         expect.objectContaining({ external_id: '@O3@', local_path: null, remote_url: null }),
         expect.objectContaining({
           external_id: '@O4@',
-          local_path: 'photos/missing.jpg',
+          local_path: null,
           sha256: null,
         }),
         expect.objectContaining({
@@ -252,7 +252,8 @@ describe('media', () => {
       rejected: 1,
     });
     expect(report.warnings.map((w) => w.code)).toEqual(['media-unsafe-path', 'media-missing']);
-    expect(report.unmapped.map((u) => u.path)).toEqual(['OBJE.FILE']);
+    // The unsafe path and the missing file stay unmapped; neither gets a local_path.
+    expect(report.unmapped).toEqual([expect.objectContaining({ path: 'OBJE.FILE', count: 2 })]);
   });
 
   it('links media from a GEDZIP archive', async () => {

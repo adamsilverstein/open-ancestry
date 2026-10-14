@@ -612,3 +612,135 @@ describe('home person and living status', () => {
     expect(living('@I4@')).toBe('inferred_dead');
   });
 });
+
+describe('repeated single-valued lines', () => {
+  it('keeps every _APID of a citation, one citation row per Ancestry record', async () => {
+    const { store, report } = await importInto(
+      ged(
+        '0 @I1@ INDI',
+        '1 BIRT',
+        '2 SOUR @S1@',
+        '3 PAGE Roll 12',
+        '3 PAGE Roll 13',
+        '3 _APID 1,7602::111',
+        '3 _APID 1,8054::222',
+        '2 SOUR @S1@',
+        '3 PAGE Roll 12',
+        '3 _APID 1,7602::111',
+        '3 _APID 1,8054::222',
+        '0 @S1@ SOUR',
+        '1 TITL Census',
+      ),
+    );
+    const birth = personEvents(store, '@I1@', 'BIRT')[0]!;
+    expect(citationsOf(store, 'event', birth.id).map((c) => [c.page, c.apid])).toEqual([
+      ['Roll 12', '1,7602::111'],
+      ['Roll 12', '1,8054::222'],
+    ]);
+    expect(value(store, 'SELECT count(*) FROM citation')).toBe(2);
+    // The second PAGE has nowhere to go: it stays unmapped, so nothing is silently lost.
+    expect(report.unmapped).toEqual([
+      expect.objectContaining({
+        path: 'INDI.BIRT.SOUR.PAGE',
+        count: 1,
+        example: { line: 9, text: '3 PAGE Roll 13' },
+      }),
+    ]);
+    expect(report.lines.mapped + report.lines.preserved).toBe(report.lines.total);
+  });
+
+  it('keeps the first DATE, PLAC and SEX and leaves repeats unmapped', async () => {
+    const { store, report } = await importInto(
+      ged(
+        '0 @I1@ INDI',
+        '1 SEX F',
+        '1 SEX M',
+        '1 BIRT',
+        '2 DATE 1850',
+        '2 DATE 1851',
+        '2 PLAC A',
+        '2 PLAC B',
+      ),
+    );
+    expect(personEvents(store, '@I1@', 'BIRT')[0]).toMatchObject({ date_text: '1850', place: 'A' });
+    expect(value(store, 'SELECT sex FROM person')).toBe('F');
+    expect(report.unmapped.map((u) => u.path).sort()).toEqual([
+      'INDI.BIRT.DATE',
+      'INDI.BIRT.PLAC',
+      'INDI.SEX',
+    ]);
+  });
+});
+
+describe('same-sex couples', () => {
+  it.each([
+    ['HUSB', 'HUSB'],
+    ['WIFE', 'WIFE'],
+    ['WIFE', 'HUSB'],
+  ])('%s + %s fill both partner slots, without FAMS back-links', async (a, b) => {
+    const { store, report } = await importInto(
+      ged(
+        '0 @I1@ INDI',
+        '0 @I2@ INDI',
+        '0 @F1@ FAM',
+        `1 ${a} @I1@`,
+        `1 ${b} @I2@`,
+        '1 CHIL @I3@',
+        '0 @I3@ INDI',
+      ),
+    );
+    const family = row<{ partner1_id: string; partner2_id: string }>(
+      store,
+      'SELECT partner1_id, partner2_id FROM family',
+    )!;
+    expect([family.partner1_id, family.partner2_id].sort()).toEqual(
+      [pid(store, '@I1@'), pid(store, '@I2@')].sort(),
+    );
+    expect(report.warnings).toEqual([]);
+    expect(report.unmapped).toEqual([]);
+  });
+
+  it('keeps FAMS order for both partners of a same-sex couple', async () => {
+    const { store, report } = await importInto(
+      ged(
+        '0 @I1@ INDI',
+        '1 FAMS @F0@',
+        '1 FAMS @F1@',
+        '0 @I2@ INDI',
+        '1 FAMS @F1@',
+        '0 @F0@ FAM',
+        '1 HUSB @I1@',
+        '0 @F1@ FAM',
+        '1 WIFE @I1@',
+        '1 WIFE @I2@',
+      ),
+    );
+    expect(
+      row(store, "SELECT partner1_order, partner2_order FROM family WHERE external_id = '@F1@'"),
+    ).toEqual({
+      partner1_order: 0,
+      partner2_order: 1,
+    });
+    expect(report.warnings).toEqual([]);
+  });
+
+  it('warns when a family names a third partner or the same partner twice', async () => {
+    const { report } = await importInto(
+      ged(
+        '0 @I1@ INDI',
+        '0 @I2@ INDI',
+        '0 @I3@ INDI',
+        '0 @F1@ FAM',
+        '1 HUSB @I1@',
+        '1 HUSB @I1@',
+        '1 WIFE @I2@',
+        '1 WIFE @I3@',
+      ),
+    );
+    expect(codes(report.warnings)).toEqual(['self-relationship', 'duplicate-link']);
+    expect(report.unmapped.map((u) => [u.path, u.count])).toEqual([
+      ['FAM.HUSB', 1],
+      ['FAM.WIFE', 1],
+    ]);
+  });
+});

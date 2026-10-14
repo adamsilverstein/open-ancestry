@@ -161,7 +161,7 @@ export class Mapper {
   private readonly partnerFamilies = new Map<string, FamilyState[]>();
   private readonly linkKeys = new Set<string>();
   private readonly linkOrder = new Map<string, number>();
-  private readonly citationKeys = new Map<string, string>();
+  private readonly citationKeys = new Map<string, string[]>();
   private readonly surnameKeys = new Map<string, string | null>();
   private readonly copiedMedia = new Set<string>();
   private readonly insertedTags = new Set<string>();
@@ -364,6 +364,7 @@ export class Mapper {
     };
     this.persons.set(id, person);
     const owner = { type: 'person', id };
+    let sexSeen = false;
     for (const c of record.children) {
       switch (c.tag) {
         case 'NAME':
@@ -384,7 +385,9 @@ export class Mapper {
           break;
         case 'SEX': {
           const sex = c.value?.trim().toUpperCase();
+          if (sexSeen) break;
           if (sex === 'M' || sex === 'F' || sex === 'X' || sex === 'U') {
+            sexSeen = true;
             person.sex = sex;
             this.use(c);
           } else if (sex) {
@@ -443,7 +446,7 @@ export class Mapper {
           break;
         case 'RESN': {
           const level = privacy(c.value);
-          if (level) {
+          if (level && person.privacy === 'public') {
             person.privacy = level;
             this.use(c);
           }
@@ -597,19 +600,20 @@ export class Mapper {
     for (const c of node.children) {
       switch (c.tag) {
         case 'TYPE':
-          if (text(c)) {
+          if (text(c) && row.custom_type == null) {
             row.custom_type = c.value!;
             this.use(c);
           }
           break;
         case 'DATE':
-          if (text(c)) {
+          if (text(c) && date === undefined) {
             date = c.value!;
             Object.assign(row, dateColumns(date));
             this.use(c);
           }
           break;
         case 'PLAC': {
+          if (row.place_id) break;
           const placeId = this.mapPlace(c);
           if (placeId) {
             row.place_id = placeId;
@@ -618,13 +622,13 @@ export class Mapper {
           break;
         }
         case 'AGE':
-          if (text(c)) {
+          if (text(c) && row.age == null) {
             row.age = c.value!;
             this.use(c);
           }
           break;
         case 'CAUS':
-          if (text(c)) {
+          if (text(c) && row.cause == null) {
             row.cause = c.value!;
             this.use(c);
           }
@@ -636,7 +640,7 @@ export class Mapper {
         }
         case 'RESN': {
           const level = privacy(c.value);
-          if (level) {
+          if (level && row.privacy == null) {
             row.privacy = level;
             this.use(c);
           }
@@ -764,10 +768,11 @@ export class Mapper {
     const row: InsertRow<'citation'> = { source_id: sourceId };
     const attachments: GedcomNode[] = [];
     const texts: string[] = [];
+    const apids: string[] = [];
     for (const c of node.children) {
       switch (c.tag) {
         case 'PAGE':
-          if (text(c)) {
+          if (text(c) && row.page == null) {
             row.page = c.value!;
             this.use(c);
           }
@@ -776,7 +781,7 @@ export class Mapper {
           const quality = /^\s*[0-3]\s*$/.test(c.value ?? '') ? Number(c.value) : undefined;
           if (quality === undefined) {
             this.warn('invalid-value', c.line, `QUAY "${c.value ?? ''}" is not 0-3`);
-          } else {
+          } else if (row.quality == null) {
             row.quality = quality;
             this.use(c);
           }
@@ -785,7 +790,7 @@ export class Mapper {
         case 'DATA':
           this.use(c);
           for (const d of c.children) {
-            if (d.tag === 'DATE' && text(d)) {
+            if (d.tag === 'DATE' && text(d) && row.date_text == null) {
               row.date_text = d.value!;
               this.use(d);
             } else if (d.tag === 'TEXT' && text(d)) {
@@ -812,7 +817,7 @@ export class Mapper {
           break;
         case '_APID':
           if (text(c)) {
-            row.apid = c.value!.trim();
+            apids.push(c.value!.trim());
             this.use(c);
           }
           break;
@@ -824,24 +829,29 @@ export class Mapper {
       }
     }
     if (texts.length) row.text = texts.join('\n');
-    // Ancestry repeats the same citation on many facts; share one row when nothing hangs off it.
+    // Ancestry repeats the same citation on many facts; share rows when nothing hangs off them.
     const key = attachments.length
       ? undefined
-      : [sourceId, row.page, row.quality, row.date_text, row.text, row.url, row.apid].join(
+      : [sourceId, row.page, row.quality, row.date_text, row.text, row.url, ...apids].join(
           '\u0000',
         );
-    let citationId = key ? this.citationKeys.get(key) : undefined;
-    if (!citationId) {
-      citationId = this.options.newId();
-      this.sink.insert('citation', { ...row, id: citationId });
-      if (key) this.citationKeys.set(key, citationId);
-      const citationOwner = { type: 'citation', id: citationId };
+    let citationIds = key ? this.citationKeys.get(key) : undefined;
+    if (!citationIds) {
+      // citation.apid holds one Ancestry record; a citation naming several becomes one row per
+      // record, same source and page, so every _APID stays searchable and linked.
+      citationIds = (apids.length ? apids : [null]).map((apid) => {
+        const id = this.options.newId();
+        this.sink.insert('citation', { ...row, apid, id });
+        return id;
+      });
+      if (key) this.citationKeys.set(key, citationIds);
+      const citationOwner = { type: 'citation', id: citationIds[0]! };
       for (const c of attachments) {
         if (c.tag === 'OBJE') this.mapMediaLink(c, citationOwner);
         else this.mapNote(c, citationOwner);
       }
     }
-    this.link('citation_link', 'citation_id', citationId, owner);
+    for (const id of citationIds) this.link('citation_link', 'citation_id', id, owner);
   }
 
   private mapTagLink(node: GedcomNode, owner: Owner): void {
@@ -877,6 +887,7 @@ export class Mapper {
       import_batch_id: this.options.batchId,
     };
     let kind: MediaKind | undefined;
+    let explicitKind = false;
     let fileSeen = false;
     const owner = { type: 'media', id };
     const form = (n: GedcomNode) => {
@@ -899,7 +910,7 @@ export class Mapper {
           if (fileSeen || !text(c)) break;
           fileSeen = true;
           this.mapFile(c, row, xref);
-          const type = mediaType(row.local_path ?? row.remote_url ?? undefined);
+          const type = mediaType(c.value);
           for (const f of c.children) {
             if (f.tag === 'FORM') form(f);
             else if (f.tag === 'TITL' && text(f)) {
@@ -923,7 +934,7 @@ export class Mapper {
           }
           break;
         case '_OID':
-          if (text(c)) {
+          if (text(c) && row.ancestry_oid == null) {
             row.ancestry_oid = c.value!.trim();
             this.use(c);
           }
@@ -944,7 +955,8 @@ export class Mapper {
           break;
         case '_TYPE':
         case '_MTYPE':
-          if (text(c)) {
+          if (text(c) && !explicitKind) {
+            explicitKind = true;
             kind = kindFromType(c.value);
             this.use(c);
           }
@@ -953,10 +965,9 @@ export class Mapper {
         case '_HGHT':
         case '_SIZE': {
           const n = /^\s*\d+\s*$/.test(c.value ?? '') ? Number(c.value) : undefined;
-          if (n === undefined) break;
-          if (c.tag === '_WDTH') row.width = n;
-          else if (c.tag === '_HGHT') row.height = n;
-          else row.byte_size ??= n;
+          const column = c.tag === '_WDTH' ? 'width' : c.tag === '_HGHT' ? 'height' : 'byte_size';
+          if (n === undefined || row[column] != null) break;
+          row[column] = n;
           this.use(c);
           break;
         }
@@ -987,25 +998,19 @@ export class Mapper {
       return;
     }
     const file = this.options.media.find(ref);
-    const missing = () =>
+    // local_path is set only for a file that is really in the tree; anything else keeps its
+    // FILE line in unmapped_line (and raw_record) so no unresolved path reaches a media route.
+    if (!file) {
       this.missingMedia.push({
         path: ref.type === 'local' ? ref.path : value,
         line: node.line,
         ...(xref && { xref }),
       });
-    if (!file) {
-      missing();
       if (this.options.media.available) {
         this.warn('media-missing', node.line, `Media file "${value}" was not found`);
       }
-      if (ref.type === 'local') {
-        row.local_path = ref.path;
-        this.use(node);
-      }
       return;
     }
-    row.local_path = file.path;
-    this.use(node);
     if (file.size > this.options.maxMediaBytes) {
       this.warn('media-too-large', node.line, `Media file "${file.path}" is too large to copy`);
       return;
@@ -1016,9 +1021,11 @@ export class Mapper {
         writeMediaFile(this.options.mediaRoot, file.path, bytes);
         this.copiedMedia.add(file.path);
       }
+      row.local_path = file.path;
       row.byte_size = bytes.length;
       row.sha256 = sha256(bytes);
       this.linkedMedia++;
+      this.use(node);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       this.warn(
@@ -1059,20 +1066,30 @@ export class Mapper {
             break;
           }
           if (!personId) break;
-          const slot = c.tag === 'HUSB' ? 'partner1' : 'partner2';
+          // Slots are positional, not gendered: HUSB fills partner1 and WIFE partner2 when free,
+          // so a second HUSB or WIFE (a same-sex couple) takes the other slot.
+          const preferred = c.tag === 'HUSB' ? 'partner1' : 'partner2';
           const other = c.tag === 'HUSB' ? 'partner2' : 'partner1';
-          if (family[slot]) {
+          if (family.partner1 === personId || family.partner2 === personId) {
+            this.warn(
+              'self-relationship',
+              c.line,
+              `${c.pointer} is already a partner in this family`,
+            );
+            break;
+          }
+          const slot =
+            family[preferred] === null ? preferred : family[other] === null ? other : undefined;
+          if (!slot) {
             this.warn(
               'duplicate-link',
               c.line,
-              `Family ${record.xref ?? ''} already has a ${c.tag}`,
+              `Family ${record.xref ?? ''} already has two partners`,
             );
-          } else if (family[other] === personId) {
-            this.warn('self-relationship', c.line, `${c.pointer} cannot be their own partner`);
-          } else {
-            family[slot] = personId;
-            this.use(c);
+            break;
           }
+          family[slot] = personId;
+          this.use(c);
           break;
         }
         case 'CHIL': {
@@ -1090,7 +1107,7 @@ export class Mapper {
         }
         case '_STAT': {
           const status = relationshipStatus(c.value);
-          if (status) {
+          if (status && !family.status) {
             family.status = status;
             this.use(c);
           }
@@ -1098,7 +1115,7 @@ export class Mapper {
         }
         case 'RESN': {
           const level = privacy(c.value);
-          if (level) {
+          if (level && family.privacy === 'public') {
             family.privacy = level;
             this.use(c);
           }

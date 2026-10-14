@@ -5,12 +5,14 @@ import {
   type NoteRow,
   type RawRecordRow,
   type TreeStore,
+  type UnmappedLineRow,
 } from '@open-ancestry/db';
 import {
   analyzeHeader,
   parseGedcom,
   resnRestrictions,
   serializeNode,
+  tokenizeLine,
   type GedcomNode,
 } from '@open-ancestry/gedcom';
 import {
@@ -131,6 +133,8 @@ class GedcomWriter implements WriterContext, MergeContext {
   private readonly living = new Set<string>();
   private readonly privateFamilies = new Set<string>();
   private readonly withheld = new Set<string>();
+  /** Imported FILE lines `filePath` wrote for media whose file was missing. */
+  private readonly usedFileLines = new Set<UnmappedLineRow>();
   private readonly hiddenEvents = new Set<string>();
   private nameStates: Map<string, NameTextState> | undefined;
   private readonly xrefs = new Map<string, string>();
@@ -182,6 +186,7 @@ class GedcomWriter implements WriterContext, MergeContext {
       }
       this.findWithheld();
     }
+    this.findMediaWithoutFile();
     this.writer = new RecordWriter(this);
   }
 
@@ -350,13 +355,47 @@ class GedcomWriter implements WriterContext, MergeContext {
   }
 
   filePath(media: MediaRow): string | undefined {
-    if (this.options.filePath) return this.options.filePath(media);
+    const path = this.options.filePath ? this.options.filePath(media) : this.storedPath(media);
+    if (path !== undefined) return path;
+    // A file missing at import: its FILE line as written, so the reference is kept.
+    const original = this.originalFile(media);
+    if (!original) return undefined;
+    this.usedFileLines.add(original.row);
+    return this.fileValue(original.value);
+  }
+
+  private storedPath(media: MediaRow): string | undefined {
     if (media.remote_url) return media.remote_url;
     if (!media.local_path) return undefined;
     // GEDCOM 7 FILE values are URI references.
     return this.v7
       ? media.local_path.split('/').map(encodeURIComponent).join('/')
       : media.local_path;
+  }
+
+  /** The imported FILE line of media whose file was not found, kept in unmapped_line. */
+  private originalFile(media: MediaRow): { row: UnmappedLineRow; value: string } | undefined {
+    for (const row of this.data.unmapped.get(ownerKey('media', media.id)) ?? []) {
+      if (!/(^|\.)FILE$/.test(row.path)) continue;
+      const value = tokenizeLine(row.line)?.value?.trim();
+      if (value) return { row, value };
+    }
+    return undefined;
+  }
+
+  /**
+   * Media with no file and no imported path to name one (trees imported before
+   * the FILE line was kept with its media) are left out of generated records:
+   * an empty FILE is invalid in both GEDCOM versions.
+   */
+  private findMediaWithoutFile(): void {
+    for (const m of this.data.mediaRows) {
+      if (this.withheld.has(m.id) || m.local_path || m.remote_url || this.originalFile(m)) continue;
+      this.withheld.add(m.id);
+      // A privatized export does not quote what it leaves out.
+      const what = this.quoteLines && m.title ? `"${m.title}"` : 'A media item';
+      this.warn(`${what} has no file path and was left out`);
+    }
   }
 
   // ------------------------------------------------------------ export
@@ -621,7 +660,9 @@ class GedcomWriter implements WriterContext, MergeContext {
       else {
         const slot = this.slotByKey.get(key);
         const raws = slot ? [slot.raw, ...(slot.also ?? [])] : [];
-        mergeUnmapped(this, node, raws, this.data.unmapped.get(key), xref);
+        // A FILE line already written from its imported text is not merged a second time.
+        const rows = this.data.unmapped.get(key)?.filter((r) => !this.usedFileLines.has(r));
+        mergeUnmapped(this, node, raws, rows, xref);
       }
       if (this.privatize && this.scrubXrefs(node)) {
         this.warn(`${xref}: an imported record id in its text was removed`);

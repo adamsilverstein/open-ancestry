@@ -19,6 +19,7 @@ import {
   treeNameProblem,
   type RunningServer,
 } from '@open-ancestry/server';
+import { escapeControls } from './escape';
 
 export const DEFAULT_PORT = 4317;
 
@@ -182,7 +183,7 @@ function stopOnSignals(
 const row = (label: string, value: string | number) => `${label.padEnd(15)}${value}`;
 const MAX_LISTED = 50;
 
-/** The import report as plain text for the terminal. */
+/** The import report as plain text for the terminal, control characters escaped. */
 export function formatReport(
   report: ImportReport,
   tree: { name: string; dir: string; homePerson: string | null },
@@ -233,7 +234,7 @@ export function formatReport(
   for (const m of report.media.missing.slice(0, MAX_LISTED)) {
     lines.push(`  missing media: ${m.path} (line ${m.line})`);
   }
-  return lines.join('\n');
+  return escapeControls(lines.join('\n'));
 }
 
 const PHASE_LABELS: Record<ImportPhase, string> = {
@@ -288,7 +289,7 @@ async function importCommand(
       `A tree named "${name}" already exists in ${library.root}; choose another with --name.`,
     );
   }
-  log(`Importing ${cli.file} ...`);
+  log(escapeControls(`Importing ${cli.file} ...`));
   const report = await importGedcom(
     { path: cli.file },
     { dir, name },

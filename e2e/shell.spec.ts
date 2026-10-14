@@ -138,6 +138,45 @@ test.describe('command palette', () => {
     await expect(trigger).toBeFocused();
   });
 
+  test('keys typed straight after the first Cmd/Ctrl-K reach the input', async ({ page }) => {
+    await gotoReady(page, '/');
+    await page.keyboard.press(`${modKey}+k`);
+    await page.keyboard.type('zzzz-nobody');
+    const dialog = page.getByRole('dialog', { name: 'Command palette' });
+    await expect(dialog.getByRole('combobox')).toHaveValue('zzzz-nobody');
+    await expect(dialog.getByText('No results')).toBeVisible();
+  });
+
+  test('keys typed while the palette chunk loads are kept in order, edits included', async ({
+    page,
+  }) => {
+    // A slow chunk makes the gap between the shortcut and the input as wide as on a busy machine.
+    await page.route(/\/assets\/ShellCommandPalette-[^/]+\.js$/, async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      await route.continue();
+    });
+    await gotoReady(page, '/');
+    await page.keyboard.press(`${modKey}+k`);
+    await page.keyboard.type('zzzx');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.type('z-');
+    const input = page.getByRole('dialog', { name: 'Command palette' }).getByRole('combobox');
+    await expect(input).toBeFocused();
+    await page.keyboard.type('nobody');
+    await expect(input).toHaveValue('zzzz-nobody');
+  });
+
+  test('typing works again when the palette chunk cannot load', async ({ page }) => {
+    await page.route(/\/assets\/ShellCommandPalette-[^/]+\.js$/, (route) => route.abort());
+    await gotoReady(page, '/design');
+    const field = page.getByRole('textbox').first();
+    await page.keyboard.press(`${modKey}+k`);
+    await page.waitForTimeout(500);
+    await field.focus();
+    await page.keyboard.type('still typing');
+    await expect(field).toHaveValue('still typing');
+  });
+
   test('Cmd/Ctrl-K toggles the palette closed', async ({ page }) => {
     await gotoReady(page, '/');
     await page.keyboard.press(`${modKey}+k`);

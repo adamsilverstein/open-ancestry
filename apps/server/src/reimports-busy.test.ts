@@ -1,13 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import type * as importPackage from '@open-ancestry/import';
 import { importFile } from '@open-ancestry/import';
 import { MUTATION_HEADERS, testApi, type TestApi } from './test/helpers';
 
 // The compare is held open so the test can act while it runs.
 const held = vi.hoisted(() => ({ release: () => {}, started: false }));
 vi.mock('@open-ancestry/import', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@open-ancestry/import')>();
+  const actual = await importOriginal<typeof importPackage>();
   return {
     ...actual,
     prepareReimport: async (...args: Parameters<typeof actual.prepareReimport>) => {

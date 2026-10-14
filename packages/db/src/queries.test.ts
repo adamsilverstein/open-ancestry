@@ -11,6 +11,7 @@ import {
   citations,
   events,
   families,
+  familyChildren,
   getNeighborhood,
   getPersonDetail,
   getPersonSummaries,
@@ -198,6 +199,43 @@ describe('neighborhood', () => {
     expect(zero.people.map((p) => p.id).sort()).toEqual([f.me, f.spouse].sort());
     expect(zero.moreUp).toEqual([f.me]);
     expect(zero.moreDown).toEqual([f.me]);
+    store.close();
+  });
+
+  it("includes ancestors' siblings down to siblingsDepth", () => {
+    const store = memoryTree();
+    const f = seedSmallFamily(store);
+    const { result: r } = store.transact('aunt', (tx) => {
+      const aunt = persons.create(tx, { names: [{ given: 'Wynne', surname: 'Vale' }] }).id;
+      const cousin = persons.create(tx, { names: [{ given: 'Rook', surname: 'Vale' }] }).id;
+      familyChildren.create(tx, { family_id: f.grandparentsFamily, child_id: aunt });
+      families.create(tx, { partner1_id: aunt, children: [{ child_id: cousin }] });
+      return { aunt, cousin };
+    });
+    const ids = (n: { people: { id: string }[] }) => n.people.map((p) => p.id);
+
+    const two = getNeighborhood(store, f.me, { up: 2, down: 0, siblingsDepth: 2 });
+    expect(ids(two)).toEqual(expect.arrayContaining([f.sister, r.aunt]));
+    expect(ids(two)).not.toContain(r.cousin);
+    expect(two.children).toContainEqual(
+      expect.objectContaining({ familyId: f.grandparentsFamily, childId: r.aunt }),
+    );
+    // The aunt has children that were not fetched.
+    expect(two.moreDown).toContain(r.aunt);
+
+    const one = getNeighborhood(store, f.me, { up: 2, down: 0 });
+    expect(ids(one)).toContain(f.sister);
+    expect(ids(one)).not.toContain(r.aunt);
+    expect(getNeighborhood(store, f.me, { up: 2, down: 0, siblingsDepth: 1 })).toEqual(one);
+
+    const none = getNeighborhood(store, f.me, { up: 2, down: 0, siblingsDepth: 0 });
+    expect(ids(none)).not.toContain(f.sister);
+    expect(getNeighborhood(store, f.me, { up: 2, down: 0, siblings: false })).toEqual(none);
+
+    // Capped at `up`: the grandparents are not fetched, so neither is the aunt.
+    const capped = getNeighborhood(store, f.me, { up: 1, down: 0, siblingsDepth: 5 });
+    expect(ids(capped)).not.toContain(r.aunt);
+    expect(ids(capped)).toContain(f.sister);
     store.close();
   });
 

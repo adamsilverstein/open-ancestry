@@ -30,6 +30,7 @@ export {
 } from './tree';
 export * from './repositories';
 export * from './queries';
+export { ancestorGenerations, wouldCreateCycle } from './lineage';
 export {
   MAX_SEARCH_LENGTH,
   MAX_SEARCH_WORDS,

@@ -108,17 +108,14 @@ test('filters the people list and highlights the tree by tag', async ({ page }) 
   await expect(
     page.getByRole('status').filter({ hasText: 'Highlighting people tagged Smiths' }),
   ).toBeVisible();
-  const card = (name: RegExp) =>
-    page
-      .locator('[data-key]')
-      .filter({ has: page.locator(`[aria-label]`) })
-      .and(page.getByRole('button', { name }));
-  await expect(card(/^Rowan Ashdown/).first()).not.toHaveAttribute('data-dimmed', /.*/);
-  await expect(card(/^Iris Vale/).first()).toHaveAttribute('data-dimmed', 'true');
-  expect([rowan, iris]).toHaveLength(2);
+  const card = (name: string) => page.locator(`[data-key][aria-label^="${name}"]`).first();
+  await expect(card('Rowan Ashdown')).toBeVisible();
+  await expect(card('Rowan Ashdown')).not.toHaveAttribute('data-dimmed', /.*/);
+  await expect(card('Iris Vale')).toHaveAttribute('data-dimmed', 'true');
+  expect(iris).not.toBe(rowan);
 
   await page.getByRole('button', { name: 'Clear highlight' }).click();
-  await expect(card(/^Iris Vale/).first()).not.toHaveAttribute('data-dimmed', /.*/);
+  await expect(card('Iris Vale')).not.toHaveAttribute('data-dimmed', /.*/);
 });
 
 test('is reachable from the command palette and the people list', async ({ page }) => {

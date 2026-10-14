@@ -1,5 +1,5 @@
 import { existsSync, statSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
@@ -258,6 +258,35 @@ describe('attaching media', () => {
         .statusCode,
     ).toBe(403);
     expect(existsSync(join(treeDir(), 'media', 'attached'))).toBe(false);
+  });
+});
+
+describe('containment', () => {
+  it('never writes thumbnails or attachments through a symlinked folder', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'oa-outside-'));
+    await rm(join(treeDir(), 'thumbs'), { recursive: true, force: true });
+    await symlink(outside, join(treeDir(), 'thumbs'));
+    const id = addMedia({ local_path: 'photos/big.png' });
+    expect((await api.get(`${s.base}/media/${id}/thumb/sm`)).statusCode).toBe(404);
+
+    await symlink(outside, join(treeDir(), 'media', 'attached'));
+    const res = await attach(
+      { owner_type: 'person', owner_id: s.ada },
+      { name: 'a.png', bytes: png },
+    );
+    expect(res.statusCode).toBe(409);
+    expect(await readdir(outside)).toEqual([]);
+  });
+
+  it('does not serve a thumbnail that is a symlink out of the tree', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'oa-outside-'));
+    await writeFile(join(outside, 'secret.webp'), 'secret');
+    const id = addMedia({ local_path: 'photos/letter.pdf', kind: 'document' });
+    await mkdir(join(treeDir(), 'thumbs'), { recursive: true });
+    await symlink(join(outside, 'secret.webp'), join(treeDir(), 'thumbs', `${id}-sm.webp`));
+    const res = await api.get(`${s.base}/media/${id}/thumb/sm`);
+    expect(res.statusCode).toBe(404);
+    expect(res.body).not.toContain('secret');
   });
 });
 

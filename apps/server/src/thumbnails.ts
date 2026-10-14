@@ -1,5 +1,5 @@
-import { mkdir, open, rename, rm, stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, open, realpath, rename, rm, stat } from 'node:fs/promises';
+import { join, sep } from 'node:path';
 import { treePaths, type TreeStore } from '@open-ancestry/db';
 import sharp from 'sharp';
 import { resolveMediaPath } from './routes/media';
@@ -63,8 +63,21 @@ async function imageSource(treeDir: string, localPath: string | null): Promise<s
 }
 
 /** Writes all sizes for one image; false when the file cannot be decoded. */
+/** True when `dir` (after following symlinks) is inside the tree folder. */
+export async function insideTree(treeDir: string, dir: string): Promise<boolean> {
+  try {
+    const [root, real] = await Promise.all([realpath(treeDir), realpath(dir)]);
+    return real.startsWith(root + sep);
+  } catch {
+    return false;
+  }
+}
+
 async function render(source: string, treeDir: string, mediaId: string): Promise<boolean> {
-  await mkdir(treePaths(treeDir).thumbs, { recursive: true });
+  const thumbs = treePaths(treeDir).thumbs;
+  await mkdir(thumbs, { recursive: true });
+  // A thumbs/ symlinked elsewhere must not carry writes out of the tree.
+  if (!(await insideTree(treeDir, thumbs))) return false;
   try {
     const image = sharp(source, { limitInputPixels: MAX_INPUT_PIXELS, failOn: 'error' }).rotate();
     for (const [size, edge] of Object.entries(THUMB_SIZES) as [ThumbSize, number][]) {
@@ -126,10 +139,11 @@ export class ThumbnailQueue {
     localPath: string | null,
     size: ThumbSize,
   ): Promise<string | null> {
-    const out = thumbFile(treeDir, mediaId, size);
-    if (await exists(out)) return out;
-    const ok = await this.run({ treeDir, mediaId, localPath });
-    return ok && (await exists(out)) ? out : null;
+    const serve = async () => {
+      const out = await resolveMediaPath(treeDir, `thumbs/${mediaId}-${size}.webp`);
+      return out && (await exists(out)) ? out : null;
+    };
+    return (await serve()) ?? ((await this.run({ treeDir, mediaId, localPath })) ? serve() : null);
   }
 
   /** Resolves once the background queue is empty. */

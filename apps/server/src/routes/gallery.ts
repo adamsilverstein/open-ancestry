@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { constants, createReadStream, createWriteStream } from 'node:fs';
-import { copyFile, mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Transform } from 'node:stream';
@@ -17,7 +17,7 @@ import type { Api, Deps } from '../context';
 import { edit, requireRow } from '../edits';
 import { ApiError, badRequest, notFound } from '../errors';
 import { MediaThumbParams, TreeIdParams, TreeParams } from '../schemas';
-import { THUMB_SIZES, isThumbSize } from '../thumbnails';
+import { THUMB_SIZES, insideTree, isThumbSize } from '../thumbnails';
 import { MEDIA_CSP, resolveMediaPath, sniffMediaType } from './media';
 
 /*
@@ -246,12 +246,19 @@ export function galleryRoutes(app: Api, { library, thumbnails, uploadLimit }: De
         const localPath = `${ATTACHED_DIR}/${upload.sha256.slice(0, 12)}-${name}`;
         const target = join(mediaRoot, ATTACHED_DIR, `${upload.sha256.slice(0, 12)}-${name}`);
         await mkdir(join(mediaRoot, ATTACHED_DIR), { recursive: true });
+        // A symlinked attached/ (or media/) folder must not carry the copy out of the tree.
+        if (!(await insideTree(library.dirOf(tree), join(mediaRoot, ATTACHED_DIR)))) {
+          throw new ApiError(409, 'conflict', 'The media folder leads outside the tree');
+        }
         try {
           await copyFile(upload.path, target, constants.COPYFILE_EXCL);
         } catch (error) {
-          // Same name and hash prefix: keep the file that is there if it is these bytes.
+          // Same name and hash prefix: keep the file that is there if it is these bytes
+          // (and a real file, not a symlink to somewhere else).
+          const there = await lstat(target).catch(() => null);
           const same =
             (error as NodeJS.ErrnoException).code === 'EEXIST' &&
+            there?.isFile() === true &&
             createHash('sha256')
               .update(await readFile(target))
               .digest('hex') === upload.sha256;

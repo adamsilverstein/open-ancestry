@@ -10,6 +10,11 @@ export interface Relations {
   parents: Map<string, string[]>;
   children: Map<string, string[]>;
   partners: Map<string, string[]>;
+  /**
+   * Each card's brothers and sisters, the card itself included: one list per
+   * sibling group, shared by every member, so a family of k children costs k
+   * rather than k² entries.
+   */
   siblings: Map<string, string[]>;
   /** Cards sharing a row, left to right. */
   rows: Map<string, LayoutNode[]>;
@@ -18,41 +23,54 @@ export interface Relations {
 export type Direction = 'up' | 'down' | 'left' | 'right';
 type Sex = 'M' | 'F' | 'U' | 'X';
 
-function push(map: Map<string, string[]>, key: string, value: string) {
-  const list = map.get(key);
-  if (!list) map.set(key, [value]);
-  else if (!list.includes(value)) list.push(value);
+/** Adds `value` to `key`'s list once; the sets make the check O(1). */
+function linker() {
+  const lists = new Map<string, string[]>();
+  const seen = new Map<string, Set<string>>();
+  const push = (key: string, value: string) => {
+    const set = seen.get(key);
+    if (!set) {
+      seen.set(key, new Set([value]));
+      lists.set(key, [value]);
+    } else if (!set.has(value)) {
+      set.add(value);
+      lists.get(key)!.push(value);
+    }
+  };
+  return { lists, push };
 }
 
 const rowKey = (n: LayoutNode) => `${n.generation}:${n.y}`;
 
 export function buildRelations(layout: TreeLayout): Relations {
   const nodes = new Map(layout.nodes.map((n) => [n.key, n]));
-  const parents = new Map<string, string[]>();
-  const children = new Map<string, string[]>();
-  const partners = new Map<string, string[]>();
+  const parents = linker();
+  const children = linker();
+  const partners = linker();
   const siblings = new Map<string, string[]>();
   const groupParents = new Map<string, string[]>();
-  const groupChildren = new Map<string, string[]>();
+  const groupChildren = linker();
 
   for (const edge of layout.edges) {
     if (edge.kind === 'couple' && edge.parents?.length === 2) {
       const [a, b] = edge.parents as [string, string];
-      push(partners, a, b);
-      push(partners, b, a);
+      partners.push(a, b);
+      partners.push(b, a);
     } else if (edge.kind === 'parent-child') {
       if (edge.parents) groupParents.set(edge.group, edge.parents);
-      if (edge.child) push(groupChildren, edge.group, edge.child);
+      if (edge.child) groupChildren.push(edge.group, edge.child);
     }
   }
-  for (const [group, kids] of groupChildren) {
+  for (const [group, kids] of groupChildren.lists) {
     const ps = groupParents.get(group) ?? [];
     for (const kid of kids) {
       for (const p of ps) {
-        push(parents, kid, p);
-        push(children, p, kid);
+        parents.push(kid, p);
+        children.push(p, kid);
       }
-      for (const other of kids) if (other !== kid) push(siblings, kid, other);
+      const other = siblings.get(kid);
+      // In two sibling groups (rare): a list of its own, merging both.
+      siblings.set(kid, other ? [...new Set([...other, ...kids])] : kids);
     }
   }
 
@@ -64,7 +82,14 @@ export function buildRelations(layout: TreeLayout): Relations {
   }
   for (const list of rows.values()) list.sort((a, b) => a.x - b.x);
 
-  return { nodes, parents, children, partners, siblings, rows };
+  return {
+    nodes,
+    parents: parents.lists,
+    children: children.lists,
+    partners: partners.lists,
+    siblings,
+    rows,
+  };
 }
 
 /**
@@ -135,6 +160,9 @@ function lineTerm(n: number, base: string): string {
 /** Kinship path steps: U(p), D(own), S(pouse), B(rother or sister). */
 function kinshipPaths(rel: Relations, focusKey: string, stopAt?: string): Map<string, string> {
   const paths = new Map<string, string>([[focusKey, '']]);
+  // Sibling lists are shared by the whole group: the first member to reach one
+  // (the nearest, as the walk is breadth-first) labels all the others.
+  const walked = new Set<string[]>();
   let frontier = [focusKey];
   while (frontier.length > 0 && !(stopAt && paths.has(stopAt))) {
     const next: string[] = [];
@@ -148,7 +176,9 @@ function kinshipPaths(rel: Relations, focusKey: string, stopAt?: string): Map<st
         ['S', rel.partners.get(from)],
       ];
       for (const [step, keys] of steps) {
-        for (const to of keys ?? []) {
+        if (!keys || walked.has(keys)) continue;
+        if (step === 'B') walked.add(keys);
+        for (const to of keys) {
           if (paths.has(to)) continue;
           paths.set(to, path + step);
           next.push(to);

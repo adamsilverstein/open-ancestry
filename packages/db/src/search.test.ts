@@ -9,6 +9,7 @@ import {
   places,
   rebuildSearchIndex,
   searchPeople,
+  type TreeStore,
 } from './index';
 import { memoryTree, seedSmallFamily } from './test/helpers';
 
@@ -190,4 +191,66 @@ describe('searchPeople', () => {
     expect(searchPeople(store, padded)).toEqual([]);
     store.close();
   });
+
+  it('keeps the FTS lookup and the summary queries on indexes (EXPLAIN QUERY PLAN)', () => {
+    const store = memoryTree();
+    seedSmallFamily(store);
+    const recorded = recordQueries(store, () =>
+      searchPeople(store, 'vale 1960', { phoneticKeys: () => ['VAL'] }),
+    );
+    const plans = recorded.map(({ sql, args }) => ({
+      sql,
+      plan: (
+        store.db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...args) as { detail: string }[]
+      ).map((r) => r.detail),
+    }));
+    const fts = plans.filter((p) => p.sql.includes('person_search MATCH'));
+    expect(fts.length).toBeGreaterThan(0);
+    for (const { plan } of fts) {
+      // The MATCH is answered by the FTS index, then one rowid lookup per hit.
+      expect(
+        plan.some((d) => /person_search VIRTUAL TABLE INDEX \d+:M/.test(d)),
+        plan.join('; '),
+      ).toBe(true);
+      expect(plan).toContain('SEARCH d USING INTEGER PRIMARY KEY (rowid=?)');
+    }
+    // getPersonSummaries: person, person_name, event_role and event via indexes, never a scan.
+    const summaries = plans.filter((p) => /FROM person p|event_role r/.test(p.sql));
+    expect(summaries.length).toBeGreaterThanOrEqual(2);
+    for (const { sql, plan } of summaries) {
+      for (const detail of plan) {
+        expect(detail, sql).not.toMatch(
+          /^SCAN (p|n|r|e|pl|person|person_name|event_role|event|place)\b/,
+        );
+      }
+    }
+    store.close();
+  });
 });
+
+/** Runs `fn` and returns every SQL statement it ran through the store, with its arguments. */
+function recordQueries(store: TreeStore, fn: () => unknown): { sql: string; args: unknown[] }[] {
+  const seen: { sql: string; args: unknown[] }[] = [];
+  const original = store.stmt.bind(store);
+  store.stmt = (sql: string) => {
+    const statement = original(sql);
+    return new Proxy(statement, {
+      get(target, key) {
+        const value = Reflect.get(target, key) as unknown;
+        if (key === 'all' || key === 'get' || key === 'iterate') {
+          return (...args: unknown[]) => {
+            seen.push({ sql, args });
+            return (value as (...a: unknown[]) => unknown).apply(target, args);
+          };
+        }
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+  };
+  try {
+    fn();
+  } finally {
+    store.stmt = original;
+  }
+  return seen;
+}

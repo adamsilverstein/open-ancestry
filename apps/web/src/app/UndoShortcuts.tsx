@@ -13,14 +13,19 @@ function isEditable(target: EventTarget | null): boolean {
 }
 
 /**
- * An open dialog, popover or menu owns the keyboard: undoing behind an edit
- * form would leave it showing stale values that its Save would write back, and
- * a menu would stay open over a changed page.
+ * An open dialog, popover, menu or select list owns the keyboard: undoing
+ * behind an edit form would leave it showing stale values that its Save would
+ * write back, and a menu or list would stay open over a changed page.
  */
-function dialogOpen(): boolean {
+function overlayOpen(): boolean {
   return (
     document.querySelector(
-      '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [role="menu"][data-state="open"]',
+      [
+        '[role="dialog"][data-state="open"]',
+        '[role="alertdialog"][data-state="open"]',
+        '[role="menu"][data-state="open"]',
+        '[role="listbox"][data-state="open"]',
+      ].join(', '),
     ) !== null
   );
 }
@@ -42,7 +47,7 @@ export function UndoShortcuts() {
     let busy = false;
     async function onKeyDown(event: KeyboardEvent) {
       const action = historyShortcut(event);
-      if (!action || isEditable(event.target) || dialogOpen()) return;
+      if (!action || isEditable(event.target) || overlayOpen()) return;
       event.preventDefault();
       // One at a time: rapid presses queue up rather than race.
       while (busy) await new Promise((resolve) => setTimeout(resolve, 20));

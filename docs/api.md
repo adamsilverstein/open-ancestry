@@ -8,6 +8,7 @@
 - **Validation:** params, query strings and bodies are checked against TypeBox schemas (`apps/server/src/schemas.ts`). Unknown body properties are rejected.
 - **Reads** return database DTOs from `packages/db` (`PersonSummary`, `PersonDetail`, `Neighborhood`, ...). **Write bodies** use the database column names (`date_text`, `relationship_type`, ...); derived columns are computed by the server exactly as the importer computes them: date sort keys and qualifiers, surname phonetic keys, the GEDCOM-form `person_name.full_text`, and inferred living status (person, event and relationship edits re-run living inference for the people involved and their parents, spouses and children; an explicit `living` or `dead` is never overridden, and `living: "unknown"` asks for inference again).
 - **Edits:** each mutation is one undoable change batch and returns `batchId` (null when nothing changed).
+- **Downloads** (`export.*`) send `Content-Disposition: attachment` named after the tree: an ASCII `filename` (other characters become `_`) and the exact name in `filename*`.
 - **Caching:** GET responses carry a weak `ETag` (send `If-None-Match` for a 304). JSON over 1 KB is compressed with Brotli or gzip.
 
 ## Security contract for clients
@@ -55,6 +56,8 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 | `GET /api/trees/:tree/history?limit` | Change batches, `canUndo`, `canRedo`. |
 | `POST /api/trees/:tree/undo`, `/redo` | Undo or redo the latest batch; `{ batch }` (null if none). |
 | `GET /api/trees/:tree/export.json` | Full open-ancestry JSON download. |
+| `GET /api/trees/:tree/export.ged?version&privatize` | GEDCOM download (`text/vnd.familysearch.gedcom`); `version` is `5.5.1` (default, Ancestry-compatible) or `7`; `privatize=true` writes living people as "Private" with only their family links. |
+| `GET /api/trees/:tree/export.gdz?privatize` | GEDZIP download (GEDCOM 7 plus the tree's media files). |
 | `POST /api/import` (multipart `file`: .ged, .gedcom, .zip, .gdz) | Imports into a new tree named after the file (" 2", " 3", ... when taken); 202 `{ jobId, job }` with `job.tree` and `job.createdTree: true`. The server owns that tree: if the import fails or is cancelled it removes it, but only while it is still the empty tree it created. |
 | `POST /api/trees/:tree/import` (multipart `file`) | Starts an import into an existing, empty tree (202 `{ jobId, job }`); that tree is never removed. |
 | `GET /api/jobs/:id` | Job state, progress, result or error. |

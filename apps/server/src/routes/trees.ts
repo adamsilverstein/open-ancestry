@@ -8,9 +8,10 @@ import {
   undoLast,
   type TreeStore,
 } from '@open-ancestry/db';
+import { exportGedcom, exportGedzip } from '@open-ancestry/export';
 import type { Api, Deps } from '../context';
 import { edit } from '../edits';
-import { HistoryQuery, HomeBody, TreeBody, TreeParams } from '../schemas';
+import { ExportQuery, GedzipQuery, HistoryQuery, HomeBody, TreeBody, TreeParams } from '../schemas';
 
 function treeDetail(deps: Deps, id: string) {
   const store = deps.library.open(id);
@@ -21,6 +22,21 @@ function treeDetail(deps: Deps, id: string) {
     homePersonId: meta.getHomePersonId(store),
     schemaVersion: LATEST_SCHEMA_VERSION,
   };
+}
+
+/**
+ * Content-Disposition for a download named after the tree: an ASCII fallback
+ * (anything outside letters, digits, space, dot, dash and underscore becomes
+ * `_`, so no quote or header syntax gets through) plus the exact UTF-8 name.
+ */
+export function attachment(tree: string, extension: string): string {
+  const ascii = tree.replace(/[^A-Za-z0-9 ._-]/g, '_');
+  // RFC 8187 ext-value: encodeURIComponent leaves ' ( ) * as they are, which are not allowed.
+  const utf8 = encodeURIComponent(tree).replace(
+    /['()*]/g,
+    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `attachment; filename="${ascii}.${extension}"; filename*=UTF-8''${utf8}.${extension}`;
 }
 
 function hasBatch(store: TreeStore, state: 'applied' | 'undone'): boolean {
@@ -115,11 +131,39 @@ export function treeRoutes(app: Api, deps: Deps): void {
       const json = exportJsonString(library.open(tree));
       return reply
         .type('application/json; charset=utf-8')
-        .header(
-          'content-disposition',
-          `attachment; filename="tree.json"; filename*=UTF-8''${encodeURIComponent(tree)}.json`,
-        )
+        .header('content-disposition', attachment(tree, 'json'))
         .send(json);
+    },
+  );
+
+  app.get(
+    '/api/trees/:tree/export.ged',
+    { schema: { params: TreeParams, querystring: ExportQuery } },
+    async (request, reply) => {
+      const { tree } = request.params;
+      const text = exportGedcom(library.open(tree), {
+        version: request.query.version ?? '5.5.1',
+        privatizeLiving: request.query.privatize ?? false,
+      });
+      return reply
+        .type('text/vnd.familysearch.gedcom; charset=utf-8')
+        .header('content-disposition', attachment(tree, 'ged'))
+        .send(text);
+    },
+  );
+
+  app.get(
+    '/api/trees/:tree/export.gdz',
+    { schema: { params: TreeParams, querystring: GedzipQuery } },
+    async (request, reply) => {
+      const { tree } = request.params;
+      const bytes = exportGedzip(library.open(tree), {
+        privatizeLiving: request.query.privatize ?? false,
+      });
+      return reply
+        .type('application/vnd.familysearch.gedcom+zip')
+        .header('content-disposition', attachment(tree, 'gdz'))
+        .send(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
     },
   );
 }

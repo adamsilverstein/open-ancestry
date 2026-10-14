@@ -52,10 +52,10 @@ describe('GEDCOM export routes', () => {
   });
 
   it('gives an ASCII fallback file name for any tree name', async () => {
-    const base = await createTestTree(api, 'Vale & Reed "family" ü');
+    const base = await createTestTree(api, "Vale & Reed's ü;tree");
     const res = await api.get(`${base}/export.ged`);
     expect(res.headers['content-disposition']).toBe(
-      `attachment; filename="Vale _ Reed _family_ _.ged"; filename*=UTF-8''Vale%20%26%20Reed%20%22family%22%20%C3%BC.ged`,
+      `attachment; filename="Vale _ Reed_s __tree.ged"; filename*=UTF-8''Vale%20%26%20Reed%27s%20%C3%BC%3Btree.ged`,
     );
   });
 

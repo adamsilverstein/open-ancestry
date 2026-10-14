@@ -940,6 +940,34 @@ test.describe('fan chart keyboard', () => {
   });
 });
 
+test.describe('far zoom', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  test('re-focusing while cards are painted on the canvas raises no errors', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    const { perf } = seed;
+    await page.goto(`/tree/${perf.wideId}?tree=${encodeURIComponent(perf.tree)}&down=7&up=1`);
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    await page.getByRole('button', { name: 'Fit to screen' }).click();
+    await settled(page);
+    expect((await transform(page)).scale).toBeLessThan(0.35);
+    await canvas(page).locator(`[data-key="${perf.wideId}"]`).focus();
+    for (const key of ['ArrowDown', 'ArrowUp', 'ArrowDown', 'ArrowUp']) {
+      await page.keyboard.press(key);
+      const target = await activeKey(page);
+      await page.keyboard.press('Enter');
+      // Straight on to the next, while the previous re-focus tween is still
+      // running its frames: that is where the painted layer redraws.
+      await expect(page).toHaveURL(new RegExp(`/tree/${target}\\?`));
+      await expect.poll(() => activeKey(page)).toBe(target);
+    }
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    await settled(page);
+    expect(errors).toEqual([]);
+  });
+});
+
 test.describe('visual snapshots', () => {
   // Baselines are Linux Chromium only, like design.spec.ts.
   test.skip(

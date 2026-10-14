@@ -1,4 +1,4 @@
-import { strToU8, zipSync, type Zippable } from 'fflate';
+import { deflateSync, strToU8, zipSync, type Zippable } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import { GedzipError, readGedzip } from './gedzip';
 
@@ -30,6 +30,54 @@ function renameCentral(archive: Uint8Array, from: string, to: string) {
     return;
   }
   throw new Error(`no central entry ${from}`);
+}
+
+/**
+ * Writes a zip by hand so one deflated payload can back thousands of entries
+ * (zipSync would recompress each one). CRCs are left at 0; readGedzip ignores them.
+ */
+function handZip(entries: { name: string; data: Uint8Array; size: number }[]): Uint8Array {
+  const parts: Uint8Array[] = [];
+  const central: Uint8Array[] = [];
+  let offset = 0;
+  for (const { name, data, size } of entries) {
+    const n = strToU8(name);
+    const local = new Uint8Array(30 + n.length);
+    const lv = new DataView(local.buffer);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(8, 8, true);
+    lv.setUint32(18, data.length, true);
+    lv.setUint32(22, size, true);
+    lv.setUint16(26, n.length, true);
+    local.set(n, 30);
+    const cd = new Uint8Array(46 + n.length);
+    const cv = new DataView(cd.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(10, 8, true);
+    cv.setUint32(20, data.length, true);
+    cv.setUint32(24, size, true);
+    cv.setUint16(28, n.length, true);
+    cv.setUint32(42, offset, true);
+    cd.set(n, 46);
+    parts.push(local, data);
+    central.push(cd);
+    offset += local.length + data.length;
+  }
+  const cdSize = central.reduce((sum, c) => sum + c.length, 0);
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, entries.length, true);
+  ev.setUint16(10, entries.length, true);
+  ev.setUint32(12, cdSize, true);
+  ev.setUint32(16, offset, true);
+  const out = new Uint8Array(offset + cdSize + 22);
+  let p = 0;
+  for (const part of [...parts, ...central, end]) {
+    out.set(part, p);
+    p += part.length;
+  }
+  return out;
 }
 
 function expectError(fn: () => unknown, code: GedzipError['code']) {
@@ -97,6 +145,25 @@ describe('readGedzip', () => {
       () => readGedzip(zip({ 'gedcom.ged': GED, 'big.bin': big }), { maxEntrySize: 5000 }),
       'too-large',
     );
+  });
+
+  it('rejects 2,000 entries of 1 MiB zeros (2 GB from a 2 MB archive) before inflating', () => {
+    const size = 1024 * 1024 - 1;
+    const zeros = deflateSync(new Uint8Array(size));
+    const entries = [{ name: 'gedcom.ged', data: deflateSync(GED), size: GED.length }];
+    for (let i = 0; i < 2000; i++) entries.push({ name: `m/${i}.bin`, data: zeros, size });
+    const archive = handZip(entries);
+    expect(archive.length).toBeLessThan(3_000_000);
+    const start = performance.now();
+    // Over the default 256 MiB total, and over the aggregate ratio when the total is raised.
+    expectError(() => readGedzip(archive), 'too-large');
+    expectError(() => readGedzip(archive, { maxTotalSize: 4 * 1024 ** 3 }), 'ratio');
+    expect(performance.now() - start).toBeLessThan(1000);
+  });
+
+  it('reads a hand-built archive', () => {
+    const archive = handZip([{ name: 'gedcom.ged', data: deflateSync(GED), size: GED.length }]);
+    expect(readGedzip(archive).gedcom).toEqual(GED);
   });
 
   it('rejects many small high-ratio entries by the aggregate ratio', () => {

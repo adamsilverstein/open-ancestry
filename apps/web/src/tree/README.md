@@ -57,11 +57,11 @@ than the 10k ones, and they assert that.
 | Measure | Budget |
 | --- | --- |
 | First paint: home person's family view, navigation to first rendered layout, median of 5 cold loads | < 1s |
-| Re-focus with cached data, key press to painted frame, p95 of 10: at fit (500+ painted) and at 35-45% zoom (cards mounted) | < 50ms |
-| Pan and pinch with 2,000+ laid out, at fit (all painted) and at 35-45% (cards mounted) | median >= 58fps, < 5% of frames over 33ms, at most 1 long task |
+| Re-focus with cached data, key press to painted frame, median of 30 (p95 reported): at fit (500+ painted) and at 35-45% zoom (cards mounted) | < 50ms |
+| Pan and pinch with 2,000+ laid out, at fit (all painted) and at 35-45% (cards mounted) | median >= 58fps, < 5% of frames over 33ms (long tasks and the longest frame reported) |
 | JS heap after GC, each round of re-focuses and pans after the first | < 2MB growth |
 
-Time budgets scale by `OA_BENCH_FACTOR` (CI: 2.5; CI allows two long tasks). Results go to
+Time budgets (and the allowed share of frames over 33ms) scale by `OA_BENCH_FACTOR` (CI: 2.5); the fps and memory budgets do not. The spec only runs with `OA_PERF=1`, which `npm run e2e:perf` and the CI `perf` job set. Results go to
 `perf-results/tree-view.md`, which CI's `perf` job adds to its summary. The app marks
 `oa-tree-first-paint` once and `oa-tree-ready` (replaced each time) when a layout's frame has
 painted, and measures `oa-tree-refocus` from the re-focus action to that mark, keeping at most

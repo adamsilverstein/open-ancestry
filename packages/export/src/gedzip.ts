@@ -38,19 +38,21 @@ export function buildGedzipExport(
   };
 
   /** Reads a media file for the archive, once, refusing anything outside the media folder. */
-  const filePath = (media: MediaRow): string | undefined => {
-    if (!media.local_path) return media.remote_url ?? undefined;
+  // `scrub` takes withheld people's names out of a privatized export's file names.
+  const filePath = (media: MediaRow, scrub: (text: string) => string): string | undefined => {
+    if (!media.local_path) return media.remote_url ? scrub(media.remote_url) : undefined;
     const path = safeEntryPath(media.local_path);
+    const shown = scrub(media.local_path);
     let file = files.get(media.id);
     if (!file && path && realRoot) {
       const bytes = readInside(realRoot, join(root!, ...path.split('/')));
-      if (bytes) file = { entry: entryName(path), bytes };
-      else warnings.push(`Media file ${media.local_path} is missing or outside the media folder`);
+      if (bytes) file = { entry: entryName(scrub(path)), bytes };
+      else warnings.push(`Media file ${shown} is missing or outside the media folder`);
       if (file) files.set(media.id, file);
     } else if (!file) {
-      warnings.push(`Media file ${media.local_path} is not in this tree's media folder`);
+      warnings.push(`Media file ${shown} is not in this tree's media folder`);
     }
-    const target = file?.entry ?? path ?? media.local_path;
+    const target = file?.entry ?? (path ? scrub(path) : shown);
     return target.split('/').map(encodeURIComponent).join('/');
   };
 

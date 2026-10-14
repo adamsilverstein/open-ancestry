@@ -82,13 +82,26 @@ function allowlist(record: GedcomNode): void {
     .map((c) => ({ ...c, ...(c.tag === 'NAME' && { value: 'Private' }), children: [] }));
 }
 
+/** A word in free text: letters (with combining marks) and digits. */
+const WORD = /[\p{L}\p{M}\p{N}]+/gu;
+
+/**
+ * Values that are not free text and keep their words when privatizing: dates,
+ * places (scrubbing "Rose Hill" for a living Rose would only break them),
+ * enumerations, ids and FILE (scrubbed as the path is chosen).
+ */
+const KEPT_TEXT = new Set(
+  `DATE TIME AGE PLAC SEX RESN FORM MEDI MIME LANG PEDI QUAY ROLE STAT FILE _APID _OID _PRIM
+  _WDTH _HGHT _SIZE VERS GEDC CHAR`.split(/\s+/),
+);
+
 /** Privacy levels a privatized export withholds (not `locked`, which only guards edits). */
 const withheldPrivacy = (privacy: Privacy) => privacy === 'private' || privacy === 'confidential';
 
 /** Options only the GEDZIP writer uses. */
 export interface InternalOptions extends GedcomExportOptions {
   /** FILE value for a media row; also tells the caller which media were written. */
-  filePath?: (media: MediaRow) => string | undefined;
+  filePath?: (media: MediaRow, scrub: (text: string) => string) => string | undefined;
   /** False forces every record through the canonical writer. */
   verbatim?: boolean;
 }
@@ -144,6 +157,8 @@ class GedcomWriter implements WriterContext, MergeContext {
   private importedXrefs: Map<string, { kind: RecordKind; id: string } | null> | undefined;
   /** Imported xrefs, upper-cased, for scrubbing text in privatized exports. */
   private importedIds: Set<string> | undefined;
+  /** Words of withheld people's names, for `scrubName`. */
+  private nameWords: Set<string> | undefined;
   private readonly generated = new Map<string, GedcomNode>();
   private readonly slots: Slot[] = [];
   private readonly slotByKey = new Map<string, Slot>();
@@ -212,6 +227,10 @@ class GedcomWriter implements WriterContext, MergeContext {
   }
 
   get quoteLines(): boolean {
+    return !this.privatize;
+  }
+
+  get keepCustomTags(): boolean {
     return !this.privatize;
   }
 
@@ -348,13 +367,12 @@ class GedcomWriter implements WriterContext, MergeContext {
   }
 
   filePath(media: MediaRow): string | undefined {
-    if (this.options.filePath) return this.options.filePath(media);
-    if (media.remote_url) return media.remote_url;
+    if (this.options.filePath) return this.options.filePath(media, this.scrubName);
+    if (media.remote_url) return this.scrubName(media.remote_url);
     if (!media.local_path) return undefined;
+    const path = this.scrubName(media.local_path);
     // GEDCOM 7 FILE values are URI references.
-    return this.v7
-      ? media.local_path.split('/').map(encodeURIComponent).join('/')
-      : media.local_path;
+    return this.v7 ? path.split('/').map(encodeURIComponent).join('/') : path;
   }
 
   // ------------------------------------------------------------ export
@@ -615,8 +633,13 @@ class GedcomWriter implements WriterContext, MergeContext {
       if (hidden) allowlist(node);
       else
         mergeUnmapped(this, node, this.slotByKey.get(key)?.raw, this.data.unmapped.get(key), xref);
-      if (this.privatize && this.scrubXrefs(node)) {
-        this.warn(`${xref}: an imported record id in its text was removed`);
+      if (this.privatize && !hidden) {
+        if (this.scrubXrefs(node)) {
+          this.warn(`${xref}: an imported record id in its text was removed`);
+        }
+        if (this.scrubNames(node)) {
+          this.warn(`${xref}: names of withheld people in its text were replaced with "Private"`);
+        }
       }
       this.generated.set(key, node);
     }
@@ -646,6 +669,61 @@ class GedcomWriter implements WriterContext, MergeContext {
       }
     }
     for (const c of node.children) changed = this.scrubXrefs(c) || changed;
+    return changed;
+  }
+
+  /**
+   * Every word, three letters or more, of every name a withheld person goes by
+   * (given names, surnames, nicknames, the name as written), lower-cased NFC.
+   */
+  private withheldWords(): Set<string> {
+    if (this.nameWords) return this.nameWords;
+    const words = new Set<string>();
+    for (const id of this.living) {
+      for (const n of this.data.names.get(id) ?? []) {
+        for (const text of [n.given, n.surname, n.nickname, n.full_text]) {
+          for (const word of (text ?? '').normalize('NFC').toLowerCase().match(WORD) ?? []) {
+            if (word.length >= 3) words.add(word);
+          }
+        }
+      }
+    }
+    return (this.nameWords = words);
+  }
+
+  /**
+   * Text with every word of a withheld person's names replaced by "Private"
+   * (#195): living relatives are named in notes, event types, photo titles
+   * and file names on deceased people's records. Matching is by whole word,
+   * so it fails closed: a deceased person or place sharing the word loses it
+   * too, except in their own NAME (see `scrubNames`).
+   */
+  readonly scrubName = (text: string): string => {
+    if (!this.privatize) return text;
+    const words = this.withheldWords();
+    if (!words.size) return text;
+    return text
+      .normalize('NFC')
+      .replace(WORD, (word) => (words.has(word.toLowerCase()) ? 'Private' : word));
+  };
+
+  /** Applies `scrubName` to a generated record's text. Returns whether anything changed. */
+  private scrubNames(node: GedcomNode): boolean {
+    let changed = false;
+    if (node.value !== undefined && node.pointer === undefined && !KEPT_TEXT.has(node.tag)) {
+      const value = this.scrubName(node.value);
+      if (value !== node.value) {
+        node.value = value;
+        delete node.rawValue;
+        delete node.source;
+        changed = true;
+      }
+    }
+    for (const c of node.children) {
+      // A person's own names stay: a shared surname is theirs too.
+      if (node.tag === 'INDI' && c.tag === 'NAME') continue;
+      changed = this.scrubNames(c) || changed;
+    }
     return changed;
   }
 
@@ -688,7 +766,7 @@ class GedcomWriter implements WriterContext, MergeContext {
   }
 
   fileValue(raw: string): string {
-    const value = raw.trim();
+    const value = this.scrubName(raw.trim());
     if (!this.v7 || /^[a-z][a-z0-9+.-]*:/i.test(value)) return value;
     return value.split('/').map(encodeURIComponent).join('/');
   }

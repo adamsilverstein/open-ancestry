@@ -116,6 +116,9 @@ test('JSON export is a full backup, so privatize is not offered', async ({ page 
   await page.getByRole('button', { name: 'File' }).click();
   await page.getByRole('menuitem', { name: /Export/ }).click();
   const dialog = page.getByRole('dialog', { name: 'Export tree' });
+  // GEDCOM: privatizing says what it covers and what it cannot (#195).
+  await expect(dialog).toContainText('names are also replaced in notes, titles and file names');
+  await expect(dialog).toContainText('read the notes before you share');
   await dialog.getByRole('combobox', { name: 'Format' }).click();
   await page.getByRole('option', { name: 'JSON (full backup)' }).click();
   await expect(dialog.getByRole('checkbox', { name: /^Privatize/ })).toBeDisabled();

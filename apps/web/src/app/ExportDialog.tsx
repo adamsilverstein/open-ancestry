@@ -198,7 +198,7 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
             label="Privatize living and private people"
             description={
               canPrivatize(format)
-                ? 'Living people, and anyone marked private or confidential, are written as "Private" with only their family links.'
+                ? 'Living people, and anyone marked private or confidential, are written as "Private" with only their family links. Their names are also replaced in notes, titles and file names on other records, and imported custom tags are left out, but other wording can still identify them: read the notes before you share.'
                 : 'JSON is a full backup and always includes everyone.'
             }
             checked={privatize}

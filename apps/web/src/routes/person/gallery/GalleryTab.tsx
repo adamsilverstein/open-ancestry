@@ -430,7 +430,13 @@ export function GalleryTab({ tree, detail }: { tree: string; detail: PersonDetai
                 update: (d) => ({
                   ...d,
                   person: { ...d.person, primary_media_id: mediaId },
-                  summary: { ...d.summary, primaryMediaId: mediaId },
+                  summary: {
+                    ...d.summary,
+                    primaryMediaId: mediaId,
+                    primaryMediaLocal: d.media.some(
+                      (m) => m.media.id === mediaId && m.media.local_path !== null,
+                    ),
+                  },
                 }),
               },
             })

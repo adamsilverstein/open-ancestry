@@ -29,9 +29,12 @@ export function toPersonSummary(p: ApiPersonSummary, tree: string): PersonSummar
     birth: lifeDate(p.birth),
     death: lifeDate(p.death),
     living: p.living !== 'dead' && p.living !== 'inferred_dead',
-    photoUrl: p.primaryMediaId
-      ? `${treePath(tree)}/media/${encodeURIComponent(p.primaryMediaId)}`
-      : undefined,
+    // Cards and the quick view show at most 64px: the 160px thumbnail, never the
+    // original. Media with no local file (Ancestry placeholders) has none.
+    photoUrl:
+      p.primaryMediaId && p.primaryMediaLocal
+        ? `${treePath(tree)}/media/${encodeURIComponent(p.primaryMediaId)}/thumb/sm`
+        : undefined,
   };
 }
 

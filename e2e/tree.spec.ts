@@ -446,6 +446,8 @@ test.describe('family view', () => {
 
     // Single-key shortcuts only act while focus is in the tree (WCAG 2.1.4).
     await expect(card(page, 'Ada Vale')).toHaveAccessibleName(/focus person/);
+    // Keyboard focus follows the re-focus to Ada; let it land before moving on.
+    await expect(card(page, 'Ada Vale')).toBeFocused();
     await card(page, 'Bram Vale').focus();
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));

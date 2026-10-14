@@ -8,6 +8,7 @@ const base: ApiPersonSummary = {
   living: 'dead',
   privacy: 'public',
   primaryMediaId: null,
+  primaryMediaLocal: false,
   given: 'Ada',
   surname: 'Vale',
   surnamePrefix: null,
@@ -55,9 +56,18 @@ describe('toPersonSummary', () => {
     expect(s.name).toBe('Unknown');
   });
 
-  it('links the primary photo through the media API', () => {
-    const s = toPersonSummary({ ...base, primaryMediaId: 'm1' }, 'my tree');
-    expect(s.photoUrl).toBe('/api/trees/my%20tree/media/m1');
+  it('links the primary photo by its small thumbnail, when it has a local file', () => {
+    const s = toPersonSummary(
+      { ...base, primaryMediaId: 'm1', primaryMediaLocal: true },
+      'my tree',
+    );
+    expect(s.photoUrl).toBe('/api/trees/my%20tree/media/m1/thumb/sm');
+    // Ancestry-only media has no file here: no request, the silhouette shows.
+    const remote = toPersonSummary(
+      { ...base, primaryMediaId: 'm2', primaryMediaLocal: false },
+      'my tree',
+    );
+    expect(remote.photoUrl).toBeUndefined();
   });
 });
 

@@ -17,6 +17,7 @@ const base: ApiPersonSummary = {
   living: 'unknown',
   privacy: 'public',
   primaryMediaId: null,
+  primaryMediaLocal: false,
   given: null,
   surname: null,
   surnamePrefix: null,

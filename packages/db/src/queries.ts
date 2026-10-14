@@ -44,6 +44,8 @@ export interface PersonSummary {
   living: LivingStatus;
   privacy: Privacy;
   primaryMediaId: string | null;
+  /** The primary photo has a local file (Ancestry placeholders do not), so it has thumbnails. */
+  primaryMediaLocal: boolean;
   given: string | null;
   surname: string | null;
   surnamePrefix: string | null;
@@ -60,6 +62,7 @@ interface SummaryRow {
   living: LivingStatus;
   privacy: Privacy;
   primary_media_id: string | null;
+  primary_media_local: 0 | 1;
   given: string | null;
   surname: string | null;
   surname_prefix: string | null;
@@ -93,8 +96,10 @@ export function getPersonSummaries(store: TreeStore, ids: readonly string[]): Pe
   const rows = store
     .stmt(
       `SELECT p.id, p.sex, p.living, p.privacy, p.primary_media_id,
+              m.local_path IS NOT NULL AS primary_media_local,
               n.given, n.surname, n.surname_prefix, n.prefix, n.suffix, n.nickname
        FROM person p LEFT JOIN person_name n ON n.person_id = p.id AND n.is_primary = 1
+       LEFT JOIN media m ON m.id = p.primary_media_id
        WHERE p.id IN (${IDS})`,
     )
     .all(json) as SummaryRow[];
@@ -124,6 +129,7 @@ export function getPersonSummaries(store: TreeStore, ids: readonly string[]): Pe
       living: r.living,
       privacy: r.privacy,
       primaryMediaId: r.primary_media_id,
+      primaryMediaLocal: r.primary_media_local === 1,
       given: r.given,
       surname: r.surname,
       surnamePrefix: r.surname_prefix,

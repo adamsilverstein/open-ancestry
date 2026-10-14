@@ -281,7 +281,7 @@ const STOP_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
  * clean up (their upload and any empty tree they created) before the process
  * ends. A second signal exits at once.
  */
-function stopOnSignals(
+export function stopOnSignals(
   server: RunningServer,
   signals: Pick<NodeJS.Process, 'on' | 'off'>,
   exit: (code: number) => void,
@@ -294,7 +294,10 @@ function stopOnSignals(
     log(`Stopping (${signal})...`);
     server.close().then(
       () => exit(0),
-      () => exit(1),
+      (error: unknown) => {
+        log(`Could not stop cleanly: ${error instanceof Error ? error.message : String(error)}`);
+        exit(1);
+      },
     );
   };
   for (const signal of STOP_SIGNALS) signals.on(signal, onSignal);

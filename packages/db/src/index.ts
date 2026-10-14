@@ -8,6 +8,9 @@ export {
   getSchemaVersion,
   listTables,
   migrate,
+  upgradeRow,
+  type ColumnChanges,
+  type TableRowsByName,
   type Migration,
   type MigrateOptions,
   type TableInfo,
@@ -30,6 +33,7 @@ export {
 } from './tree';
 export * from './repositories';
 export * from './queries';
+export { ancestorGenerations, wouldCreateCycle } from './lineage';
 export {
   MAX_SEARCH_LENGTH,
   MAX_SEARCH_WORDS,
@@ -67,3 +71,10 @@ export {
   type OaJsonTables,
 } from './json';
 export { generateSyntheticTree, type SyntheticOptions, type SyntheticTree } from './synthetic';
+export {
+  CONVERTED_CALENDARS,
+  DERIVED_STEPS,
+  deriveDateSort,
+  refreshDerivedColumns,
+  type RefreshOptions,
+} from './derived';

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState, type RefObject } from 'react';
 import { useQueries } from '@tanstack/react-query';
 import { Pencil, Plus, SlidersHorizontal, UserPlus } from 'lucide-react';
 import { personQuery } from '../../api/queries';
@@ -74,11 +74,13 @@ function TimelineColumn({
   detail,
   half,
   onEditEvent,
+  addEventRef,
 }: {
   detail: PersonDetail;
   half: ApiPersonSummary[];
   /** Opens the event dialog; no item means a new event. */
   onEditEvent: (item?: EventDetail) => void;
+  addEventRef: RefObject<HTMLButtonElement | null>;
 }) {
   const entries = useMemo(() => buildTimeline(detail, { halfSiblings: half }), [detail, half]);
   const eventsById = useMemo(
@@ -112,6 +114,7 @@ function TimelineColumn({
       actions={
         <>
           <Button
+            ref={addEventRef}
             size="sm"
             variant="ghost"
             iconStart={<Plus size={14} aria-hidden />}
@@ -305,12 +308,15 @@ export function FactsTab({ tree, detail }: { tree: string; detail: PersonDetail 
   // Dialogs mount only while open, so each opening starts from fresh values.
   const [eventDialog, setEventDialog] = useState<{ item?: EventDetail | undefined } | null>(null);
   const [relative, setRelative] = useState<RelativeKind | null>(null);
+  // Focus lands here when an edited event is deleted and its Edit button goes with it.
+  const addEventRef = useRef<HTMLButtonElement>(null);
   return (
     <div className={styles.facts}>
       <TimelineColumn
         detail={detail}
         half={half}
         onEditEvent={(item) => setEventDialog({ item })}
+        addEventRef={addEventRef}
       />
       <SourcesColumn detail={detail} />
       <RelationshipsColumn detail={detail} half={half} onAdd={setRelative} />
@@ -321,6 +327,7 @@ export function FactsTab({ tree, detail }: { tree: string; detail: PersonDetail 
           item={eventDialog.item}
           open
           onOpenChange={(open) => !open && setEventDialog(null)}
+          returnFocusFallback={() => addEventRef.current}
         />
       )}
       {relative && (

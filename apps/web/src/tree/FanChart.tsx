@@ -51,24 +51,30 @@ function fanNeighbor(
 export function FanChart({ fan, focusPersonId, person, onRefocus }: FanChartProps) {
   const focusName = person(focusPersonId)?.name ?? '';
   const svgRef = useRef<SVGSVGElement>(null);
-  const center = useMemo(() => fan.segments.find((s) => s.isFocus)?.key ?? null, [fan]);
-  // The roving tab stop, reset to the center for each fan.
-  const [roving, setRoving] = useState<{ fan: FanLayout; key: string | null }>({
-    fan,
+  // Only drawn segments (their person is loaded) can hold the tab stop.
+  const drawn = useMemo(
+    () => fan.segments.filter((s) => person(s.personId) !== undefined),
+    [fan, person],
+  );
+  const center = drawn.find((s) => s.isFocus)?.key ?? drawn[0]?.key ?? null;
+  // The roving tab stop, by layout key: it survives a rebuild of the same fan
+  // (a reload) and starts at the center for a new focus person.
+  const [roving, setRoving] = useState<{ focus: string; key: string | null }>({
+    focus: focusPersonId,
     key: center,
   });
   const active =
-    roving.fan === fan && fan.segments.some((s) => s.key === roving.key) ? roving.key : center;
+    roving.focus === focusPersonId && drawn.some((s) => s.key === roving.key) ? roving.key : center;
 
   function onKeyDown(event: KeyboardEvent<SVGSVGElement>) {
-    const from = fan.segments.find((s) => s.key === active);
+    const from = drawn.find((s) => s.key === active);
     if (!from || event.altKey || event.ctrlKey || event.metaKey) return;
-    const next = fanNeighbor(fan.segments, from, event.key);
+    const next = fanNeighbor(drawn, from, event.key);
     if (!next) return;
     event.preventDefault();
     // Keep the canvas from also handling the key (it pans on arrows).
     event.stopPropagation();
-    setRoving({ fan, key: next.key });
+    setRoving({ focus: focusPersonId, key: next.key });
     svgRef.current
       ?.querySelector<SVGGElement>(`[data-key="${CSS.escape(next.key)}"]`)
       ?.focus({ preventScroll: true });
@@ -121,7 +127,7 @@ export function FanChart({ fan, focusPersonId, person, onRefocus }: FanChartProp
             data-sex={p.sex}
             data-focus={segment.isFocus || undefined}
             onClick={go}
-            onFocus={() => setRoving({ fan, key: segment.key })}
+            onFocus={() => setRoving({ focus: focusPersonId, key: segment.key })}
             onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();

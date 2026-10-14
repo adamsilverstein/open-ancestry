@@ -15,6 +15,7 @@ import type { Deps } from './context';
 import { errorBody, registerErrorHandling, toApiError } from './errors';
 import { JobManager, type Importer } from './jobs';
 import { Library, defaultLibraryRoot } from './library';
+import { checkRoutes } from './routes/checks';
 import { editRoutes } from './routes/edit';
 import { importRoutes, sweepStaleUploads } from './routes/imports';
 import { reimportRoutes } from './routes/reimports';
@@ -44,6 +45,13 @@ export {
   workerImporter,
   type WorkerImporterOptions,
 } from './import-runner';
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    /** Cancels what can be cancelled, waits for every job and thumbnail to finish. */
+    drain(): Promise<void>;
+  }
+}
 
 export interface ServerOptions {
   /** Directory containing the built web app (index.html + assets). */
@@ -199,6 +207,7 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     treeRoutes(typed, deps);
     peopleRoutes(typed, deps);
     editRoutes(typed, deps);
+    checkRoutes(typed, deps);
     importRoutes(typed, deps);
     reimportRoutes(typed, deps);
     mediaRoutes(typed, deps);
@@ -247,11 +256,16 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   });
 
   // Before the HTTP server stops: aborting jobs ends their event streams, which
-  // close() would otherwise wait on forever, and runs their cleanup.
-  app.addHook('preClose', async () => {
+  // close() would otherwise wait on forever, and runs their cleanup. A job past
+  // the point of no return saves first, which can take longer than Fastify's
+  // 10s hook timeout, so startServer drains before close(); this hook then has
+  // nothing left to wait for (and still covers a plain app.close()).
+  const drain = async () => {
     await jobs.shutdown();
     await deps.thumbnails.idle();
-  });
+  };
+  app.decorate('drain', drain);
+  app.addHook('preClose', drain);
   app.addHook('onClose', async () => {
     deps.reimports.closeAll();
     library.closeAll();
@@ -283,6 +297,10 @@ export async function startServer(options: StartOptions = {}): Promise<RunningSe
   return {
     url: `http://${host.includes(':') ? `[${host}]` : host}:${port}`,
     app,
-    close: () => app.close(),
+    // Drain outside close(): its preClose hooks time out after 10s.
+    close: async () => {
+      await app.drain();
+      await app.close();
+    },
   };
 }

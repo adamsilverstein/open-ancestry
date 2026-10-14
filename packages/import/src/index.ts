@@ -11,7 +11,7 @@ export {
   resolveImportLimits,
 } from './import';
 export { dateColumns, surnameKey } from './mapper';
-export { BIRTH_SUBSTITUTES, DEATH_EVENTS, OTHER_DEATH_FACTS } from './tags';
+export { BIRTH_SUBSTITUTES, DEATH_EVENTS, OTHER_DEATH_FACTS, morePrivate } from './tags';
 export { ImportError } from './types';
 export type * from './types';
 export * from './reimport/index';

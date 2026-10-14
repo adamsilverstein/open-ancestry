@@ -1,4 +1,4 @@
-import { daysInMonth, monthNumber, monthsInYear } from './calendar';
+import { daysInMonth, isHebrewLeap, monthNumber, monthsInYear } from './calendar';
 import { pointKey, UNDATED_SORT_KEY } from './sort-key';
 import type { Calendar, DatePoint, DateQualifier, ParsedDate } from './types';
 
@@ -347,10 +347,13 @@ function validPoint(
   dual: string | undefined,
 ): Point | undefined {
   if (year === undefined || year === 0 || Number.isNaN(year)) return undefined;
+  // B.C./BCE only exists for Gregorian and Julian years.
+  if (bc && (calendar === 'hebrew' || calendar === 'french_r')) return undefined;
   const point: DatePoint = { year: bc ? -year : year };
   if (month !== undefined) {
     if (!(month >= 1 && month <= monthsInYear(calendar))) return undefined;
-    point.month = month;
+    // Adar II (ADS) only exists in leap years; elsewhere it can only mean Adar.
+    point.month = calendar === 'hebrew' && month === 7 && !isHebrewLeap(year) ? 6 : month;
   }
   if (day !== undefined) {
     if (month === undefined || !(day >= 1 && day <= daysInMonth(calendar, point.year, month)))
@@ -427,6 +430,7 @@ function build(
     sortKeyEnd,
     valid: true,
   };
+  if (end.calendar !== start.calendar) date.endCalendar = end.calendar;
   if (start.ambiguous || end.ambiguous) date.ambiguous = true;
   return date;
 }

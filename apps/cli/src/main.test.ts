@@ -7,7 +7,15 @@ import { describe, expect, it, vi } from 'vitest';
 import { generateGedcom } from '../../../fixtures/generate';
 import { openMemoryTree } from '@open-ancestry/db';
 import { importGedcom } from '@open-ancestry/import';
-import { exposureWarning, formatReport, main, parseCliArgs, progressReporter, run } from './main';
+import {
+  exposureWarning,
+  formatReport,
+  main,
+  parseCliArgs,
+  progressReporter,
+  run,
+  stopOnSignals,
+} from './main';
 
 describe('parseCliArgs', () => {
   it('parses serve with defaults', () => {
@@ -414,6 +422,25 @@ describe('serve on SIGINT/SIGTERM', () => {
     expect(exits).toEqual([1]);
     await vi.waitFor(() => expect(exits).toEqual([1, 0]));
     await server?.close();
+  });
+
+  it('says why stopping failed before exiting 1', async () => {
+    const signals = new EventEmitter();
+    const exits: number[] = [];
+    const logs: string[] = [];
+    stopOnSignals(
+      {
+        url: 'http://127.0.0.1:1',
+        app: {} as never,
+        close: () => Promise.reject(new Error('Plugin did not start in time: preClose')),
+      },
+      signals as unknown as Pick<NodeJS.Process, 'on' | 'off'>,
+      (code) => exits.push(code),
+      (line) => logs.push(line),
+    );
+    signals.emit('SIGINT', 'SIGINT');
+    await vi.waitFor(() => expect(exits).toEqual([1]));
+    expect(logs.at(-1)).toBe('Could not stop cleanly: Plugin did not start in time: preClose');
   });
 });
 

@@ -255,6 +255,8 @@ export interface ChangeBatchRow {
   state: BatchState;
   created_at: string;
   state_changed_at: string | null;
+  /** Commit order, 1, 2, 3, ...; undo, redo and history sort by it. */
+  seq: number;
 }
 
 export interface ChangeLogRow {
@@ -266,6 +268,8 @@ export interface ChangeLogRow {
   op: ChangeOp;
   before_json: string | null;
   after_json: string | null;
+  /** Schema version the images were written under. */
+  schema_version: number;
 }
 
 /** Tables written through the unit of work (and exported to JSON), by name. */

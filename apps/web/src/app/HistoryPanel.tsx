@@ -77,7 +77,9 @@ export default function HistoryPanel({ open, onOpenChange }: HistoryPanelProps) 
       ) : history.items.length === 0 ? (
         <p className={styles.muted}>No changes yet.</p>
       ) : (
-        <ol className={styles.list}>
+        // Focusable so the list can be scrolled from the keyboard (axe scrollable-region-focusable).
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+        <ol className={styles.list} aria-label="Changes" tabIndex={0}>
           {history.items.map((batch) => (
             <li key={batch.id} className={batch.state === 'undone' ? styles.undone : undefined}>
               <span className={styles.label}>{batch.label}</span>

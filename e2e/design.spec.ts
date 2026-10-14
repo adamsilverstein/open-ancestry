@@ -28,6 +28,8 @@ test.describe('visual snapshots', () => {
   for (const colorScheme of ['light', 'dark'] as const) {
     test(`/design in ${colorScheme}`, async ({ page }) => {
       await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
+      // The top bar names the open tree once it loads.
+      await expect(page.getByRole('banner').getByText('Ashdown family')).toBeVisible();
       await page.evaluate(() => document.fonts.ready);
       // Full-page captures don't scroll, so scroll once to trigger lazy images.
       await page.evaluate(async () => {

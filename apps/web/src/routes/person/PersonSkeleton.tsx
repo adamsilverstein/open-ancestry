@@ -1,6 +1,6 @@
 import { useId } from 'react';
-import { Skeleton } from '../components/Skeleton/Skeleton';
-import styles from './PersonPage.module.css';
+import { Skeleton } from '../../components/Skeleton/Skeleton';
+import styles from './PersonSkeleton.module.css';
 
 const columns = [
   { rows: 6, height: 64 },
@@ -8,8 +8,8 @@ const columns = [
   { rows: 5, height: 56 },
 ];
 
-/** Placeholder until the person page (F11) lands: header band, tabs and the facts grid. */
-export function PersonPage() {
+/** Person page placeholder sized like the header band, tabs and facts grid. */
+export function PersonSkeleton() {
   const headingId = useId();
   return (
     <section aria-labelledby={headingId} aria-busy="true">

@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { test as base } from '@playwright/test';
+import { FIXTURE_TREE } from './tree-fixture';
 import libCoverage, { type CoverageMapData } from 'istanbul-lib-coverage';
 import libSourceMaps from 'istanbul-lib-source-maps';
 
@@ -12,10 +13,19 @@ export { expect } from '@playwright/test';
 const rawCoverageDir = join(import.meta.dirname, '..', 'coverage', 'e2e', 'raw');
 
 /**
- * Playwright `test` with an automatic fixture that saves the instrumented
+ * Playwright `test` with automatic fixtures: `currentTree` opens the fixture
+ * tree from global-setup.ts, and `collectCoverage` saves the instrumented
  * build's `window.__coverage__` after each test when E2E_COVERAGE=1.
  */
-export const test = base.extend<{ collectCoverage: void }>({
+export const test = base.extend<{ collectCoverage: void; currentTree: void }>({
+  currentTree: [
+    async ({ page }, use) => {
+      // Other specs create trees in the same library; always open the fixture.
+      await page.addInitScript((tree) => localStorage.setItem('oa-tree', tree), FIXTURE_TREE);
+      await use();
+    },
+    { auto: true },
+  ],
   collectCoverage: [
     async ({ page }, use) => {
       await use();

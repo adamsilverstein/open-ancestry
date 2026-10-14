@@ -3,7 +3,14 @@ import {
   createRoute,
   createRouter,
   lazyRouteComponent,
+  notFound,
 } from '@tanstack/react-router';
+import { isNotFound } from '../api/client';
+import { currentTreeQuery, personQuery } from '../api/queries';
+import { PersonNotFound } from '../routes/person/PersonNotFound';
+import { PersonSkeleton } from '../routes/person/PersonSkeleton';
+import { validatePersonSearch } from '../routes/person/search';
+import { queryClient } from './queryClient';
 import { AppShell } from './AppShell';
 import { HomePage } from '../routes/HomePage';
 import { NotFoundPage } from '../routes/NotFoundPage';
@@ -36,7 +43,24 @@ const treeRoute = createRoute({
 const personRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/person/$personId',
-  component: lazyRouteComponent(() => import('../routes/PersonPage'), 'PersonPage'),
+  validateSearch: validatePersonSearch,
+  // Runs on hover/focus preload too, so the detail is usually cached by the click.
+  loader: async ({ params }) => {
+    const tree = await queryClient.ensureQueryData(currentTreeQuery);
+    if (!tree) throw notFound({ data: { reason: 'no-tree' } });
+    try {
+      await queryClient.ensureQueryData(personQuery(tree, params.personId));
+    } catch (error) {
+      if (isNotFound(error)) throw notFound();
+      throw error;
+    }
+    return { tree };
+  },
+  pendingComponent: PersonSkeleton,
+  pendingMs: 150,
+  pendingMinMs: 0,
+  notFoundComponent: PersonNotFound,
+  component: lazyRouteComponent(() => import('../routes/person/PersonPage'), 'PersonPage'),
 });
 
 const peopleRoute = createRoute({

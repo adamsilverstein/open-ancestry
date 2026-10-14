@@ -44,6 +44,15 @@ describe('export after a re-import (#72 review)', () => {
     expect(after).toContain(`0 ${thaddeus}`);
   });
 
+  it('leaves a rejected new person out of the export', async () => {
+    const added = renumber(
+      SAMPLE.replace('0 TRLR', '0 @I90@ INDI\n1 NAME Quillon /Vexbury/\n1 SEX F\n0 TRLR'),
+    );
+    const { after } = await reimportNothing(added);
+    expect(after).not.toContain('Vexbury');
+    expect(count(after, /^0 @I\d+@ INDI/)).toBe(26);
+  });
+
   it('regenerates a person whose incoming change was rejected', async () => {
     const changed = renumber(SAMPLE.replace('2 DATE Abt. 1842', '2 DATE 12 MAR 1842'));
     const { after } = await reimportNothing(changed);

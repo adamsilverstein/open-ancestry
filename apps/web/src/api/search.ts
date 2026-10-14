@@ -1,5 +1,5 @@
 import { keepPreviousData, queryOptions, useQuery } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { SearchMatch, TagRow } from '@open-ancestry/db';
 import { apiGet, seg } from './client';
 import { currentTreeQuery } from './queries';
@@ -32,34 +32,34 @@ export const searchQuery = (tree: string, q: string, limit = PALETTE_RESULTS) =>
     staleTime: 60_000,
   });
 
-/** Typing pauses this long before a search request goes out. */
-export const SEARCH_DEBOUNCE_MS = 120;
-
 const searchable = (q: string) => /[\p{L}\p{N}]/u.test(q);
 
 /**
- * People in the open tree matching `query`, debounced. While the current
- * query's results load, the previous results stay available as `stale` (so
- * the list does not flash) and `pending` is true; stale hits must not be
- * treated as answers to the current query.
+ * People in the open tree matching `query`. There is no debounce: a key
+ * typed while no search is running is searched at once, and keys typed while
+ * one is running wait for it, then search the latest text only. So a fast
+ * server answers each pause in typing within a few ms, and a slow query
+ * never queues a request per key behind it.
+ *
+ * While the current query's results load, the previous results stay
+ * available as `stale` (so the list does not flash) and `pending` is true;
+ * stale hits must not be treated as answers to the current query.
  */
 export function useSearchPeople(query: string, limit = PALETTE_RESULTS) {
   const { data: tree = null } = useQuery(currentTreeQuery);
   const current = query.trim();
-  const [debounced, setDebounced] = useState(current);
-  useEffect(() => {
-    const id = setTimeout(() => setDebounced(current), SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(id);
-  }, [current]);
-  const enabled = tree !== null && searchable(debounced);
+  const [requested, setRequested] = useState(current);
+  const enabled = tree !== null && searchable(requested);
   const result = useQuery({
-    ...searchQuery(tree ?? '', debounced, limit),
+    ...searchQuery(tree ?? '', requested, limit),
     enabled,
     placeholderData: keepPreviousData,
   });
+  const busy = enabled && result.isFetching;
+  if (!busy && requested !== current) setRequested(current);
   const wanted = tree !== null && searchable(current);
   const fresh =
-    wanted && debounced === current && result.data !== undefined && !result.isPlaceholderData;
+    wanted && requested === current && result.data !== undefined && !result.isPlaceholderData;
   return {
     tree,
     hits: wanted ? (result.data ?? []) : [],

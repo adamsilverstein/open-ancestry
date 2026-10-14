@@ -48,6 +48,7 @@ describe('server', () => {
     const root = await app.inject({ method: 'GET', url: '/' });
     expect(root.body).toContain('<title>spa</title>');
     const deep = await app.inject({ method: 'GET', url: '/tree/123' });
+    expect(deep.headers['cache-control']).toBe('no-store');
     expect(deep.statusCode).toBe(200);
     expect(deep.body).toContain('<title>spa</title>');
     const head = await app.inject({ method: 'HEAD', url: '/tree/123' });
@@ -64,11 +65,12 @@ describe('server', () => {
     const app = createServer({ staticDir: dir });
     const asset = await app.inject({ method: 'GET', url: '/assets/index-abc123.js' });
     expect(asset.headers['cache-control']).toBe('public, max-age=31536000, immutable');
+    // The shell carries a per-response nonce, so it is never cached.
     expect((await app.inject({ method: 'GET', url: '/' })).headers['cache-control']).toBe(
-      'no-cache',
+      'no-store',
     );
     expect((await app.inject({ method: 'GET', url: '/people' })).headers['cache-control']).toBe(
-      'no-cache',
+      'no-store',
     );
   });
 
@@ -101,5 +103,35 @@ describe('server', () => {
     );
     expect(huge).toMatch(/^HTTP\/1\.1 431 /);
     expect(huge).toContain('referrer-policy: no-referrer');
+  });
+
+  it('serves the SPA shell with a per-response style nonce in CSP and a meta tag', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'oa-static-'));
+    await writeFile(
+      join(dir, 'index.html'),
+      '<!doctype html><html><head><title>spa</title></head><body></body></html>',
+    );
+    const app = createServer({ staticDir: dir });
+    const nonces: string[] = [];
+    for (const url of ['/', '/index.html', '/tree/abc', '/people?sort=birth']) {
+      const res = await app.inject({ method: 'GET', url });
+      expect(res.statusCode, url).toBe(200);
+      const nonce = /<meta name="csp-nonce" content="([A-Za-z0-9+/=]+)">/.exec(res.body)?.[1];
+      expect(nonce, url).toBeDefined();
+      const csp = String(res.headers['content-security-policy']);
+      expect(csp).toContain(`style-src 'self' 'nonce-${nonce}'`);
+      expect(csp).toContain("default-src 'self'");
+      expect(csp).not.toContain('unsafe-inline');
+      expect(res.headers['content-type']).toContain('text/html');
+      expect(res.headers['cache-control']).toBe('no-store');
+      nonces.push(nonce!);
+    }
+    expect(new Set(nonces).size).toBe(nonces.length);
+    const head = await app.inject({ method: 'HEAD', url: '/' });
+    expect(head.statusCode).toBe(200);
+    // Other responses keep the plain policy.
+    const api = await app.inject({ method: 'GET', url: '/api/health' });
+    expect(String(api.headers['content-security-policy'])).not.toContain('nonce');
+    await app.close();
   });
 });

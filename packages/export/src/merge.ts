@@ -32,10 +32,13 @@ const GENERATED_TAGS = new Set([
   '_HOME',
 ]);
 
-/** Standard tags a structure holds at most once (repeatable ones like ASSO, NOTE, SOUR may be added). */
+/**
+ * Standard tags a structure holds at most once. Repeatable ones (ASSO, NOTE,
+ * SOUR, and EMAIL, PHON, FAX, WWW, which 5.5.1 allows three of) may be added.
+ */
 const SINGLE_VALUED = new Set(
-  `ABBR ADDR AGE AUTH CALN CAUS DATA DATE EMAIL FILE FORM GIVN LATI LONG MAP NICK NPFX NSFX PAGE
-  PEDI PHON PLAC PUBL QUAY RESN ROLE SEX SPFX SURN TEXT TIME TITL TYPE VERS WWW`.split(/\s+/),
+  `ABBR ADDR AGE AUTH CALN CAUS DATA DATE FILE FORM GIVN LATI LONG MAP NICK NPFX NSFX PAGE
+  PEDI PLAC PUBL QUAY RESN ROLE SEX SPFX SURN TEXT TIME TITL TYPE VERS`.split(/\s+/),
 );
 
 /** Every GEDCOM 7.0 standard tag; anything else must be an `_` extension in a 7 file. */
@@ -145,6 +148,8 @@ class Merger {
   private readonly ctx: MergeContext;
   private readonly label: string;
   private readonly isUnmapped: (node: GedcomNode, path: string) => boolean;
+  /** Lines this merge inserted, as opposed to lines the generator wrote. */
+  private readonly merged = new WeakSet<GedcomNode>();
 
   constructor(
     ctx: MergeContext,
@@ -213,16 +218,22 @@ class Merger {
       return existing;
     }
     if (existing) {
-      // An identical line is already there; a second value of a one-value tag would contradict it.
-      if (target.children.some((c) => sameLine(c, node) && c.children.length === 0))
-        return undefined;
+      // The generator already wrote this very line (only lines it wrote count: a repeated
+      // imported line is kept, as it was in the file); a second value of a one-value tag
+      // would contradict the current one.
+      const written = (c: GedcomNode) =>
+        !this.merged.has(c) && sameLine(c, node) && c.children.length === 0;
+      if (target.children.some(written)) return undefined;
       if (SINGLE_VALUED.has(node.tag) || GENERATED_TAGS.has(node.tag)) {
         this.lost(node, path, 'it conflicts with the current value');
         return undefined;
       }
     }
     const copy = this.prepare(node, path);
-    if (copy) target.children.splice(at, 0, copy);
+    if (copy) {
+      this.merged.add(copy);
+      target.children.splice(at, 0, copy);
+    }
     return copy;
   }
 

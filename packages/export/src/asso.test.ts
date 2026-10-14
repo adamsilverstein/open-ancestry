@@ -43,4 +43,36 @@ describe('associations (ASSO)', () => {
     expect(recordText(again.text, '@I1@')).toBe(recordText(seven, '@I1@'));
     expect(recordText(again.text, '@I3@')).toBe(recordText(seven, '@I3@'));
   });
+
+  it('keeps a repeated association and repeated contact lines as they were', async () => {
+    const store = await importInto(
+      ged(
+        '0 @I1@ INDI',
+        '1 NAME Odile /Fernsby/',
+        '1 ASSO @I2@',
+        '1 ASSO @I2@',
+        '0 @I2@ INDI',
+        '1 NAME Bastien /Corlew/',
+        '0 @R1@ REPO',
+        '1 NAME County archive',
+        '1 EMAIL a@archive.example',
+        '1 EMAIL b@archive.example',
+        '1 PHON 555-0100',
+        '1 PHON 555-0101',
+        '1 WWW https://a.example',
+        '1 WWW https://b.example',
+      ),
+    );
+    store.db.exec("DELETE FROM raw_record WHERE gedcom_tag IN ('HEAD', 'TRLR')");
+    for (const version of ['5.5.1', '7'] as const) {
+      // Regenerate every record (no verbatim copy) so the merge-back path runs.
+      const out = buildGedcomExport(store, { version, now: TODAY, includeMedia: false });
+      expect(out.warnings, version).toEqual([]);
+      expect(recordText(out.text, '@I1@')!.match(/^1 ASSO @I2@$/gm), version).toHaveLength(2);
+      const repo = recordText(out.text, '@R1@')!;
+      for (const line of ['b@archive.example', '555-0101', 'https://b.example']) {
+        expect(repo, `${version} ${line}`).toContain(line);
+      }
+    }
+  });
 });

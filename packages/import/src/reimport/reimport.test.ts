@@ -1492,3 +1492,112 @@ describe('name conflict wording (#160)', () => {
     }
   });
 });
+
+describe('rename wording only for renames (#201)', () => {
+  const mercyChanges = (s: ReimportSession) =>
+    s.diff.people
+      .filter((p) => p.existingId === pid(store, '@I2@'))
+      .flatMap((p) => p.changes)
+      .filter((c) => c.kind === 'name.add');
+  const withNames = (...lines: string[]) =>
+    renumber(
+      SAMPLE.replace(
+        '2 GIVN Mercy\n2 SURN Bellweather\n',
+        ['2 GIVN Mercy', '2 SURN Bellweather', ...lines, ''].join('\n'),
+      ),
+    );
+
+  it('a name the export adds is a plain addition when the user only added an alternate', async () => {
+    const mercy = pid(store, '@I2@');
+    store.transact('Add aka', (tx) =>
+      tx.insert('person_name', {
+        person_id: mercy,
+        given: 'Mercie',
+        surname: 'Bellweather',
+        type: 'aka',
+        is_primary: 0,
+      } as never),
+    );
+    const s2 = await prepareReimport(
+      store,
+      { bytes: withNames('1 NAME Mercy /Ashgrove/', '2 TYPE married') },
+      { today: TODAY },
+    );
+    try {
+      expect(mercyChanges(s2)).toEqual([
+        expect.objectContaining({
+          name: 'Mercy Ashgrove',
+          nameType: 'married',
+          defaultAccept: true,
+        }),
+      ]);
+      expect(mercyChanges(s2)[0]!.conflict).toBeUndefined();
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  it('an alternate name the user edited, still in the export, offers nothing', async () => {
+    const mercy = pid(store, '@I2@');
+    const s1 = await prepareReimport(
+      store,
+      { bytes: withNames('1 NAME Mercie /Bellweather/') },
+      { today: TODAY },
+    );
+    applyReimport(store, s1, defaults(s1), 'Re-import 1');
+    closeReimport(s1);
+    const alt = value<string>(
+      store,
+      "SELECT id FROM person_name WHERE person_id = ? AND given = 'Mercie'",
+      mercy,
+    );
+    store.transact('Edit alt', (tx) => tx.update('person_name', alt, { given: 'Mercia' }));
+    const s2 = await prepareReimport(
+      store,
+      { bytes: renumber(withNames('1 NAME Mercie /Bellweather/'), 400) },
+      { today: TODAY },
+    );
+    try {
+      expect(mercyChanges(s2)).toEqual([]);
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  it('a primary name both sides changed is a conflict that says what it was', async () => {
+    const mercy = pid(store, '@I2@');
+    const name = value<string>(store, 'SELECT id FROM person_name WHERE person_id = ?', mercy);
+    store.transact('Rename', (tx) => tx.update('person_name', name, { given: 'Marcy' }));
+    const changed = renumber(
+      SAMPLE.replace(
+        '1 NAME Mercy /Bellweather/\n2 GIVN Mercy\n',
+        '1 NAME Mercey /Bellweather/\n2 GIVN Mercey\n',
+      ),
+    );
+    const s2 = await prepareReimport(store, { bytes: changed }, { today: TODAY });
+    try {
+      expect(mercyChanges(s2)).toEqual([
+        expect.objectContaining({
+          name: 'Mercey Bellweather',
+          was: 'Mercy Bellweather',
+          conflict: 'local-edit',
+          defaultAccept: false,
+        }),
+      ]);
+      // Ticked, it is kept as an alternate with no invented type.
+      applyReimport(store, s2, new Set(mercyChanges(s2).map((c) => c.id)), 'Re-import');
+    } finally {
+      closeReimport(s2);
+    }
+    expect(
+      rows(
+        store,
+        'SELECT given, type, is_primary FROM person_name WHERE person_id = ? ORDER BY sort_order',
+        mercy,
+      ),
+    ).toEqual([
+      { given: 'Marcy', type: 'birth', is_primary: 1 },
+      { given: 'Mercey', type: 'aka', is_primary: 0 },
+    ]);
+  });
+});

@@ -117,15 +117,21 @@ describe('conflict wording (#160)', () => {
     }) as ReviewChange;
 
   it("says that ticking a name keeps the user's name as the primary", () => {
-    expect(describeChange(name('local-edit'), 'Walt Ashgrove')).toBe(
-      'Also keep Walter Ashgrove as an alternate name',
+    const renamed = {
+      ...name('local-edit'),
+      was: 'Walter Ashgrove',
+      name: 'Walther Ashgrove',
+    } as ReviewChange;
+    expect(describeChange(renamed, 'Walt Ashgrove')).toBe(
+      'Also keep Walther Ashgrove as an alternate name',
     );
-    expect(conflictText(name('local-edit'), 'Walt Ashgrove')).toBe(
-      'The export still calls this person Walter Ashgrove; you renamed them Walt Ashgrove here. Tick to also keep Walter Ashgrove as an alternate name; Walt Ashgrove stays the primary name.',
+    expect(conflictText(renamed, 'Walt Ashgrove')).toBe(
+      'The export now calls this person Walther Ashgrove (it was Walter Ashgrove); you renamed them Walt Ashgrove here. Tick to also keep Walther Ashgrove as an alternate name; Walt Ashgrove stays the primary name.',
     );
-    expect(conflictText(name('local-delete'), 'Walt Ashgrove')).toBe(
-      'You deleted the name Walter Ashgrove here. Tick to add it back as an alternate name.',
-    );
+    // A stated type stays in the label where the user decides.
+    expect(
+      describeChange({ ...renamed, nameType: 'married' } as ReviewChange, 'Walt Ashgrove'),
+    ).toBe('Also keep Walther Ashgrove (married name) as an alternate name');
   });
 
   it('shows a name type only when the export gives one', () => {

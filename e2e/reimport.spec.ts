@@ -321,14 +321,22 @@ test("a renamed person's export name is offered as an alternate, saying so", asy
     { headers: seeded.headers, data: { given: 'Thad' } },
   );
   expect(renamed.ok()).toBe(true);
-  await startReimport(page, seeded);
+  // Ancestry renamed him too, so both sides changed the name (#185).
+  await startReimport(
+    page,
+    seeded,
+    laterExport().replace(
+      '1 NAME Thaddeus /Ashgrove/\n2 GIVN Thaddeus\n',
+      '1 NAME Thaddeus James /Ashgrove/\n2 GIVN Thaddeus James\n',
+    ),
+  );
   const keep = card(page, 'Thad Ashgrove').getByRole('checkbox', {
-    name: 'Also keep Thaddeus Ashgrove as an alternate name',
+    name: 'Also keep Thaddeus James Ashgrove as an alternate name',
   });
   await expect(keep).not.toBeChecked();
   await expect(
     card(page, 'Thad Ashgrove').getByText(
-      'The export still calls this person Thaddeus Ashgrove; you renamed them Thad Ashgrove here. Tick to also keep Thaddeus Ashgrove as an alternate name; Thad Ashgrove stays the primary name.',
+      'The export now calls this person Thaddeus James Ashgrove (it was Thaddeus Ashgrove); you renamed them Thad Ashgrove here. Tick to also keep Thaddeus James Ashgrove as an alternate name; Thad Ashgrove stays the primary name.',
     ),
   ).toBeVisible();
 });

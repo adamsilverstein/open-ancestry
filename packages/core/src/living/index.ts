@@ -8,23 +8,34 @@
  * future dates, a bad `today` or malformed input all leave the person living,
  * so their details stay private.
  *
- * Without a usable birth date the birth year is estimated from relatives:
- * parent + 25, spouse + 0, child - 25 years. Every date counts at its latest
- * possible year and the latest estimate wins, again erring toward living.
- * An estimate alone only proves death when it rests on at least two dated
- * relatives and clears the threshold by ESTIMATE_MARGIN_YEARS, so one
- * mistyped relative's date cannot hide a living person's privacy.
+ * Without a usable birth date, relatives only bound the birth year. Each
+ * relative gives the LATEST plausible birth year, not a typical one:
+ *
+ *   parent born P  -> person born by P + 50 (PARENT_MAX_AGE)
+ *   spouse born S  -> person born by S + 20 (SPOUSE_MAX_GAP)
+ *   child born C   -> person born by C - 12 (PARENT_MIN_AGE)
+ *
+ * Every relative date is read at its latest possible year and the latest
+ * bound wins, so the most recent relative decides. Relatives alone prove
+ * death only when at least two dated relatives agree (MIN_ESTIMATE_SOURCES)
+ * and even that latest bound is ESTIMATE_MARGIN_YEARS past the threshold.
+ * One mistyped date can therefore never expose a living person; anything
+ * short of that is living with reason 'insufficient-evidence'.
+ *
  * With no dates at all the person is living, as on Ancestry.
  */
 import { parseDate } from '../dates';
 import type { DateInput, ParsedDate } from '../dates';
 
-export const GENERATION_YEARS = 25;
+export const PARENT_MAX_AGE = 50;
+export const SPOUSE_MAX_GAP = 20;
+export const PARENT_MIN_AGE = 12;
+export const MIN_ESTIMATE_SOURCES = 2;
 export const ESTIMATE_MARGIN_YEARS = 10;
 
 export interface LivingInput {
   birth?: DateInput;
-  /** Any death value, even an empty or undated one, means the person died. */
+  /** A death record's date; any string, even empty (an undated DEAT), means the person died. Null does not. */
   death?: DateInput;
   burial?: DateInput;
   /** Other death evidence such as cremation, probate or `DEAT Y`. */
@@ -73,9 +84,9 @@ function estimateBirthYear(input: LivingInput): { year: number; sources: number 
       if (year !== undefined) estimates.push(year + offset);
     }
   };
-  add(input.parentBirths, GENERATION_YEARS);
-  add(input.spouseBirths, 0);
-  add(input.childBirths, -GENERATION_YEARS);
+  add(input.parentBirths, PARENT_MAX_AGE);
+  add(input.spouseBirths, SPOUSE_MAX_GAP);
+  add(input.childBirths, -PARENT_MIN_AGE);
   return estimates.length ? { year: Math.max(...estimates), sources: estimates.length } : undefined;
 }
 
@@ -98,7 +109,8 @@ export function inferLiving(
   const threshold = Number.isFinite(thresholdYears) && thresholdYears > 0 ? thresholdYears : 100;
   const age = currentYear - birthYear;
   if (estimate) {
-    const proven = estimate.sources >= 2 && age >= threshold + ESTIMATE_MARGIN_YEARS;
+    const proven =
+      estimate.sources >= MIN_ESTIMATE_SOURCES && age >= threshold + ESTIMATE_MARGIN_YEARS;
     return {
       living: !proven,
       reason: proven

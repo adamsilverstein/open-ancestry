@@ -48,54 +48,69 @@ describe('inferLiving', () => {
     ],
     ['unparseable birth, no relatives', { birth: 'unknown' }, { living: true, reason: 'no-dates' }],
     [
-      'one parent born 1890 is not enough',
+      'one parent born 1890 bounds birth by 1940',
       { parentBirths: ['1890'] },
-      { living: true, reason: 'insufficient-evidence', estimated: true, birthYear: 1915 },
+      { living: true, reason: 'birth-within-threshold', estimated: true, birthYear: 1940 },
     ],
     [
-      'two parents born 1880s',
-      { parentBirths: ['1880', '1885'] },
-      { living: false, reason: 'birth-beyond-threshold', estimated: true, birthYear: 1910 },
+      'one old parent is not enough',
+      { parentBirths: ['1850'] },
+      { living: true, reason: 'insufficient-evidence', estimated: true, birthYear: 1900 },
     ],
     [
-      'two old relatives within the margin',
-      { parentBirths: ['1880', '1895'] },
+      'two old parents agree',
+      { parentBirths: ['1850', '1855'] },
+      { living: false, reason: 'birth-beyond-threshold', estimated: true, birthYear: 1905 },
+    ],
+    [
+      'two old relatives inside the margin',
+      { parentBirths: ['1855', '1870'] },
       { living: true, reason: 'insufficient-evidence', birthYear: 1920 },
     ],
     [
       'single mistyped child date',
       { childBirths: ['1801'] },
-      { living: true, reason: 'insufficient-evidence', birthYear: 1776 },
+      { living: true, reason: 'insufficient-evidence', birthYear: 1789 },
     ],
     [
       'parent born 1950',
       { parentBirths: ['1950'] },
-      { living: true, estimated: true, birthYear: 1975 },
+      { living: true, estimated: true, birthYear: 2000 },
     ],
     [
       'child born 1960',
       { childBirths: ['1960'] },
-      { living: true, estimated: true, birthYear: 1935 },
+      { living: true, estimated: true, birthYear: 1948 },
     ],
     [
       'children born 1900 and 1905',
       { childBirths: ['1900', '1905'] },
-      { living: false, estimated: true, birthYear: 1880 },
+      { living: false, estimated: true, birthYear: 1893 },
     ],
     [
       'spouse born 1920 alone',
       { spouseBirths: ['1920'] },
-      { living: true, reason: 'insufficient-evidence', birthYear: 1920 },
+      { living: true, reason: 'birth-within-threshold', birthYear: 1940 },
+    ],
+    [
+      'old spouse alone',
+      { spouseBirths: ['1880'] },
+      { living: true, reason: 'insufficient-evidence', birthYear: 1900 },
     ],
     [
       'spouse born 1940',
       { spouseBirths: [parseDate('1940')] },
-      { living: true, estimated: true, birthYear: 1940 },
+      { living: true, estimated: true, birthYear: 1960 },
+    ],
+    [
+      'old parent and spouse agree',
+      { parentBirths: ['1850'], spouseBirths: ['1870'] },
+      { living: false, birthYear: 1900 },
     ],
     [
       'latest estimate wins',
-      { parentBirths: ['1890'], childBirths: ['1990'] },
-      { living: true, estimated: true, birthYear: 1965 },
+      { parentBirths: ['1850', '1855'], childBirths: ['1990'] },
+      { living: true, estimated: true, birthYear: 1978 },
     ],
     [
       'undated relatives',
@@ -228,6 +243,43 @@ describe('inferLiving fails closed (properties)', () => {
     fc.assert(
       fc.property(fc.integer({ min: 1927, max: 3000 }), arbInput, (year, input) => {
         expect(inferLiving({ ...input, birth: String(year) }, today).living).toBe(true);
+      }),
+    );
+  });
+
+  it('never marks deceased from a single relative, however old', () => {
+    const relative = fc.oneof(
+      fc.integer({ min: 1, max: 3000 }).map(String),
+      fc.integer({ min: 1, max: 3000 }).map((y) => `BEF ${y}`),
+    );
+    const kind = fc.constantFrom('parentBirths', 'spouseBirths', 'childBirths');
+    fc.assert(
+      fc.property(kind, relative, (k, date) => {
+        expect(inferLiving({ [k]: [date] }, today).living).toBe(true);
+      }),
+    );
+  });
+
+  it('only marks deceased from relatives when two agree well past the threshold', () => {
+    const years = fc.array(fc.integer({ min: 1, max: 3000 }), { maxLength: 4 });
+    fc.assert(
+      fc.property(years, years, years, (parents, spouses, children) => {
+        const result = inferLiving(
+          {
+            parentBirths: parents.map(String),
+            spouseBirths: spouses.map(String),
+            childBirths: children.map(String),
+          },
+          today,
+        );
+        if (result.living) return;
+        const bounds = [
+          ...parents.map((y) => y + 50),
+          ...spouses.map((y) => y + 20),
+          ...children.map((y) => y - 12),
+        ];
+        expect(bounds.length).toBeGreaterThanOrEqual(2);
+        expect(today.getFullYear() - Math.max(...bounds)).toBeGreaterThanOrEqual(110);
       }),
     );
   });

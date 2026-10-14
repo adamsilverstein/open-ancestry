@@ -33,6 +33,7 @@ export type ImportWarningCode =
   | 'wrong-pointer-type'
   | 'duplicate-xref'
   | 'duplicate-link'
+  | 'duplicate-partner'
   | 'one-sided-link'
   | 'self-relationship'
   | 'relationship-cycle'

@@ -12,7 +12,7 @@ import type {
 import { CITATION_OWNERS, MEDIA_OWNERS, NOTE_OWNERS, TAG_OWNERS } from '@open-ancestry/db';
 import { serializeNode, type GedcomNode, type ParseResult } from '@open-ancestry/gedcom';
 import { createHash } from 'node:crypto';
-import { classifyFile, kindFromType, mediaType, writeMediaFile, type MediaSource } from './media';
+import { classifyFile, kindFromType, mediaType, storeMediaFile, type MediaSource } from './media';
 import { Places, coordinate, placeParts } from './places';
 import {
   BIRTH_SUBSTITUTES,
@@ -168,6 +168,8 @@ export class Mapper {
   private readonly surnameKeys = new Map<string, string | null>();
   /** Relative paths of media files written into the tree's media folder. */
   readonly copiedMedia = new Set<string>();
+  private readonly storedBySource = new Map<string, string>();
+  private readonly storedByHash = new Map<string, string>();
   /** Folders created under the media folder for those files. */
   readonly createdMediaFolders: string[] = [];
   private readonly insertedTags = new Set<string>();
@@ -736,21 +738,22 @@ export class Mapper {
 
   // ------------------------------------------------------------ notes, citations, tags, media links
 
-  private mapNote(node: GedcomNode, owner: Owner): void {
+  /** Maps a NOTE pointer or inline note onto `owner`; returns the note id. */
+  private mapNote(node: GedcomNode, owner: Owner): string | undefined {
     if (node.pointer !== undefined) {
       const noteId = this.resolve(node, 'NOTE', 'SNOTE');
-      if (!noteId) return;
+      if (!noteId) return undefined;
       this.use(node);
       this.link('note_link', 'note_id', noteId, owner);
-      return;
+      return noteId;
     }
     const value = text(node);
-    if (!value) return;
+    if (!value) return undefined;
     this.use(node);
     if (owner.type === 'place') {
       // A place repeats on many events; keep its note once.
       const key = `note|${owner.id}|${value}`;
-      if (this.linkKeys.has(key)) return;
+      if (this.linkKeys.has(key)) return undefined;
       this.linkKeys.add(key);
     }
     const id = this.options.newId();
@@ -759,6 +762,7 @@ export class Mapper {
     for (const c of node.children) {
       if (c.tag === 'SOUR') this.mapCitation(c, { type: 'note', id });
     }
+    return id;
   }
 
   private mapCitation(node: GedcomNode, owner: Owner): void {
@@ -858,10 +862,18 @@ export class Mapper {
         return id;
       });
       if (key) this.citationKeys.set(key, citationIds);
-      const citationOwner = { type: 'citation', id: citationIds[0]! };
+      // Every copy of a split citation carries the same notes and media: map
+      // them once onto the first and link the same rows to the others.
+      const [first, ...copies] = citationIds.map((id) => ({ type: 'citation', id }));
       for (const c of attachments) {
-        if (c.tag === 'OBJE') this.mapMediaLink(c, citationOwner);
-        else this.mapNote(c, citationOwner);
+        if (c.tag === 'OBJE') {
+          const mediaId = this.mapMediaLink(c, first!);
+          if (mediaId)
+            for (const copy of copies) this.link('media_link', 'media_id', mediaId, copy);
+        } else {
+          const noteId = this.mapNote(c, first!);
+          if (noteId) for (const copy of copies) this.link('note_link', 'note_id', noteId, copy);
+        }
       }
     }
     for (const id of citationIds) this.link('citation_link', 'citation_id', id, owner);
@@ -1030,14 +1042,10 @@ export class Mapper {
     }
     try {
       const bytes = file.read();
-      if (this.options.mediaRoot && !this.copiedMedia.has(file.path)) {
-        this.copiedMedia.add(file.path);
-        const folder = writeMediaFile(this.options.mediaRoot, file.path, bytes);
-        if (folder) this.createdMediaFolders.push(folder);
-      }
-      row.local_path = file.path;
+      const hash = sha256(bytes);
+      row.local_path = this.storeMedia(file.path, bytes, hash);
       row.byte_size = bytes.length;
-      row.sha256 = sha256(bytes);
+      row.sha256 = hash;
       this.linkedMedia++;
       this.use(node);
     } catch (error) {
@@ -1048,6 +1056,28 @@ export class Mapper {
         `Media file "${file.path}" could not be copied: ${reason}`,
       );
     }
+  }
+
+  /**
+   * Where a source file lives in the tree. Each source file and each distinct
+   * content (sha256) is stored once; existing files are never overwritten.
+   */
+  private storeMedia(sourcePath: string, bytes: Uint8Array, hash: string): string {
+    const known = this.storedBySource.get(sourcePath) ?? this.storedByHash.get(hash);
+    if (known) {
+      this.storedBySource.set(sourcePath, known);
+      return known;
+    }
+    let path = sourcePath;
+    if (this.options.mediaRoot) {
+      const stored = storeMediaFile(this.options.mediaRoot, sourcePath, bytes, sha256);
+      path = stored.path;
+      if (stored.written) this.copiedMedia.add(path);
+      if (stored.folder) this.createdMediaFolders.push(stored.folder);
+    }
+    this.storedBySource.set(sourcePath, path);
+    this.storedByHash.set(hash, path);
+    return path;
   }
 
   // ------------------------------------------------------------ other records
@@ -1086,9 +1116,9 @@ export class Mapper {
           const other = c.tag === 'HUSB' ? 'partner2' : 'partner1';
           if (family.partner1 === personId || family.partner2 === personId) {
             this.warn(
-              'self-relationship',
+              'duplicate-partner',
               c.line,
-              `${c.pointer} is already a partner in this family`,
+              `${c.pointer} is listed twice as a partner of family ${record.xref ?? ''}; this ${c.tag} line is ignored`,
             );
             break;
           }
@@ -1098,7 +1128,7 @@ export class Mapper {
             this.warn(
               'duplicate-link',
               c.line,
-              `Family ${record.xref ?? ''} already has two partners`,
+              `Family ${record.xref ?? ''} already has two partners; ${c.tag} ${c.pointer} is not added`,
             );
             break;
           }

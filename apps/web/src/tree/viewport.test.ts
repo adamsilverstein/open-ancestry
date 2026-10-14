@@ -8,6 +8,7 @@ import {
   interpolate,
   toScreen,
   visibleWorld,
+  wheelKind,
   zoomAt,
 } from './viewport';
 
@@ -66,5 +67,15 @@ describe('viewport math', () => {
     expect(interpolate(a, b, 0)).toEqual(a);
     expect(interpolate(a, b, 1)).toEqual(b);
     expect(interpolate(a, b, 0.5)).toEqual({ x: 50, y: -50, scale: 1.5 });
+  });
+
+  it('tells mouse wheels, trackpad scrolls and pinches apart', () => {
+    const e = { ctrlKey: false, metaKey: false, shiftKey: false, deltaMode: 0, deltaX: 0 };
+    expect(wheelKind({ ...e, deltaY: 100 })).toBe('wheel');
+    expect(wheelKind({ ...e, deltaY: 3, deltaMode: 1 })).toBe('wheel');
+    expect(wheelKind({ ...e, deltaY: 12.5 })).toBe('pan');
+    expect(wheelKind({ ...e, deltaX: 4, deltaY: 60 })).toBe('pan');
+    expect(wheelKind({ ...e, deltaY: 100, shiftKey: true })).toBe('pan');
+    expect(wheelKind({ ...e, deltaY: -8, ctrlKey: true })).toBe('pinch');
   });
 });

@@ -1,4 +1,4 @@
-import { House, LayoutGrid, Maximize, Search, ZoomIn, ZoomOut } from 'lucide-react';
+import { House, LayoutGrid, Map as MapIcon, Maximize, Search, ZoomIn, ZoomOut } from 'lucide-react';
 import { Tooltip } from '../Tooltip/Tooltip';
 import { IconButton } from '../IconButton/IconButton';
 import iconButtonStyles from '../IconButton/IconButton.module.css';
@@ -27,6 +27,9 @@ export interface TreeToolbarProps {
   /** Control the layout menu, e.g. to open it from the `L` shortcut. */
   layoutMenuOpen?: boolean;
   onLayoutMenuOpenChange?: (open: boolean) => void;
+  /** Shows a Minimap toggle (shortcut `M`) when given. */
+  minimapVisible?: boolean;
+  onToggleMinimap?: () => void;
   className?: string;
 }
 
@@ -43,6 +46,8 @@ export function TreeToolbar({
   onFit,
   layoutMenuOpen,
   onLayoutMenuOpenChange,
+  minimapVisible,
+  onToggleMinimap,
   className,
 }: TreeToolbarProps) {
   const side = 'right';
@@ -104,6 +109,16 @@ export function TreeToolbar({
         icon={<Maximize {...icon} />}
         onClick={onFit}
       />
+      {onToggleMinimap && (
+        <IconButton
+          label="Minimap"
+          shortcut="M"
+          tooltipSide={side}
+          pressed={Boolean(minimapVisible)}
+          icon={<MapIcon {...icon} />}
+          onClick={onToggleMinimap}
+        />
+      )}
     </Toolbar>
   );
 }

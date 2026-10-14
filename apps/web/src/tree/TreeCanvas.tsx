@@ -7,6 +7,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useId,
   useState,
   type FocusEvent,
   type KeyboardEvent,
@@ -37,6 +38,7 @@ import {
   interpolate,
   toScreen,
   visibleWorld,
+  wheelKind,
   zoomAt,
   type Rect,
   type Transform,
@@ -264,6 +266,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   ref,
 ) {
   const viewportRef = useRef<HTMLDivElement>(null);
+  const helpId = useId();
   const worldRef = useRef<HTMLDivElement>(null);
   const lodRef = useRef<HTMLCanvasElement>(null);
   const transform = useRef<Transform>({ x: 0, y: 0, scale: 1 });
@@ -294,8 +297,8 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   const relations = useMemo(() => (layout ? buildRelations(layout) : null), [layout]);
 
   // Latest props for callbacks that must stay stable.
-  const latest = useRef({ onInteract, onViewportChange, onPrefetch, layout, fan, person });
-  latest.current = { onInteract, onViewportChange, onPrefetch, layout, fan, person };
+  const latest = useRef({ onInteract, onViewportChange, onPrefetch, layout, fan, person, kind });
+  latest.current = { onInteract, onViewportChange, onPrefetch, layout, fan, person, kind };
 
   const measure = useCallback(() => {
     const el = viewportRef.current;
@@ -479,10 +482,36 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     [apply, moving],
   );
 
-  const centeredOnFocus = useCallback((t: Transform): Transform => {
+  /**
+   * Centers the focus card across. In the family view it also frames the rows from
+   * the grandparents to the children down the screen (zooming out to fit them on
+   * first view), as Ancestry does; other views center the focus card.
+   */
+  const centeredOnFocus = useCallback((t: Transform, fitRows = false): Transform => {
     const { width, height } = size.current;
     const { layout: current, fan: currentFan } = latest.current;
     const focus = current?.nodes.find((n) => n.isFocus);
+    if (focus && current && latest.current.kind === 'family') {
+      let top = focus.y;
+      let bottom = focus.y + focus.height;
+      for (const n of current.nodes) {
+        if (n.generation < -2 || n.generation > 1) continue;
+        top = Math.min(top, n.y);
+        bottom = Math.max(bottom, n.y + n.height);
+      }
+      const pad = 32;
+      // Room for the chevrons above the top row and below the bottom one.
+      const rows = bottom - top + 28;
+      const scale = fitRows
+        ? Math.max(LOD_SCALE + 0.05, Math.min(1, (height - 2 * pad) / rows))
+        : t.scale;
+      const centered = centerOn({ ...t, scale }, focus.x + focus.width / 2, 0, width, height);
+      const y =
+        rows * scale <= height - 2 * pad
+          ? height / 2 - ((top + bottom) / 2) * scale
+          : pad - (top - 14) * scale;
+      return { x: centered.x, y, scale };
+    }
     if (focus)
       return centerOn(t, focus.x + focus.width / 2, focus.y + focus.height / 2, width, height);
     if (currentFan) {
@@ -592,7 +621,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     previous.current = { layout, kind, focus: focusPersonId };
     if (!prev || prev.kind !== kind) {
       stopAnimation();
-      apply(centeredOnFocus(transform.current));
+      apply(centeredOnFocus(transform.current, true));
     } else if (prev.focus !== focusPersonId) {
       if (keepFocus.current) {
         keepFocus.current = false;
@@ -646,7 +675,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     return () => observer.disconnect();
   }, [measure, updateVisible]);
 
-  // Wheel pans; ctrl/cmd + wheel (and trackpad pinch, which arrives as ctrl + wheel) zooms.
+  // Mouse wheel and pinch zoom around the pointer; trackpad two-finger scrolling pans.
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
@@ -657,13 +686,13 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       moving();
       const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? size.current.height : 1;
       const t = transform.current;
-      if (event.ctrlKey || event.metaKey) {
-        const box = el.getBoundingClientRect();
-        const factor = Math.exp(-event.deltaY * unit * 0.0025);
+      const box = el.getBoundingClientRect();
+      const at = (factor: number) =>
         apply(zoomAt(t, event.clientX - box.left, event.clientY - box.top, factor));
-      } else {
-        apply({ x: t.x - event.deltaX * unit, y: t.y - event.deltaY * unit, scale: t.scale });
-      }
+      const kind = wheelKind(event);
+      if (kind === 'pinch') at(Math.exp(-event.deltaY * unit * 0.0025));
+      else if (kind === 'wheel') at(Math.exp(-event.deltaY * unit * 0.0015));
+      else apply({ x: t.x - event.deltaX * unit, y: t.y - event.deltaY * unit, scale: t.scale });
     };
     // Safari reports trackpad pinch as gesture events.
     let gestureScale = 1;
@@ -765,7 +794,9 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   /** Re-focus from inside the canvas: keyboard focus follows to the new focus card. */
   const keepFocus = useRef(false);
   function refocus(personId: string) {
-    keepFocus.current = Boolean(viewportRef.current?.contains(document.activeElement));
+    // Even from a double click (whose first click opened the quick view), so
+    // the tree keeps keyboard focus and its shortcuts.
+    keepFocus.current = true;
     onRefocus(personId);
   }
 
@@ -904,6 +935,8 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
 
   // ----- render.
   const focusName = person(focusPersonId)?.name ?? '';
+  // Labels are relative to the focus person, as on Ancestry: "Ada’s grandparents".
+  const focusGiven = focusName.split(' ')[0] ?? '';
 
   const shown = visible.source === layout && layout ? visible : null;
   const cardIndexes = useMemo(() => {
@@ -937,6 +970,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       role="application"
       aria-roledescription="family tree"
       aria-label={label}
+      aria-describedby={helpId}
       aria-busy={busy}
       className={styles.viewport}
       onPointerDown={onPointerDown}
@@ -951,6 +985,11 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       onKeyUp={onKeyUp}
       onFocus={onFocus}
     >
+      <p id={helpId} className="oa-visually-hidden">
+        Arrow keys move between relatives, Enter centers on a person, Space opens their summary.
+        Drag or scroll with two fingers to pan; use the mouse wheel, pinch, or plus and minus to
+        zoom.
+      </p>
       <canvas ref={lodRef} className={styles.lodLayer} aria-hidden />
       <div
         ref={worldRef}
@@ -964,7 +1003,9 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
             className={l.anchor === 'right-middle' ? styles.labelGutter : styles.labelColumn}
             style={{ left: l.x, top: l.y }}
           >
-            <GenerationLabel>{l.text}</GenerationLabel>
+            <GenerationLabel>
+              {focusGiven ? `${focusGiven}’s ${l.text.toLowerCase()}` : l.text}
+            </GenerationLabel>
           </div>
         ))}
         {edgePaths && (

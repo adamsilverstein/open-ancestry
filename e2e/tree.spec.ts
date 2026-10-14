@@ -54,6 +54,9 @@ async function box(locator: Locator) {
 }
 
 test.describe('family view', () => {
+  // Fit keeps this family above the 35% canvas level of detail, so cards stay mounted.
+  test.use({ viewport: { width: 1440, height: 900 } });
+
   test('shows the focus person with spouses, parents, grandparents, children, siblings, aunts and uncles', async ({
     page,
   }) => {
@@ -82,12 +85,13 @@ test.describe('family view', () => {
     for (const [name, label] of expected) {
       await expect(card(page, name), name).toHaveAccessibleName(label);
     }
+    // Generation labels are relative to the focus person.
     for (const label of [
-      'Great-grandparents',
-      'Grandparents',
-      'Parents',
-      'Children',
-      'Grandchildren',
+      'Ada’s great-grandparents',
+      'Ada’s grandparents',
+      'Ada’s parents',
+      'Ada’s children',
+      'Ada’s grandchildren',
     ]) {
       await expect(canvas(page).getByText(label, { exact: true })).toBeVisible();
     }
@@ -303,9 +307,15 @@ test.describe('family view', () => {
     const worldX = (t: typeof zoomed) => (cx - viewport.x - t.x) / t.scale;
     expect(Math.abs(worldX(zoomed) - worldX(fitted))).toBeLessThan(1);
 
-    // Plain wheel pans; drag on the empty canvas pans.
+    // A mouse wheel notch zooms out around the cursor too (map style).
     await page.mouse.wheel(0, 100);
-    await expect.poll(async () => (await transform(page)).y).toBeLessThan(zoomed.y);
+    await expect.poll(async () => (await transform(page)).scale).toBeLessThan(zoomed.scale);
+    const wheeled = await transform(page);
+    expect(Math.abs(worldX(wheeled) - worldX(zoomed))).toBeLessThan(1);
+    // A trackpad's two-finger scroll (small, two-axis deltas) pans.
+    await page.mouse.wheel(6, 12.5);
+    await expect.poll(async () => (await transform(page)).y).toBeLessThan(wheeled.y);
+    expect((await transform(page)).scale).toBe(wheeled.scale);
     const beforeDrag = await transform(page);
     // Dragging works anywhere on the canvas, cards included.
     await page.mouse.move(viewport.x + viewport.width - 250, viewport.y + 80);
@@ -321,8 +331,31 @@ test.describe('family view', () => {
     await card(page, 'Ada Vale').focus();
     await card(page, 'Elsa Hale').dblclick();
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.elsa}\\?`));
+    // Keyboard focus follows to the new focus card.
+    await expect(card(page, 'Elsa Hale')).toBeFocused();
     await page.keyboard.press('h');
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.ada}\\?`));
+
+    // Single-key shortcuts only act while focus is in the tree (WCAG 2.1.4).
+    await card(page, 'Bram Vale').dblclick();
+    await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
+    await page.getByRole('banner').getByRole('button', { name: 'File' }).focus();
+    await page.keyboard.press('h');
+    await page.keyboard.press('0');
+    await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
+  });
+
+  test('the first view frames grandparents to children', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await open(page);
+    await settled(page);
+    const viewport = await box(canvas(page));
+    for (const name of ['Otto Vale', 'Rhea Lund', 'Ada Vale', 'Wren Ash', 'Mira Reed']) {
+      const b = await box(card(page, name));
+      expect(b.y, name).toBeGreaterThanOrEqual(viewport.y);
+      expect(b.y + b.height, name).toBeLessThanOrEqual(viewport.y + viewport.height);
+    }
+    await expect(canvas(page).getByText('Ada’s grandparents')).toBeInViewport();
   });
 
   test('the minimap shows the viewport and navigates on click and drag', async ({ page }) => {
@@ -347,6 +380,16 @@ test.describe('family view', () => {
     await expect.poll(async () => (await transform(page)).x).toBeGreaterThan(dragged.x);
 
     await page.getByRole('button', { name: 'Hide minimap' }).click();
+    await expect(minimap).toHaveCount(0);
+    // The toolbar brings it back (and M toggles it).
+    const toggle = page.getByRole('toolbar', { name: 'Tree tools' }).getByRole('button', {
+      name: 'Minimap',
+    });
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    await toggle.click();
+    await expect(minimap).toBeVisible();
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    await page.keyboard.press('m');
     await expect(minimap).toHaveCount(0);
   });
 
@@ -411,6 +454,7 @@ test.describe('family view', () => {
     await page.keyboard.press('f');
     await expect(page.getByRole('dialog', { name: 'Find in tree' })).toBeVisible();
     await page.keyboard.press('Escape');
+    await expect(card(page, 'Tilda Hale')).toBeFocused();
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k');
     await expect(page.getByRole('dialog', { name: 'Find in tree' })).toBeVisible();
   });

@@ -17,7 +17,7 @@ export interface Rect {
   height: number;
 }
 
-export const MIN_SCALE = 0.01;
+export const MIN_SCALE = 0.001;
 export const MAX_SCALE = 2;
 /** One zoom button press or key press. */
 export const ZOOM_STEP = 1.25;
@@ -89,4 +89,24 @@ export function interpolate(a: Transform, b: Transform, p: number): Transform {
     y: a.y + (b.y - a.y) * p,
     scale: a.scale + (b.scale - a.scale) * p,
   };
+}
+
+/**
+ * Map-style wheel handling. Pinch arrives as ctrl + wheel (and cmd + wheel zooms
+ * too). A mouse wheel moves in whole lines or large integer steps on one axis;
+ * a trackpad's two-finger scroll sends small, fractional or two-axis deltas,
+ * and Shift + wheel scrolls sideways. Wheel and pinch zoom; trackpad scroll pans.
+ */
+export function wheelKind(e: {
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+  deltaMode: number;
+  deltaX: number;
+  deltaY: number;
+}): 'pinch' | 'wheel' | 'pan' {
+  if (e.ctrlKey || e.metaKey) return 'pinch';
+  if (e.shiftKey) return 'pan';
+  if (e.deltaMode !== 0) return 'wheel';
+  return e.deltaX === 0 && Number.isInteger(e.deltaY) && Math.abs(e.deltaY) >= 50 ? 'wheel' : 'pan';
 }

@@ -82,13 +82,14 @@ function TreeMinimap({
   store,
   person,
   onNavigate,
+  onDismiss,
 }: {
   layout: TreeLayout;
   store: ReturnType<typeof createViewportStore>;
   person: (personId: string) => PersonSummary | undefined;
   onNavigate: (center: { x: number; y: number }) => void;
+  onDismiss: () => void;
 }) {
-  const [hidden, setHidden] = useState(false);
   const viewport = useSyncExternalStore(store.subscribe, store.get);
   const nodes = useMemo(
     () =>
@@ -110,7 +111,6 @@ function TreeMinimap({
     }),
     [layout],
   );
-  if (hidden) return null;
   return (
     <Minimap
       className={styles.minimap}
@@ -118,7 +118,7 @@ function TreeMinimap({
       bounds={bounds}
       viewport={viewport}
       onNavigate={onNavigate}
-      onDismiss={() => setHidden(true)}
+      onDismiss={onDismiss}
     />
   );
 }
@@ -174,6 +174,7 @@ export function TreeView({
   const [popoverKey, setPopoverKey] = useState<string | null>(null);
   const [findOpen, setFindOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [minimapVisible, setMinimapVisible] = useState(true);
   const viewKey = `${personId}|${kind}`;
   const [view, setView] = useState<ViewState>({
     for: viewKey,
@@ -427,10 +428,19 @@ export function TreeView({
 
   const onInteract = useCallback(() => setPopoverKey(null), []);
 
-  // Shortcuts: + - 0 zoom, H home, F and Cmd/Ctrl-K find, L layout.
+  // Shortcuts: + - 0 zoom, H home, F and Cmd/Ctrl-K find, L layout, M minimap. Only while
+  // focus is in the tree (canvas, toolbar, minimap), so typing elsewhere never triggers them
+  // (WCAG 2.1.4).
   useEffect(() => {
+    const inTree = (event: KeyboardEvent) =>
+      (event.target as HTMLElement).closest?.('[data-tree-region]') !== null;
     const onCapture = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') {
+      if (
+        inTree(event) &&
+        (event.metaKey || event.ctrlKey) &&
+        !event.altKey &&
+        event.key.toLowerCase() === 'k'
+      ) {
         // Inside the tree, Cmd-K finds people in it rather than opening the app palette.
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -439,6 +449,7 @@ export function TreeView({
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (!inTree(event)) return;
       const target = event.target as HTMLElement;
       if (
         target.closest(
@@ -455,6 +466,7 @@ export function TreeView({
         h: () => void goHome(),
         f: () => setFindOpen(true),
         l: () => setMenuOpen(true),
+        m: () => setMinimapVisible((v) => !v),
       };
       const action = actions[event.key.length === 1 ? event.key.toLowerCase() : event.key];
       if (!action) return;
@@ -590,9 +602,12 @@ export function TreeView({
         onZoomIn={() => canvas.current?.zoomBy(ZOOM_STEP)}
         onZoomOut={() => canvas.current?.zoomBy(1 / ZOOM_STEP)}
         onFit={() => canvas.current?.fit()}
+        minimapVisible={minimapVisible}
+        onToggleMinimap={() => setMinimapVisible((v) => !v)}
       />
-      {shownResult?.layout && (
+      {shownResult?.layout && minimapVisible && (
         <TreeMinimap
+          onDismiss={() => setMinimapVisible(false)}
           layout={shownResult.layout}
           store={viewportStore}
           person={person}

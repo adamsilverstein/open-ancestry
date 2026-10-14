@@ -70,7 +70,12 @@ export function TreePage() {
   }
 
   return (
-    <section aria-labelledby={headingId} className={styles.page} data-surface="canvas">
+    <section
+      aria-labelledby={headingId}
+      className={styles.page}
+      data-surface="canvas"
+      data-tree-region
+    >
       <h1 id={headingId} className="oa-visually-hidden">
         Family tree
       </h1>

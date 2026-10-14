@@ -1,6 +1,7 @@
 import { TransactionInProgressError, Tx, type TreeStore } from './store';
 import { deriveDateSort, hasConvertedDate } from './derived';
 import { upgradeRow } from './migrations/index';
+import { MERGED_IDS_KEY } from './nfc';
 import { DATA_TABLES } from './tables';
 import type { ChangeBatchRow, ChangeLogRow } from './types';
 
@@ -9,6 +10,41 @@ export class UndoConflictError extends Error {
     super(message);
     this.name = 'UndoConflictError';
   }
+}
+
+/** Place and tag ids the NFC upgrade (migration 3) merged away. */
+function mergedAway(store: TreeStore): string[] {
+  const value = store.stmt('SELECT value FROM meta WHERE key = ?').pluck().get(MERGED_IDS_KEY);
+  try {
+    const ids: unknown = JSON.parse(typeof value === 'string' ? value : '[]');
+    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Whether a batch's log names a place or tag the NFC upgrade merged away.
+ * Its images point at a row that no longer exists, so it can never be
+ * undone or redone; undo explains that instead of a generic conflict.
+ */
+export function touchesMergedRows(
+  store: TreeStore,
+  batchId: string,
+  merged = mergedAway(store),
+): boolean {
+  if (merged.length === 0) return false;
+  const log = store
+    .stmt('SELECT entity_id, before_json, after_json FROM change_log WHERE batch_id = ?')
+    .all(batchId) as Pick<ChangeLogRow, 'entity_id' | 'before_json' | 'after_json'>[];
+  return log.some((entry) =>
+    merged.some(
+      (id) =>
+        entry.entity_id === id ||
+        !!entry.before_json?.includes(`"${id}"`) ||
+        !!entry.after_json?.includes(`"${id}"`),
+    ),
+  );
 }
 
 /** Tables whose rows the change log may touch. Anything else in `entity` is refused. */
@@ -159,6 +195,14 @@ function replay(
   } catch (error) {
     // A deferred foreign key failure at COMMIT leaves the transaction open.
     if (store.db.inTransaction) store.db.exec('ROLLBACK');
+    const conflict =
+      error instanceof UndoConflictError ||
+      (error as { code?: string }).code === 'SQLITE_CONSTRAINT_FOREIGNKEY';
+    if (conflict && touchesMergedRows(store, batch.id)) {
+      throw new UndoConflictError(
+        `Cannot ${direction} "${batch.label}": this change touched a place or tag that was merged during an upgrade, so it can't be ${direction === 'undo' ? 'undone' : 'redone'}. Older changes stay in History.`,
+      );
+    }
     // Rows created by this batch are still referenced by later edits (or rows
     // it deleted are needed by them): the same situation as a row conflict.
     if ((error as { code?: string }).code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
@@ -187,12 +231,21 @@ export function redo(store: TreeStore, batchId: string): ChangeBatchRow {
   return replay(store, batch, 'redo');
 }
 
-/** Undoes the most recent applied batch (Cmd/Ctrl-Z). Returns null when there is nothing to undo. */
+/**
+ * Undoes the most recent applied batch (Cmd/Ctrl-Z), stepping over batches the
+ * NFC upgrade made un-undoable. Returns null when there is nothing to undo.
+ */
 export function undoLast(store: TreeStore): ChangeBatchRow | null {
-  const row = store
-    .stmt("SELECT id FROM change_batch WHERE state = 'applied' ORDER BY seq DESC LIMIT 1")
-    .get() as { id: string } | undefined;
-  return row ? undo(store, row.id) : null;
+  const merged = mergedAway(store);
+  const batches = store
+    .stmt(
+      `SELECT id FROM change_batch WHERE state = 'applied' ORDER BY seq DESC${merged.length ? '' : ' LIMIT 1'}`,
+    )
+    .all() as { id: string }[];
+  // A batch the NFC upgrade made permanently un-undoable is stepped over, so Cmd-Z
+  // still reaches the older ones (each is still checked for conflicts by undo).
+  const next = batches.find((b) => !touchesMergedRows(store, b.id, merged));
+  return next ? undo(store, next.id) : null;
 }
 
 /** Redoes the oldest undone batch, i.e. the last one undone. Returns null when there is nothing to redo. */

@@ -17,6 +17,7 @@ import {
   toNFC,
   redo,
   undo,
+  undoLast,
   UndoConflictError,
   type TreeStore,
 } from './index';
@@ -143,6 +144,7 @@ describe('schema v3: NFC normalization of existing trees', () => {
     ] as const) {
       const event = w.insert('event', { type: 'BIRT', place_id: place });
       w.insert('event_role', { event_id: event, person_id: person, role: 'principal' });
+      if (place === ids.nfdPlace) ids.nfdEvent = event;
     }
     const note = w.insert('note', { text: NFD('Notizen über Zürich') });
     w.insert('note_link', { note_id: note, owner_type: 'place', owner_id: ids.nfdPlace! });
@@ -170,6 +172,9 @@ describe('schema v3: NFC normalization of existing trees', () => {
     // Edits made before the upgrade: their change_log images hold NFD text.
     ids.edit = store.transact('Add nickname', (tx) =>
       tx.update('person_name', ids.name!, { nickname: 'Pepe' }),
+    ).batchId;
+    ids.eventEdit = store.transact('Date the birth', (tx) =>
+      tx.update('event', ids.nfdEvent!, { date_text: '1900' }),
     ).batchId;
     ids.placeEdit = store.transact('Set type', (tx) =>
       tx.update('place', ids.nfdChild!, { type: 'District' }),
@@ -237,19 +242,15 @@ describe('schema v3: NFC normalization of existing trees', () => {
   it('is an upgrade, not an edit: History is unchanged', () => {
     const { path, ids } = legacyTree();
     const store = openTree(path);
-    expect(listBatches(store).map((b) => b.id)).toEqual([ids.placeEdit, ids.edit]);
+    expect(listBatches(store).map((b) => b.id)).toEqual([ids.placeEdit, ids.eventEdit, ids.edit]);
     expect(one(store, 'SELECT count(*) FROM change_log WHERE schema_version = 3')).toBe(0);
     store.close();
   });
 
-  it('still undoes and redoes an edit made before the upgrade', () => {
+  it('still undoes and redoes a text edit made before the upgrade', () => {
     const { path, ids } = legacyTree();
     const store = openTree(path);
-    // The upgrade merged this place's parent, so its image names a parent that is gone:
-    // undo refuses it as a conflict and changes nothing.
-    expect(() => undo(store, ids.placeEdit!)).toThrow(UndoConflictError);
-    expect(store.getRow('place', ids.nfdChild!)?.type).toBe('District');
-    // Text-only normalization is upgraded in the images, so other edits undo cleanly.
+    // Its images hold NFD text; upgradeRow normalizes them, so they match the live row.
     undo(store, ids.edit!);
     expect(store.getRow('person_name', ids.name!)).toMatchObject({
       nickname: null,
@@ -257,6 +258,40 @@ describe('schema v3: NFC normalization of existing trees', () => {
     });
     redo(store, ids.edit!);
     expect(store.getRow('person_name', ids.name!)?.nickname).toBe('Pepe');
+    store.close();
+  });
+
+  it.each([
+    ['a child of a merged place', 'placeEdit', 'place', 'nfdChild'],
+    ['an event at a merged place', 'eventEdit', 'event', 'nfdEvent'],
+  ] as const)(
+    'refuses to undo an earlier edit to %s, with the tree unchanged',
+    (_, batch, table, row) => {
+      const { path, ids } = legacyTree();
+      const store = openTree(path);
+      const before = JSON.stringify(store.getRow(table, ids[row]!));
+      const history = JSON.stringify(listBatches(store));
+      // Its images name the place merged away, which no longer exists.
+      expect(() => undo(store, ids[batch]!)).toThrow(UndoConflictError);
+      expect(() => undo(store, ids[batch]!)).toThrow(
+        /merged during an upgrade, so it can't be undone\. Older changes stay in History\./,
+      );
+      expect(JSON.stringify(store.getRow(table, ids[row]!))).toBe(before);
+      expect(store.getRow(table, ids[row]!)).toMatchObject(
+        table === 'event' ? { place_id: ids.nfcPlace } : { parent_id: ids.nfcPlace },
+      );
+      expect(JSON.stringify(listBatches(store))).toBe(history);
+      store.close();
+    },
+  );
+
+  it('lets Cmd-Z step over edits that can no longer be undone', () => {
+    const { path, ids } = legacyTree();
+    const store = openTree(path);
+    // The two newest batches name the merged place; the nickname edit behind them undoes.
+    expect(undoLast(store)?.id).toBe(ids.edit);
+    expect(store.getRow('person_name', ids.name!)?.nickname).toBeNull();
+    expect(undoLast(store)).toBeNull();
     store.close();
   });
 

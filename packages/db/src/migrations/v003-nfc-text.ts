@@ -11,7 +11,7 @@
 // Older change_log images and JSON backups get the same treatment through
 // `upgradeRow` and `upgradeTables`.
 import type { Database } from 'better-sqlite3';
-import { isNfcColumn, nfcRow, toNFC } from '../nfc';
+import { MERGED_IDS_KEY, isNfcColumn, nfcRow, toNFC } from '../nfc';
 import { rebuildSearchDocs } from '../search-docs';
 import { DATA_TABLES } from '../tables';
 import type { TableRowsByName } from './index';
@@ -25,6 +25,7 @@ const PLACE_LINKS = [
 ] as const;
 
 export function normalizeText(db: Database): void {
+  const merged: string[] = [];
   for (const table of DATA_TABLES) {
     const columns = (
       db.prepare('SELECT name FROM pragma_table_info(?)').all(table) as { name: string }[]
@@ -42,13 +43,22 @@ export function normalizeText(db: Database): void {
         ([column, value]) => column !== key && value !== row[column],
       );
       if (patch.length === 0) continue;
-      if (table === 'tag' && mergeTag(db, row[key] as string, Object.fromEntries(patch))) continue;
+      if (table === 'tag' && mergeTag(db, row[key] as string, Object.fromEntries(patch))) {
+        merged.push(row[key] as string);
+        continue;
+      }
       db.prepare(
         `UPDATE ${table} SET ${patch.map(([c]) => `${c} = ?`).join(', ')} WHERE ${key} = ?`,
       ).run(...patch.map(([, value]) => value), row[key]);
     }
   }
-  mergePlaces(db);
+  merged.push(...mergePlaces(db));
+  if (merged.length) {
+    // Undo names these in its refusal of older edits that still point at them (see undo.ts).
+    db.prepare(
+      'INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value',
+    ).run(MERGED_IDS_KEY, JSON.stringify(merged.sort()));
+  }
   rebuildSearchDocs(db);
 }
 
@@ -70,8 +80,12 @@ function mergeTag(db: Database, id: string, patch: Row): boolean {
   return true;
 }
 
-/** Merges places with identical full names into the oldest, parents (shorter names) first. */
-function mergePlaces(db: Database): void {
+/**
+ * Merges places with identical full names into the oldest, parents (shorter
+ * names) first. Returns the ids of the places merged away.
+ */
+function mergePlaces(db: Database): string[] {
+  const merged: string[] = [];
   const names = db
     .prepare('SELECT full_name FROM place GROUP BY full_name HAVING count(*) > 1')
     .pluck()
@@ -102,8 +116,10 @@ function mergePlaces(db: Database): void {
         ).run(survivor!.id, dup.id);
       }
       db.prepare('DELETE FROM place WHERE id = ?').run(dup.id);
+      merged.push(dup.id);
     }
   }
+  return merged;
 }
 
 /** The same rewrite for one row written before this version (change_log images, JSON rows). */
@@ -113,55 +129,68 @@ export function upgradeRow(table: string, row: Row): Row {
 
 /** The merges for an older JSON document, whose rows `upgradeRow` already normalized. */
 export function upgradeTables(tables: TableRowsByName): void {
-  mergeRows(
-    tables,
-    'tag',
-    (t) => `${String(t.category)}\u0000${String(t.name)}`,
-    (from, to) => {
-      const links = tables.tag_link;
-      if (!links) return;
-      for (const link of links) if (link.tag_id === from) link.tag_id = to;
-      tables.tag_link = unique(
-        links,
-        (l) => `${String(l.tag_id)}|${String(l.owner_type)}|${String(l.owner_id)}`,
-      );
-    },
-  );
-  mergeRows(
-    tables,
-    'place',
-    (p) => String(p.full_name),
-    (from, to, survivor, dup) => {
-      if (survivor.latitude == null && dup.latitude != null) {
-        survivor.latitude = dup.latitude;
-        survivor.longitude = dup.longitude;
-      }
-      for (const event of tables.event ?? []) if (event.place_id === from) event.place_id = to;
-      for (const place of tables.place ?? []) if (place.parent_id === from) place.parent_id = to;
-      for (const [table, ref] of PLACE_LINKS) {
-        const links = tables[table];
-        if (!links) continue;
-        for (const link of links) {
-          if (link.owner_type === 'place' && link.owner_id === from) link.owner_id = to;
-        }
-        tables[table] = unique(
+  const merged: string[] = [];
+  merged.push(
+    ...mergeRows(
+      tables,
+      'tag',
+      (t) => `${String(t.category)}\u0000${String(t.name)}`,
+      (from, to) => {
+        const links = tables.tag_link;
+        if (!links) return;
+        for (const link of links) if (link.tag_id === from) link.tag_id = to;
+        tables.tag_link = unique(
           links,
-          (l) => `${String(l[ref])}|${String(l.owner_type)}|${String(l.owner_id)}`,
+          (l) => `${String(l.tag_id)}|${String(l.owner_type)}|${String(l.owner_id)}`,
         );
-      }
-    },
+      },
+    ),
   );
+  merged.push(
+    ...mergeRows(
+      tables,
+      'place',
+      (p) => String(p.full_name),
+      (from, to, survivor, dup) => {
+        if (survivor.latitude == null && dup.latitude != null) {
+          survivor.latitude = dup.latitude;
+          survivor.longitude = dup.longitude;
+        }
+        for (const event of tables.event ?? []) if (event.place_id === from) event.place_id = to;
+        for (const place of tables.place ?? []) if (place.parent_id === from) place.parent_id = to;
+        for (const [table, ref] of PLACE_LINKS) {
+          const links = tables[table];
+          if (!links) continue;
+          for (const link of links) {
+            if (link.owner_type === 'place' && link.owner_id === from) link.owner_id = to;
+          }
+          tables[table] = unique(
+            links,
+            (l) => `${String(l[ref])}|${String(l.owner_type)}|${String(l.owner_id)}`,
+          );
+        }
+      },
+    ),
+  );
+  if (merged.length) {
+    const meta = (tables.meta ??= []).filter((row) => row.key !== MERGED_IDS_KEY);
+    meta.push({ key: MERGED_IDS_KEY, value: JSON.stringify(merged.sort()) });
+    tables.meta = meta;
+  }
 }
 
-/** Groups rows by `key`; every row after the one with the smallest id merges into it. */
+/**
+ * Groups rows by `key`; every row after the one with the smallest id merges
+ * into it. Returns the ids merged away.
+ */
 function mergeRows(
   tables: TableRowsByName,
   table: string,
   key: (row: Row) => string,
   merge: (from: unknown, to: unknown, survivor: Row, duplicate: Row) => void,
-): void {
+): string[] {
   const rows = tables[table];
-  if (!rows) return;
+  if (!rows) return [];
   const survivors = new Map<string, Row>();
   const removed = new Set<Row>();
   for (const row of [...rows].sort((a, b) => (String(a.id) < String(b.id) ? -1 : 1))) {
@@ -175,6 +204,7 @@ function mergeRows(
     removed.add(row);
   }
   if (removed.size) tables[table] = rows.filter((row) => !removed.has(row));
+  return [...removed].map((row) => String(row.id));
 }
 
 /** Keeps the first row for each key. */

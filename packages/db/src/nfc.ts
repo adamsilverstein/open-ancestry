@@ -25,6 +25,13 @@ const VERBATIM_COLUMNS: Record<string, ReadonlySet<string>> = {
   media: new Set(['local_path', 'remote_url', 'sha256', 'mime']),
 };
 
+/**
+ * meta key listing (as a JSON array) the place and tag ids the NFC upgrade
+ * merged away. Older change_log images may still name them; undo uses this to
+ * explain why such an edit cannot be undone.
+ */
+export const MERGED_IDS_KEY = 'nfc_merged_ids';
+
 const NON_ASCII = /[\u0080-\uffff]/;
 
 /** NFC form of `text`; ASCII (most text) is returned without calling into ICU. */

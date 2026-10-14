@@ -9,7 +9,49 @@ export class UndoConflictError extends Error {
   }
 }
 
-const REPLAYABLE = new Set<string>(BULK_TABLE_ORDER);
+/** Tables whose rows the change log may touch. Anything else in `entity` is refused. */
+export const REPLAYABLE_TABLES: ReadonlySet<string> = new Set<string>(BULK_TABLE_ORDER);
+
+/**
+ * Parses and checks one before/after image from change_log, which may come
+ * from an imported (untrusted) file: it must be a flat object with exactly the
+ * table's columns, scalar values, and the key of the row it is logged for.
+ * Column names from the data are never used to build SQL.
+ */
+export function parseLogImage(
+  store: TreeStore,
+  entity: string,
+  entityId: string,
+  json: string | null,
+): Record<string, unknown> | null {
+  if (!REPLAYABLE_TABLES.has(entity)) throw new Error(`Cannot replay ${entity} rows`);
+  if (json === null) return null;
+  const invalid = (why: string) =>
+    new Error(`Invalid change_log image for ${entity} ${entityId}: ${why}`);
+  let image: unknown;
+  try {
+    image = JSON.parse(json);
+  } catch {
+    throw invalid('not JSON');
+  }
+  if (typeof image !== 'object' || image === null || Array.isArray(image))
+    throw invalid('not an object');
+  const { key, columns } = store.plan(entity);
+  const keys = Object.keys(image);
+  if (keys.length !== columns.length || keys.some((k, i) => k !== columns[i])) {
+    throw invalid('columns do not match the table');
+  }
+  for (const value of Object.values(image)) {
+    const ok =
+      value === null ||
+      typeof value === 'string' ||
+      (typeof value === 'number' && Number.isFinite(value));
+    if (!ok) throw invalid('values must be strings, finite numbers or null');
+  }
+  if ((image as Record<string, unknown>)[key] !== entityId)
+    throw invalid('key does not match entity_id');
+  return image as Record<string, unknown>;
+}
 
 function getBatch(store: TreeStore, batchId: string): ChangeBatchRow {
   const batch = store.stmt('SELECT * FROM change_batch WHERE id = ?').get(batchId) as
@@ -41,8 +83,9 @@ function replay(
         direction === 'undo'
           ? [entry.after_json, entry.before_json]
           : [entry.before_json, entry.after_json];
-      // change_log can come from an imported JSON file: only replay known tables.
-      if (!REPLAYABLE.has(entry.entity)) throw new Error(`Cannot replay ${entry.entity} rows`);
+      // Validates the entity against the allowlist and both images before any SQL is built.
+      parseLogImage(store, entry.entity, entry.entity_id, from);
+      const target = parseLogImage(store, entry.entity, entry.entity_id, to);
       const { key } = store.plan(entry.entity);
       const current = store
         .stmt(`SELECT * FROM ${entry.entity} WHERE ${key} = ?`)
@@ -53,11 +96,7 @@ function replay(
           `Cannot ${direction} "${batch.label}": ${entry.entity} ${entry.entity_id} was changed by a later edit`,
         );
       }
-      tx.restore(
-        entry.entity,
-        entry.entity_id,
-        to === null ? null : (JSON.parse(to) as Record<string, unknown>),
-      );
+      tx.restore(entry.entity, entry.entity_id, target);
     }
     tx.flush();
     store

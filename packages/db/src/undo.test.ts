@@ -121,6 +121,48 @@ describe('undo / redo', () => {
     store.close();
   });
 
+  it('refuses tampered change_log rows without changing data', () => {
+    const tampered = (sql: string, ...params: unknown[]) => {
+      const store = memoryTree();
+      store.transact('other', (tx) => persons.create(tx, { sex: 'F' }));
+      const { batchId } = store.transact('add', (tx) => persons.create(tx, { sex: 'M' }));
+      store.db.prepare(sql).run(...params, batchId);
+      const before = snapshot(store);
+      return { store, batchId, before };
+    };
+    const cases: [string, unknown[], RegExp][] = [
+      [
+        'UPDATE change_log SET entity = ? WHERE batch_id = ?',
+        ['person; DROP TABLE person'],
+        /Cannot replay/,
+      ],
+      // Redirect the write at another row by changing the key inside the image.
+      [
+        "UPDATE change_log SET after_json = json_set(after_json, '$.id', (SELECT id FROM person ORDER BY id LIMIT 1)) WHERE batch_id = ?",
+        [],
+        /key does not match/,
+      ],
+      [
+        `UPDATE change_log SET after_json = json_set(after_json, '$."sex = ''F'' --"', 1) WHERE batch_id = ?`,
+        [],
+        /columns/,
+      ],
+      [
+        "UPDATE change_log SET after_json = json_set(after_json, '$.sex', json('{}')) WHERE batch_id = ?",
+        [],
+        /values/,
+      ],
+      ["UPDATE change_log SET after_json = 'not json' WHERE batch_id = ?", [], /not JSON/],
+    ];
+    for (const [sql, params, message] of cases) {
+      const { store, batchId, before } = tampered(sql, ...params);
+      expect(() => undo(store, batchId)).toThrow(message);
+      expect(snapshot(store)).toBe(before);
+      expect(listBatches(store).find((b) => b.id === batchId)?.state).toBe('applied');
+      store.close();
+    }
+  });
+
   it('restores a cascading person delete exactly', () => {
     const store = memoryTree();
     const f = seedSmallFamily(store);

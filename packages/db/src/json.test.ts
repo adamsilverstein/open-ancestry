@@ -11,6 +11,7 @@ import {
   exportJsonString,
   generateSyntheticTree,
   importJson,
+  importJsonString,
   media,
   mediaLinks,
   meta,
@@ -124,4 +125,120 @@ describe('JSON interchange', () => {
     store.close();
     fresh.close();
   });
+
+  describe('untrusted documents', () => {
+    function baseDoc() {
+      const store = memoryTree();
+      seedSmallFamily(store);
+      const doc = exportJson(store);
+      store.close();
+      return doc;
+    }
+
+    /** Imports into a fresh tree, expects a throw, and checks nothing was written. */
+    function rejects(doc: unknown, message: RegExp, options?: { maxRows?: number }) {
+      const target = memoryTree();
+      expect(() => importJson(target, doc, options)).toThrow(message);
+      expect(target.db.inTransaction).toBe(false);
+      for (const table of ['person', 'person_name', 'family', 'change_log', 'change_batch']) {
+        expect(target.db.prepare(`SELECT count(*) AS n FROM ${table}`).get()).toEqual({ n: 0 });
+      }
+      expect(target.db.prepare('SELECT key FROM meta').all()).toEqual([{ key: 'schema_version' }]);
+      target.close();
+    }
+
+    it('rejects SQL in table names without touching the database', () => {
+      const doc = baseDoc();
+      rejects(
+        { ...doc, tables: { ...doc.tables, 'person; DROP TABLE person; --': [] } },
+        /Unknown table/,
+      );
+      rejects({ ...doc, tables: { ...doc.tables, sqlite_schema: [] } }, /Unknown table/);
+    });
+
+    it('rejects SQL in column names', () => {
+      const doc = baseDoc();
+      const person = doc.tables.person[0] as unknown as Record<string, unknown>;
+      person["sex) VALUES ('M'); DROP TABLE person; --"] = 'M';
+      rejects(doc, /JSON Schema/);
+    });
+
+    it('rejects type confusion and bad enums before writing', () => {
+      const cases: ((d: ReturnType<typeof baseDoc>) => void)[] = [
+        (d) => ((d.tables.person[0] as unknown as Record<string, unknown>).sex = 1),
+        (d) => ((d.tables.person[0] as unknown as Record<string, unknown>).living = 'zombie'),
+        (d) => ((d.tables.person[0] as unknown as Record<string, unknown>).id = { $gt: '' }),
+        (d) => ((d.tables.family_child[0] as unknown as Record<string, unknown>).sort_order = '1'),
+        (d) => ((d.tables.person_name[0] as unknown as Record<string, unknown>).is_primary = true),
+        (d) => delete (d.tables.event[0] as unknown as Record<string, unknown>).type,
+      ];
+      for (const mutate of cases) {
+        const doc = baseDoc();
+        mutate(doc);
+        rejects(doc, /JSON Schema/);
+      }
+    });
+
+    it('rejects malformed envelopes', () => {
+      const doc = baseDoc();
+      rejects(null, /object/);
+      rejects([doc], /object/);
+      rejects({ ...doc, tables: [] }, /tables must be an object/);
+      rejects({ ...doc, tables: { ...doc.tables, person: {} } }, /must be an array/);
+    });
+
+    it('rolls back documents that break foreign keys or CHECKs', () => {
+      const doc = baseDoc();
+      (doc.tables.person_name[0] as { person_id: string }).person_id = 'NOBODY';
+      rejects(doc, /FOREIGN KEY/);
+      const media = baseDoc();
+      media.tables.media.push({
+        ...(Object.fromEntries(
+          Object.keys(buildJsonSchemaColumns('media')).map((c) => [c, null]),
+        ) as object),
+        id: '01ZZZZZZZZZZZZZZZZZZZZZZZZ',
+        kind: 'photo',
+        local_path: '../../etc/passwd',
+        created_at: 'x',
+        updated_at: 'x',
+      } as never);
+      rejects(media, /CHECK/);
+    });
+
+    it('rejects change_log rows that undo could abuse', () => {
+      const tamper = (patch: Record<string, unknown>) => {
+        const doc = baseDoc();
+        Object.assign(doc.tables.change_log?.[0] ?? {}, patch);
+        return doc;
+      };
+      rejects(tamper({ entity: 'sqlite_schema' }), /Cannot replay/);
+      rejects(tamper({ entity: 'person; DROP TABLE person' }), /Cannot replay/);
+      const doc = baseDoc();
+      const entry = doc.tables.change_log?.[0] as { after_json: string };
+      const image = JSON.parse(entry.after_json) as Record<string, unknown>;
+      rejects(tamper({ after_json: JSON.stringify({ ...image, 'x = 1; --': 1 }) }), /columns/);
+      rejects(tamper({ after_json: JSON.stringify({ ...image, id: 'OTHER' }) }), /key/);
+      rejects(tamper({ after_json: '[1]' }), /object/);
+    });
+
+    it('caps rows and bytes', () => {
+      const doc = baseDoc();
+      rejects(doc, /limit/, { maxRows: 10 });
+      const target = memoryTree();
+      const text = JSON.stringify(doc);
+      expect(() => importJsonString(target, text, { maxBytes: 100 })).toThrow(/limit/);
+      importJsonString(target, text);
+      expect(persons.list(target)).toHaveLength(9);
+      target.close();
+    });
+  });
 });
+
+function buildJsonSchemaColumns(table: string): Record<string, unknown> {
+  const store = memoryTree();
+  const schema = buildJsonSchema(store) as {
+    $defs: Record<string, { properties: Record<string, unknown> }>;
+  };
+  store.close();
+  return schema.$defs[table]?.properties ?? {};
+}

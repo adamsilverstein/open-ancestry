@@ -1,7 +1,10 @@
+import { Ajv2020 } from 'ajv/dist/2020.js';
+import type { ValidateFunction } from 'ajv';
 import { BulkWriter } from './bulk';
 import { ENUM_COLUMNS } from './enums';
 import { LATEST_SCHEMA_VERSION, listTables } from './migrations/index';
 import type { TreeStore } from './store';
+import { parseLogImage } from './undo';
 import type { ChangeBatchRow, ChangeLogRow, TableRows } from './types';
 
 /*
@@ -62,24 +65,84 @@ export function exportJsonString(store: TreeStore, options?: ExportOptions): str
   return `${JSON.stringify(exportJson(store, options), null, 2)}\n`;
 }
 
+export interface ImportOptions {
+  /** Refuse documents with more rows than this across all tables (default 5,000,000). */
+  maxRows?: number;
+}
+
+export interface ImportStringOptions extends ImportOptions {
+  /** Refuse input larger than this many UTF-8 bytes before parsing (default 512 MiB). */
+  maxBytes?: number;
+}
+
+const validators = new WeakMap<TreeStore, ValidateFunction>();
+
+function validator(store: TreeStore): ValidateFunction {
+  let validate = validators.get(store);
+  if (!validate) {
+    validate = new Ajv2020({ allErrors: false, allowUnionTypes: true }).compile(
+      buildJsonSchema(store),
+    );
+    validators.set(store, validate);
+  }
+  return validate;
+}
+
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
 /**
- * Loads an exported document into an empty tree (a fresh `createTree`), in one
- * transaction, then rebuilds the search index. Meta keys other than
- * schema_version are replaced by the document's.
+ * Loads an exported document into an empty tree (a fresh `createTree`).
+ *
+ * The document is untrusted. Before anything is written it must pass the
+ * envelope checks, the row cap and the published JSON Schema (exact columns,
+ * types and enums for every row), and every change_log image is checked like
+ * undo checks it. Table and column names used in SQL come only from the live
+ * schema, never from the document; values are bound parameters. Everything is
+ * then written in one transaction (foreign keys and CHECKs enforced at commit)
+ * that rolls back on any error, and the search index is rebuilt.
  */
-export function importJson(store: TreeStore, doc: OaJsonDocument): void {
+export function importJson(
+  store: TreeStore,
+  input: unknown,
+  { maxRows = 5_000_000 }: ImportOptions = {},
+): void {
+  if (!isObject(input)) throw new Error('Document must be a JSON object');
+  const doc = input as Partial<OaJsonDocument>;
   if (doc.format !== OA_JSON_FORMAT || doc.formatVersion !== OA_JSON_FORMAT_VERSION) {
     throw new Error(`Unsupported format ${String(doc.format)} v${String(doc.formatVersion)}`);
   }
   if (doc.schemaVersion !== LATEST_SCHEMA_VERSION) {
     throw new Error(
-      `Document schema version ${doc.schemaVersion} does not match ${LATEST_SCHEMA_VERSION}`,
+      `Document schema version ${String(doc.schemaVersion)} does not match ${LATEST_SCHEMA_VERSION}`,
     );
   }
-  const known = new Set(exportedTables(store, true));
-  for (const name of Object.keys(doc.tables)) {
-    if (!known.has(name)) throw new Error(`Unknown table ${name} in document`);
+  const tables: unknown = doc.tables;
+  if (!isObject(tables)) throw new Error('Document tables must be an object');
+  const known = exportedTables(store, true);
+  const knownSet = new Set(known);
+  let rowCount = 0;
+  for (const [name, rows] of Object.entries(tables)) {
+    if (!knownSet.has(name)) throw new Error(`Unknown table ${JSON.stringify(name)} in document`);
+    if (!Array.isArray(rows)) throw new Error(`Table ${name} must be an array`);
+    rowCount += rows.length;
   }
+  if (rowCount > maxRows)
+    throw new Error(`Document has ${rowCount} rows, more than the ${maxRows} limit`);
+
+  const validate = validator(store);
+  if (!validate(doc)) {
+    const [first] = validate.errors ?? [];
+    throw new Error(
+      `Document does not match the JSON Schema: ${first?.instancePath ?? ''} ${first?.message ?? ''}`.trim(),
+    );
+  }
+  const valid = doc as OaJsonDocument;
+  for (const entry of valid.tables.change_log ?? []) {
+    parseLogImage(store, entry.entity, entry.entity_id, entry.before_json);
+    parseLogImage(store, entry.entity, entry.entity_id, entry.after_json);
+  }
+
   for (const name of known) {
     if (name === 'meta') continue;
     if (store.db.prepare(`SELECT 1 FROM ${name} LIMIT 1`).get()) {
@@ -89,15 +152,13 @@ export function importJson(store: TreeStore, doc: OaJsonDocument): void {
   const writer = new BulkWriter(store);
   try {
     store.db.exec("DELETE FROM meta WHERE key <> 'schema_version'");
-    for (const [name, rows] of Object.entries(doc.tables) as unknown as [
-      string,
-      Record<string, unknown>[],
-    ][]) {
-      const columns = new Set(store.plan(name).columns);
+    // Iterate the live schema's tables, not the document's keys.
+    for (const name of known) {
+      const rows =
+        (valid.tables as unknown as Record<string, Record<string, unknown>[] | undefined>)[name] ??
+        [];
       for (const row of rows) {
         if (name === 'meta' && row.key === 'schema_version') continue;
-        const extra = Object.keys(row).find((c) => !columns.has(c));
-        if (extra) throw new Error(`Unknown column ${name}.${extra} in document`);
         writer.insertAny(name, row);
       }
     }
@@ -106,6 +167,18 @@ export function importJson(store: TreeStore, doc: OaJsonDocument): void {
     throw error;
   }
   writer.commit();
+}
+
+/** Parses and imports a JSON document, refusing oversized input before parsing. */
+export function importJsonString(
+  store: TreeStore,
+  text: string,
+  { maxBytes = 512 * 1024 * 1024, ...options }: ImportStringOptions = {},
+): void {
+  const bytes = Buffer.byteLength(text, 'utf8');
+  if (bytes > maxBytes)
+    throw new Error(`Document is ${bytes} bytes, more than the ${maxBytes} limit`);
+  importJson(store, JSON.parse(text) as unknown, options);
 }
 
 const JSON_TYPES: Record<string, string> = { TEXT: 'string', INTEGER: 'integer', REAL: 'number' };

@@ -25,7 +25,16 @@ export {
 export * from './repositories';
 export * from './queries';
 export { rebuildSearchIndex, searchPeople, type SearchOptions, type SearchResult } from './search';
-export { UndoConflictError, listBatches, redo, redoLast, undo, undoLast } from './undo';
+export {
+  REPLAYABLE_TABLES,
+  UndoConflictError,
+  listBatches,
+  parseLogImage,
+  redo,
+  redoLast,
+  undo,
+  undoLast,
+} from './undo';
 export { BULK_TABLE_ORDER, BulkWriter, bulkInsert, type BulkCounts, type BulkData } from './bulk';
 export {
   OA_JSON_FORMAT,
@@ -34,6 +43,9 @@ export {
   exportJson,
   exportJsonString,
   importJson,
+  importJsonString,
+  type ImportOptions,
+  type ImportStringOptions,
   type ExportOptions,
   type OaJsonDocument,
   type OaJsonTables,

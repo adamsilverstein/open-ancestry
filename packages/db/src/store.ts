@@ -222,7 +222,7 @@ export class Tx {
     if (target === null) {
       if (current) this.store.stmt(`DELETE FROM ${table} WHERE ${key} = ?`).run(id);
     } else if (current) {
-      this.writeRow(table, target);
+      this.writeRow(table, { ...target, [key]: id });
     } else {
       this.store.insertStatement(table).run(this.store.plan(table).columns.map((c) => target[c]));
     }

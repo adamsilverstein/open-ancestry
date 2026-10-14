@@ -28,12 +28,14 @@ import {
   ancestryLink,
   attachMedia,
   hasThumbnail,
+  learnedSize,
   mediaGroup,
   mediaSource,
   originalUrl,
   personMediaQuery,
   setProfilePhoto,
   thumbUrl,
+  tileImage,
   type GalleryItem,
   type MediaFilter,
   type MediaOwner,
@@ -69,9 +71,6 @@ function fileType(media: MediaRow): string {
   return 'File';
 }
 
-/** Pixel size of the `sm` thumbnail's longer edge. */
-const THUMB_SM = 160;
-
 /** Thumbnails that failed to load (a corrupt or unreadable file), shared by tiles and lightbox. */
 type ThumbFailures = { has: (id: string) => boolean; add: (id: string) => void };
 
@@ -84,32 +83,26 @@ function Preview({
   media: MediaRow;
   failures: ThumbFailures;
 }) {
-  // An image no bigger than the small thumbnail gains nothing from `md`, and a 480w
-  // descriptor would make the browser draw its 40px file at 40 * 190/480 px.
-  const [small, setSmall] = useState(media.width !== null && media.width <= THUMB_SM);
+  // The original's size: stored, or learned from the first thumbnail that loads.
+  const [learned, setLearned] = useState<{ width: number; height: number } | null>(null);
+  const known =
+    media.width !== null ? { width: media.width, height: media.height ?? media.width } : learned;
   if (hasThumbnail(media) && !failures.has(media.id)) {
+    const image = tileImage(tree, media.id, known);
     // Decorative: the tile's caption already names it.
     return (
       <img
-        // A new element when the srcset goes: browsers keep the old density for the same URL.
-        key={small ? 'small' : 'srcset'}
-        src={thumbUrl(tree, media.id, 'sm')}
-        // Tiles are about 190px wide: 2x screens pick the 480px thumbnail.
-        srcSet={
-          small
-            ? undefined
-            : `${thumbUrl(tree, media.id, 'sm')} ${THUMB_SM}w, ${thumbUrl(tree, media.id, 'md')} 480w`
-        }
-        sizes={small ? undefined : '190px'}
+        // A new element when the srcset changes: browsers keep the old density for a URL.
+        key={image.srcSet ?? 'plain'}
+        {...image}
         alt=""
         loading="lazy"
         decoding="async"
         onLoad={(event) => {
-          // Size unknown until now (most imports): drop the srcset for a small original.
-          const img = event.currentTarget;
-          if (!small && img.naturalWidth < THUMB_SM && img.naturalHeight < THUMB_SM) {
-            setSmall(true);
-          }
+          // Size unknown (trees imported before sizes were recorded): learn it once.
+          if (known) return;
+          const size = learnedSize(event.currentTarget);
+          if (size) setLearned(size);
         }}
         onError={() => failures.add(media.id)}
       />

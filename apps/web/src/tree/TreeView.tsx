@@ -73,7 +73,7 @@ export const MAX_FAN_GENERATIONS = 6;
 
 const STALE = 5 * 60_000;
 /** Undos and redos in quick succession reset the tree view once, this long after the last. */
-const RESET_DEBOUNCE_MS = 80;
+const RESET_DEBOUNCE_MS = 250;
 /** How long the pointer or keyboard rests on a card before its layout is prepared. */
 const PREFETCH_DWELL_MS = 120;
 const NO_KIN: Record<string, string> = {};

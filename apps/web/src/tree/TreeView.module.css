@@ -145,6 +145,11 @@
   background: color-mix(in oklab, var(--oa-canvas) 85%, transparent);
 }
 
+/* Too tall for the gap it sits in: out of sight, still read by screen readers. */
+.labelGutter[data-thin] {
+  opacity: 0;
+}
+
 .labelColumn {
   transform: translate(0, -100%);
   /* Clear of the expand chevrons that sit on the top cards' edges. */

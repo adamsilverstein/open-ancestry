@@ -309,10 +309,10 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     const labels = [...(gutter?.children ?? [])] as HTMLElement[];
     // A label's right edge never changes (its key includes its text), so
     // measure it once, and all reads before any writes: this runs on every pan
-    // frame and re-focus. Hidden labels have no size to measure yet.
+    // frame and re-focus. A hidden gutter has no size to measure yet.
     if (gutter && !gutter.hidden) {
       const offset = gutter.offsetLeft;
-      for (const label of labels.filter((l) => !l.hidden)) {
+      for (const label of labels) {
         label.dataset.right ||= String(offset + label.offsetLeft + label.offsetWidth + 8);
         label.dataset.h ||= String(label.offsetHeight);
       }
@@ -324,7 +324,11 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       const under = Number(label.dataset.left) * t.scale + t.x < Number(label.dataset.right);
       const y = under ? Number(label.dataset.gapY) : Number(label.dataset.y);
       // Zoomed far out the gap is thinner than the label: hide it rather than cover cards.
-      label.hidden = under && Number(label.dataset.gapH) * t.scale < Number(label.dataset.h) + 4;
+      // Faded rather than `hidden`, so it stays in the reading order.
+      label.toggleAttribute(
+        'data-thin',
+        under && Number(label.dataset.gapH) * t.scale < Number(label.dataset.h) + 4,
+      );
       label.style.transform = `translateY(${y * t.scale + t.y}px) translateY(-50%)`;
       label.toggleAttribute('data-above', under);
     }
@@ -830,6 +834,24 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       }
     }
   });
+
+  // Labels re-measure when their size changes (a minimum font size, a late
+  // web font); placeGutter caches it otherwise.
+  useEffect(() => {
+    const gutter = gutterRef.current;
+    if (!gutter) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const { target } of entries) {
+        const label = target as HTMLElement;
+        delete label.dataset.right;
+        delete label.dataset.h;
+      }
+      placeGutter();
+    });
+    for (const label of gutter.children) observer.observe(label);
+    return () => observer.disconnect();
+    // The labels change with the layout.
+  }, [layout]);
 
   // Size changes re-run virtualization.
   useEffect(() => {

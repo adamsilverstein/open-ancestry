@@ -1273,6 +1273,28 @@ test.describe('phone width (#139)', () => {
     expect(reserved).toBeLessThan(view.height - bar.y + 16);
   });
 
+  test('zoomed out, a tap on a card’s top opens it, not the chevron above (#173 review)', async ({
+    page,
+  }) => {
+    await open(page);
+    await settled(page);
+    const zoomOut = toolbar(page).getByRole('button', { name: 'Zoom out' });
+    while ((await transform(page)).scale > 0.5) {
+      await zoomOut.click();
+      await settled(page);
+    }
+    expect((await transform(page)).scale).toBeGreaterThan(0.35);
+    const ada = card(page, 'Ada Vale');
+    const b = await box(ada);
+    // A quarter of the way down the card, right under its up chevron.
+    await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height * 0.25);
+    await expect(page.getByRole('dialog', { name: 'Ada Vale' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    // The chevron itself still takes a 44px tap.
+    const up = canvas(page).locator(`[data-chevron="up"][data-node="${ids.ada}"]`);
+    expect(await reachable(page, up)).toBe(true);
+  });
+
   test('a double tap on a card re-centers on that person', async ({ page }) => {
     await open(page);
     await settled(page);

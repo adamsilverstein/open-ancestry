@@ -138,10 +138,20 @@ test.describe('tree switcher', () => {
     await expect(create).toBeHidden();
     await expect(switcher).toContainText(first);
 
-    // A bad name is explained, not sent.
+    // A bad name is explained, not sent; a blank one before any request (issue #123).
     await switcher.click();
     await page.getByRole('menuitem', { name: 'Rename tree…' }).click();
     const rename = page.getByRole('dialog', { name: 'Rename tree' });
+    const sent: string[] = [];
+    page.on(
+      'request',
+      (r) => r.url().includes('/api/trees') && r.method() === 'PATCH' && sent.push(r.url()),
+    );
+    await rename.getByLabel('Tree name').fill('   ');
+    await rename.getByRole('button', { name: 'Rename' }).click();
+    await expect(rename.getByText('Enter a tree name')).toBeVisible();
+    await expect(rename.getByLabel('Tree name')).toBeFocused();
+    expect(sent).toEqual([]);
     await rename.getByLabel('Tree name').fill('bad/name');
     await rename.getByRole('button', { name: 'Rename' }).click();
     await expect(rename.getByText(/path separator/)).toBeVisible();

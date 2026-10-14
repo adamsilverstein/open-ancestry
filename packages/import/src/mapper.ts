@@ -70,6 +70,8 @@ interface PersonState {
   nameOrder: number;
   singular: Set<string>;
   fams: { familyId: string; node: GedcomNode }[];
+  /** Family ids in `fams`, for the duplicate check (a person can have thousands). */
+  famsIds: Set<string>;
   famcCount: number;
   marriages: GedcomNode[];
   adoptions: GedcomNode[];
@@ -396,6 +398,7 @@ export class Mapper {
       nameOrder: 0,
       singular: new Set(),
       fams: [],
+      famsIds: new Set(),
       famcCount: 0,
       marriages: [],
       adoptions: [],
@@ -449,10 +452,11 @@ export class Mapper {
         case 'FAMS': {
           const familyId = this.resolve(c, 'FAM');
           if (!familyId) break;
-          if (person.fams.some((f) => f.familyId === familyId)) {
+          if (person.famsIds.has(familyId)) {
             this.warn('duplicate-link', c.line, `FAMS ${c.pointer} is repeated`);
             break;
           }
+          person.famsIds.add(familyId);
           person.fams.push({ familyId, node: c });
           break;
         }
@@ -1465,13 +1469,16 @@ export class Mapper {
     for (const person of this.persons.values()) {
       if (!person.marriages.length) continue;
       const families = this.partnerFamilies.get(person.id) ?? [];
+      // Indexed rather than searched per MARR: one person can have thousands
+      // of families and marriages, which made this quadratic.
+      const index = new MarriageIndex();
+      families.forEach((family, f) => family.marriages.forEach((m, i) => index.add(m, f, i)));
+      let unmarried = families.filter((f) => !f.marriages.length);
       for (const node of person.marriages) {
         const date = normalizeDate(text(this.child(node, 'DATE')));
         const placeNode = this.child(node, 'PLAC');
         const place = text(placeNode) ? placeParts(placeNode!.value!).join(', ') : '';
-        const match = families
-          .flatMap((f) => f.marriages)
-          .find((m) => (!date || normalizeDate(m.date) === date) && (!place || m.place === place));
+        const match = index.find(date, place);
         if (match) {
           // Same marriage as the family's: keep one event, moving any citations and notes onto it.
           this.use(node);
@@ -1481,7 +1488,6 @@ export class Mapper {
             this.mapAttachment(c, { type: 'event', id: match.eventId });
           continue;
         }
-        const unmarried = families.filter((f) => !f.marriages.length);
         if (unmarried.length === 1) {
           const family = unmarried[0]!;
           const event = this.mapEvent(
@@ -1490,7 +1496,10 @@ export class Mapper {
             family.eventOrder++,
             true,
           );
-          family.marriages.push(marriage(event));
+          const added = marriage(event);
+          family.marriages.push(added);
+          index.add(added, families.indexOf(family), family.marriages.length - 1);
+          unmarried = [];
         } else {
           this.mapPersonEvent(node, person);
         }
@@ -1801,6 +1810,37 @@ function countLines(node: GedcomNode): number {
 
 function marriage(event: { id: string; date: string | undefined; place: string }): Marriage {
   return { eventId: event.id, date: event.date ?? '', place: event.place };
+}
+
+/**
+ * A person's family marriages, looked up the way the old linear `find` did:
+ * the first marriage in (family, marriage) order whose date matches when a
+ * date is given and whose place matches when a place is given. Marriages can
+ * be added to an earlier family later, so each key keeps the lowest rank
+ * rather than the first added.
+ */
+class MarriageIndex {
+  private readonly byKey = new Map<string, { m: Marriage; family: number; order: number }>();
+
+  add(m: Marriage, family: number, order: number): void {
+    const date = normalizeDate(m.date);
+    for (const key of ['', `d${date}`, `p${m.place}`, `b${date}\u0000${m.place}`]) {
+      const current = this.byKey.get(key);
+      if (
+        !current ||
+        family < current.family ||
+        (family === current.family && order < current.order)
+      ) {
+        this.byKey.set(key, { m, family, order });
+      }
+    }
+  }
+
+  find(date: string, place: string): Marriage | undefined {
+    const key =
+      !date && !place ? '' : !date ? `p${place}` : !place ? `d${date}` : `b${date}\u0000${place}`;
+    return this.byKey.get(key)?.m;
+  }
 }
 
 function normalizeDate(date: string | undefined): string {

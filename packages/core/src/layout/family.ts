@@ -203,8 +203,8 @@ function search(xs: number[], x: number, inclusive: boolean): number {
  * hang from the partner's own card instead of a midpoint.
  *
  * When a family's drop point is outside its children's span, the connector
- * jogs sideways on its own level between the row and the bars. Within a
- * block, families whose children lie to the right are stacked with the
+ * jogs sideways on its own level between the row and the bars. Among all
+ * families dropping into one row, those whose children lie to the right are stacked with the
  * rightmost highest, those to the left with the leftmost highest, which
  * keeps every connector clear of every other family's lines. Families of the
  * same couple share the trunk down from that couple.
@@ -334,9 +334,12 @@ function verticalEdges(
       return;
     }
     const drop = { link, group, start, parents, lo: Math.min(...xs), hi: Math.max(...xs), xs };
-    const list = blocks.get(link.block);
+    // Every family dropping into one row is routed together: cousins slid
+    // out past the focus row's half siblings must nest with their lines.
+    const row = link.children[0]!.card.y;
+    const list = blocks.get(row);
     if (list) list.push(drop);
-    else blocks.set(link.block, [drop]);
+    else blocks.set(row, [drop]);
   });
 
   for (const drops of blocks.values()) {

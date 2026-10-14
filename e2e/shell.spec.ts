@@ -183,3 +183,34 @@ test.describe('fonts and network', () => {
     );
   });
 });
+
+test.describe('performance', () => {
+  test.skip(
+    ({ browserName }) => browserName !== 'chromium',
+    'LCP and CLS entries are Chromium only',
+  );
+
+  test('home LCP under 1s with no layout shift', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+    const { lcp, cls } = await page.evaluate(
+      () =>
+        new Promise<{ lcp: number; cls: number }>((resolve) => {
+          let lcp = 0;
+          let cls = 0;
+          new PerformanceObserver((list) => {
+            for (const entry of list.getEntries()) lcp = entry.startTime;
+          }).observe({ type: 'largest-contentful-paint', buffered: true });
+          new PerformanceObserver((list) => {
+            for (const entry of list.getEntries() as (PerformanceEntry & { value: number })[]) {
+              cls += entry.value;
+            }
+          }).observe({ type: 'layout-shift', buffered: true });
+          setTimeout(() => resolve({ lcp, cls }), 500);
+        }),
+    );
+    expect(lcp).toBeGreaterThan(0);
+    expect(lcp).toBeLessThan(1000);
+    expect(cls).toBeLessThan(0.01);
+  });
+});

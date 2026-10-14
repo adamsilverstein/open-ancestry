@@ -1,0 +1,8 @@
+0 HEAD
+1 CHAR ANSI
+1 GEDC
+2 VERS 5.5.1
+0 @I1@ INDI
+1 NAME José /Peña/
+1 NOTE “quoted” €20
+0 TRLR

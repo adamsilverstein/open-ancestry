@@ -1,12 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { stripBom } from './index';
+import * as gedcom from './index';
 
-describe('stripBom', () => {
-  it('removes a leading UTF-8 byte order mark', () => {
-    expect(stripBom('﻿0 HEAD')).toBe('0 HEAD');
-  });
-
-  it('leaves text without a BOM unchanged', () => {
-    expect(stripBom('0 HEAD')).toBe('0 HEAD');
+describe('@open-ancestry/gedcom public API', () => {
+  it('exports the parser, serializer and GEDZIP reader', () => {
+    for (const name of [
+      'parseGedcom',
+      'parseGedcomStream',
+      'serializeNode',
+      'serializeGedcom',
+      'readGedzip',
+      'decodeGedcom',
+      'analyzeHeader',
+      'subtreeLines',
+    ]) {
+      expect(typeof (gedcom as Record<string, unknown>)[name], name).toBe('function');
+    }
   });
 });

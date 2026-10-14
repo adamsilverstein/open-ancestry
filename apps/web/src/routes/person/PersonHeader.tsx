@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { Network, Pencil } from 'lucide-react';
@@ -110,6 +110,7 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
   const relationship = useRelationshipToHome(tree, detail);
   const sex = summary.sex === 'M' || summary.sex === 'F' ? summary.sex : 'U';
   const [editing, setEditing] = useState(false);
+  const editButton = useRef<HTMLButtonElement>(null);
   // `?edit=true` (the tree's quick view Edit) opens the editor on arrival.
   const { edit } = useSearch({ from: '/person/$personId' });
   const navigate = useNavigate({ from: '/person/$personId' });
@@ -171,6 +172,7 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
       </div>
       <div className={styles.headerActions}>
         <Button
+          ref={editButton}
           size="sm"
           variant="secondary"
           iconStart={<Pencil size={14} aria-hidden />}
@@ -193,6 +195,11 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
           detail={detail}
           open
           onOpenChange={(open) => !open && closeEditor()}
+          // Opened from a link (?edit=true) there is no button to return to.
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            editButton.current?.focus();
+          }}
         />
       )}
     </header>

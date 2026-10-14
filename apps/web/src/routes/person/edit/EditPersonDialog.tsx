@@ -90,10 +90,18 @@ interface EditPersonDialogProps {
   detail: PersonDetail;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Where focus goes on close (call `event.preventDefault()` and focus it yourself). */
+  onCloseAutoFocus?: (event: Event) => void;
 }
 
 /** Names (all types), sex, living status, relationship to each parent, and delete. */
-export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPersonDialogProps) {
+export function EditPersonDialog({
+  tree,
+  detail,
+  open,
+  onOpenChange,
+  onCloseAutoFocus,
+}: EditPersonDialogProps) {
   const id = detail.person.id;
   const base = `/trees/${seg(tree)}`;
   const edit = useEdit(tree);
@@ -179,6 +187,7 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
   return (
     <>
       <Dialog
+        {...(onCloseAutoFocus ? { onCloseAutoFocus } : {})}
         open={open}
         onOpenChange={onOpenChange}
         title="Edit person"

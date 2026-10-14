@@ -23,7 +23,7 @@
     "@open-ancestry/gedcom": "*",
     "@open-ancestry/import": "*",
     "fastify": "^5.12.7",
-    "sharp": "^0.34.5"
+    "sharp": "^0.35.5"
   },
   "devDependencies": {
     "@fastify/type-provider-typebox": "^6.3.0",

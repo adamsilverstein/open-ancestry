@@ -34,6 +34,7 @@ export type ReviewChange = {
   | { kind: 'merged'; incomingName: string }
   | { kind: 'possibly-merged'; existingName: string }
   | { kind: 'possible-match'; existingName: string }
+  | { kind: 'unlinked-new' }
 );
 
 export interface PersonReview {

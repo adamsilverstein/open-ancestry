@@ -79,6 +79,8 @@ export type ReimportChange =
   | { kind: 'merged'; incomingId: string; incomingName: string }
   /** An unmatched record that shares a relative with someone merged here: likely the same person. */
   | { kind: 'possibly-merged'; existingId: string; existingName: string }
+  /** A new person whose every link into the tree starts unticked: added alone, they'd have no family. */
+  | { kind: 'unlinked-new' }
   /** An unmatched record that looks like someone already matched to another record. */
   | { kind: 'possible-match'; existingId: string; existingName: string };
 
@@ -879,6 +881,26 @@ export function diffTrees(
         },
       );
     }
+  }
+
+  // A new person is added by default only if one of their links is too: a new
+  // child of a partnership the tree doesn't have would otherwise end up with no parents.
+  const links = new Map<string, ReviewChange[]>();
+  for (const p of people) {
+    for (const c of p.changes) {
+      const ids =
+        c.kind === 'child.add' ? [c.incomingChildId] : c.kind === 'family.add' ? c.partners : [];
+      for (const id of ids) links.set(id, [...(links.get(id) ?? []), c]);
+    }
+  }
+  for (const [incomingId, changeId] of newPersonChange) {
+    const own = links.get(incomingId);
+    if (!own?.length || own.some((c) => c.defaultAccept)) continue;
+    const r = reviews.get(`n:${incomingId}`)!;
+    const added = r.changes.find((c) => c.id === changeId)!;
+    if (!added.defaultAccept) continue;
+    added.defaultAccept = false;
+    adder(r, { applicable: false, defaultAccept: false })({ kind: 'unlinked-new' });
   }
 
   // Partnerships and parent links from an earlier import that the export dropped.

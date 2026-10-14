@@ -73,6 +73,10 @@ describe('re-import labels', () => {
         'Possibly merged into Josiah Ashgrove earlier (shares a relative); not added unless you tick it',
       ],
       [
+        { ...base, kind: 'unlinked-new' },
+        'New child of a partnership not in this tree; tick to add',
+      ],
+      [
         { ...base, kind: 'possible-match', existingName: 'Edith Ashgrove' },
         'Looks like Edith Ashgrove, who is already matched; not added unless you tick it',
       ],

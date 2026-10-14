@@ -67,6 +67,8 @@ export function describeChange(change: ReviewChange, personName: string): string
       return `Not in the new export: child of ${list(change.parentNames)}. Kept in your tree.`;
     case 'deleted-here':
       return `You deleted ${personName} from this tree; not added back unless you tick it`;
+    case 'unlinked-new':
+      return 'New child of a partnership not in this tree; tick to add';
     case 'possible-match':
       return `Looks like ${change.existingName}, who is already matched; not added unless you tick it`;
     case 'possibly-merged':

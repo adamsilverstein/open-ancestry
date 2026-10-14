@@ -1,6 +1,8 @@
 import Database from 'better-sqlite3';
 import { existsSync, mkdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { refreshDerivedColumns } from './derived';
+import { toNFC } from './nfc';
 import { TreeStore, type StoreOptions } from './store';
 
 /*
@@ -37,7 +39,7 @@ function assertTreeDir(dir: string): void {
 }
 
 function setName(store: TreeStore, name: string): void {
-  store.db.prepare("INSERT INTO meta (key, value) VALUES ('tree_name', ?)").run(name);
+  store.db.prepare("INSERT INTO meta (key, value) VALUES ('tree_name', ?)").run(toNFC(name));
   store.db.prepare("INSERT INTO meta (key, value) VALUES ('created_at', ?)").run(store.clock());
 }
 
@@ -49,6 +51,7 @@ export function createTree(dir: string, { name, ...options }: CreateTreeOptions 
   mkdirSync(paths.media, { recursive: true });
   mkdirSync(paths.thumbs, { recursive: true });
   const store = new TreeStore(new Database(paths.database), dir, options);
+  refreshDerivedColumns(store);
   setName(store, name ?? basename(dir, TREE_EXTENSION));
   return store;
 }
@@ -60,7 +63,9 @@ export function openTree(dir: string, options: StoreOptions = {}): TreeStore {
   if (!existsSync(paths.database)) throw new Error(`Tree not found at ${dir}`);
   const db = new Database(paths.database, { fileMustExist: true });
   try {
-    return new TreeStore(db, dir, options);
+    const store = new TreeStore(db, dir, options);
+    refreshDerivedColumns(store);
+    return store;
   } catch (error) {
     db.close();
     throw error;
@@ -70,6 +75,7 @@ export function openTree(dir: string, options: StoreOptions = {}): TreeStore {
 /** An in-memory tree for tests and tools. */
 export function openMemoryTree({ name, ...options }: CreateTreeOptions = {}): TreeStore {
   const store = new TreeStore(new Database(':memory:'), null, options);
+  refreshDerivedColumns(store);
   if (name !== undefined) setName(store, name);
   return store;
 }

@@ -327,7 +327,7 @@ describe('relationships', () => {
 
     const child = await api.post(`${s.base}/people/${s.ada}/children`, {
       familyId: s.marriage,
-      personId: s.bram,
+      person: { names: [{ given: 'Lu', surname: 'Reed' }] },
       partner1_rel: 'adopted',
       partner2_rel: 'step',
     });
@@ -361,6 +361,61 @@ describe('relationships', () => {
     const kit = await detail(orphan.json().siblingId);
     expect(kit.parentFamilies[0]).toMatchObject({ partner1: null, partner2: null });
     expect(kit.parentFamilies[0].siblings[0].person.id).toBe(s.dan);
+  });
+
+  it('refuses links that would make someone their own ancestor (#95)', async () => {
+    const refused = async (
+      res: Promise<{ statusCode: number; json(): { error?: { message: string } } }>,
+    ) => {
+      const r = await res;
+      return [r.statusCode, r.json().error?.message];
+    };
+    // Eve (Ada's child) as Ada's parent, and Bram (Ada's father) as Ada's child.
+    expect(
+      await refused(api.post(`${s.base}/people/${s.ada}/parents`, { personId: s.eve })),
+    ).toEqual([409, expect.stringContaining('Eve Reed is a child of Ada Vale')]);
+    expect(
+      await refused(
+        api.post(`${s.base}/people/${s.ada}/children`, { familyId: s.marriage, personId: s.bram }),
+      ),
+    ).toEqual([409, expect.stringContaining('Bram Vale is a parent of Ada Vale')]);
+    // Without a family, Ada's new family still makes her Bram's parent.
+    expect(
+      (await api.post(`${s.base}/people/${s.ada}/children`, { personId: s.bram })).statusCode,
+    ).toBe(409);
+    // A sibling joins Ada's parents' family: Bram cannot be his own child.
+    expect(
+      (await api.post(`${s.base}/people/${s.ada}/siblings`, { personId: s.bram })).statusCode,
+    ).toBe(409);
+    // Eve's grandchild as a partner in the family Eve's mother Ada was born into.
+    const grandchild = (
+      await api.post(`${s.base}/people/${s.eve}/children`, {
+        person: { names: [{ given: 'Zed' }] },
+      })
+    ).json().childId as string;
+    const born = (await detail(s.ada)).parentFamilies[0].family.id;
+    const res = await api.patch(`${s.base}/families/${born}`, { partner1_id: grandchild });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.message).toContain('Zed is a grandchild of Ada Vale');
+    // Nothing was written by the refused edits.
+    expect((await detail(s.ada)).parentFamilies[0].family.partner1_id).toBe(s.bram);
+    expect((await detail(s.bram)).parentFamilies).toEqual([]);
+
+    // Pedigree collapse is fine: Eve's child marries a cousin and Dan becomes a stepfather.
+    const cousin = (
+      await api.post(`${s.base}/people/${s.ada}/siblings`, {
+        person: { names: [{ given: 'Ula' }] },
+      })
+    ).json().siblingId as string;
+    const cousinChild = (
+      await api.post(`${s.base}/people/${cousin}/children`, {
+        person: { names: [{ given: 'Vic' }] },
+      })
+    ).json().childId as string;
+    expect(
+      (await api.post(`${s.base}/people/${grandchild}/spouses`, { personId: cousinChild }))
+        .statusCode,
+    ).toBe(201);
   });
 
   it('edits and deletes families and child links', async () => {
@@ -493,7 +548,7 @@ describe('undo, redo and history', () => {
   it('returns null when there is nothing to undo', async () => {
     const fresh = '/api/trees/Empty';
     await api.post('/api/trees', { name: 'Empty' });
-    expect((await api.post(`${fresh}/undo`)).json()).toEqual({ batch: null });
+    expect((await api.post(`${fresh}/undo`)).json()).toEqual({ batch: null, skipped: [] });
     expect((await api.get(`${fresh}/history`)).json()).toEqual({
       items: [],
       canUndo: false,

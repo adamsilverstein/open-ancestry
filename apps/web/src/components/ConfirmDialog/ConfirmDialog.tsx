@@ -1,8 +1,9 @@
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import * as RadixDialog from '@radix-ui/react-dialog';
 import { Button } from '../Button/Button';
 import dialogStyles from '../Dialog/Dialog.module.css';
 import { cx } from '../../lib/cx';
+import { captureOpener, lastControlOutside, returnFocus } from '../../lib/returnFocus';
 import styles from './ConfirmDialog.module.css';
 
 export interface ConfirmDialogProps {
@@ -32,13 +33,25 @@ export function ConfirmDialog({
   danger = true,
   onCloseAutoFocus,
 }: ConfirmDialogProps) {
+  // What opened it, then the last control used outside overlays (for a dialog
+  // opened from the command palette, whose input is gone by the time it closes).
+  const opener = useRef<HTMLElement | null>(null);
+  const outside = useRef<HTMLElement | null>(null);
   return (
     <RadixDialog.Root open={open} onOpenChange={onOpenChange}>
       <RadixDialog.Portal>
         <RadixDialog.Overlay className={cx(dialogStyles.overlay, styles.overlay)} />
         <RadixDialog.Content
           role="alertdialog"
-          {...(onCloseAutoFocus ? { onCloseAutoFocus } : {})}
+          onOpenAutoFocus={() => {
+            opener.current = captureOpener();
+            outside.current = lastControlOutside();
+          }}
+          onCloseAutoFocus={(event) => {
+            if (onCloseAutoFocus) return onCloseAutoFocus(event);
+            // No landmark fallback: a dialog under the confirm may still place focus itself.
+            if (returnFocus(opener.current, outside.current)) event.preventDefault();
+          }}
           className={cx(dialogStyles.content, dialogStyles.sm, styles.content)}
           {...(description ? {} : { 'aria-describedby': undefined })}
         >

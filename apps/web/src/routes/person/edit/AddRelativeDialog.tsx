@@ -113,6 +113,15 @@ export function AddRelativeDialog({
       open={open}
       onOpenChange={onOpenChange}
       title={RELATIVE_TITLES[kind]}
+      // Start in Given names, so typing a name works right away.
+      onOpenAutoFocus={(event) => {
+        const first = (event.currentTarget as HTMLElement | null)?.querySelector<HTMLElement>(
+          'input:not([type="radio"])',
+        );
+        if (!first) return;
+        event.preventDefault();
+        first.focus();
+      }}
       description={`Of ${fullName(detail.summary)}`}
       footer={
         <>

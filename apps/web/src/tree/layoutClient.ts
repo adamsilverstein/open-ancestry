@@ -49,9 +49,14 @@ export class LayoutClient {
   private readonly posted = new Set<number>();
   /** The newest speculative request, held until the worker is idle. */
   private queued: number | null = null;
-  private readonly snapshot: () => ApiNeighborhood;
+  private snapshot: () => ApiNeighborhood;
 
   constructor(snapshot: () => ApiNeighborhood) {
+    this.snapshot = snapshot;
+  }
+
+  /** Where the next worker's starting graph comes from. */
+  setSnapshot(snapshot: () => ApiNeighborhood) {
     this.snapshot = snapshot;
   }
 

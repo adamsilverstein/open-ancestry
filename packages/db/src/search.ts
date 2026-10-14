@@ -1,4 +1,5 @@
 import { getPersonSummaries, type PersonSummary } from './queries';
+import { DOC_COLUMNS, rebuildSearchDocs } from './search-docs';
 import type { TreeStore } from './store';
 
 /*
@@ -10,19 +11,6 @@ import type { TreeStore } from './store';
  */
 
 const IDS = 'SELECT value FROM json_each(?)';
-
-const DOC_COLUMNS = `
-  (SELECT group_concat(concat_ws(' ', n.prefix, n.given, n.nickname, n.surname_prefix, n.surname, n.suffix), ' ' ORDER BY n.sort_order, n.id)
-     FROM person_name n WHERE n.person_id = d.person_id),
-  (SELECT group_concat(n.surname_key, ' ' ORDER BY n.sort_order, n.id)
-     FROM person_name n WHERE n.person_id = d.person_id),
-  (SELECT group_concat(full_name, ' ; ' ORDER BY full_name) FROM (
-     SELECT DISTINCT pl.full_name FROM event_role r
-     JOIN event e ON e.id = r.event_id JOIN place pl ON pl.id = e.place_id
-     WHERE r.person_id = d.person_id AND r.role = 'principal')),
-  (SELECT group_concat(year, ' ' ORDER BY year) FROM (
-     SELECT DISTINCT e.date_sort / 10000 AS year FROM event_role r JOIN event e ON e.id = r.event_id
-     WHERE r.person_id = d.person_id AND r.role = 'principal' AND e.date_sort IS NOT NULL))`;
 
 /** Records which people's search documents a row change affects. */
 export function markSearchDirty(
@@ -86,13 +74,7 @@ export function refreshSearch(store: TreeStore, personIds: string[]): void {
 
 /** Drops and rebuilds the whole search index. */
 export function rebuildSearchIndex(store: TreeStore): void {
-  store.db.transaction(() => {
-    store.db.exec('DELETE FROM person_search; DELETE FROM search_doc;');
-    store.db.exec('INSERT INTO search_doc (person_id) SELECT id FROM person ORDER BY id');
-    store.db.exec(
-      `INSERT INTO person_search (rowid, names, phonetic, places, years) SELECT d.doc_id, ${DOC_COLUMNS} FROM search_doc d`,
-    );
-  })();
+  store.db.transaction(() => rebuildSearchDocs(store.db))();
 }
 
 export interface SearchOptions {

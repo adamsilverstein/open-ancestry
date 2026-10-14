@@ -1,8 +1,4 @@
-import { run } from './main';
+import { main } from './main';
 
-try {
-  await run(process.argv.slice(2));
-} catch (error) {
-  console.error(error instanceof Error ? error.message : error);
-  process.exit(1);
-}
+const code = await main(process.argv.slice(2));
+if (code !== 0) process.exit(code);

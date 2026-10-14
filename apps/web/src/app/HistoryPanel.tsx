@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Redo2, Undo2 } from 'lucide-react';
-import { historyQuery, undoRedo } from '../api/history';
+import { historyQuery, undoRedo, undoRedoMessage } from '../api/history';
 import { currentTreeQuery } from '../api/queries';
 import { Button } from '../components/Button/Button';
 import { Dialog } from '../components/Dialog/Dialog';
@@ -37,7 +37,9 @@ export default function HistoryPanel({ open, onOpenChange }: HistoryPanelProps) 
 
   const run = async (direction: 'undo' | 'redo') => {
     try {
-      await undoRedo(queryClient, direction);
+      const result = await undoRedo(queryClient, direction);
+      // The panel shows what changed; only a step-over needs saying.
+      if (result.skipped.length) toast({ ...undoRedoMessage(direction, result), duration: 6000 });
     } catch (error) {
       toast({
         title: `Could not ${direction}`,
@@ -77,7 +79,9 @@ export default function HistoryPanel({ open, onOpenChange }: HistoryPanelProps) 
       ) : history.items.length === 0 ? (
         <p className={styles.muted}>No changes yet.</p>
       ) : (
-        <ol className={styles.list}>
+        // Focusable so the list can be scrolled from the keyboard (axe scrollable-region-focusable).
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+        <ol className={styles.list} aria-label="Changes" tabIndex={0}>
           {history.items.map((batch) => (
             <li key={batch.id} className={batch.state === 'undone' ? styles.undone : undefined}>
               <span className={styles.label}>{batch.label}</span>

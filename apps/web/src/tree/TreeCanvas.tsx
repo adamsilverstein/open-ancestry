@@ -314,6 +314,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       const offset = gutter.offsetLeft;
       for (const label of labels) {
         label.dataset.right ||= String(offset + label.offsetLeft + label.offsetWidth + 8);
+        label.dataset.h ||= String(label.offsetHeight);
       }
     }
     for (const label of labels) {
@@ -322,6 +323,12 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       // the label never covers a card.
       const under = Number(label.dataset.left) * t.scale + t.x < Number(label.dataset.right);
       const y = under ? Number(label.dataset.gapY) : Number(label.dataset.y);
+      // Zoomed far out the gap is thinner than the label: hide it rather than cover cards.
+      // Faded rather than `hidden`, so it stays in the reading order.
+      label.toggleAttribute(
+        'data-thin',
+        under && Number(label.dataset.gapH) * t.scale < Number(label.dataset.h) + 4,
+      );
       label.style.transform = `translateY(${y * t.scale + t.y}px) translateY(-50%)`;
       label.toggleAttribute('data-above', under);
     }
@@ -766,6 +773,13 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     measure();
     const prev = previous.current;
     previous.current = { layout, kind, focus: focusPersonId };
+    // A new layout remounts the cards: if one had keyboard focus, give it back
+    // (or the focus card, when that person is no longer shown).
+    const had = focusedKey.current;
+    if (had && !viewportRef.current?.contains(document.activeElement)) {
+      const nodes = layout?.nodes ?? fan?.segments ?? [];
+      pendingFocus.current = nodes.some((n) => n.key === had) ? had : focusPersonId;
+    }
     if (!prev || prev.kind !== kind) {
       stopAnimation();
       apply(centeredOnFocus(transform.current, true));
@@ -827,6 +841,24 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       }
     }
   });
+
+  // Labels re-measure when their size changes (a minimum font size, a late
+  // web font); placeGutter caches it otherwise.
+  useEffect(() => {
+    const gutter = gutterRef.current;
+    if (!gutter) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const { target } of entries) {
+        const label = target as HTMLElement;
+        delete label.dataset.right;
+        delete label.dataset.h;
+      }
+      placeGutter();
+    });
+    for (const label of gutter.children) observer.observe(label);
+    return () => observer.disconnect();
+    // The labels change with the layout.
+  }, [layout]);
 
   // Size changes re-run virtualization.
   useEffect(() => {
@@ -1115,9 +1147,31 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   }
 
   // Keyboard focus landing on a card off screen (Tab, screen reader) brings it into view.
+  /**
+   * The card with keyboard focus, kept while a new layout briefly unmounts it
+   * (an undo, a chevron, a re-focus), so focus can be put back afterwards.
+   */
+  const focusedKey = useRef<string | null>(null);
+
+  function onBlur(event: FocusEvent<HTMLDivElement>) {
+    const target = event.target as HTMLElement;
+    const next = event.relatedTarget as Node | null;
+    if (next) {
+      if (!viewportRef.current?.contains(next)) focusedKey.current = null;
+      return;
+    }
+    // No new target: either the card was removed (keep it, to restore) or focus
+    // left for the page or another window (forget it unless it comes back).
+    setTimeout(() => {
+      if (target.isConnected && document.activeElement !== target) focusedKey.current = null;
+    }, 0);
+  }
+
   function onFocus(event: FocusEvent<HTMLDivElement>) {
     const target = event.target as HTMLElement;
     const key = target.dataset.key;
+    // A chevron or switcher counts as its card.
+    focusedKey.current = key ?? target.dataset.node ?? target.dataset.switch ?? null;
     if (key) {
       setActiveKey(key);
       // Only for keyboard focus: a click must not slide the card from under the pointer.
@@ -1135,7 +1189,10 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   const shown = visible.source === layout && layout ? visible : null;
   // Per labelled row: its leftmost card, and the middle of the gap above it.
   const rowExtent = useMemo(() => {
-    const extent = new Map<number, { 'data-left': number; 'data-gap-y': number }>();
+    const extent = new Map<
+      number,
+      { 'data-left': number; 'data-gap-y': number; 'data-gap-h': number }
+    >();
     if (!layout) return extent;
     const rows = new Map<number, { left: number; top: number }>();
     for (const n of layout.nodes) {
@@ -1148,7 +1205,9 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       const height = layout.nodes[0]!.height;
       // Chevrons sit on the cards' top edges: keep the label clear of them.
       const gapY = above ? (above.top + height + row.top) / 2 - 7 : row.top - 28;
-      extent.set(generation, { 'data-left': row.left, 'data-gap-y': gapY });
+      // Room between the row above and the chevrons on this row's cards.
+      const gapH = above ? row.top - (above.top + height) - 14 : 56;
+      extent.set(generation, { 'data-left': row.left, 'data-gap-y': gapY, 'data-gap-h': gapH });
     }
     return extent;
   }, [layout]);
@@ -1201,6 +1260,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       onKeyDown={onKeyDown}
       onKeyUp={onKeyUp}
       onFocus={onFocus}
+      onBlur={onBlur}
     >
       <p id={helpId} className="oa-visually-hidden">
         Arrow keys move between relatives, Enter centers on a person, Space opens their summary.

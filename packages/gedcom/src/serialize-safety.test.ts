@@ -4,6 +4,10 @@ import { parseGedcom } from './parser';
 import { GedcomSerializeError, serializeGedcom, serializeNode, valueLines } from './serialize';
 import type { GedcomNode } from './types';
 
+// Property tests run hundreds of cases; under coverage on a shared CI runner that can
+// pass Vitest's 5s default, so they get room. A hang still fails.
+const PROPERTY_TIMEOUT = 30_000;
+
 const node = (partial: Partial<GedcomNode> & Pick<GedcomNode, 'level' | 'tag'>): GedcomNode => ({
   children: [],
   line: 0,
@@ -271,7 +275,7 @@ describe('structure is validated', () => {
   });
 });
 
-describe('fuzz: serialize -> parse keeps records and values', () => {
+describe('fuzz: serialize -> parse keeps records and values', { timeout: PROPERTY_TIMEOUT }, () => {
   const piece = fc.oneof(
     fc.string({ unit: 'binary', maxLength: 20 }),
     fc.constantFrom(

@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { exposureWarning, parseCliArgs, run } from './main';
+import { exposureWarning, parseCliArgs, progressReporter, run } from './main';
 
 describe('parseCliArgs', () => {
   it('parses serve with defaults', () => {
@@ -170,6 +170,37 @@ describe('import', () => {
     await expect(
       run(['import', fixture, '--name', 'a/b', '--library', library], { log: () => {} }),
     ).rejects.toThrow(/path separator/);
+  });
+
+  it('refuses a --media folder that does not exist', async () => {
+    const library = await mkdtemp(join(tmpdir(), 'oa-cli-media-'));
+    await expect(
+      run(['import', fixture, '--media', join(library, 'nope'), '--library', library], {
+        log: () => {},
+      }),
+    ).rejects.toThrow(/--media folder not found/);
+    await expect(
+      run(['import', fixture, '--media', fixture, '--library', library], { log: () => {} }),
+    ).rejects.toThrow(/--media folder not found/);
+    expect(existsSync(join(library, 'ancestry-sample.oatree'))).toBe(false);
+  });
+
+  it('writes progress lines when asked (stderr on a terminal)', async () => {
+    const library = await mkdtemp(join(tmpdir(), 'oa-cli-progress-'));
+    const chunks: string[] = [];
+    await run(['import', fixture, '--library', library], {
+      log: () => {},
+      progress: (text) => chunks.push(text),
+    });
+    const text = chunks.join('');
+    expect(text).toContain('Parsing');
+    expect(text).toContain('Mapping records 100%');
+    expect(text.endsWith('\n')).toBe(true);
+    const lines: string[] = [];
+    const report = progressReporter((t) => lines.push(t.trim()));
+    for (let done = 0; done <= 1000; done += 50) report('map', done, 1000);
+    report('map', 1000, 1000);
+    expect(lines).toEqual(Array.from({ length: 11 }, (_, i) => `Mapping records ${i * 10}%`));
   });
 
   it('fails cleanly on a missing or non-GEDCOM file', async () => {

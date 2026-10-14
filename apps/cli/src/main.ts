@@ -1,10 +1,15 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { basename, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { getPersonSummary, openTree } from '@open-ancestry/db';
-import { importFile, importGedcom, type ImportReport } from '@open-ancestry/import';
+import {
+  importFile,
+  importGedcom,
+  type ImportPhase,
+  type ImportReport,
+} from '@open-ancestry/import';
 import {
   DEFAULT_HOST,
   Library,
@@ -130,6 +135,8 @@ export function exposureWarning(host: string): string {
 
 export interface RunDeps {
   log?: (line: string) => void;
+  /** Where import progress goes (default: stderr when it is a terminal). */
+  progress?: (text: string) => void;
   warn?: (line: string) => void;
   openUrl?: (url: string) => void;
 }
@@ -191,10 +198,47 @@ export function formatReport(
   return lines.join('\n');
 }
 
+const PHASE_LABELS: Record<ImportPhase, string> = {
+  read: 'Reading',
+  parse: 'Parsing',
+  map: 'Mapping records',
+  finalize: 'Linking families',
+  commit: 'Saving',
+  done: 'Done',
+};
+
+/** One status line per phase (and per 10% while mapping), for a progress line on stderr. */
+export function progressReporter(write: (text: string) => void) {
+  let last = '';
+  return (phase: ImportPhase, done: number, total: number) => {
+    const percent = phase === 'map' && total > 0 ? Math.floor((done / total) * 10) * 10 : null;
+    const line = percent === null ? PHASE_LABELS[phase] : `${PHASE_LABELS[phase]} ${percent}%`;
+    if (line === last) return;
+    last = line;
+    write(phase === 'done' ? `\r${line.padEnd(30)}\n` : `\r${line.padEnd(30)}`);
+  };
+}
+
+/** Progress goes to stderr only on a terminal, so piped output stays the report alone. */
+const stderrProgress = process.stderr.isTTY
+  ? (text: string) => void process.stderr.write(text)
+  : undefined;
+
 async function importCommand(
   cli: Extract<CliCommand, { command: 'import' }>,
   log: (line: string) => void,
+  progress: ((text: string) => void) | undefined,
 ): Promise<void> {
+  if (cli.media) {
+    const isDir = (() => {
+      try {
+        return statSync(cli.media).isDirectory();
+      } catch {
+        return false;
+      }
+    })();
+    if (!isDir) throw new Error(`--media folder not found: ${cli.media}`);
+  }
   const name = cli.name ?? basename(cli.file, extname(cli.file)).trim();
   const problem = treeNameProblem(name);
   if (problem) throw new Error(`${problem}: "${name}". Choose another with --name.`);
@@ -212,6 +256,7 @@ async function importCommand(
     { dir, name },
     {
       ...(cli.media && { mediaDir: cli.media }),
+      ...(progress && { onProgress: progressReporter(progress) }),
     },
   );
   const store = openTree(dir);
@@ -227,7 +272,12 @@ async function importCommand(
 
 export async function run(
   argv: string[],
-  { log = console.log, warn = console.warn, openUrl = openInBrowser }: RunDeps = {},
+  {
+    log = console.log,
+    warn = console.warn,
+    openUrl = openInBrowser,
+    progress = stderrProgress,
+  }: RunDeps = {},
 ): Promise<RunningServer | undefined> {
   const cli = parseCliArgs(argv);
   if (cli.command === 'help') {
@@ -235,7 +285,7 @@ export async function run(
     return undefined;
   }
   if (cli.command === 'import') {
-    await importCommand(cli, log);
+    await importCommand(cli, log, progress);
     return undefined;
   }
   if (!isLoopbackHost(cli.host)) warn(exposureWarning(cli.host));

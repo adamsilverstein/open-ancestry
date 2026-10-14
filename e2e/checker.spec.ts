@@ -39,7 +39,8 @@ async function openChecker(page: Page, seeded: Seeded) {
 
 const toasts = (page: Page) =>
   page.getByRole('region', { name: /Notifications/ }).getByRole('listitem');
-const issues = (page: Page) => page.getByRole('list', { name: 'Issues' }).getByRole('listitem');
+/** Issue rows only, not the people listed inside each. */
+const issues = (page: Page) => page.getByRole('list', { name: 'Issues' }).locator(':scope > li');
 
 let seeded: Seeded;
 test.beforeEach(async ({ request, baseURL }, testInfo) => {
@@ -99,7 +100,11 @@ test('is reachable from the people list and the command palette', async ({ page 
   await page.goto('/');
   await page.locator('html[data-shell-ready]').waitFor({ state: 'attached' });
   await page.keyboard.press(`${mod}+k`);
+  await expect(
+    page.getByRole('dialog', { name: 'Command palette' }).getByRole('combobox'),
+  ).toBeFocused();
   await page.keyboard.type('checker');
+  await expect(page.getByRole('option', { name: 'Open tree checker' })).toBeVisible();
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/checker$/);
 });

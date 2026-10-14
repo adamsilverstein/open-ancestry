@@ -15,6 +15,8 @@ import { useTheme } from '../lib/useTheme';
 interface ShellCommandPaletteProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Keys typed before the input took focus, to start the query with. */
+  takeTypeAhead?: () => string;
 }
 
 /** "1850–1921 · Kestrel Cove, Saltmarsh" */
@@ -28,7 +30,11 @@ function personDescription(hit: SearchHit): string {
  * Enter opens the person page and Shift/Alt+Enter focuses them in the tree;
  * on the tree view ("Find in tree") the two swap.
  */
-export default function ShellCommandPalette({ open, onOpenChange }: ShellCommandPaletteProps) {
+export default function ShellCommandPalette({
+  open,
+  onOpenChange,
+  takeTypeAhead,
+}: ShellCommandPaletteProps) {
   const navigate = useNavigate();
   const onTree = useRouterState({ select: (s) => s.location.pathname.startsWith('/tree/') });
   const { theme, toggle } = useTheme();
@@ -113,6 +119,7 @@ export default function ShellCommandPalette({ open, onOpenChange }: ShellCommand
       onOpenChange={onOpenChange}
       groups={groups}
       onQueryChange={setQuery}
+      takeTypeAhead={takeTypeAhead}
       placeholder={onTree ? 'Find in tree, or search actions' : 'Search people, places, actions'}
       loading={pending && people.length === 0}
       pending={pending}

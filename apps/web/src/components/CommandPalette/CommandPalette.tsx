@@ -50,6 +50,11 @@ export interface CommandPaletteProps {
    * with nothing selectable highlighted, runs on the first result once they arrive.
    */
   pending?: boolean;
+  /**
+   * Called as the palette takes focus: text typed since it was asked to open
+   * (while its code loaded), which becomes the starting query.
+   */
+  takeTypeAhead?: () => string;
 }
 
 /** Item values are ids, so two people with the same name stay distinct. */
@@ -67,6 +72,7 @@ export function CommandPalette({
   footer,
   loading = false,
   pending = false,
+  takeTypeAhead,
 }: CommandPaletteProps) {
   // Opened by shortcut, not a Radix trigger, so remember where focus was and restore it.
   const returnFocus = useRef<HTMLElement | null>(null);
@@ -151,6 +157,11 @@ export function CommandPalette({
           aria-describedby={undefined}
           onOpenAutoFocus={() => {
             returnFocus.current = document.activeElement as HTMLElement | null;
+            const typed = takeTypeAhead?.();
+            if (typed) {
+              setQuery(typed);
+              onQueryChange?.(typed);
+            }
           }}
           onCloseAutoFocus={(event) => {
             if (!returnFocus.current?.isConnected) return;

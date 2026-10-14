@@ -76,4 +76,4 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 
 ## Import jobs
 
-The import route streams the upload to a private temp folder, then runs an injected `Importer` (`apps/server/src/jobs.ts`), the `importGedcom(filePath, store, { mediaDir, onProgress, signal })` function from the import package. Without one the route answers 501. The temp file is deleted when the job ends, and rename or delete of a tree is refused while it is importing.
+The import route streams the upload to a private temp folder, then runs an injected `Importer` (`apps/server/src/jobs.ts`). The CLI and the dev server inject `importFile` from `@open-ancestry/import`, which imports the upload into the empty tree and reports progress as `{ phase, done, total }` (`phase` is `read`, `parse`, `map`, `finalize`, `commit` or `done`; `done`/`total` count records during `map`). The completed job's `result` is the import report (see `packages/import/README.md`). Without an importer the route answers 501. The temp file is deleted when the job ends, and rename or delete of a tree is refused while it is importing.

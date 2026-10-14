@@ -1,5 +1,8 @@
 .content {
   min-width: 200px;
+  /* Select's content rules are shared but its size variable is unset here; long menus scroll. */
+  max-height: var(--radix-dropdown-menu-content-available-height, 60dvh);
+  overflow-y: auto;
   padding: var(--oa-space-1);
 }
 

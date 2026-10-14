@@ -176,6 +176,36 @@ test.describe('tree switcher', () => {
     expect(trees.trees.map((t) => t.name)).not.toContain(renamed);
   });
 
+  test('the tree menu scrolls when the library has more trees than fit', async ({
+    page,
+    baseURL,
+  }, testInfo) => {
+    const { token } = (await (await page.request.get('/api/session')).json()) as {
+      token: string;
+    };
+    const origin = new URL(baseURL!).origin;
+    const names = Array.from({ length: 16 }, (_, i) => unique(testInfo, `Many ${i}`));
+    for (const name of names) {
+      const res = await page.request.post('/api/trees', {
+        data: { name },
+        headers: { origin, 'x-oa-token': token },
+      });
+      expect(res.status()).toBe(201);
+    }
+    await page.setViewportSize({ width: 1024, height: 420 });
+    await page.goto('/');
+    const switcher = page.getByRole('banner').getByRole('button', { name: /Tree:/ });
+    await switcher.click();
+    const menu = page.getByRole('menu');
+    // The menu stays on screen and scrolls, so every tree can be reached.
+    const box = (await menu.boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual(420);
+    expect(await menu.evaluate((el) => getComputedStyle(el).overflowY)).toBe('auto');
+    const last = names.at(-1)!;
+    await page.getByRole('menuitemradio', { name: last }).click();
+    await expect(switcher).toContainText(last);
+  });
+
   test('switching trees remembers the choice', async ({ page, baseURL }, testInfo) => {
     const a = unique(testInfo, 'Alpha');
     const b = unique(testInfo, 'Beta');

@@ -117,3 +117,115 @@ test('a note that fails to save stays in its form', async ({ page }) => {
   await expect(field).toBeHidden();
   await expect(page.getByText('Kept the mill accounts.')).toBeVisible();
 });
+
+/** Fails matching writes with a 500 after `delay` ms, so a test can act while the save is pending. */
+async function failWritesSlowly(page: Page, url: string | RegExp, delay: number) {
+  const handler = async (route: Route) => {
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    await route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: { code: 'internal', message: 'Simulated failure' } }),
+    });
+  };
+  await page.route(url, handler);
+  return () => page.unroute(url, handler);
+}
+
+test('a second submit while a failing save is pending keeps the dialog and the edits', async ({
+  page,
+}) => {
+  await openSeeded(page, seeded);
+  const restore = await failWritesSlowly(page, '**/batch', 600);
+  await page.getByRole('button', { name: 'Edit person', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit person' });
+  const given = dialog.getByRole('textbox', { name: 'Given names' }).first();
+  await given.fill('Rowena');
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  // The optimistic update already matches the draft: this used to look like "nothing changed".
+  await given.press('Enter');
+  await given.press('Enter');
+  await expect(dialog.getByRole('alert')).toContainText('Simulated failure');
+  await expect(dialog).toBeVisible();
+  await expect(given).toHaveValue('Rowena');
+  await restore();
+});
+
+test('focus stays on the submit button through a failed save', async ({ page }) => {
+  await openSeeded(page, seeded);
+  const restore = await failWrites(page, '**/batch');
+  await page.getByRole('button', { name: 'Edit person', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit person' });
+  await dialog.getByRole('textbox', { name: 'Given names' }).first().fill('Rowena');
+  await dialog.getByRole('button', { name: 'Save' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(dialog.getByRole('alert')).toContainText('Simulated failure');
+  await expect(dialog.getByRole('button', { name: 'Try again' })).toBeFocused();
+  await restore();
+});
+
+test('Edit note keeps the text when the save fails, and retries', async ({ page }) => {
+  await openSeeded(page, seeded);
+  await page.getByRole('tab', { name: 'Notes' }).click();
+  await page.getByRole('button', { name: 'Add note' }).click();
+  await page.getByRole('textbox', { name: 'New note' }).fill('Kept the mill accounts.');
+  await page.getByRole('button', { name: 'Save note' }).click();
+  await expect(page.getByText('Kept the mill accounts.')).toBeVisible();
+
+  const restore = await failWrites(page, /\/notes\/[^/]+$/, 'PATCH');
+  await page.getByRole('button', { name: 'Edit note' }).click();
+  const field = page.getByRole('textbox', { name: 'Note', exact: true });
+  await field.fill('Kept the mill accounts until 1902.');
+  await page.getByRole('button', { name: 'Save note' }).click();
+  await expect(page.getByRole('alert')).toContainText('Simulated failure');
+  await expect(field).toHaveValue('Kept the mill accounts until 1902.');
+  await expect(page.getByRole('button', { name: 'Try again' })).toBeFocused();
+  await restore();
+  await page.getByRole('button', { name: 'Try again' }).click();
+  await expect(field).toBeHidden();
+  await expect(page.getByText('Kept the mill accounts until 1902.')).toBeVisible();
+});
+
+test('Add relative with an existing person keeps the choice and retries', async ({ page }) => {
+  await openSeeded(page, seeded, seeded.iris);
+  const restore = await failWrites(page, '**/spouses', 'POST');
+  await relationships(page).getByRole('button', { name: 'Add family member' }).click();
+  await page.getByRole('menuitem', { name: 'Add spouse' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add spouse' });
+  await dialog.getByRole('radio', { name: 'Existing person' }).check();
+  await dialog.getByRole('combobox', { name: 'Person' }).click();
+  await page.keyboard.type('Wendell');
+  await page.getByRole('option', { name: /Wendell Quarrier/ }).click();
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText('Simulated failure');
+  await expect(dialog.getByRole('radio', { name: 'Existing person' })).toBeChecked();
+  await expect(dialog.getByRole('combobox', { name: 'Person' })).toContainText('Wendell Quarrier');
+  await restore();
+  await dialog.getByRole('button', { name: 'Try again' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(relationships(page).getByRole('link', { name: /Wendell Quarrier/ })).toBeVisible();
+});
+
+test('a save that finishes after Cancel does not close the next dialog', async ({ page }) => {
+  await openSeeded(page, seeded);
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(/\/people\/[^/]+\/events$/, async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    await held;
+    await route.fallback();
+  });
+  await timeline(page).getByRole('button', { name: 'Add event' }).click();
+  const first = page.getByRole('dialog', { name: 'Add event' });
+  await first.getByRole('textbox', { name: 'Date' }).fill('1905');
+  await first.getByRole('button', { name: 'Save' }).click();
+  await first.getByRole('button', { name: 'Cancel' }).click();
+  await expect(first).toBeHidden();
+
+  await timeline(page).getByRole('button', { name: 'Add event' }).click();
+  const second = page.getByRole('dialog', { name: 'Add event' });
+  await expect(second).toBeVisible();
+  release();
+  await expect(timeline(page).getByText('1905')).toBeVisible();
+  await expect(second).toBeVisible();
+});

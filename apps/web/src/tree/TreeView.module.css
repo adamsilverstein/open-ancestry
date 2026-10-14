@@ -127,6 +127,8 @@
   top: 0;
   left: 0;
   width: 1px;
+  /* The world layer is 0 wide; the global `svg { max-width: 100% }` would hide these. */
+  max-width: none;
   height: 1px;
   overflow: visible;
 }

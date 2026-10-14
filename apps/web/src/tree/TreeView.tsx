@@ -18,6 +18,7 @@ import {
   type QuickViewAnchor,
 } from '../components/QuickViewPopover/QuickViewPopover';
 import { useToast } from '../components/Toast/Toast';
+import type { PersonSummary } from '../lib/person';
 import { TreeToolbar, type TreeLayout as LayoutKind } from '../components/TreeToolbar/TreeToolbar';
 import { Skeleton } from '../components/Skeleton/Skeleton';
 import { ApiError, fetchHome, fetchNeighborhood, treeKeys, type NeighborhoodRequest } from './api';
@@ -77,20 +78,26 @@ function createViewportStore() {
 function TreeMinimap({
   layout,
   store,
+  person,
   onNavigate,
 }: {
-  layout: TreeLayout | FanLayout;
+  layout: TreeLayout;
   store: ReturnType<typeof createViewportStore>;
+  person: (personId: string) => PersonSummary | undefined;
   onNavigate: (center: { x: number; y: number }) => void;
 }) {
   const [hidden, setHidden] = useState(false);
   const viewport = useSyncExternalStore(store.subscribe, store.get);
   const nodes = useMemo(
     () =>
-      'nodes' in layout
-        ? layout.nodes.map((n) => ({ x: n.x, y: n.y, width: n.width, height: n.height }))
-        : [],
-    [layout],
+      layout.nodes.map((n) => ({
+        x: n.x,
+        y: n.y,
+        width: n.width,
+        height: n.height,
+        sex: person(n.personId)?.sex,
+      })),
+    [layout, person],
   );
   const bounds = useMemo(
     () => ({
@@ -519,10 +526,11 @@ export function TreeView({
         onZoomOut={() => canvas.current?.zoomBy(1 / ZOOM_STEP)}
         onFit={() => canvas.current?.fit()}
       />
-      {shown && (
+      {shownResult?.layout && (
         <TreeMinimap
-          layout={shown}
+          layout={shownResult.layout}
           store={viewportStore}
+          person={person}
           onNavigate={(center) => canvas.current?.centerOnPoint(center)}
         />
       )}

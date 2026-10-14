@@ -101,8 +101,10 @@ test.describe('family view', () => {
       (await box(card(page, 'Ada Vale'))).y,
     );
     expect(ada.width).toBeGreaterThan(0);
-    // Edges are drawn.
-    await expect(page.locator('[data-testid="tree-edges"] path').first()).toBeAttached();
+    // Edges are drawn (and not collapsed to nothing by a size rule).
+    const edges = page.getByTestId('tree-edges');
+    await expect(edges.locator('path').first()).toHaveAttribute('d', /^M/);
+    expect(await edges.evaluate((svg) => svg.getBoundingClientRect().width)).toBeGreaterThan(0);
   });
 
   test('a card click opens the quick view and Profile opens the person page', async ({ page }) => {

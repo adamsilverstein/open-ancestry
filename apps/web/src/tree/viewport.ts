@@ -17,7 +17,7 @@ export interface Rect {
   height: number;
 }
 
-export const MIN_SCALE = 0.02;
+export const MIN_SCALE = 0.01;
 export const MAX_SCALE = 2;
 /** One zoom button press or key press. */
 export const ZOOM_STEP = 1.25;

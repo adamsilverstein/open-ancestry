@@ -162,6 +162,10 @@ test('the cancelled page has its heading focused and no accessibility violations
   const heading = page.getByRole('heading', { level: 1, name: 'Import cancelled' });
   await expect(heading).toBeVisible({ timeout: 30_000 });
   await expect(heading).toBeFocused();
+  // Let the toast's entrance animation finish: mid-fade colors fail contrast.
+  await page.evaluate(() =>
+    Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))),
+  );
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations).toEqual([]);
 });

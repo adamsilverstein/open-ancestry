@@ -1,4 +1,5 @@
-import { openMemoryTree } from '@open-ancestry/db';
+import { openMemoryTree, openTree } from '@open-ancestry/db';
+import { join } from 'node:path';
 import { parseGedcom, readGedzip } from '@open-ancestry/gedcom';
 import { importGedcom } from '@open-ancestry/import';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -11,6 +12,29 @@ beforeEach(async () => {
   s = await seed(api);
 });
 afterEach(() => api.close());
+
+/** A tree imported from GEDCOM whose regenerated person has a pointer to a missing family. */
+async function importedTree(): Promise<string> {
+  const base = await createTestTree(api, 'Imported');
+  const store = openTree(join(api.root, 'Imported.oatree'));
+  await importGedcom(
+    {
+      bytes: [
+        '0 HEAD',
+        '1 GEDC',
+        '2 VERS 5.5.1',
+        '0 @I1@ INDI',
+        '1 NAME Odile /Fernsby/',
+        '1 FAMS @F99@',
+        '0 TRLR',
+        '',
+      ].join('\n'),
+    },
+    store,
+  );
+  store.close();
+  return base;
+}
 
 const givenNames = async (gedcom: Uint8Array | string) => {
   const store = openMemoryTree();
@@ -64,6 +88,23 @@ describe('GEDCOM export routes', () => {
     const res = await api.get(`${s.base}/export.ged?version=7`);
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('1 GRAD\n2 DATE 1963');
+  });
+
+  it('reports export warnings in headers the dialog reads', async () => {
+    const clean = await api.get(`${s.base}/export.ged`);
+    expect(clean.headers['x-oa-export-warning-count']).toBe('0');
+    expect(JSON.parse(decodeURIComponent(clean.headers['x-oa-export-warnings'] as string))).toEqual(
+      [],
+    );
+    const tree = await importedTree();
+    for (const path of ['export.ged?version=7', 'export.gdz']) {
+      const res = await api.get(`${tree}/${path}`);
+      expect(res.headers['x-oa-export-warning-count'], path).toBe('1');
+      const warnings = JSON.parse(
+        decodeURIComponent(res.headers['x-oa-export-warnings'] as string),
+      );
+      expect(warnings).toEqual([expect.stringContaining('@F99@ is not in the export')]);
+    }
   });
 
   it('rejects unknown versions and options', async () => {

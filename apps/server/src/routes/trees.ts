@@ -8,7 +8,7 @@ import {
   undoLast,
   type TreeStore,
 } from '@open-ancestry/db';
-import { exportGedcom, exportGedzip } from '@open-ancestry/export';
+import { buildGedcomExport, buildGedzipExport } from '@open-ancestry/export';
 import type { Api, Deps } from '../context';
 import { edit } from '../edits';
 import { ExportQuery, GedzipQuery, HistoryQuery, HomeBody, TreeBody, TreeParams } from '../schemas';
@@ -37,6 +37,18 @@ export function attachment(tree: string, extension: string): string {
     (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
   );
   return `attachment; filename="${ascii}.${extension}"; filename*=UTF-8''${utf8}.${extension}`;
+}
+
+/** Export warnings shown by the dialog: the count, and the first few as percent-encoded JSON. */
+export const WARNING_COUNT_HEADER = 'x-oa-export-warning-count';
+export const WARNINGS_HEADER = 'x-oa-export-warnings';
+const MAX_HEADER_WARNINGS = 20;
+
+function warningHeaders(warnings: string[]): Record<string, string> {
+  return {
+    [WARNING_COUNT_HEADER]: String(warnings.length),
+    [WARNINGS_HEADER]: encodeURIComponent(JSON.stringify(warnings.slice(0, MAX_HEADER_WARNINGS))),
+  };
 }
 
 function hasBatch(store: TreeStore, state: 'applied' | 'undone'): boolean {
@@ -141,13 +153,14 @@ export function treeRoutes(app: Api, deps: Deps): void {
     { schema: { params: TreeParams, querystring: ExportQuery } },
     async (request, reply) => {
       const { tree } = request.params;
-      const text = exportGedcom(library.open(tree), {
+      const { text, warnings } = buildGedcomExport(library.open(tree), {
         version: request.query.version ?? '5.5.1',
         privatizeLiving: request.query.privatize ?? false,
       });
       return reply
         .type('text/vnd.familysearch.gedcom; charset=utf-8')
         .header('content-disposition', attachment(tree, 'ged'))
+        .headers(warningHeaders(warnings))
         .send(text);
     },
   );
@@ -157,12 +170,13 @@ export function treeRoutes(app: Api, deps: Deps): void {
     { schema: { params: TreeParams, querystring: GedzipQuery } },
     async (request, reply) => {
       const { tree } = request.params;
-      const bytes = exportGedzip(library.open(tree), {
+      const { bytes, warnings } = buildGedzipExport(library.open(tree), {
         privatizeLiving: request.query.privatize ?? false,
       });
       return reply
         .type('application/vnd.familysearch.gedcom+zip')
         .header('content-disposition', attachment(tree, 'gdz'))
+        .headers(warningHeaders(warnings))
         .send(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
     },
   );

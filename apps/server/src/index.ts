@@ -1,4 +1,6 @@
 import { existsSync } from 'node:fs';
+import { STATUS_CODES } from 'node:http';
+import type { Duplex } from 'node:stream';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import { constants as zlib } from 'node:zlib';
@@ -71,11 +73,31 @@ function staticHeaders(reply: FastifyReply, path: string) {
   reply.header('cache-control', hashed ? 'public, max-age=31536000, immutable' : 'no-cache');
 }
 
+/**
+ * Node's HTTP parser rejects malformed requests (bad request line, headers
+ * over 16 KB) before Fastify sees them; answer with the security headers too.
+ */
+export function handleClientError(error: Error & { code?: string }, socket: Duplex): void {
+  if (!socket.writable) {
+    socket.destroy();
+    return;
+  }
+  const status = error.code === 'HPE_HEADER_OVERFLOW' ? 431 : 400;
+  const body = JSON.stringify(errorBody('bad_request', 'Malformed request'));
+  const headers = Object.entries(SECURITY_HEADERS).map(([name, value]) => `${name}: ${value}\r\n`);
+  socket.end(
+    `HTTP/1.1 ${status} ${STATUS_CODES[status]}\r\n${headers.join('')}` +
+      'content-type: application/json; charset=utf-8\r\n' +
+      `content-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`,
+  );
+}
+
 export function createServer(options: ServerOptions = {}): FastifyInstance {
   const app = Fastify({
     logger: options.logger ?? false,
     bodyLimit: JSON_BODY_LIMIT,
     ajv: { customOptions: { removeAdditional: false, coerceTypes: 'array' } },
+    clientErrorHandler: handleClientError,
     // Router-level failures (malformed URL, bad content type) get the typed envelope too.
     frameworkErrors: (error, _request, reply: FastifyReply) => {
       const api = toApiError(error);

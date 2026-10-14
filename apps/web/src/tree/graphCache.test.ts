@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { indexGraph, layoutFamily, layoutFan, layoutPedigree } from '@open-ancestry/core';
 import { GraphCache } from './graphCache';
 import type { ApiNeighborhood, ApiPersonSummary } from './api';
 
@@ -117,5 +118,133 @@ describe('GraphCache', () => {
     const copy = new GraphCache();
     copy.merge(cache.snapshot());
     expect(copy.input()).toEqual(cache.input());
+  });
+});
+
+/** Deterministic pseudo-random numbers (mulberry32), so failures reproduce. */
+function random(seed: number) {
+  return () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Messy slices: missing partners, a person as both partners, children of unloaded families. */
+function randomSlices(seed: number, count: number): ApiNeighborhood[] {
+  const rnd = random(seed);
+  const pick = <T>(list: T[]) => list[Math.floor(rnd() * list.length)]!;
+  const ids = Array.from({ length: 40 }, (_, i) => `p${i}`);
+  const fams = Array.from({ length: 25 }, (_, i) => `f${i}`);
+  const maybe = () => (rnd() < 0.15 ? null : pick(ids));
+  return Array.from({ length: count }, (_, s) => {
+    const p1 = maybe();
+    return {
+      focusId: pick(ids),
+      people: ids
+        .filter(() => rnd() < 0.3)
+        .map((id) => summary(id, { sex: rnd() < 0.5 ? 'M' : 'F' })),
+      families: fams
+        .filter(() => rnd() < 0.25)
+        .map((id) => ({
+          ...family(id, rnd() < 0.1 ? p1 : maybe(), rnd() < 0.1 ? p1 : maybe()),
+          partner1Order: Math.floor(rnd() * 3),
+          partner2Order: Math.floor(rnd() * 3),
+        })),
+      children: Array.from({ length: 12 }, () => ({
+        ...child(pick(fams), pick(ids), rnd() < 0.5),
+        sortOrder: Math.floor(rnd() * 4),
+        childOrder: Math.floor(rnd() * 3),
+      })),
+      moreUp: ids.filter(() => rnd() < 0.1),
+      moreDown: ids.filter(() => rnd() < 0.1),
+      truncated: s % 2 === 0,
+    };
+  });
+}
+
+describe('GraphCache.index', () => {
+  const famIds = (list: readonly { id: string }[]) => list.map((f) => f.id);
+
+  it('answers exactly as indexing the merged graph would', () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      const cache = new GraphCache();
+      for (const slice of randomSlices(seed, 4)) {
+        cache.merge(slice);
+        const expected = indexGraph(cache.graph());
+        const actual = cache.index();
+        for (let i = 0; i < 42; i++) {
+          const id = `p${i}`;
+          expect(actual.person(id), `${seed} ${id}`).toEqual(expected.person(id));
+          expect(famIds(actual.parentFamilies(id)), `${seed} ${id} up`).toEqual(
+            famIds(expected.parentFamilies(id)),
+          );
+          expect(famIds(actual.partnerFamilies(id)), `${seed} ${id} spouses`).toEqual(
+            famIds(expected.partnerFamilies(id)),
+          );
+        }
+        // Families are looked up by id, so the graph's own objects work too.
+        for (const f of cache.graph().families) {
+          expect(actual.partners(f), `${seed} ${f.id}`).toEqual(expected.partners(f));
+          expect(actual.children(f), `${seed} ${f.id}`).toEqual(expected.children(f));
+          for (const c of f.children) {
+            expect(actual.entry(f, c.id)).toEqual(expected.entry(f, c.id));
+          }
+        }
+      }
+    }
+  });
+
+  it('lays out the same as the merged graph', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const cache = new GraphCache();
+      for (const slice of randomSlices(seed, 4)) cache.merge(slice);
+      for (let i = 0; i < 40; i += 3) {
+        const id = `p${i}`;
+        const options = { ancestorsDepth: 3, descendantsDepth: 3 };
+        expect(layoutFamily(cache.index(), id, options)).toEqual(
+          layoutFamily(cache.graph(), id, options),
+        );
+        expect(layoutPedigree(cache.index(), id, options)).toEqual(
+          layoutPedigree(cache.graph(), id, options),
+        );
+        expect(layoutFan(cache.index(), id)).toEqual(layoutFan(cache.graph(), id));
+      }
+    }
+  });
+
+  it('lays out a small view in time that does not grow with everything merged', () => {
+    /** Ada's family plus `extra` unrelated people (couples with a child). */
+    const sized = (extra: number) => {
+      const cache = new GraphCache();
+      cache.merge(first);
+      const people: ApiPersonSummary[] = [];
+      const families: ReturnType<typeof family>[] = [];
+      const children: ReturnType<typeof child>[] = [];
+      for (let i = 0; i < extra; i += 3) {
+        people.push(summary(`x${i}`), summary(`x${i + 1}`, { sex: 'F' }), summary(`x${i + 2}`));
+        families.push(family(`xf${i}`, `x${i}`, `x${i + 1}`));
+        children.push(child(`xf${i}`, `x${i + 2}`));
+      }
+      cache.merge({ ...first, people, families, children, moreUp: [], moreDown: [] });
+      return cache;
+    };
+    /** Median time of a new slice arriving, then a layout of Ada's view. */
+    const time = (cache: GraphCache) => {
+      layoutFamily(cache.index(), 'ada');
+      const runs: number[] = [];
+      for (let i = 0; i < 7; i++) {
+        const start = performance.now();
+        cache.merge({ ...first, people: [summary(`new${i}`)], families: [], children: [] });
+        layoutFamily(cache.index(), 'ada');
+        runs.push(performance.now() - start);
+      }
+      return runs.sort((a, b) => a - b)[3]!;
+    };
+    const small = time(sized(1_000));
+    const large = time(sized(100_000));
+    // Within 2x, with a little slack for timer noise at sub-millisecond times.
+    expect(large).toBeLessThan(Math.max(2 * small, small + 2));
   });
 });

@@ -19,8 +19,10 @@ import {
   createEvent,
   createPerson,
   edit,
+  eventPeople,
   eventRow,
   nameRow,
+  refreshLiving,
   requireRow,
   resolveRelative,
 } from '../edits';
@@ -126,7 +128,11 @@ export function editRoutes(app: Api, { library }: Deps): void {
       requireRow(store, 'person', id);
       const { primary_media_id } = request.body;
       if (primary_media_id) ownerExists(store, 'media', primary_media_id);
-      const { batchId } = edit(store, 'Edit person', (tx) => persons.update(tx, id, request.body));
+      const { batchId } = edit(store, 'Edit person', (tx) => {
+        persons.update(tx, id, request.body);
+        // `unknown` asks for the inferred status again.
+        if (request.body.living !== undefined) refreshLiving(tx, [id], { relatives: false });
+      });
       return { batchId, person: summary(store, id) };
     },
   );
@@ -159,9 +165,9 @@ export function editRoutes(app: Api, { library }: Deps): void {
     async (request) => {
       const store = open(request.params.tree);
       const { id } = request.params;
-      requireRow(store, 'person_name', id);
+      const existing = requireRow(store, 'person_name', id);
       const { batchId, result } = edit(store, 'Edit name', (tx) =>
-        names.update(tx, id, nameRow(request.body)),
+        names.update(tx, id, nameRow(request.body, existing)),
       );
       return { batchId, name: result };
     },
@@ -191,9 +197,11 @@ export function editRoutes(app: Api, { library }: Deps): void {
       const store = open(request.params.tree);
       const { id } = request.params;
       requireRow(store, 'person', id);
-      const { batchId, result } = edit(store, 'Add event', (tx) =>
-        createEvent(tx, request.body, { person_id: id }),
-      );
+      const { batchId, result } = edit(store, 'Add event', (tx) => {
+        const event = createEvent(tx, request.body, { person_id: id });
+        refreshLiving(tx, [id]);
+        return event;
+      });
       return reply.code(201).send({ batchId, event: result });
     },
   );
@@ -219,16 +227,22 @@ export function editRoutes(app: Api, { library }: Deps): void {
       const store = open(request.params.tree);
       const { id } = request.params;
       requireRow(store, 'event', id);
-      const { batchId, result } = edit(store, 'Edit event', (tx) =>
-        events.update(tx, id, eventRow(tx, request.body)),
-      );
+      const { batchId, result } = edit(store, 'Edit event', (tx) => {
+        const event = events.update(tx, id, eventRow(tx, request.body));
+        refreshLiving(tx, eventPeople(tx.store, id));
+        return event;
+      });
       return { batchId, event: result };
     },
   );
 
   app.delete('/api/trees/:tree/events/:id', ids, async (request) => {
     const store = open(request.params.tree);
-    const { batchId } = edit(store, 'Delete event', (tx) => events.delete(tx, request.params.id));
+    const { batchId } = edit(store, 'Delete event', (tx) => {
+      const people = eventPeople(tx.store, request.params.id);
+      events.delete(tx, request.params.id);
+      refreshLiving(tx, people);
+    });
     return { batchId };
   });
 
@@ -241,9 +255,11 @@ export function editRoutes(app: Api, { library }: Deps): void {
       const store = open(request.params.tree);
       const { id } = request.params;
       requireRow(store, 'person', id);
-      const { batchId, result } = edit(store, 'Add parent', (tx) =>
-        addParent(tx, id, request.body),
-      );
+      const { batchId, result } = edit(store, 'Add parent', (tx) => {
+        const added = addParent(tx, id, request.body);
+        refreshLiving(tx, [id, added.parentId]);
+        return added;
+      });
       return reply.code(201).send({ batchId, ...result });
     },
   );
@@ -265,6 +281,7 @@ export function editRoutes(app: Api, { library }: Deps): void {
             ? { relationship_type: request.body.relationship_type }
             : {}),
         });
+        refreshLiving(tx, [id, spouseId]);
         return { family, spouseId };
       });
       return reply.code(201).send({ batchId, ...result });
@@ -300,6 +317,7 @@ export function editRoutes(app: Api, { library }: Deps): void {
           sort_order: familyChildren.listForFamily(tx.store, family.id).length,
           ...rels,
         });
+        refreshLiving(tx, [id, childId]);
         return { family, childId, link };
       });
       return reply.code(201).send({ batchId, ...result });
@@ -326,6 +344,7 @@ export function editRoutes(app: Api, { library }: Deps): void {
           child_id: siblingId,
           sort_order: familyChildren.listForFamily(tx.store, familyId).length,
         });
+        refreshLiving(tx, [id, siblingId]);
         return { familyId, siblingId, link };
       });
       return reply.code(201).send({ batchId, ...result });

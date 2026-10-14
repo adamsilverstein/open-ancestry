@@ -1,15 +1,23 @@
-import { parseDate, phoneticKeys } from '@open-ancestry/core';
+import { inferLiving } from '@open-ancestry/core';
 import {
   events,
   names,
   persons,
   type EventRow,
+  type PersonNameRow,
   type InsertRow,
   type PatchRow,
   type PersonRow,
   type TreeStore,
   type Tx,
 } from '@open-ancestry/db';
+import {
+  BIRTH_SUBSTITUTES,
+  DEATH_EVENTS,
+  OTHER_DEATH_FACTS,
+  dateColumns as importDateColumns,
+  surnameKey as importSurnameKey,
+} from '@open-ancestry/import';
 import { badRequest, notFound } from './errors';
 import type { EventBody, EventPatch, NameBody, PersonBody, RelativeBody } from './schemas';
 
@@ -35,19 +43,40 @@ export function edit<R>(store: TreeStore, label: string, fn: (tx: Tx) => R): Edi
   return { batchId: changed ? batchId : null, result };
 }
 
-export function surnameKey(surname: string | null | undefined): string | null {
-  const keys = surname ? phoneticKeys(surname) : [];
-  return keys.length > 0 ? keys.join(' ') : null;
+/** Same keys as an import, so search treats typed and imported names alike. */
+export const surnameKey = importSurnameKey;
+
+type NameParts = Pick<PersonNameRow, 'given' | 'surname' | 'surname_prefix' | 'prefix' | 'suffix'>;
+
+/** The name in GEDCOM form (`Dr. Finn /Vale/ Jr.`), as the importer stores it. */
+export function gedcomName(name: Partial<NameParts>): string | null {
+  const surname = [name.surname_prefix, name.surname].filter((p) => p?.trim()).join(' ');
+  const text = [name.prefix, name.given, surname ? `/${surname}/` : null, name.suffix]
+    .filter((p) => p?.trim())
+    .join(' ');
+  return text || null;
 }
 
-export function nameRow(body: NameBody): Omit<InsertRow<'person_name'>, 'person_id'> {
+/**
+ * Name body to row. `existing` is the stored row on an edit, so derived
+ * columns are computed from the name as it will be after the patch.
+ */
+export function nameRow(
+  body: NameBody,
+  existing?: PersonNameRow,
+): Omit<InsertRow<'person_name'>, 'person_id'> {
   const { is_primary, ...fields } = body;
   const row: Omit<InsertRow<'person_name'>, 'person_id'> = { ...fields };
   if (is_primary !== undefined) row.is_primary = is_primary ? 1 : 0;
   if ('surname' in body) row.surname_key = surnameKey(body.surname);
+  const parts = ['given', 'surname', 'surname_prefix', 'prefix', 'suffix'] as const;
+  if (!existing || parts.some((p) => p in body)) {
+    row.full_text = gedcomName({ ...existing, ...fields });
+  }
   return row;
 }
 
+/** Date columns as the importer fills them; blank text clears them. */
 export function dateColumns(dateText: string | null | undefined) {
   if (!dateText?.trim()) {
     return {
@@ -58,18 +87,7 @@ export function dateColumns(dateText: string | null | undefined) {
       calendar: null,
     };
   }
-  const parsed = parseDate(dateText);
-  return {
-    date_text: dateText,
-    date_qualifier: parsed.qualifier,
-    date_sort: parsed.valid ? parsed.sortKey : null,
-    date_sort_end: parsed.valid ? (parsed.sortKeyEnd ?? null) : null,
-    // Null means gregorian; matches dateColumns in @open-ancestry/import.
-    calendar:
-      !parsed.valid || parsed.calendar === 'gregorian' || parsed.calendar === 'unknown'
-        ? null
-        : parsed.calendar,
-  };
+  return importDateColumns(dateText);
 }
 
 /** Finds a place by its full name (case-insensitive) or creates it. */
@@ -109,6 +127,7 @@ export function createPerson(tx: Tx, body: PersonBody): PersonRow {
   const person = persons.create(tx, fields);
   nameBodies.forEach((n, i) => names.add(tx, person.id, { sort_order: i, ...nameRow(n) }));
   for (const e of eventBodies) createEvent(tx, e, { person_id: person.id });
+  refreshLiving(tx, [person.id], { relatives: false });
   return person;
 }
 
@@ -131,4 +150,124 @@ export function requireRow<
   const row = store.getRow(table, id);
   if (!row) throw notFound(`${table.replace('_', ' ')} ${id} not found`);
   return row;
+}
+
+// ---------------------------------------------------------------- living
+
+const INFERRED = new Set(['inferred_living', 'inferred_dead', 'unknown']);
+const DEATH_FACTS = new Set([...DEATH_EVENTS, ...OTHER_DEATH_FACTS]);
+
+interface PrincipalEvent {
+  type: string;
+  date_text: string | null;
+  is_preferred: number;
+}
+
+function principalEvents(store: TreeStore, personId: string): PrincipalEvent[] {
+  return store
+    .stmt(
+      `SELECT e.type, e.date_text, r.is_preferred FROM event_role r JOIN event e ON e.id = r.event_id
+       WHERE r.person_id = ? AND r.role = 'principal'
+       ORDER BY r.is_preferred DESC, r.sort_order, e.id`,
+    )
+    .all(personId) as PrincipalEvent[];
+}
+
+/** Birth date text the way the importer picks it: BIRT, else a christening or baptism. */
+function birthOf(store: TreeStore, personId: string): string | undefined {
+  const evts = principalEvents(store, personId);
+  for (const types of [['BIRT'], BIRTH_SUBSTITUTES]) {
+    const found = evts.find((e) => types.includes(e.type) && e.date_text);
+    if (found) return found.date_text!;
+  }
+  return undefined;
+}
+
+interface Kin {
+  parents: string[];
+  spouses: string[];
+  children: string[];
+}
+
+function kinOf(store: TreeStore, personId: string): Kin {
+  const ids = (sql: string) =>
+    (store.stmt(sql).all({ id: personId }) as { id: string | null }[])
+      .map((r) => r.id)
+      .filter((id): id is string => !!id && id !== personId);
+  return {
+    parents: ids(
+      `SELECT f.partner1_id AS id FROM family_child fc JOIN family f ON f.id = fc.family_id WHERE fc.child_id = @id
+       UNION SELECT f.partner2_id FROM family_child fc JOIN family f ON f.id = fc.family_id WHERE fc.child_id = @id`,
+    ),
+    spouses: ids(
+      `SELECT partner2_id AS id FROM family WHERE partner1_id = @id
+       UNION SELECT partner1_id FROM family WHERE partner2_id = @id`,
+    ),
+    children: ids(
+      `SELECT fc.child_id AS id FROM family f JOIN family_child fc ON fc.family_id = f.id
+       WHERE f.partner1_id = @id OR f.partner2_id = @id`,
+    ),
+  };
+}
+
+/**
+ * Re-runs living inference (core inferLiving, as the importer does) for the
+ * given people and, with `relatives`, their parents, spouses and children,
+ * whose estimates can depend on them. Explicit living/dead choices are kept.
+ */
+export function refreshLiving(
+  tx: Tx,
+  personIds: Iterable<string>,
+  { relatives = true } = {},
+): void {
+  const store = tx.store;
+  const targets = new Set<string>();
+  for (const id of personIds) {
+    if (!store.getRow('person', id)) continue;
+    targets.add(id);
+    if (relatives) {
+      const kin = kinOf(store, id);
+      for (const k of [...kin.parents, ...kin.spouses, ...kin.children]) targets.add(k);
+    }
+  }
+  for (const id of targets) {
+    const person = store.getRow('person', id);
+    if (!person || !INFERRED.has(person.living)) continue;
+    const evts = principalEvents(store, id);
+    const firstDate = (type: string) => {
+      const found = evts.filter((e) => e.type === type);
+      // Any record of the fact counts, even undated (empty string).
+      return found.length > 0 ? (found.find((e) => e.date_text)?.date_text ?? '') : undefined;
+    };
+    const kin = kinOf(store, id);
+    const births = (list: string[]) =>
+      list.flatMap((k) => {
+        const birth = birthOf(store, k);
+        return birth ? [birth] : [];
+      });
+    const result = inferLiving({
+      birth: birthOf(store, id),
+      death: firstDate('DEAT'),
+      burial: firstDate('BURI'),
+      hasDeathFacts: evts.some(
+        (e) => DEATH_FACTS.has(e.type) && e.type !== 'DEAT' && e.type !== 'BURI',
+      ),
+      parentBirths: births(kin.parents),
+      spouseBirths: births(kin.spouses),
+      childBirths: births(kin.children),
+    });
+    const living = result.living ? 'inferred_living' : 'inferred_dead';
+    if (living !== person.living) persons.update(tx, id, { living });
+  }
+}
+
+/** People with a principal role in an event (for refreshing their living status). */
+export function eventPeople(store: TreeStore, eventId: string): string[] {
+  return (
+    store
+      .stmt(
+        'SELECT DISTINCT person_id AS id FROM event_role WHERE event_id = ? AND person_id IS NOT NULL',
+      )
+      .all(eventId) as { id: string }[]
+  ).map((r) => r.id);
 }

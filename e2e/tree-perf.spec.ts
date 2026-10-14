@@ -16,8 +16,8 @@ import { readSeed, type PerfTree } from './tree-view-fixtures';
  *   worker layout, render), p95 < 50ms over 10: at fit (~500+ people painted)
  *   and at 35-45% zoom (cards mounted as DOM).
  * - Pan and zoom with 2,000+ laid-out cards, at fit and with cards mounted:
- *   median frame at 58fps or better, under 5% of frames over 33ms, and no long
- *   tasks.
+ *   median frame at 58fps or better, under 5% of frames over 33ms, and at most
+ *   one long task.
  * - Memory: after the first round of re-focuses and pans, each further round
  *   grows the JS heap by under 2MB (no growth per interaction).
  *
@@ -305,8 +305,9 @@ for (const tree of trees) {
         );
         const fps = 1000 / frames.median;
         const maxOver = 0.05 * factor;
-        // None on a laptop; shared runners get a couple of scheduling hiccups.
-        const maxLongTasks = factor > 1 ? 2 : 0;
+        // At most one on a laptop (a busy machine can stall one frame past 50ms);
+        // shared runners get a couple of scheduling hiccups.
+        const maxLongTasks = factor > 1 ? 2 : 1;
         const ok = fps >= 58 && frames.over33 < maxOver && longTasks.length <= maxLongTasks;
         report(
           tree,

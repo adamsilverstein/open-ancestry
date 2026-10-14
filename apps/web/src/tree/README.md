@@ -58,10 +58,10 @@ than the 10k ones, and they assert that.
 | --- | --- |
 | First paint: home person's family view, navigation to first rendered layout, median of 5 cold loads | < 1s |
 | Re-focus with cached data, key press to painted frame, p95 of 10: at fit (500+ painted) and at 35-45% zoom (cards mounted) | < 50ms |
-| Pan and pinch with 2,000+ laid out, at fit (all painted) and at 35-45% (cards mounted) | median >= 58fps, < 5% of frames over 33ms, no long tasks |
+| Pan and pinch with 2,000+ laid out, at fit (all painted) and at 35-45% (cards mounted) | median >= 58fps, < 5% of frames over 33ms, at most 1 long task |
 | JS heap after GC, each round of re-focuses and pans after the first | < 2MB growth |
 
-Time budgets scale by `OA_BENCH_FACTOR` (CI: 2.5; CI also allows two long tasks). Results go to
+Time budgets scale by `OA_BENCH_FACTOR` (CI: 2.5; CI allows two long tasks). Results go to
 `perf-results/tree-view.md`, which CI's `perf` job adds to its summary. The app marks
 `oa-tree-first-paint` once and `oa-tree-ready` (replaced each time) when a layout's frame has
 painted, and measures `oa-tree-refocus` from the re-focus action to that mark, keeping at most

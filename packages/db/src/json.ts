@@ -1,4 +1,5 @@
-import { Ajv2020 } from 'ajv/dist/2020.js';
+import { createRequire } from 'node:module';
+import type { Ajv2020 as Ajv2020Class } from 'ajv/dist/2020.js';
 import type { ValidateFunction } from 'ajv';
 import { BulkWriter } from './bulk';
 import { ENUM_COLUMNS } from './enums';
@@ -77,10 +78,22 @@ export interface ImportStringOptions extends ImportOptions {
 
 const validators = new WeakMap<TreeStore, ValidateFunction>();
 
+/**
+ * Ajv is only needed to import a JSON document, so it loads on first use
+ * rather than with every process that opens a tree (server cold start, #54).
+ */
+let Ajv2020: typeof Ajv2020Class | undefined;
+function loadAjv(): typeof Ajv2020Class {
+  Ajv2020 ??= (
+    createRequire(import.meta.url)('ajv/dist/2020.js') as { Ajv2020: typeof Ajv2020Class }
+  ).Ajv2020;
+  return Ajv2020;
+}
+
 function validator(store: TreeStore): ValidateFunction {
   let validate = validators.get(store);
   if (!validate) {
-    validate = new Ajv2020({ allErrors: false, allowUnionTypes: true }).compile(
+    validate = new (loadAjv())({ allErrors: false, allowUnionTypes: true }).compile(
       buildJsonSchema(store),
     );
     validators.set(store, validate);

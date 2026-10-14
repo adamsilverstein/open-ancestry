@@ -1,0 +1,20 @@
+.main {
+  min-height: calc(100dvh - var(--oa-topbar-height));
+  outline: none;
+}
+
+.skipLink {
+  position: absolute;
+  top: var(--oa-space-2);
+  left: var(--oa-space-2);
+  padding: var(--oa-space-2) var(--oa-space-3);
+  border-radius: var(--oa-radius-md);
+  background: var(--oa-accent);
+  color: var(--oa-accent-contrast);
+  translate: 0 -200%;
+  z-index: 100;
+}
+
+.skipLink:focus {
+  translate: 0 0;
+}

@@ -1,0 +1,70 @@
+.topBar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--oa-space-3);
+  height: var(--oa-topbar-height);
+  padding: 0 var(--oa-space-3) 0 var(--oa-space-4);
+  border-bottom: 1px solid var(--oa-border);
+  background: var(--oa-surface);
+  z-index: 20;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oa-space-2);
+  border-radius: var(--oa-radius-sm);
+  color: var(--oa-accent);
+  font-family: var(--oa-font-serif);
+  font-size: 17px;
+  font-weight: var(--oa-weight-semibold);
+  text-decoration: none;
+}
+
+.brand span {
+  color: var(--oa-text);
+}
+
+.divider {
+  width: 1px;
+  height: 20px;
+  background: var(--oa-border);
+}
+
+.treeName {
+  overflow: hidden;
+  color: var(--oa-text-muted);
+  font: var(--oa-text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--oa-space-1);
+  margin-left: auto;
+}
+
+.find {
+  color: var(--oa-text-muted);
+}
+
+.kbd {
+  padding: 0 var(--oa-space-1);
+  border: 1px solid var(--oa-border-strong);
+  border-radius: var(--oa-radius-sm);
+  color: var(--oa-text-muted);
+  font: var(--oa-text-xs);
+  font-family: var(--oa-font-sans);
+}
+
+@media (width < 640px) {
+  .brand span,
+  .divider,
+  .kbd {
+    display: none;
+  }
+}

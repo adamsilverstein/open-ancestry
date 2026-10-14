@@ -279,6 +279,31 @@ test('a partner dropped from the export adds no parent family by default', async
   expect(await parentFamilies('Iris')).toBe(before.iris);
 });
 
+test('match percent and reasons say what differs, and why a new person is new', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const edyth = '0 @I90@ INDI\n1 NAME Edyth /Ashgrove/\n1 SEX F\n1 BIRT\n2 DATE 1897\n';
+  await startReimport(page, seeded, laterExport().replace('0 TRLR', `${edyth}0 TRLR`));
+  // Thaddeus's birth date was refined: not a 100% match, and it says why.
+  const thaddeus = card(page, 'Thaddeus Ashgrove');
+  await expect(thaddeus.getByText(/different birth date/)).toBeVisible();
+  await expect(thaddeus.getByText(/100% match/)).toHaveCount(0);
+  // Edyth names her closest tree person and is not added by default, even in bulk.
+  const card90 = card(page, 'Edyth Ashgrove');
+  await expect(card90.getByText(/closest: Edith Ashgrove, \d+%/)).toBeVisible();
+  const add = card90.getByRole('checkbox', { name: 'Add Edyth Ashgrove' });
+  await expect(add).not.toBeChecked();
+  await page.getByRole('button', { name: 'Accept all high-confidence' }).click();
+  await expect(add).not.toBeChecked();
+  // A genuinely new person says so.
+  await expect(
+    card(page, 'Noah Ashgrove').getByText(/closest:|no one with a similar name/),
+  ).toBeVisible();
+});
+
 test('discarding a review changes nothing', async ({ page, request, baseURL }, testInfo) => {
   const seeded = await seed(request, baseURL!, testInfo);
   await startReimport(page, seeded);

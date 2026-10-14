@@ -354,5 +354,7 @@ describe('undo / redo', () => {
       ),
       { numRuns: 60 },
     );
-  });
+    // Each run builds a SQLite tree and replays up to 48 edits; about 0.7s
+    // alone, but over the 5s default when the whole suite runs in parallel.
+  }, 30_000);
 });

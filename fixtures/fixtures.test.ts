@@ -108,6 +108,14 @@ describe('generateGedcom', () => {
     expect(all.filter((l) => l.tag === 'INDI')).toHaveLength(people);
   });
 
+  it('matches the committed 1k fixture', () => {
+    const committed = readFileSync(
+      join(import.meta.dirname, 'generated', 'synthetic-1000.ged'),
+      'utf8',
+    );
+    expect(committed).toBe(generateGedcom({ people: 1000, seed: 1 }));
+  });
+
   it('includes Ancestry quirks at scale', () => {
     const text = generateGedcom({ people: 1000, seed: 1 });
     const tags = tagsIn(lines(text));

@@ -12,13 +12,14 @@ test('a toast still shows when its chunk cannot load', async ({ page }) => {
   await page.route(/\/assets\/ToastStack-[^/]+\.js$/, (route) => route.abort());
   await page.goto('/design');
   await page.getByRole('button', { name: 'Show toast' }).click();
-  await expect(page.getByRole('status').filter({ hasText: 'Changes saved' })).toBeVisible();
+  const shown = page.getByTestId('toast-fallback').filter({ hasText: 'Changes saved' });
+  await expect(shown).toBeVisible();
+  // Announced through a polite status region.
+  await expect(page.getByRole('status').filter({ hasText: 'Changes saved' })).toHaveCount(1);
   await expect(page.getByRole('banner')).toBeVisible();
   await expect(page.getByRole('heading', { level: 1, name: 'Design system' })).toBeVisible();
   // It goes away on its own like a real toast.
-  await expect(page.getByRole('status').filter({ hasText: 'Changes saved' })).toBeHidden({
-    timeout: 10_000,
-  });
+  await expect(shown).toBeHidden({ timeout: 10_000 });
 });
 
 test('a route whose chunk is gone offers a reload instead of crashing', async ({ page }) => {

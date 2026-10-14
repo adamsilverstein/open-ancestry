@@ -1,12 +1,13 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { cx } from '../../lib/cx';
 import type { ToastItem } from './Toast';
 import styles from './Toast.module.css';
 
 /**
  * Toasts without Radix, for when its chunk cannot load (offline, or a new
- * build replaced the chunk): a polite live region that still shows each
- * message and removes it after its duration.
+ * build replaced the chunk). Each message shows for its duration; the newest
+ * is announced through one polite status region that is cleared and then
+ * set, which screen readers pick up more reliably than inserted nodes.
  */
 export function ToastFallback({
   toasts,
@@ -15,22 +16,41 @@ export function ToastFallback({
   toasts: ToastItem[];
   onRemove: (id: number) => void;
 }) {
+  const [announcement, setAnnouncement] = useState('');
+  const latest = toasts.at(-1);
+  const latestText = latest ? [latest.title, latest.description].filter(Boolean).join('. ') : '';
+
   useEffect(() => {
     const timers = toasts.map(({ id, duration = 5000 }) =>
       setTimeout(() => onRemove(id), duration),
     );
     return () => timers.forEach(clearTimeout);
   }, [toasts, onRemove]);
+
+  useEffect(() => {
+    if (!latestText) return;
+    const frame = requestAnimationFrame(() => setAnnouncement(latestText));
+    return () => {
+      cancelAnimationFrame(frame);
+      setAnnouncement('');
+    };
+  }, [latest?.id, latestText]);
+
   return (
-    <ol className={styles.viewport} aria-label="Notifications">
-      {toasts.map(({ id, title, description, variant = 'info' }) => (
-        <li key={id} role="status" className={cx(styles.toast, styles[variant])}>
-          <div className={styles.body}>
-            <p className={styles.title}>{title}</p>
-            {description && <p className={styles.description}>{description}</p>}
-          </div>
-        </li>
-      ))}
-    </ol>
+    <>
+      <div role="status" aria-live="polite" className="oa-visually-hidden">
+        {announcement}
+      </div>
+      <ol className={styles.viewport} aria-hidden>
+        {toasts.map(({ id, title, description, variant = 'info' }) => (
+          <li key={id} className={cx(styles.toast, styles[variant])} data-testid="toast-fallback">
+            <div className={styles.body}>
+              <p className={styles.title}>{title}</p>
+              {description && <p className={styles.description}>{description}</p>}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </>
   );
 }

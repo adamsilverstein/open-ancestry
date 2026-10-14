@@ -57,15 +57,17 @@ function slice(focusId: string, parents: Record<string, string[]>, sexes: Record
   const families: Neighborhood['families'] = [];
   const children: Neighborhood['children'] = [];
   for (const [child, [p1, p2]] of Object.entries(parents)) {
-    const id = `F-${child}`;
-    families.push({
-      id,
-      partner1Id: p1 ?? null,
-      partner2Id: p2 ?? null,
-      relationshipType: 'married',
-      partner1Order: 0,
-      partner2Order: 0,
-    });
+    // Siblings share their parents' family, as in the database.
+    const id = `F-${p1}+${p2}`;
+    if (!families.some((f) => f.id === id))
+      families.push({
+        id,
+        partner1Id: p1 ?? null,
+        partner2Id: p2 ?? null,
+        relationshipType: 'married',
+        partner1Order: 0,
+        partner2Order: 0,
+      });
     children.push({
       familyId: id,
       childId: child,

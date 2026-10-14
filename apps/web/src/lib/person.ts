@@ -1,3 +1,5 @@
+import type { LivingStatus } from '@open-ancestry/db';
+import type { ApiPersonSummary, EventBrief } from '../api/types';
 import type { LifeDate } from './lifespan';
 
 export type Sex = 'M' | 'F' | 'U';
@@ -29,4 +31,48 @@ export function initials(name: string): string {
   const first = parts[0]?.[0] ?? '';
   const last = parts.length > 1 ? (parts.at(-1)?.[0] ?? '') : '';
   return (first + last).toUpperCase() || '?';
+}
+
+// ------------------------------------------------------------ API adapters
+
+const QUALIFIER: Partial<Record<string, LifeDate['qualifier']>> = {
+  about: 'abt',
+  before: 'bef',
+  after: 'aft',
+  estimated: 'est',
+  calculated: 'cal',
+};
+
+/** Mirrors packages/db `isLiving`: unknown counts as living for privacy. */
+export function isLivingStatus(status: LivingStatus): boolean {
+  return status !== 'dead' && status !== 'inferred_dead';
+}
+
+export function fullName(person: ApiPersonSummary): string {
+  const name = [person.prefix, person.given, person.surnamePrefix, person.surname, person.suffix]
+    .filter((part) => part?.trim())
+    .join(' ');
+  return name || 'Unknown name';
+}
+
+/** Year-level date for LifespanText from an API event brief. */
+export function lifeDate(event: EventBrief | null): LifeDate | undefined {
+  if (!event?.dateSort) return undefined;
+  return {
+    year: Math.trunc(event.dateSort / 10000),
+    qualifier: QUALIFIER[event.dateQualifier ?? ''],
+  };
+}
+
+/** API summary to the shape PersonCard, Avatar and RelationshipList take. */
+export function toPersonSummary(person: ApiPersonSummary, photoUrl?: string): PersonSummary {
+  return {
+    id: person.id,
+    name: fullName(person),
+    sex: person.sex === 'M' || person.sex === 'F' ? person.sex : 'U',
+    birth: lifeDate(person.birth),
+    death: lifeDate(person.death),
+    living: !person.death && isLivingStatus(person.living),
+    photoUrl,
+  };
 }

@@ -94,7 +94,7 @@ test.describe('tabs', () => {
     );
     await expect(panel).toContainText('He married Iris Vale on 14 Jun 1905 in Ashcombe, Eastholm.');
     await expect(panel).toContainText(
-      'He died on 3 Nov 1950 in Thornbury, Northvale, at the age of 70.',
+      'He died on 3 Nov 1950 in Thornbury, Northvale, at the age of 70, and was buried in Thornbury, Northvale.',
     );
   });
 });

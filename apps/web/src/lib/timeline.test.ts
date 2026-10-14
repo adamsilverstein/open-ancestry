@@ -59,7 +59,7 @@ describe('buildTimeline', () => {
   it('filters by category', () => {
     const visible = filterTimeline(entries, new Set(['family', 'work']));
     expect(visible.every((e) => e.category !== 'family' && e.category !== 'work')).toBe(true);
-    expect(visible).toHaveLength(entries.length - 8);
+    expect(visible).toHaveLength(entries.length - 10);
     expect(timelineCategories.map((c) => c.label)).toEqual([
       'Life events',
       'Family events',

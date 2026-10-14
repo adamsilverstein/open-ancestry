@@ -750,6 +750,22 @@ test.describe('generation depth in the URL', () => {
       expect(down).toBeGreaterThanOrEqual(0);
     }
   });
+
+  for (const value of ['abc', '', '%20']) {
+    test(`a non-numeric depth (${JSON.stringify(value)}) falls back to the default`, async ({
+      page,
+    }) => {
+      const seen = depths(page);
+      await open(page, 'ada', `&up=${value}&down=${value}`);
+      await expect(card(page, 'Ada Vale')).toBeAttached();
+      // The family view's defaults are 3 up and 2 down, never 0.
+      expect(seen.length).toBeGreaterThan(0);
+      for (const { up, down } of seen) {
+        expect(up).toBeGreaterThanOrEqual(3);
+        expect(down).toBeGreaterThanOrEqual(2);
+      }
+    });
+  }
 });
 
 test.describe('visual snapshots', () => {

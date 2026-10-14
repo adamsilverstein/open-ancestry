@@ -22,9 +22,13 @@ const treeDir = () => join(root, 'Test.oatree');
 function addMedia(fields: Record<string, unknown>, owner?: { type: string; id: string }) {
   const store = library.open('Test');
   return store.transact('media', (tx) => {
-    const id = tx.insert('media', { kind: 'photo', ...fields });
+    const id = tx.insert('media', { kind: 'photo', ...fields }).id;
     if (owner)
-      tx.insert('media_link', { media_id: id, owner_type: owner.type, owner_id: owner.id });
+      tx.insert('media_link', {
+        media_id: id,
+        owner_type: owner.type as 'person' | 'event',
+        owner_id: owner.id,
+      });
     return id;
   }).result;
 }
@@ -214,13 +218,17 @@ describe('attaching media', () => {
     expect(await readdir(join(treeDir(), 'media', 'attached'))).toHaveLength(1);
     const items = (await api.get(`${s.base}/people/${s.ada}/media`)).json().items as {
       media: { id: string };
-      owner: { type: string; id: string; event?: { type: string; date_text: string | null } };
+      owners: { type: string; id: string; event?: { type: string; date_text: string | null } }[];
     }[];
-    expect(items.map((i) => i.owner.type).sort()).toEqual(['event', 'person']);
-    expect(items.find((i) => i.owner.type === 'event')!.owner).toMatchObject({
-      id: birth,
-      event: { type: 'BIRT', date_text: '5 SEP 1941' },
-    });
+    expect(items).toHaveLength(1);
+    expect(items[0]!.owners).toEqual([
+      { type: 'person', id: s.ada },
+      expect.objectContaining({
+        type: 'event',
+        id: birth,
+        event: expect.objectContaining({ type: 'BIRT', date_text: '5 SEP 1941' }),
+      }),
+    ]);
   });
 
   it('keeps unknown file types inert and confines odd names to the attached folder', async () => {
@@ -269,10 +277,10 @@ describe('person media', () => {
     );
     const res = await api.get(`${s.base}/people/${s.ada}/media`);
     expect(res.statusCode).toBe(200);
-    const items = res.json().items as { media: { id: string }; owner: { type: string } }[];
-    expect(items.map((i) => [i.media.id, i.owner.type])).toEqual([
-      [shared, 'person'],
-      [remote, 'event'],
+    const items = res.json().items as { media: { id: string }; owners: { type: string }[] }[];
+    expect(items.map((i) => [i.media.id, i.owners.map((o) => o.type)])).toEqual([
+      [shared, ['person', 'event']],
+      [remote, ['event']],
     ]);
     expect((await api.get(`${s.base}/people/01NOPE0000000000000000000/media`)).statusCode).toBe(
       404,

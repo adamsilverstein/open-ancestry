@@ -139,10 +139,10 @@ test('attaches a file from disk to the person or an event, once per content', as
 
   const items = (await (
     await page.request.get(`/api/trees/${MEDIA_TREE}/people/${MEDIA_IDS.imogen}/media`)
-  ).json()) as { items: { media: { id: string; title: string } }[] };
+  ).json()) as { items: { media: { title: string }; owners: { type: string }[] }[] };
   const ours = items.items.filter((i) => i.media.title === title);
-  expect(ours).toHaveLength(2);
-  expect(new Set(ours.map((i) => i.media.id)).size).toBe(1);
+  expect(ours).toHaveLength(1);
+  expect(ours[0]!.owners.map((o) => o.type)).toEqual(['person', 'event']);
 });
 
 test('virtualizes a large gallery', async ({ page }) => {

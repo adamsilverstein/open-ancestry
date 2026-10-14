@@ -19,6 +19,8 @@ import { importRoutes, sweepStaleUploads } from './routes/imports';
 import { mediaRoutes } from './routes/media';
 import { peopleRoutes } from './routes/people';
 import { treeRoutes } from './routes/trees';
+import { galleryRoutes } from './routes/gallery';
+import { ThumbnailQueue } from './thumbnails';
 import { SECURITY_HEADERS, createToken, isLoopbackHost, registerSecurity } from './security';
 import { sendShell } from './shell';
 
@@ -126,6 +128,7 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     jobs,
     importer: options.importer,
     uploadLimit: options.uploadLimit ?? DEFAULT_UPLOAD_LIMIT,
+    thumbnails: new ThumbnailQueue(),
   };
 
   registerErrorHandling(app);
@@ -156,6 +159,7 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     editRoutes(typed, deps);
     importRoutes(typed, deps);
     mediaRoutes(typed, deps);
+    galleryRoutes(typed, deps);
   });
 
   const { staticDir } = options;
@@ -187,6 +191,7 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
 
   app.addHook('onClose', async () => {
     await jobs.shutdown();
+    await deps.thumbnails.idle();
     library.closeAll();
   });
 

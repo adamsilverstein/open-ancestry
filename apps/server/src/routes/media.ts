@@ -4,8 +4,8 @@ import { resolve, sep } from 'node:path';
 import { treePaths } from '@open-ancestry/db';
 import type { FastifyReply } from 'fastify';
 import type { Api, Deps } from '../context';
-import { ApiError, errorBody, notFound } from '../errors';
-import { MediaThumbParams, TreeIdParams } from '../schemas';
+import { errorBody, notFound } from '../errors';
+import { TreeIdParams } from '../schemas';
 
 /*
  * Media comes from untrusted GEDCOM/GEDZIP files, so neither media.mime nor
@@ -143,14 +143,6 @@ export function mediaRoutes(app: Api, { library }: Deps): void {
       }
       reply.header('content-length', info.size);
       return reply.send(createReadStream(file));
-    },
-  );
-
-  app.get(
-    '/api/trees/:tree/media/:id/thumb/:size',
-    { schema: { params: MediaThumbParams } },
-    async () => {
-      throw new ApiError(404, 'not_found', 'Thumbnails are not available yet');
     },
   );
 }

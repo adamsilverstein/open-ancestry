@@ -1853,8 +1853,30 @@
       }
     ]
   },
+  "CheckKey": {
+    "type": "string",
+    "maxLength": 300,
+    "pattern": "^[a-z-]+:[0-9A-Za-z_+:-]+$"
+  },
   "ChildRel": {
     "enum": ["biological", "adopted", "step", "foster", "related", "guardian", "private", "unknown"]
+  },
+  "DismissBody": {
+    "type": "object",
+    "required": ["keys"],
+    "properties": {
+      "keys": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "maxLength": 300,
+          "pattern": "^[a-z-]+:[0-9A-Za-z_+:-]+$"
+        },
+        "minItems": 1,
+        "maxItems": 5000
+      }
+    },
+    "additionalProperties": false
   },
   "EventBody": {
     "type": "object",

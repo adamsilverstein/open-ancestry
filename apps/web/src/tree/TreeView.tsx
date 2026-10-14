@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -161,20 +160,25 @@ type Corner = 'left' | 'right' | 'collapsed';
 /** Screen gap between the minimap and the canvas edges. */
 const MINIMAP_INSET = 16;
 
+/** How long the view must rest before the minimap re-checks its corner. */
+const MINIMAP_SETTLE_MS = 150;
+
 /**
  * Where the minimap may sit: its bottom-left corner, else bottom-right, else
  * nowhere, so it never covers a row label or the keyboard's active card.
- * Re-checked after every pan or zoom (`viewport` changes).
+ * Re-checked once a pan, zoom or re-focus settles (`viewport` stops changing),
+ * and it stays in its corner while that corner is free, so it never flips
+ * back and forth mid-gesture.
  */
 function useMinimapCorner(ref: RefObject<HTMLDivElement | null>, viewport: Rect): Corner {
   const size = useRef({ width: 0, height: 0 });
   const [value, setValue] = useState<Corner>('left');
-  useLayoutEffect(() => {
+  const current = useRef(value);
+  useEffect(() => {
     const el = ref.current;
     const container = el?.parentElement;
     if (!el || !container) return;
-    // Measure after the canvas has placed this frame's labels.
-    const frame = requestAnimationFrame(() => {
+    const timer = setTimeout(() => {
       if (!el.hidden) {
         const own = el.getBoundingClientRect();
         if (own.width) size.current = { width: own.width, height: own.height };
@@ -184,24 +188,35 @@ function useMinimapCorner(ref: RefObject<HTMLDivElement | null>, viewport: Rect)
       const box = container.getBoundingClientRect();
       const obstacles = [
         ...container.querySelectorAll<HTMLElement>(
-          '[data-testid="tree-row-label"], [data-key][tabindex="0"]',
+          '[data-testid="tree-row-label"]:not([data-thin]), [data-key][tabindex="0"]',
         ),
       ]
         .filter((o) => !o.closest('[hidden]'))
         .map((o) => o.getBoundingClientRect())
         .filter((r) => r.width > 0);
       const top = box.bottom - MINIMAP_INSET - height;
-      const free = (left: number) =>
+      const leftOf: Record<'left' | 'right', number> = {
+        left: box.left + MINIMAP_INSET,
+        right: box.right - MINIMAP_INSET - width,
+      };
+      const free = (corner: 'left' | 'right') =>
         !obstacles.some(
-          (r) => r.left < left + width && left < r.right && r.top < top + height && top < r.bottom,
+          (r) =>
+            r.left < leftOf[corner] + width &&
+            leftOf[corner] < r.right &&
+            r.top < top + height &&
+            top < r.bottom,
         );
-      const left = box.left + MINIMAP_INSET;
-      const right = box.right - MINIMAP_INSET - width;
+      const was = current.current;
+      // The corner it is in first, then the left, then the right.
+      const order = was === 'right' ? (['right', 'left'] as const) : (['left', 'right'] as const);
       // Never hide the minimap while it has keyboard focus (arrow keys pan from it).
       const focused = el.contains(document.activeElement);
-      setValue(free(left) ? 'left' : free(right) || focused ? 'right' : 'collapsed');
-    });
-    return () => cancelAnimationFrame(frame);
+      const next = order.find(free) ?? (focused && was !== 'collapsed' ? was : 'collapsed');
+      current.current = next;
+      setValue(next);
+    }, MINIMAP_SETTLE_MS);
+    return () => clearTimeout(timer);
   }, [ref, viewport]);
   return value;
 }

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MAX_SEARCH_LENGTH,
   MAX_SEARCH_WORDS,
+  MIN_PREFIX_LENGTH,
   events,
   names,
   persons,
@@ -172,6 +174,20 @@ describe('searchPeople', () => {
     const many = ['jose', 'muller', ...Array.from({ length: 20 }, (_, i) => `zz${i}`)].join(' ');
     expect(searchPeople(store, many)).toEqual([]);
     expect(MAX_SEARCH_WORDS).toBe(8);
+    store.close();
+  });
+
+  it('matches a single letter only as a whole word and ignores text past the length cap', () => {
+    const store = memoryTree();
+    const { result } = store.transact('add', (tx) => ({
+      initial: persons.create(tx, { names: [{ given: 'J', surname: 'Pike' }] }).id,
+      full: persons.create(tx, { names: [{ given: 'Jory', surname: 'Pike' }] }).id,
+    }));
+    expect(searchPeople(store, 'j pike').map((r) => r.person.id)).toEqual([result.initial]);
+    expect(searchPeople(store, 'jo pike').map((r) => r.person.id)).toEqual([result.full]);
+    expect(MIN_PREFIX_LENGTH).toBe(2);
+    const padded = `${' '.repeat(MAX_SEARCH_LENGTH)}pike`;
+    expect(searchPeople(store, padded)).toEqual([]);
     store.close();
   });
 });

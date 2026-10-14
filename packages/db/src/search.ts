@@ -117,6 +117,10 @@ export interface SearchResult {
 
 const quote = (token: string) => `"${token.replaceAll('"', '""')}"`;
 const TIERS: readonly SearchMatch[] = ['exact', 'prefix', 'phonetic'];
+/** Characters of the query used; the rest is ignored. */
+export const MAX_SEARCH_LENGTH = 100;
+/** Shortest word matched as a prefix. */
+export const MIN_PREFIX_LENGTH = 2;
 /** Distinct query words searched; the rest are ignored. */
 export const MAX_SEARCH_WORDS = 8;
 /** A year in the query also matches events this many years either side (prefix tier and below). */
@@ -132,7 +136,10 @@ function wordMatch(word: string, tier: SearchMatch, keys: string[]): string {
         : Array.from({ length: 2 * YEAR_SLACK + 1 }, (_, i) => year - YEAR_SLACK + i);
     return `years : (${years.map((y) => quote(String(y))).join(' OR ')})`;
   }
-  const text = `{names places years} : ${quote(word)}${tier === 'exact' ? '' : '*'}`;
+  // One-character prefixes are not in the FTS prefix index (2 and 3) and match
+  // most of a big tree, so a lone letter only matches exactly (an initial).
+  const prefix = tier !== 'exact' && [...word].length >= MIN_PREFIX_LENGTH;
+  const text = `{names places years} : ${quote(word)}${prefix ? '*' : ''}`;
   return tier === 'phonetic' && keys.length > 0
     ? `(${text} OR phonetic : (${keys.map(quote).join(' OR ')}))`
     : `(${text})`;
@@ -153,7 +160,14 @@ export function searchPeople(
   // NFC so decomposed input (pasted from PDFs, macOS) tokenizes like typed text;
   // distinct and capped so a long repetitive query cannot stall the server.
   const words = [
-    ...new Set((query.normalize('NFC').match(/[\p{L}\p{N}]+/gu) ?? []).map((w) => w.toLowerCase())),
+    ...new Set(
+      (
+        query
+          .normalize('NFC')
+          .slice(0, MAX_SEARCH_LENGTH)
+          .match(/[\p{L}\p{N}]+/gu) ?? []
+      ).map((w) => w.toLowerCase()),
+    ),
   ].slice(0, MAX_SEARCH_WORDS);
   if (words.length === 0 || limit < 1) return [];
   const keysFor = (word: string, index: number): string[] => {

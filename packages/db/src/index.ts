@@ -25,7 +25,9 @@ export {
 export * from './repositories';
 export * from './queries';
 export {
+  MAX_SEARCH_LENGTH,
   MAX_SEARCH_WORDS,
+  MIN_PREFIX_LENGTH,
   YEAR_SLACK,
   rebuildSearchIndex,
   searchPeople,

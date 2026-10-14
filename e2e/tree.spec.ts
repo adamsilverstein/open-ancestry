@@ -603,6 +603,61 @@ test.describe('family view', () => {
   }
 });
 
+test.describe('pedigree, descendant and fan views', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  /** True when the locator's box lies inside the tree canvas. */
+  async function inView(page: Page, locator: Locator) {
+    const view = await box(canvas(page));
+    const b = await box(locator);
+    return (
+      b.x >= view.x - 1 &&
+      b.y >= view.y - 1 &&
+      b.x + b.width <= view.x + view.width + 1 &&
+      b.y + b.height <= view.y + view.height + 1
+    );
+  }
+
+  test('the pedigree opens with the focus person at the left and every generation on screen', async ({
+    page,
+  }) => {
+    await open(page, 'ada', '&layout=pedigree');
+    await settled(page);
+    const view = await box(canvas(page));
+    const ada = await box(card(page, 'Ada Vale'));
+    expect(ada.x - view.x).toBeLessThan(view.width / 4);
+    // Compact cards, so four generations of ancestors fit.
+    expect(ada.width).toBeLessThan(100);
+    for (const name of ['Bram Vale', 'Elsa Hale', 'Otto Vale', 'Abel Vale', 'Lena Frost']) {
+      expect(await inView(page, card(page, name).first())).toBe(true);
+    }
+  });
+
+  test('the descendant chart opens with the focus person near the top', async ({ page }) => {
+    await open(page, 'bram', '&layout=descendants');
+    await settled(page);
+    const view = await box(canvas(page));
+    const bram = await box(card(page, 'Bram Vale'));
+    expect(bram.y - view.y).toBeLessThan(view.height / 4);
+    for (const name of ['Hugo Vale', 'Ada Vale', 'Ilsa Vale', 'Wren Ash']) {
+      expect(await inView(page, card(page, name))).toBe(true);
+    }
+  });
+
+  test('the fan chart fits the screen and marks unknown parents as empty slots', async ({
+    page,
+  }) => {
+    await open(page, 'ada', '&layout=fan');
+    await settled(page);
+    const fan = page.getByTestId('tree-fan');
+    expect(await inView(page, fan)).toBe(true);
+    // Rhea Lund's parents are unknown: their two slots are drawn empty, not left as a gap.
+    const empty = page.getByTestId('fan-empty-slot');
+    await expect(empty).not.toHaveCount(0);
+    await expect(empty.first()).toHaveAttribute('aria-hidden', 'true');
+  });
+});
+
 test.describe('visual snapshots', () => {
   // Baselines are Linux Chromium only, like design.spec.ts.
   test.skip(

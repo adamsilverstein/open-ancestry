@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { layoutFamily } from './index';
 import { crossings, describeLayout, makeGraph, siblings } from './test-graphs';
 import type { FamilySpec } from './test-graphs';
-import type { LayoutNode, TreeLayout } from './types';
+import type { ExpandKey, LayoutNode, TreeLayout } from './types';
 
 const node = (layout: TreeLayout, key: string): LayoutNode => {
   const found = layout.nodes.find((n) => n.key === key);
@@ -234,5 +234,45 @@ describe('sibling chevrons', () => {
     expect(node(left, 'uncle').x).toBeLessThan(node(left, 'dad').x);
     expect(node(left, 'c').x).toBeLessThan(0);
     expect(crossings(left.edges)).toEqual([]);
+  });
+});
+
+describe('connector band', () => {
+  it('keeps jogging connectors at least 8px apart when many families share a row', () => {
+    // A grandmother with ten married children (the father and nine aunts and
+    // uncles), each with three children: every family's connector jogs out.
+    const people: Record<string, 'M' | 'F'> = { gpa: 'M', gma: 'F', me: 'M', mom: 'F' };
+    const fams: FamilySpec[] = [];
+    const kids = ['dad', ...Array.from({ length: 9 }, (_, i) => `aunt${i}`)];
+    fams.push(['Fg', 'gpa', 'gma', kids]);
+    for (const [i, kid] of kids.entries()) {
+      people[kid] = i === 0 ? 'M' : 'F';
+      if (i === 0) continue;
+      people[`${kid}h`] = 'M';
+      const cousins = [0, 1, 2].map((j) => `${kid}c${j}`);
+      for (const c of cousins) people[c] = 'M';
+      fams.push([`F_${kid}`, `${kid}h`, kid, cousins]);
+    }
+    fams.push(['Fme', 'dad', 'mom', ['me']]);
+    const g = makeGraph(people, fams);
+    const layout = layoutFamily(g, 'me', {
+      siblingsDepth: 3,
+      expanded: kids.slice(1).map((k): ExpandKey => `${k}:down`),
+    });
+    expect(crossings(layout.edges)).toEqual([]);
+    // Horizontal jog levels of the drops into the focus row.
+    const levels = [
+      ...new Set(
+        layout.edges
+          .filter((e) => e.kind === 'parent-child' && e.parents && e.points.length === 4)
+          .filter((e) => e.points.at(-1)![1] < 0 && e.points.at(-1)![1] > -64 - 150)
+          .map((e) => e.points[1]![1]),
+      ),
+    ].sort((a, b) => a - b);
+    expect(levels.length).toBeGreaterThan(4);
+    for (let i = 1; i < levels.length; i++) {
+      expect(levels[i]! - levels[i - 1]!).toBeGreaterThanOrEqual(8);
+    }
+    expect([node(layout, 'me').x, node(layout, 'me').y]).toEqual([0, 0]);
   });
 });

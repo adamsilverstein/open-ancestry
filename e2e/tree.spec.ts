@@ -44,6 +44,12 @@ async function focusedOn(page: Page, name: string) {
   await settled(page);
 }
 
+/** Waits for the minimap's pending corner check, so it is in its final corner. */
+async function minimapRested(page: Page) {
+  const minimap = page.getByTestId('tree-minimap');
+  if (await minimap.count()) await expect(minimap).not.toHaveAttribute('data-settling');
+}
+
 /** Waits for pan/zoom animations to finish. */
 async function settled(page: Page) {
   await expect(world(page)).not.toHaveAttribute('data-animating');
@@ -562,18 +568,7 @@ test.describe('family view', () => {
     await expect(minimap).toBeVisible();
     // The minimap may change corners once the view rests (150ms): measure it after.
     const rested = async () => {
-      let last = '';
-      await expect
-        .poll(
-          async () => {
-            const now = JSON.stringify(await box(minimap));
-            const same = now === last;
-            last = now;
-            return same;
-          },
-          { intervals: [250] },
-        )
-        .toBe(true);
+      await minimapRested(page);
       return box(minimap);
     };
     let m = await rested();
@@ -1134,16 +1129,16 @@ test.describe('wide descendant charts (#74)', () => {
       const active = canvas(page).locator('[data-key][tabindex="0"]');
       for (const a of await visibleBoxes(active)) expect(intersects(m[0]!, a)).toBe(false);
     };
-    // The minimap re-checks one frame after each pan.
+    // The minimap re-checks its corner 150ms after each pan settles.
     await expect(check).toPass({ timeout: 2000 });
     // Bring the focus card and the lowest rows down to the bottom-left corner:
     // the minimap gets out of the way.
     await drag(page, -150, 250);
-    // The minimap re-checks one frame after each pan.
+    // The minimap re-checks its corner 150ms after each pan settles.
     await expect(check).toPass({ timeout: 2000 });
     await expect(minimap).not.toHaveAttribute('data-corner', 'left');
     await drag(page, 300, 0);
-    // The minimap re-checks one frame after each pan.
+    // The minimap re-checks its corner 150ms after each pan settles.
     await expect(check).toPass({ timeout: 2000 });
   });
 });
@@ -1167,6 +1162,7 @@ test.describe('visual snapshots', () => {
           await settled(page);
         }
       }
+      await minimapRested(page);
       await page.evaluate(() => document.fonts.ready);
       await expect(canvas(page)).toHaveScreenshot(`tree-descendants-wide-${zoom}.png`);
     });
@@ -1177,6 +1173,7 @@ test.describe('visual snapshots', () => {
       await page.setViewportSize({ width: 1280, height: 800 });
       await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
       await open(page);
+      await minimapRested(page);
       await page.evaluate(() => document.fonts.ready);
       await expect(canvas(page)).toHaveScreenshot(`tree-family-${colorScheme}.png`);
     });

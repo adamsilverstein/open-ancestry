@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -174,11 +175,17 @@ function useMinimapCorner(ref: RefObject<HTMLDivElement | null>, viewport: Rect)
   const size = useRef({ width: 0, height: 0 });
   const [value, setValue] = useState<Corner>('left');
   const current = useRef(value);
+  // `data-settling` marks a pending check, so tests (and screenshots) can wait
+  // for the final corner. Written to the DOM: no re-render per pan frame.
+  useLayoutEffect(() => {
+    if (ref.current) ref.current.dataset.settling = '';
+  }, [ref, viewport]);
   useEffect(() => {
     const el = ref.current;
     const container = el?.parentElement;
     if (!el || !container) return;
     const timer = setTimeout(() => {
+      delete el.dataset.settling;
       if (!el.hidden) {
         const own = el.getBoundingClientRect();
         if (own.width) size.current = { width: own.width, height: own.height };

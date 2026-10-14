@@ -57,6 +57,10 @@ describe('re-import labels', () => {
       [{ ...base, kind: 'child.add', parentNames: [] }, 'Child of unknown'],
       [{ ...base, kind: 'person.missing' }, 'Not in the new export'],
       [
+        { ...base, kind: 'possibly-merged', existingName: 'Josiah Ashgrove' },
+        'Possibly merged into Josiah Ashgrove earlier (shares a relative); not added unless you tick it',
+      ],
+      [
         { ...base, kind: 'merged', incomingName: 'Thad Ashgrove' },
         'Exported separately as Thad Ashgrove; previously merged into Noah Ashgrove, so not added again',
       ],

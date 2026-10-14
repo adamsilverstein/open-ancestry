@@ -68,7 +68,9 @@ export type ReimportChange =
     }
   | { kind: 'person.missing' }
   /** Another exported record that was merged into this person here: folded in, never added. */
-  | { kind: 'merged'; incomingId: string; incomingName: string };
+  | { kind: 'merged'; incomingId: string; incomingName: string }
+  /** An unmatched record that shares a relative with someone merged here: likely the same person. */
+  | { kind: 'possibly-merged'; existingId: string; existingName: string };
 
 export type ReviewChange = ReimportChange & {
   id: string;
@@ -421,9 +423,29 @@ export function diffTrees(
     }
   }
 
+  // People merged here who absorbed fewer exported records than were merged into them.
+  const spare = new Map<string, number>();
+  for (const owner of existing.importXrefs.values()) spare.set(owner, (spare.get(owner) ?? 0) + 1);
+  for (const m of matches.values()) spare.set(m.existingId, (spare.get(m.existingId) ?? 1) - 1);
+  // Almost everyone has exactly the records they matched: keep only those with room left.
+  for (const [id, left] of spare) if (left <= 0) spare.delete(id);
+  const relativesOf = (p: SnapPerson) => [...p.parents, ...p.spouses, ...p.children];
+  /** A merged person with room left who shares a parent, partner or child with `i`. */
+  const possiblyMerged = (i: SnapPerson): SnapPerson | undefined => {
+    const mapped = new Set(relativesOf(i).flatMap((r) => toExisting.get(r) ?? []));
+    if (!mapped.size) return undefined;
+    for (const [id, left] of spare) {
+      if (left <= 0) continue;
+      const e = existing.people.get(id);
+      if (e && relativesOf(e).some((r) => mapped.has(r))) return e;
+    }
+    return undefined;
+  };
+
   // New people.
   for (const i of incoming.people.values()) {
     if (toExisting.has(i.row.id)) continue;
+    const suspect = possiblyMerged(i);
     const r = review(`n:${i.row.id}`, () => ({
       key: `n:${i.row.id}`,
       status: 'new',
@@ -435,7 +457,22 @@ export function diffTrees(
       reasons: [],
       changes: [],
     }));
-    newPersonChange.set(i.row.id, adder(r, {})({ kind: 'person.new', incomingId: i.row.id }).id);
+    if (suspect) {
+      // Until merges are recorded as aliases (#70), a shared relative is the hint: never pre-ticked.
+      adder(r, { applicable: false, defaultAccept: false })({
+        kind: 'possibly-merged',
+        existingId: suspect.row.id,
+        existingName: displayName(suspect),
+      });
+      spare.set(suspect.row.id, (spare.get(suspect.row.id) ?? 1) - 1);
+    }
+    newPersonChange.set(
+      i.row.id,
+      adder(
+        r,
+        suspect ? { defaultAccept: false } : {},
+      )({ kind: 'person.new', incomingId: i.row.id }).id,
+    );
   }
 
   // Relationships: incoming families mapped onto existing people and new people.

@@ -227,6 +227,13 @@ describe('after people were merged in the tree (#70)', () => {
         tx.delete('event_role', r.id);
         tx.delete('event', r.event_id);
       }
+      for (const c of rows<{ id: string }>(
+        tree,
+        'SELECT id FROM family_child WHERE child_id = ?',
+        other,
+      )) {
+        tx.delete('family_child', c.id);
+      }
       tx.delete('person', other);
     });
     return keep;
@@ -368,6 +375,47 @@ describe('after people were merged in the tree (#70)', () => {
     } finally {
       closeReimport(merged);
       tree.close();
+    }
+  });
+
+  it('marks an unmatched record that shares a parent with a merged person, unticked', async () => {
+    // A duplicate of Josiah recorded under another name, as a child of the same parents.
+    const dup = SAMPLE.replace(
+      '0 @I2@ INDI',
+      ['0 @I30@ INDI', '1 NAME J. /Smythe/', '1 SEX M', '1 FAMC @F1@', '0 @I2@ INDI'].join('\n'),
+    ).replace('1 CHIL @I4@', '1 CHIL @I4@\n1 CHIL @I30@');
+    const tree = openMemoryTree();
+    await importGedcom({ bytes: dup }, tree, { today: TODAY });
+    const keep = mergeLocally(tree, '@I3@', '@I30@');
+    const merged = await prepareReimport(tree, { bytes: renumber(dup, 500) }, { today: TODAY });
+    try {
+      const review = merged.diff.people.find((p) => p.name === 'J. Smythe')!;
+      expect(review.status).toBe('new');
+      expect(review.changes.map((c) => [c.kind, c.defaultAccept])).toEqual([
+        ['possibly-merged', false],
+        ['person.new', false],
+        ['child.add', true],
+      ]);
+      expect(review.changes[0]).toMatchObject({
+        existingId: keep,
+        existingName: 'Josiah Ashgrove',
+      });
+      // Applying the defaults brings nobody back: the child link needs the unticked person.
+      const result = applyReimport(tree, merged, defaults(merged), 'Re-import');
+      expect(result.blocked).toHaveLength(1);
+      expect(value(tree, "SELECT count(*) FROM person_name WHERE surname = 'Smythe'")).toBe(0);
+    } finally {
+      closeReimport(merged);
+      tree.close();
+    }
+    // Without a merge, the same stranger is an ordinary new person.
+    const plain = await prepareReimport(store, { bytes: renumber(dup, 500) }, { today: TODAY });
+    try {
+      const review = plain.diff.people.find((p) => p.name === 'J. Smythe')!;
+      expect(review.changes.map((c) => c.kind)).toEqual(['person.new', 'child.add']);
+      expect(review.changes[0]!.defaultAccept).toBe(true);
+    } finally {
+      closeReimport(plain);
     }
   });
 

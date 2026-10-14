@@ -61,6 +61,8 @@ export function describeChange(change: ReviewChange, personName: string): string
       return `Child of ${list(change.parentNames)}`;
     case 'person.missing':
       return 'Not in the new export';
+    case 'possibly-merged':
+      return `Possibly merged into ${change.existingName} earlier (shares a relative); not added unless you tick it`;
     case 'merged':
       return `Exported separately as ${change.incomingName}; previously merged into ${personName}, so not added again`;
   }

@@ -189,6 +189,10 @@ export function kinship(
       return gendered(sex, 'son-in-law', 'daughter-in-law', 'child-in-law');
     case 'SU':
       return gendered(sex, 'father-in-law', 'mother-in-law', 'parent-in-law');
+    case 'BD':
+      return gendered(sex, 'nephew', 'niece', 'sibling’s child');
+    case 'UBD':
+      return 'cousin';
     case 'SD':
       return gendered(sex, 'stepson', 'stepdaughter', 'stepchild');
     default:

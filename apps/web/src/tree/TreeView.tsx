@@ -204,8 +204,24 @@ export function TreeView({
     [kind, up, down],
   );
 
-  // Load the focus person's neighborhood (and, for the family view, their
-  // parents' siblings, which the endpoint does not include).
+  /**
+   * The endpoint walks straight up and down from the focus, so the family
+   * view's side branches (aunts and uncles, and the children behind the
+   * sibling, aunt and uncle chevrons) come from each grandparent walking
+   * down; a parent without known parents walks down from themself.
+   */
+  const sideBranches = useCallback(
+    (focus: string): NeighborhoodRequest[] =>
+      cache.parentsOf(focus).flatMap((parent) => {
+        const grandparents = cache.parentsOf(parent);
+        return grandparents.length > 0
+          ? grandparents.map((g) => ({ focus: g, up: 0, down: 3 }))
+          : [{ focus: parent, up: 0, down: 2 }];
+      }),
+    [cache],
+  );
+
+  // Load the focus person's neighborhood and, for the family view, its side branches.
   useEffect(() => {
     let cancelled = false;
     if (!refocusPending.current) {
@@ -215,11 +231,7 @@ export function TreeView({
     (async () => {
       try {
         await ensure(requestFor(personId));
-        if (kind === 'family') {
-          await Promise.all(
-            cache.parentsOf(personId).map((parent) => ensure({ focus: parent, up: 1, down: 0 })),
-          );
-        }
+        if (kind === 'family') await Promise.all(sideBranches(personId).map(ensure));
         if (!cancelled) {
           setFailure(null);
           setLoaded({ focus: personId, kind });
@@ -235,7 +247,7 @@ export function TreeView({
     return () => {
       cancelled = true;
     };
-  }, [client, cache, personId, kind, ensure, requestFor]);
+  }, [client, cache, personId, kind, ensure, requestFor, sideBranches]);
 
   // Lay out in the worker whenever data or view options change; latest wins.
   const latestRequest = useRef(0);

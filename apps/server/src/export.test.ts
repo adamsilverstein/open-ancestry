@@ -148,7 +148,7 @@ describe('JSON export history (#197)', () => {
       owner_id: s.ada,
     });
     const { note } = res.json() as { note: { id: string } };
-    await api.delete(`${s.base}/notes/${note.id}`);
+    await api.del(`${s.base}/notes/${note.id}`);
   }
 
   it('leaves out the edit history, and so deleted text, with history=0 or false', async () => {

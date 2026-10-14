@@ -31,7 +31,7 @@ type ExportState =
   | { status: 'warned'; count: number; shown: string[] };
 
 /** What an unprivatized export gives away, in words. */
-function exposure(living: number, marked: number, json: boolean): string {
+function exposure(living: number, marked: number, json: boolean, history: boolean): string {
   const people = (n: number, what: string) => `${n} ${n === 1 ? 'person' : 'people'} ${what}`;
   const who = [
     living > 0 && people(living, 'who may be living'),
@@ -40,7 +40,7 @@ function exposure(living: number, marked: number, json: boolean): string {
     .filter(Boolean)
     .join(' and ');
   return json
-    ? `JSON is a full backup: it includes everything about ${who}.`
+    ? `JSON is a full backup: it includes everything about ${who}.${history ? ' It also keeps your edit history, including anything you have deleted.' : ''}`
     : `This export includes everything about ${who}.`;
 }
 
@@ -66,6 +66,8 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
   const { data: current = null } = useQuery(currentTreeQuery);
   const [tree, setTree] = useState<string | undefined>();
   const [format, setFormat] = useState<ExportFormat>('gedcom-5.5.1');
+  // Off by default: a JSON file is often shared, and the history keeps deleted text (#197).
+  const [history, setHistory] = useState(false);
   // Undefined until the user decides: then it follows the tree (on when anyone is hidden).
   const [choice, setChoice] = useState<boolean | undefined>();
   const [state, setState] = useState<ExportState>({ status: 'idle' });
@@ -92,7 +94,7 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
     if (!selected) return;
     setState({ status: 'busy' });
     try {
-      const res = await fetch(exportUrl(selected, format, privatize));
+      const res = await fetch(exportUrl(selected, format, privatize, history));
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as {
           error?: { message?: string };
@@ -205,6 +207,14 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
             disabled={!canPrivatize(format)}
             onChange={(event) => setChoice(event.target.checked)}
           />
+          {format === 'json' && (
+            <Checkbox
+              label="Include edit history"
+              description="Undo history, including anything you have deleted. Leave it out when you share the file."
+              checked={history}
+              onChange={(event) => setHistory(event.target.checked)}
+            />
+          )}
           {info.isError && (
             <p className={styles.warning} role="status">
               <TriangleAlert size={16} aria-hidden />
@@ -215,7 +225,7 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
           {!privatize && living + marked > 0 && (
             <p className={styles.warning} role="status">
               <TriangleAlert size={16} aria-hidden />
-              {exposure(living, marked, format === 'json')}
+              {exposure(living, marked, format === 'json', history)}
             </p>
           )}
           {state.status === 'error' && (

@@ -26,6 +26,7 @@ export const {
   RelationshipType,
   PeopleQuery,
   ExportQuery,
+  JsonExportQuery,
   GedzipQuery,
   NeighborhoodQuery,
   SearchQuery,

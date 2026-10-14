@@ -11,7 +11,15 @@ import {
 import { buildGedcomExport, buildGedzipExport } from '@open-ancestry/export';
 import type { Api, Deps } from '../context';
 import { edit } from '../edits';
-import { ExportQuery, GedzipQuery, HistoryQuery, HomeBody, TreeBody, TreeParams } from '../schemas';
+import {
+  ExportQuery,
+  GedzipQuery,
+  HistoryQuery,
+  HomeBody,
+  JsonExportQuery,
+  TreeBody,
+  TreeParams,
+} from '../schemas';
 
 function treeDetail(deps: Deps, id: string) {
   const store = deps.library.open(id);
@@ -154,10 +162,14 @@ export function treeRoutes(app: Api, deps: Deps): void {
 
   app.get(
     '/api/trees/:tree/export.json',
-    { schema: { params: TreeParams } },
+    { schema: { params: TreeParams, querystring: JsonExportQuery } },
     async (request, reply) => {
       const { tree } = request.params;
-      const json = exportJsonString(library.open(tree));
+      // A full backup keeps the edit history (undo, and the text of deleted rows) unless asked not to.
+      const { history } = request.query;
+      const json = exportJsonString(library.open(tree), {
+        history: history !== '0' && history !== 'false',
+      });
       return reply
         .type('application/json; charset=utf-8')
         .header('content-disposition', attachment(tree, 'json'))

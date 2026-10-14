@@ -1,7 +1,7 @@
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createServer } from './index';
 import {
   createToken,
@@ -21,10 +21,11 @@ import {
 } from './test/helpers';
 
 let api: TestApi;
-beforeEach(async () => {
+// One server for the file: these tests only read, or create uniquely named trees.
+beforeAll(async () => {
   api = await testApi();
 });
-afterEach(() => api.close());
+afterAll(() => api.close());
 
 function expectSecurityHeaders(headers: Record<string, unknown>) {
   const csp = String(headers['content-security-policy']);
@@ -131,7 +132,7 @@ describe('session token and mutation guard', () => {
       method: 'POST',
       url: '/api/trees',
       headers: MUTATION_HEADERS,
-      payload: { name: 'A' },
+      payload: { name: 'Accepted 1' },
     });
     expect(res.statusCode).toBe(201);
   });
@@ -141,7 +142,7 @@ describe('session token and mutation guard', () => {
       method: 'POST',
       url: '/api/trees',
       headers: { host: 'localhost', origin: 'http://localhost', 'x-oa-token': TOKEN },
-      payload: { name: 'A' },
+      payload: { name: 'Accepted 2' },
     });
     expect(res.statusCode).toBe(201);
   });
@@ -187,11 +188,17 @@ describe('session token and mutation guard', () => {
     ],
   ])('rejects a mutation with %s', async (_, headers) => {
     for (const method of ['POST', 'PUT', 'PATCH', 'DELETE'] as const) {
-      const res = await api.inject({ method, url: '/api/trees', headers, payload: { name: 'A' } });
+      const res = await api.inject({
+        method,
+        url: '/api/trees/Accepted%201',
+        headers,
+        payload: { name: 'Rejected' },
+      });
       expect(res.statusCode).toBe(403);
       expect(res.json().error.code).toBe('forbidden');
     }
-    expect((await api.get('/api/trees')).json().trees).toEqual([]);
+    const trees = (await api.get('/api/trees')).json().trees.map((t: { id: string }) => t.id);
+    expect(trees).not.toContain('Rejected');
   });
 
   it('rejects duplicate Origin and token headers', async () => {

@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test';
+import { budget, perfOnly } from './budget';
 import { expect, test } from './fixtures';
 import { readSeed } from './tree-view-fixtures';
 
@@ -237,8 +238,9 @@ test.describe('performance', () => {
     ({ browserName }) => browserName !== 'chromium',
     'LCP and CLS entries are Chromium only',
   );
+  test.skip(perfOnly(), 'Run with npm run e2e:perf');
 
-  test('home LCP under 1s with no layout shift', async ({ page }) => {
+  test('home LCP under 1s with no layout shift', { tag: '@perf' }, async ({ page }) => {
     await page.goto('/');
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
     const { lcp, cls } = await page.evaluate(
@@ -258,7 +260,7 @@ test.describe('performance', () => {
         }),
     );
     expect(lcp).toBeGreaterThan(0);
-    expect(lcp).toBeLessThan(1000);
+    expect(lcp).toBeLessThan(budget(1000));
     expect(cls).toBeLessThan(0.01);
   });
 });

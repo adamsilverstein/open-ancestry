@@ -28,6 +28,14 @@ export interface Migration {
    * rows): applied to an older JSON document's tables after `columns`.
    */
   upgradeTables?: (tables: TableRowsByName) => void;
+  /**
+   * For migrations that rewrite existing values (a normalization pass, a
+   * format change): the same rewrite for one row written before this
+   * migration. Applied after `columns` to older change_log images and JSON
+   * rows, so undo still matches the live rows. Return the row unchanged for
+   * tables it does not touch.
+   */
+  upgradeRow?: (table: string, row: Record<string, unknown>) => Record<string, unknown>;
 }
 
 /** v2: number existing batches by commit order, mirroring the SQL backfill. */
@@ -65,7 +73,7 @@ export const MIGRATIONS: readonly Migration[] = [
 
 /**
  * Upgrades one row written under `fromVersion` through every later
- * migration's column map. Returns a new object; the input is not changed.
+ * migration: its column map, then its `upgradeRow`. Never changes the input.
  */
 export function upgradeRow(
   migrations: readonly Migration[],
@@ -75,19 +83,30 @@ export function upgradeRow(
 ): Record<string, unknown> {
   let out = row;
   for (const migration of migrations) {
-    const changes = migration.version > fromVersion ? migration.columns?.[table] : undefined;
-    if (!changes) continue;
-    out = { ...out };
-    for (const [from, to] of Object.entries(changes.renamed ?? {})) {
-      if (Object.hasOwn(out, from)) {
-        out[to] = out[from];
-        delete out[from];
-      }
+    if (migration.version <= fromVersion) continue;
+    const changes = migration.columns?.[table];
+    out = applyColumns(out, changes);
+    if (migration.upgradeRow) out = migration.upgradeRow(table, out);
+  }
+  return out;
+}
+
+/** One migration's column map applied to a row; returns a copy when anything applies. */
+function applyColumns(
+  row: Record<string, unknown>,
+  changes: ColumnChanges | undefined,
+): Record<string, unknown> {
+  if (!changes) return row;
+  const out = { ...row };
+  for (const [from, to] of Object.entries(changes.renamed ?? {})) {
+    if (Object.hasOwn(out, from)) {
+      out[to] = out[from];
+      delete out[from];
     }
-    for (const column of changes.dropped ?? []) delete out[column];
-    for (const [column, value] of Object.entries(changes.added ?? {})) {
-      if (!Object.hasOwn(out, column)) out[column] = value;
-    }
+  }
+  for (const column of changes.dropped ?? []) delete out[column];
+  for (const [column, value] of Object.entries(changes.added ?? {})) {
+    if (!Object.hasOwn(out, column)) out[column] = value;
   }
   return out;
 }

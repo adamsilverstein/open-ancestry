@@ -198,7 +198,7 @@ export function importJson(
 
 /**
  * Upgrades an older document's rows through each later migration in turn:
- * its column map, then any whole-document step. Rows are copied, not changed
+ * its column map and `upgradeRow`, then any whole-document step. Rows are copied, not changed
  * in place. change_log images keep their own version; undo upgrades them.
  */
 function upgradeTables(store: TreeStore, from: number, input: TableRowsByName): TableRowsByName {
@@ -207,9 +207,10 @@ function upgradeTables(store: TreeStore, from: number, input: TableRowsByName): 
   );
   for (const migration of store.migrations) {
     if (migration.version <= from) continue;
-    for (const name of Object.keys(migration.columns ?? {})) {
-      const rows = tables[name];
-      if (rows) tables[name] = rows.map((row) => upgradeRow([migration], from, name, row));
+    for (const [name, rows] of Object.entries(tables)) {
+      if (migration.upgradeRow || migration.columns?.[name]) {
+        tables[name] = rows.map((row) => upgradeRow([migration], from, name, row));
+      }
     }
     migration.upgradeTables?.(tables);
   }

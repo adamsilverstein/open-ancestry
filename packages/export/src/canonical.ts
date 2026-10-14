@@ -38,6 +38,10 @@ export interface WriterContext {
   nameTextState(nameId: string): NameTextState | undefined;
   /** A note or media item attached anywhere to a privatized person or family: never written. */
   isWithheld(id: string): boolean;
+  /** An event left out entirely (privatizing a private, confidential or locked event). */
+  isHiddenEvent(id: string): boolean;
+  /** Whether HEAD may name the tree (not when privatizing: tree names are often surnames). */
+  readonly treeName: string | null;
   /** FILE value for a media row. */
   filePath(media: MediaRow): string | undefined;
 }
@@ -268,9 +272,12 @@ export class RecordWriter {
   }
 
   source(source: SourceRow, xref: string): GedcomNode {
-    const repo = source.repository_id
-      ? p('REPO', this.ctx.ref('repository', source.repository_id), [v('CALN', source.call_number)])
-      : null;
+    const repo =
+      source.repository_id && !this.ctx.isWithheld(source.repository_id)
+        ? p('REPO', this.ctx.ref('repository', source.repository_id), [
+            v('CALN', source.call_number),
+          ])
+        : null;
     const record = n('SOUR', undefined, [
       v('TITL', source.title),
       v('AUTH', source.author),
@@ -389,7 +396,12 @@ export class RecordWriter {
     roles: { event_id: string; role: string; is_preferred: number }[],
     standard: ReadonlySet<string>,
   ): GedcomNode[] {
-    const list = roles.filter((r) => r.role === 'principal' && this.data.event.has(r.event_id));
+    const list = roles.filter(
+      (r) =>
+        r.role === 'principal' &&
+        this.data.event.has(r.event_id) &&
+        !this.ctx.isHiddenEvent(r.event_id),
+    );
     const firstOfType = new Map<string, number>();
     list.forEach((r, i) => {
       const type = this.data.event.get(r.event_id)!.type;
@@ -511,7 +523,11 @@ export class RecordWriter {
     const links = this.data.citationLinks.get(ownerKey(type, id)) ?? [];
     return links.flatMap((l) => {
       const citation = this.data.citation.get(l.citation_id);
-      return citation && this.data.source.has(citation.source_id) ? [this.citation(citation)] : [];
+      return citation &&
+        this.data.source.has(citation.source_id) &&
+        !this.ctx.isWithheld(citation.source_id)
+        ? [this.citation(citation)]
+        : [];
     });
   }
 

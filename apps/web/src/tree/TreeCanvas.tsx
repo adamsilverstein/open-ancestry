@@ -414,6 +414,14 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       // Far out, nothing mounts while panning: the canvas layer shows it all.
       const key = lod ? 'lod' : `${c0},${r0},${c1},${r1}`;
       if (!force && key === lastCells.current) return;
+      // Crossing the canvas threshold swaps the focused card's element: put
+      // keyboard focus back on the active card after the swap (WCAG 2.4.3).
+      if (lastCells.current !== '' && (key === 'lod') !== (lastCells.current === 'lod')) {
+        const focused = document.activeElement as HTMLElement | null;
+        if (focused?.dataset.key && viewportRef.current?.contains(focused)) {
+          pendingFocus.current = focused.dataset.key;
+        }
+      }
       lastCells.current = key;
       const rect = {
         x: c0 * CELL,
@@ -467,8 +475,11 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     }, 200);
   }, []);
 
+  /** Where the running animation ends, so repeated zoom presses add up. */
+  const animationTarget = useRef<Transform | null>(null);
   const stopAnimation = () => {
     cancelAnimationFrame(animation.current);
+    animationTarget.current = null;
     if (worldRef.current) delete worldRef.current.dataset.animating;
   };
 
@@ -481,6 +492,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       }
       const from = transform.current;
       const start = performance.now();
+      animationTarget.current = target;
       // Lets tests (and anything else) wait for the view to settle.
       if (worldRef.current) worldRef.current.dataset.animating = '';
       const step = (now: number) => {
@@ -523,7 +535,26 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         rows * scale <= height - 2 * pad
           ? height / 2 - ((top + bottom) / 2) * scale
           : pad - (top - 14) * scale;
-      return { x: centered.x, y, scale };
+      let x = centered.x;
+      if (fitRows) {
+        // Shift right, when there is room, so the leftmost row clears the label column.
+        let left = focus.x;
+        let right = focus.x + focus.width;
+        for (const n of current.nodes) {
+          if (n.generation < -2 || n.generation > 1) continue;
+          left = Math.min(left, n.x - 16);
+          right = Math.max(right, n.x + n.width + 16);
+        }
+        // Labels are absolutely positioned, so measure them, not their column.
+        const labels = [...(gutterRef.current?.children ?? [])];
+        const labelsRight = Math.max(0, ...labels.map((l) => l.getBoundingClientRect().right));
+        const box = viewportRef.current?.getBoundingClientRect();
+        const clear = labelsRight && box ? labelsRight - box.left + 8 : 0;
+        const overlap = clear - (left * scale + x);
+        const room = width - pad - (right * scale + x);
+        if (overlap > 0) x += Math.max(0, Math.min(overlap, room));
+      }
+      return { x, y, scale };
     }
     if (focus)
       return centerOn(t, focus.x + focus.width / 2, focus.y + focus.height / 2, width, height);
@@ -584,7 +615,9 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       zoomBy(factor) {
         const { width, height } = measure();
         latest.current.onInteract();
-        animateTo(zoomAt(transform.current, width / 2, height / 2, factor));
+        animateTo(
+          zoomAt(animationTarget.current ?? transform.current, width / 2, height / 2, factor),
+        );
       },
       fit() {
         const { width, height } = measure();
@@ -755,6 +788,11 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
 
   function onPointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
+    // A press on empty canvas keeps focus in the tree, so its shortcuts still work.
+    if (!(event.target as HTMLElement).closest('button, [role="button"]')) {
+      event.preventDefault();
+      viewportRef.current?.focus({ preventScroll: true });
+    }
     stopAnimation();
     pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (pointers.current.size === 1) {
@@ -907,6 +945,20 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     if (event.altKey || event.ctrlKey || event.metaKey) return;
     const target = event.target as HTMLElement;
     const node = target.dataset.key ? nodeByKey(target.dataset.key) : null;
+    if (target === viewportRef.current && arrows[event.key]) {
+      // The canvas itself has focus (after a click on empty space): arrows pan.
+      const step: Record<Direction, [number, number]> = {
+        up: [0, 80],
+        down: [0, -80],
+        left: [80, 0],
+        right: [-80, 0],
+      };
+      const [dx, dy] = step[arrows[event.key]!];
+      const t = transform.current;
+      event.preventDefault();
+      apply({ x: t.x + dx, y: t.y + dy, scale: t.scale });
+      return;
+    }
     if (!node || !relations) return;
     const direction = arrows[event.key];
     if (direction) {
@@ -988,6 +1040,8 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       aria-label={label}
       aria-describedby={helpId}
       aria-busy={busy}
+      // Focusable by script only (a click on empty canvas), never a Tab stop.
+      tabIndex={-1}
       className={styles.viewport}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

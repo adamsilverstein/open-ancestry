@@ -244,6 +244,41 @@ test.describe('family view', () => {
     await expect(notice).toHaveCount(0);
   });
 
+  test('keyboard focus survives zooming in and out of the canvas level of detail', async ({
+    page,
+  }) => {
+    await open(page);
+    await card(page, 'Ada Vale').focus();
+    // Zoom out past 35%, where cards are painted on a canvas.
+    for (let i = 0; i < 6; i++) await page.keyboard.press('-');
+    await settled(page);
+    expect((await transform(page)).scale).toBeLessThan(0.35);
+    expect(await activeKey(page)).toBe(ids.ada);
+    await page.keyboard.press('ArrowUp');
+    expect(await activeKey(page)).toBe(ids.bram);
+    // And back to mounted cards.
+    await page.keyboard.press('0');
+    await settled(page);
+    expect((await transform(page)).scale).toBeGreaterThan(0.35);
+    expect(await activeKey(page)).toBe(ids.bram);
+    await page.keyboard.press('ArrowRight');
+    expect(await activeKey(page)).toBe(ids.elsa);
+  });
+
+  test('a click on empty canvas keeps the tree shortcuts working', async ({ page }) => {
+    await open(page);
+    const viewport = await box(canvas(page));
+    await page.mouse.click(viewport.x + viewport.width - 40, viewport.y + viewport.height - 40);
+    await expect(canvas(page)).toBeFocused();
+    const before = await transform(page);
+    await page.keyboard.press('+');
+    await expect.poll(async () => (await transform(page)).scale).toBeGreaterThan(before.scale);
+    await settled(page);
+    const zoomed = await transform(page);
+    await page.keyboard.press('ArrowLeft');
+    expect((await transform(page)).x).toBeGreaterThan(zoomed.x);
+  });
+
   test('arrow keys move between related cards', async ({ page }) => {
     await open(page);
     await card(page, 'Ada Vale').focus();

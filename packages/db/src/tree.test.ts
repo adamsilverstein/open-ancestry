@@ -1,15 +1,12 @@
 import { existsSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { createTree, meta, openMemoryTree, openTree, persons, treePaths } from './index';
 import { makeTempDir } from '../../../fixtures/temp-dir';
 
 let root: string;
 beforeEach(() => {
   root = makeTempDir('oa-db-');
-});
-afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
 });
 
 describe('tree storage layout', () => {

@@ -6,12 +6,11 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { importFile, importGedcom } from './import';
 import { FIXTURES, TODAY, ged, importInto, row, rows, value } from './test-helpers';
 import { ImportError } from './types';
@@ -20,9 +19,6 @@ import { makeTempDir } from '../../../fixtures/temp-dir';
 let tmp: string;
 beforeEach(() => {
   tmp = makeTempDir('oa-import-');
-});
-afterEach(() => {
-  rmSync(tmp, { recursive: true, force: true });
 });
 
 const sample = () => readFileSync(join(FIXTURES, 'ancestry-sample.ged'));

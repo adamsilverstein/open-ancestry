@@ -1,8 +1,7 @@
 import Database from 'better-sqlite3';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   LATEST_SCHEMA_VERSION,
   MIGRATIONS,
@@ -28,15 +27,13 @@ import {
   type Tx,
 } from './index';
 import { fixedClock } from './test/helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 const historyDir = join(import.meta.dirname, 'migrations', 'history');
 
 let root: string;
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'oa-history-'));
-});
-afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  root = makeTempDir('oa-history-');
 });
 
 const count = (store: TreeStore, table: string) =>

@@ -1,7 +1,7 @@
 import { createTree } from '@open-ancestry/db';
 import { mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { importGedcom } from './import';
 import {
   classifyFile,
@@ -177,9 +177,6 @@ describe('media folder edge cases', () => {
   beforeEach(() => {
     tmp = makeTempDir('oa-media-');
   });
-  afterEach(() => {
-    rmSync(tmp, { recursive: true, force: true });
-  });
 
   it('skips file names that cannot be stored and reports copy failures as warnings', async () => {
     const source = join(tmp, 'src');
@@ -250,9 +247,6 @@ describe('storing media in a tree', () => {
   const hash = (b: Uint8Array) => Buffer.from(b).toString('hex');
   beforeEach(() => {
     root = makeTempDir('oa-store-');
-  });
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
   });
 
   it('never overwrites: same bytes are reused, different bytes get a suffix', () => {

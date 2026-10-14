@@ -55,6 +55,10 @@ export function toApiError(error: FastifyError | Error): ApiError {
     return conflict(`The tree cannot be exported as GEDCOM: ${error.message}`);
   }
   const fastify = error as FastifyError;
+  // Another connection (an import worker) holds the write lock.
+  if (fastify.code?.startsWith('SQLITE_BUSY')) {
+    return conflict('The tree is busy (an import is running); try again when it finishes');
+  }
   // Unique, foreign key and CHECK failures: the request contradicts stored data.
   if (fastify.code?.startsWith('SQLITE_CONSTRAINT')) return conflict(fastify.message);
   if (fastify.validation) return new ApiError(400, 'validation_failed', fastify.message);

@@ -41,6 +41,8 @@ export interface StoreOptions {
   /** ISO-8601 timestamp source; injectable for deterministic tests. */
   clock?: () => string;
   newId?: () => string;
+  /** How long to wait for another connection's lock before SQLITE_BUSY (default 5000ms). */
+  busyTimeoutMs?: number;
 }
 
 const TIMESTAMP_COLUMNS = new Set(['created_at', 'updated_at', 'started_at']);
@@ -74,7 +76,7 @@ export class TreeStore {
     db.pragma('synchronous = NORMAL');
     db.pragma('temp_store = MEMORY');
     db.pragma('cache_size = -65536');
-    db.pragma('busy_timeout = 5000');
+    db.pragma(`busy_timeout = ${Math.max(0, Math.floor(options.busyTimeoutMs ?? 5000))}`);
     migrate(db);
   }
 

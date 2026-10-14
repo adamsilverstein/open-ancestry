@@ -71,7 +71,9 @@ test.describe('person', () => {
     ).toBeVisible();
     await page.keyboard.press(`Shift+${mod}+z`);
     await expect(h1(page)).toHaveText('Rowan James Ashdown');
-    await expect(page.getByTestId('person-header').getByRole('img', { name: /sex unknown/ })).toBeVisible();
+    await expect(
+      page.getByTestId('person-header').getByRole('img', { name: /sex unknown/ }),
+    ).toBeVisible();
   });
 
   test('undoing the creation of the person on screen leaves their page', async ({ page }) => {
@@ -81,7 +83,9 @@ test.describe('person', () => {
     const dialog = page.getByRole('dialog', { name: 'Add sibling' });
     await dialog.getByRole('textbox', { name: 'Given names' }).fill('Tobias');
     await dialog.getByRole('button', { name: 'Add' }).click();
-    await relationships(page).getByRole('link', { name: /Tobias/ }).click();
+    await relationships(page)
+      .getByRole('link', { name: /Tobias/ })
+      .click();
     await expect(h1(page)).toHaveText('Tobias');
     await page.keyboard.press(`${mod}+z`);
     await expect(page).toHaveURL(new RegExp(`/person/${seeded.rowan}$`));

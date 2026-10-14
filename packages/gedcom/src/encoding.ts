@@ -89,10 +89,16 @@ export function detectEncoding(
   // GEDCOM 7 is always UTF-8 and has no CHAR.
   const mapped =
     declared && !version?.startsWith('7') ? CHARSETS[declared.toUpperCase()] : undefined;
-  if (mapped) return info(mapped, 'header');
-
   const prefix = bytes.subarray(0, DETECT_BYTES);
   const truncated = !options.complete || bytes.length > DETECT_BYTES;
+  if (mapped) {
+    // Exports often say ANSEL or ANSI but write UTF-8. Valid multi-byte UTF-8
+    // is very unlikely by accident, so believe the bytes over the label.
+    const multibyte = mapped !== 'utf-8' && prefix.some((b) => b >= 0x80);
+    if (multibyte && isValidUtf8(prefix, truncated)) return info('utf-8', 'sniff');
+    return info(mapped, 'header');
+  }
+
   return info(isValidUtf8(prefix, truncated) ? 'utf-8' : 'windows-1252', 'sniff');
 }
 
@@ -191,21 +197,31 @@ export function asciiFallbackWarning(): GedcomWarning {
   };
 }
 
+/** Warns when the encoding in use contradicts `HEAD.CHAR` (because of a BOM or the bytes). */
 export function mismatchWarnings(info: EncodingInfo): GedcomWarning[] {
-  if (!info.bom || info.declared === undefined) return [];
-  const declared = CHARSETS[info.declared.toUpperCase()];
-  const compatible =
-    info.declared.toUpperCase() === 'UNICODE'
-      ? info.encoding !== 'utf-8'
-      : declared === info.encoding;
-  if (compatible || (info.encoding === 'utf-8' && declared === 'ascii')) return [];
+  if (info.declared === undefined || info.source === 'header' || info.source === 'option') {
+    return [];
+  }
+  const name = info.declared.toUpperCase();
+  const declared = CHARSETS[name];
+  if (name === 'UNICODE' ? info.encoding !== 'utf-8' : declared === info.encoding) return [];
+  if (name !== 'UNICODE' && declared === undefined) return [];
+  const evidence = info.source === 'bom' ? 'the byte order mark says' : 'the bytes are valid';
   return [
     {
       code: 'charset-mismatch',
       line: 0,
-      message: `HEAD.CHAR says ${info.declared} but the byte order mark says ${info.encoding}; using ${info.encoding}`,
+      message: `HEAD.CHAR says ${info.declared} but ${evidence} ${info.encoding}; using ${info.encoding}`,
     },
   ];
+}
+
+export function decodeFailedWarning(error: unknown): GedcomWarning {
+  return {
+    code: 'decode-failed',
+    line: 0,
+    message: `File is too large to decode in memory (${(error as Error).message}); nothing after this point was read`,
+  };
 }
 
 /** Decodes a whole GEDCOM file to a string without its BOM. Never throws. */
@@ -223,7 +239,14 @@ export function decodeGedcom(
   }
 
   const decoder = createDecoder(encoding.encoding);
-  const text = decoder.decode(body) + decoder.end();
+  let text = '';
+  try {
+    text = decoder.decode(body) + decoder.end();
+  } catch (error) {
+    // Over V8's maximum string length; report instead of breaking "never throws".
+    if (!(error instanceof RangeError)) throw error;
+    warnings.push(decodeFailedWarning(error));
+  }
   const invalid = decoder.invalidBytes();
   if (invalid > 0) warnings.push(invalidBytesWarning(invalid, encoding.encoding));
   return { text, encoding, warnings };

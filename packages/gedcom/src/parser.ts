@@ -5,6 +5,7 @@ import {
   decodeGedcom,
   detectEncoding,
   asciiFallbackWarning,
+  decodeFailedWarning,
   invalidBytesWarning,
   isValidUtf8,
   mismatchWarnings,
@@ -390,20 +391,28 @@ export async function parseGedcomStream(
     splitter.push(decoder.decode(prefix.subarray(bomLength(prefix, encoding.encoding))));
   };
 
-  for await (const chunk of source) {
-    if (decoder) {
-      splitter.push(decoder.decode(chunk));
-      continue;
+  let failure: GedcomWarning | undefined;
+  try {
+    for await (const chunk of source) {
+      if (decoder) {
+        splitter.push(decoder.decode(chunk));
+        continue;
+      }
+      head.push(chunk);
+      headSize += chunk.length;
+      if (headSize >= DETECT_BYTES) start(false);
     }
-    head.push(chunk);
-    headSize += chunk.length;
-    if (headSize >= DETECT_BYTES) start(false);
+    if (!decoder) start(true);
+    splitter.push(decoder!.end());
+    splitter.end();
+  } catch (error) {
+    // A single line over V8's maximum string length; keep what was parsed.
+    if (!(error instanceof RangeError)) throw error;
+    failure = decodeFailedWarning(error);
   }
-  if (!decoder) start(true);
-  splitter.push(decoder!.end());
-  splitter.end();
 
   const warnings = mismatchWarnings(encoding!);
+  if (failure) warnings.push(failure);
   if (fallback) warnings.push(asciiFallbackWarning());
   const invalid = decoder!.invalidBytes();
   if (invalid > 0) warnings.push(invalidBytesWarning(invalid, encoding!.encoding));

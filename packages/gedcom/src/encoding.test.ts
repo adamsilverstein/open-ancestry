@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createDecoder, decodeAnsel, decodeGedcom, detectEncoding } from './encoding';
 
 const ascii = (s: string) => new Uint8Array([...s].map((c) => c.charCodeAt(0)));
@@ -150,6 +150,43 @@ describe('decodeGedcom', () => {
   });
 });
 
+describe('mislabeled charsets', () => {
+  it.each(['ANSI', 'ANSEL', 'ASCII'])('prefers valid UTF-8 over CHAR %s and warns', (declared) => {
+    const bytes = new TextEncoder().encode(`${head(declared)}1 NAME José\n`);
+    const { text, encoding, warnings } = decodeGedcom(bytes);
+    expect(encoding).toMatchObject({ encoding: 'utf-8', source: 'sniff', declared });
+    expect(text).toContain('1 NAME José');
+    expect(warnings.map((w) => w.code)).toEqual(['charset-mismatch']);
+  });
+
+  it('keeps the declared charset for pure ASCII content', () => {
+    const { encoding, warnings } = decodeGedcom(ascii(head('ANSEL')));
+    expect(encoding).toMatchObject({ encoding: 'ansel', source: 'header' });
+    expect(warnings).toEqual([]);
+  });
+});
+
+describe('decoding failures', () => {
+  it('reports a file too large to decode instead of throwing', () => {
+    const original = TextDecoder.prototype.decode;
+    // Only the body decode (UTF-8) fails; header sniffing uses windows-1252.
+    const spy = vi.spyOn(TextDecoder.prototype, 'decode').mockImplementation(function (
+      this: InstanceType<typeof TextDecoder>,
+      ...args
+    ) {
+      if (this.encoding === 'utf-8') throw new RangeError('Invalid string length');
+      return original.apply(this, args);
+    });
+    try {
+      const { text, warnings } = decodeGedcom(ascii(head('UTF-8')));
+      expect(text).toBe('');
+      expect(warnings.map((w) => w.code)).toContain('decode-failed');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
 describe('decodeAnsel', () => {
   it('maps spacing characters', () => {
     const bytes = new Uint8Array([0xa1, 0xa2, 0xa5, 0xb1, 0xb5, 0xb9, 0xc3, 0xc5, 0xc7, 0xc8]);
@@ -165,6 +202,11 @@ describe('decodeAnsel', () => {
     const result = decodeAnsel(new Uint8Array([0x41, 0x80, 0xff, 0x42]));
     expect(result.text).toBe('A\uFFFD\uFFFDB');
     expect(result.invalid).toBe(2);
+  });
+
+  it('does not put a diacritic that precedes a line break onto the break', () => {
+    expect(decodeAnsel(new Uint8Array([0x61, 0xe2, 0x0a, 0x62])).text).toBe('a\u00A0\u0301\nb');
+    expect(decodeAnsel(new Uint8Array([0xe2, 0x0d]))).toMatchObject({ text: '\u00A0\u0301\r' });
   });
 
   it('keeps a trailing diacritic with no base letter', () => {

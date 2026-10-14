@@ -100,6 +100,11 @@ export class AnselDecoder {
     for (let i = 0; i < bytes.length; i++) {
       const b = bytes[i]!;
       const cp = TABLE[b]!;
+      if (pending && (b === 0x0a || b === 0x0d)) {
+        // A diacritic with no letter before the line ends: keep it visible on a no-break space.
+        out += '\u00A0' + pending;
+        pending = '';
+      }
       if (cp === -1) {
         pending += String.fromCharCode(COMBINING[b]!);
         continue;

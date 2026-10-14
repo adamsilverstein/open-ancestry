@@ -162,6 +162,13 @@ describe('fuzz: bounded time on hostile shapes', () => {
     expect(elapsed).toBeLessThan(LIMIT_MS);
   });
 
+  it('a 20 MB single line streamed in 64 KiB chunks', async () => {
+    const bytes = new Uint8Array(20_000_000).fill(0x78);
+    bytes.set(new TextEncoder().encode('0 HEAD\n1 NOTE '));
+    const elapsed = await timed(() => parseGedcomStream(chunked(bytes, 65536)));
+    expect(elapsed).toBeLessThan(LIMIT_MS);
+  });
+
   it('a 50 MB single line streamed in 4 KiB chunks', async () => {
     const bytes = new Uint8Array(50_000_000).fill(0x78);
     bytes.set(new TextEncoder().encode('0 HEAD\n1 NOTE '));

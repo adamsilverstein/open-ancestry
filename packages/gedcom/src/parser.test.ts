@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { LineSplitter } from './tokenizer';
 import { parseGedcom, parseGedcomStream, subtreeLines } from './parser';
 import type { GedcomNode, ParseResult } from './types';
 
@@ -384,6 +385,18 @@ describe('parseGedcomStream', () => {
     expect(fallback.encoding.encoding).toBe('windows-1252');
     expect(codes(fallback)).toContain('encoding-fallback');
     expect(find(fallback.records[0], 'NOTE')?.value).toBe('René');
+  });
+
+  it('reports a line too long to hold in memory instead of throwing', async () => {
+    const spy = vi.spyOn(LineSplitter.prototype, 'push').mockImplementation(() => {
+      throw new RangeError('Invalid string length');
+    });
+    try {
+      const result = await parseGedcomStream(chunks(new TextEncoder().encode('0 HEAD\n'), 3));
+      expect(codes(result)).toContain('decode-failed');
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('reports invalid bytes in a stream', async () => {

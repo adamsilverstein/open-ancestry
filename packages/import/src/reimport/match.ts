@@ -178,7 +178,16 @@ function assign(
   return byIncoming;
 }
 
-export function matchPeople(existing: Snapshot, incoming: Snapshot): Map<string, PersonMatch> {
+/**
+ * Matches incoming people to the tree's. `nearMisses`, when given, receives
+ * each unmatched incoming person whose closest tree person scored as a match
+ * on evidence but was taken by someone else: a likely duplicate to check.
+ */
+export function matchPeople(
+  existing: Snapshot,
+  incoming: Snapshot,
+  nearMisses?: Map<string, string>,
+): Map<string, PersonMatch> {
   // Candidate pairs: same surname sound, same given-name sound and birth year, or a shared record.
   const blocks = new Map<string, string[]>();
   const byApid = new Map<string, string[]>();
@@ -309,6 +318,15 @@ export function matchPeople(existing: Snapshot, incoming: Snapshot): Map<string,
       confidence: Math.round(confidence * 100) / 100,
       reasons: c.reasons,
     });
+  }
+  if (nearMisses) {
+    const closest = new Map<string, Candidate>();
+    for (const c of candidates) {
+      if (result.has(c.i) || c.score - c.hint < MATCH_THRESHOLD) continue;
+      const best = closest.get(c.i);
+      if (!best || c.score > best.score) closest.set(c.i, c);
+    }
+    for (const [i, c] of closest) nearMisses.set(i, c.e);
   }
   return result;
 }

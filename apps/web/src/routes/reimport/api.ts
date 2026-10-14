@@ -33,6 +33,7 @@ export type ReviewChange = {
   | { kind: 'deleted-here' }
   | { kind: 'merged'; incomingName: string }
   | { kind: 'possibly-merged'; existingName: string }
+  | { kind: 'possible-match'; existingName: string }
 );
 
 export interface PersonReview {

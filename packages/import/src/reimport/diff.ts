@@ -78,7 +78,9 @@ export type ReimportChange =
   /** Another exported record that was merged into this person here: folded in, never added. */
   | { kind: 'merged'; incomingId: string; incomingName: string }
   /** An unmatched record that shares a relative with someone merged here: likely the same person. */
-  | { kind: 'possibly-merged'; existingId: string; existingName: string };
+  | { kind: 'possibly-merged'; existingId: string; existingName: string }
+  /** An unmatched record that looks like someone already matched to another record. */
+  | { kind: 'possible-match'; existingId: string; existingName: string };
 
 export type ReviewChange = ReimportChange & {
   id: string;
@@ -514,6 +516,7 @@ export function diffTrees(
   incoming: Snapshot,
   matches: Map<string, PersonMatch>,
   local: LocalHistory,
+  nearMisses: Map<string, string> = new Map(),
 ): ReimportDiff {
   const { edited } = local;
   const gone = local.removed;
@@ -692,6 +695,14 @@ export function diffTrees(
     if (deletedHere) {
       adder(r, { applicable: false, defaultAccept: false })({ kind: 'deleted-here' });
     }
+    const lookalike = suspect ? undefined : nearMisses.get(i.row.id);
+    if (lookalike) {
+      adder(r, { applicable: false, defaultAccept: false })({
+        kind: 'possible-match',
+        existingId: lookalike,
+        existingName: displayName(existing.people.get(lookalike)!),
+      });
+    }
     if (suspect) {
       // Until merges are recorded as aliases (#70), a shared relative is the hint: never pre-ticked.
       adder(r, { applicable: false, defaultAccept: false })({
@@ -705,7 +716,7 @@ export function diffTrees(
       i.row.id,
       adder(
         r,
-        suspect || deletedHere ? { defaultAccept: false } : {},
+        suspect || deletedHere || lookalike ? { defaultAccept: false } : {},
       )({ kind: 'person.new', incomingId: i.row.id }).id,
     );
   }

@@ -34,8 +34,9 @@ export async function prepareReimport(
     const imported = performance.now();
     const existingSnap = snapshot(store);
     const incomingSnap = snapshot(incoming);
-    const matches = matchPeople(existingSnap, incomingSnap);
-    const diff = diffTrees(existingSnap, incomingSnap, matches, localHistory(store));
+    const nearMisses = new Map<string, string>();
+    const matches = matchPeople(existingSnap, incomingSnap, nearMisses);
+    const diff = diffTrees(existingSnap, incomingSnap, matches, localHistory(store), nearMisses);
     return {
       incoming,
       report,

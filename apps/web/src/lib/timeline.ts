@@ -1,5 +1,7 @@
 import { ageAt, formatDate } from '@open-ancestry/core';
+import type { ChildRelationship } from '@open-ancestry/db';
 import type { ApiPersonSummary, EventBrief, EventDetail, PersonDetail } from '../api/types';
+import { dateRange, overlaps } from './dateRange';
 import { fullName } from './person';
 
 export type TimelineCategory = 'life' | 'family' | 'work' | 'other';
@@ -21,7 +23,8 @@ export interface TimelineEntry {
   date: string | undefined;
   /** Year column text. */
   year: string | undefined;
-  age: number | undefined;
+  /** `25`, or `about 31` when a date is imprecise. */
+  age: string | undefined;
   place: string | undefined;
   sourceCount: number;
   /** The relative a family event is about. */
@@ -116,16 +119,34 @@ function kin(sex: string, male: string, female: string, other: string): string {
   return sex === 'M' ? male : sex === 'F' ? female : other;
 }
 
+/** `stepfather`, `adoptive mother`; plain for biological or unknown links. */
+function parentWord(sex: string, rel: ChildRelationship): string {
+  const base = kin(sex, 'father', 'mother', 'parent');
+  if (rel === 'step') return `step${base}`;
+  if (rel === 'adopted') return `adoptive ${base}`;
+  if (rel === 'foster') return `foster ${base}`;
+  return base;
+}
+
+export interface TimelineOptions {
+  /** Children of the parents' other partnerships, loaded separately. */
+  halfSiblings?: ApiPersonSummary[];
+}
+
 /**
  * The person timeline: own events with alternates grouped under the preferred
  * fact, their partner families' events, and relatives' births and deaths
- * within the person's lifetime, all in date order.
+ * that could fall within the person's lifetime, all in date order.
  */
-export function buildTimeline(detail: PersonDetail): TimelineEntry[] {
+export function buildTimeline(
+  detail: PersonDetail,
+  options: TimelineOptions = {},
+): TimelineEntry[] {
   const birthText = detail.summary.birth?.dateText ?? null;
+  // `25`, or `about 31` when either date is imprecise.
   const ageFor = (text: string | null | undefined) => {
     if (!birthText || !text) return undefined;
-    return ageAt(birthText, text)?.years;
+    return ageAt(birthText, text)?.text;
   };
 
   const ownEntry = (item: EventDetail, title: string): TimelineEntry => ({
@@ -176,17 +197,27 @@ export function buildTimeline(detail: PersonDetail): TimelineEntry[] {
     }
   }
 
-  const start = detail.summary.birth?.dateSort ?? -Infinity;
-  const end = detail.summary.death?.dateSort ?? Infinity;
+  // Possible lifetime: earliest birth to latest death, so `abt.` and year-only
+  // dates never drop an event that might fall inside it.
+  const lifeStart = dateRange(birthText)?.[0] ?? -Infinity;
+  const lifeEnd = dateRange(detail.summary.death?.dateText)?.[1] ?? Infinity;
+  const seen = new Set<string>();
   const relativeEvent = (
     relative: ApiPersonSummary,
     event: EventBrief | null,
     what: 'Birth' | 'Death',
     relation: string,
+    { afterDeath = false } = {},
   ) => {
-    if (!event?.dateSort || event.dateSort < start || event.dateSort > end) return;
+    if (!event?.dateSort) return;
+    const id = `${event.eventId}:${relative.id}`;
+    // A relative can appear in several of the person's families (birth and adoptive).
+    if (seen.has(id)) return;
+    const range = dateRange(event.dateText) ?? [event.dateSort, event.dateSort];
+    if (!overlaps(range, [lifeStart, afterDeath ? Infinity : lifeEnd])) return;
+    seen.add(id);
     entries.push({
-      id: `${event.eventId}:${relative.id}`,
+      id,
       kind: 'family',
       category: 'family',
       title: `${what} of ${relation} ${fullName(relative)}`,
@@ -202,20 +233,28 @@ export function buildTimeline(detail: PersonDetail): TimelineEntry[] {
   };
 
   for (const family of detail.parentFamilies) {
-    for (const parent of [family.partner1, family.partner2]) {
-      if (parent)
-        relativeEvent(parent, parent.death, 'Death', kin(parent.sex, 'father', 'mother', 'parent'));
+    const parents = [
+      [family.partner1, family.link.partner1_rel],
+      [family.partner2, family.link.partner2_rel],
+    ] as const;
+    for (const [parent, rel] of parents) {
+      if (parent) relativeEvent(parent, parent.death, 'Death', parentWord(parent.sex, rel));
     }
     for (const { person } of family.siblings) {
       relativeEvent(person, person.birth, 'Birth', kin(person.sex, 'brother', 'sister', 'sibling'));
     }
+  }
+  for (const person of options.halfSiblings ?? []) {
+    const relation = kin(person.sex, 'half brother', 'half sister', 'half sibling');
+    relativeEvent(person, person.birth, 'Birth', relation);
   }
   for (const { partner, children } of detail.partnerFamilies) {
     if (partner)
       relativeEvent(partner, partner.death, 'Death', kin(partner.sex, 'husband', 'wife', 'spouse'));
     for (const { person } of children) {
       const relation = kin(person.sex, 'son', 'daughter', 'child');
-      relativeEvent(person, person.birth, 'Birth', relation);
+      // A child can be born after a parent's death.
+      relativeEvent(person, person.birth, 'Birth', relation, { afterDeath: true });
       relativeEvent(person, person.death, 'Death', relation);
     }
   }

@@ -37,13 +37,15 @@ describe('buildTimeline', () => {
       category: 'life',
       date: '14 Jun 1905',
       year: '1905',
-      age: 25,
+      age: '25',
       place: 'Ashcombe, Eastholm',
     });
     expect(entries[0]).toMatchObject({ age: undefined, sourceCount: 1, year: '1880' });
     expect(entries.find((e) => e.title === 'Census')).toMatchObject({
       category: 'work',
       sourceCount: 1,
+      // Year-only date: the age could be 30 or 31.
+      age: 'about 31',
     });
     expect(entries.find((e) => e.title.startsWith('Death of father'))).toMatchObject({
       kind: 'family',
@@ -54,6 +56,43 @@ describe('buildTimeline', () => {
 
   it('leaves out family events outside the lifetime', () => {
     expect(entries.some((e) => e.title.includes('Mabel'))).toBe(false);
+  });
+
+  it('dedupes relatives listed in several parent families', () => {
+    const detail = fixtureDetail('rowan');
+    const [family] = detail.parentFamilies;
+    const twice = buildTimeline({
+      ...detail,
+      parentFamilies: [family!, { ...family!, family: { ...family!.family, id: 'adoptive' } }],
+    });
+    const ids = twice.map((e) => e.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(twice.filter((e) => e.title === 'Birth of brother Tobias Ashdown')).toHaveLength(1);
+  });
+
+  it('names step and adoptive parents', () => {
+    const detail = fixtureDetail('rowan');
+    const [family] = detail.parentFamilies;
+    const step = buildTimeline({
+      ...detail,
+      parentFamilies: [{ ...family!, link: { ...family!.link, partner1_rel: 'step' } }],
+    });
+    expect(step.map((e) => e.title)).toContain('Death of stepfather Edmund Ashdown');
+    const adopted = buildTimeline({
+      ...detail,
+      parentFamilies: [{ ...family!, link: { ...family!.link, partner2_rel: 'adopted' } }],
+    });
+    expect(adopted.map((e) => e.title)).toContain('Death of adoptive mother Clara Penhallow');
+  });
+
+  it('adds half siblings passed in', () => {
+    const nell = fixtureDetail('nell').summary;
+    const titles = buildTimeline(fixtureDetail('rowan'), { halfSiblings: [nell] }).map(
+      (e) => e.title,
+    );
+    expect(titles.indexOf('Birth of half sister Nell Marsh')).toBe(
+      titles.indexOf('Death of father Edmund Ashdown') + 1,
+    );
   });
 
   it('filters by category', () => {
@@ -73,5 +112,89 @@ describe('buildTimeline', () => {
     expect(
       buildTimeline({ ...detail, events: [], parentFamilies: [], partnerFamilies: [] }),
     ).toEqual([]);
+  });
+});
+
+describe('lifetime window', () => {
+  const detail = fixtureDetail('rowan');
+  const [family] = detail.parentFamilies;
+  const brief = (dateText: string, dateSort: number) => ({
+    eventId: `e-${dateText}`,
+    type: 'BIRT',
+    dateText,
+    dateQualifier: null,
+    dateSort,
+    place: null,
+  });
+  const withSummary = (birth: string | null, death: string | null) => ({
+    ...detail,
+    summary: {
+      ...detail.summary,
+      birth: birth ? brief(birth, 0) : null,
+      death: death ? { ...brief(death, 0), type: 'DEAT' } : null,
+    },
+  });
+  const sibling = (dateText: string, dateSort: number) => ({
+    ...family!.siblings[0]!,
+    person: {
+      ...family!.siblings[0]!.person,
+      id: 'sib',
+      given: 'Sib',
+      birth: brief(dateText, dateSort),
+    },
+  });
+
+  it('keeps a sibling born early in an approximate birth year', () => {
+    const entries = buildTimeline({
+      ...withSummary('ABT 1890', null),
+      parentFamilies: [{ ...family!, siblings: [sibling('MAR 1890', 18900315)] }],
+    });
+    expect(entries.some((e) => e.title === 'Birth of sister Sib Ashdown')).toBe(true);
+  });
+
+  it('keeps events late in a year-only death year', () => {
+    const partner = detail.partnerFamilies[0]!;
+    const child = partner.children[1]!;
+    const entries = buildTimeline({
+      ...withSummary('1880', '1955'),
+      partnerFamilies: [
+        {
+          ...partner,
+          children: [
+            {
+              ...child,
+              person: {
+                ...child.person,
+                death: { ...brief('OCT 1955', 19551015), type: 'DEAT' },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(entries.some((e) => e.title === 'Death of son Arthur Ashdown')).toBe(true);
+  });
+
+  it('keeps a child born after the death', () => {
+    const partner = detail.partnerFamilies[0]!;
+    const child = partner.children[0]!;
+    const entries = buildTimeline({
+      ...withSummary('1880', '1955'),
+      partnerFamilies: [
+        {
+          ...partner,
+          children: [{ ...child, person: { ...child.person, birth: brief('FEB 1956', 19560215) } }],
+        },
+      ],
+    });
+    expect(entries.some((e) => e.title === 'Birth of daughter Lena Ashdown')).toBe(true);
+  });
+
+  it('still drops a sibling born well before', () => {
+    const entries = buildTimeline({
+      ...withSummary('1890', null),
+      parentFamilies: [{ ...family!, siblings: [sibling('1885', 18850701)] }],
+    });
+    expect(entries.some((e) => e.title.includes('Sib'))).toBe(false);
   });
 });

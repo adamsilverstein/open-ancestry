@@ -8,8 +8,8 @@ export type TimelineVariant = 'own' | 'family' | 'alternate';
 export interface TimelineItemProps {
   /** Year column, e.g. `1911` or `abt. 1890`. */
   year?: string | number | undefined;
-  /** Age at the event, in years. */
-  age?: number | undefined;
+  /** Age at the event: years, or text such as `about 31`. */
+  age?: number | string | undefined;
   title: string;
   /** Full display date, e.g. `5 Sep 1911`. */
   date?: string | undefined;

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { captureOpener, returnFocus, trackFocus } from './returnFocus';
+import { captureOpener, lastControlOutside, returnFocus, trackFocus } from './returnFocus';
 
 afterEach(() => {
   document.body.innerHTML = '';
@@ -57,5 +57,25 @@ describe('returnFocus', () => {
 
   it('reports when nothing is usable', () => {
     expect(returnFocus(null, () => undefined)).toBe(false);
+  });
+});
+
+describe('a dialog opened from the command palette', () => {
+  it('returns to the last control outside overlays once the palette input is gone', () => {
+    trackFocus();
+    const find = button('Find');
+    find.focus();
+    const palette = document.createElement('div');
+    palette.setAttribute('role', 'dialog');
+    document.body.append(palette);
+    const input = document.createElement('input');
+    palette.append(input);
+    input.focus();
+    const opener = captureOpener();
+    const outside = lastControlOutside();
+    expect(opener).toBe(input);
+    palette.remove();
+    expect(returnFocus(opener, outside)).toBe(true);
+    expect(document.activeElement).toBe(find);
   });
 });

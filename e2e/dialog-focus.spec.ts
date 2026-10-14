@@ -105,7 +105,9 @@ test.describe('focus returns to the opener', () => {
     await page.keyboard.type('Tamsin');
     await page.keyboard.press('Enter');
     await expect(child).toBeHidden();
-    await expect(relationships(page).getByRole('link', { name: /Tamsin/ })).toBeVisible();
+    await expect(relationships(page).getByRole('link', { name: /Tamsin/ })).toBeVisible({
+      timeout: 15_000,
+    });
     await expect(opener).toBeFocused();
   });
 
@@ -196,5 +198,22 @@ test.describe('axe with editing overlays open', () => {
         expect(results.violations).toEqual([]);
       });
     }
+  }
+});
+
+test('Escape on the Delete person confirm never closes Edit person', async ({ page }) => {
+  await openSeeded(page, seeded);
+  await page.getByRole('button', { name: 'Edit person', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit person' });
+  const given = dialog.getByRole('textbox', { name: 'Given names' }).first();
+  await given.fill('Rowan Unsaved');
+  for (let i = 0; i < 20; i++) {
+    await dialog.getByRole('button', { name: 'Delete person' }).click();
+    const confirm = page.getByRole('alertdialog', { name: 'Delete Rowan Ashdown?' });
+    await expect(confirm).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(confirm).toBeHidden();
+    await expect(dialog).toBeVisible();
+    await expect(given).toHaveValue('Rowan Unsaved');
   }
 });

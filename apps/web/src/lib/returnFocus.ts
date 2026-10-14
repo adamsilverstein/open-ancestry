@@ -30,6 +30,14 @@ export function trackFocus(): void {
   );
 }
 
+/** The last control focused or pressed outside any overlay. */
+export function lastControlOutside(): HTMLElement | null {
+  return lastOutside;
+}
+
+/** Last resort when nothing that opened a dialog is left: the main landmark. */
+export const mainLandmark = () => document.getElementById('main');
+
 /** The element a dialog opening now should return focus to. */
 export function captureOpener(): HTMLElement | null {
   const active = document.activeElement;

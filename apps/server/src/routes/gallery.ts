@@ -182,7 +182,10 @@ async function hashFile(path: string): Promise<string> {
   return hash.digest('hex');
 }
 
-export function galleryRoutes(app: Api, { library, thumbnails, uploadLimit }: Deps): void {
+export function galleryRoutes(
+  app: Api,
+  { library, thumbnails, mediaUploadLimit: uploadLimit }: Deps,
+): void {
   const attachLocks = new KeyedLock();
   app.get(
     '/api/trees/:tree/people/:id/media',

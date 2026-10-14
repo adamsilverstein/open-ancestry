@@ -4,7 +4,6 @@ import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { treePaths } from '@open-ancestry/db';
 import type { FastifyRequest } from 'fastify';
 import type { Api, Deps } from '../context';
 import { ApiError, badRequest, conflict, notFound } from '../errors';
@@ -38,6 +37,14 @@ export function importRoutes(app: Api, deps: Deps): void {
   /** Streams the one uploaded file to a private temp folder. */
   async function receive(request: FastifyRequest) {
     if (!importer) throw new ApiError(501, 'not_implemented', 'GEDCOM import is not available');
+    // Refuse before streaming up to the size cap to disk for a job that cannot queue.
+    if (!jobs.hasRoom()) {
+      throw new ApiError(
+        429,
+        'too_many_jobs',
+        'Too many imports are queued; try again when one finishes',
+      );
+    }
     if (!request.isMultipart()) {
       throw new ApiError(415, 'unsupported_media_type', 'Upload the file as multipart/form-data');
     }
@@ -80,11 +87,7 @@ export function importRoutes(app: Api, deps: Deps): void {
         (signal, onProgress) =>
           library.whileBusy(tree, async () => {
             const store = library.open(tree);
-            const result = await importer!(upload.path, store, {
-              mediaDir: treePaths(library.dirOf(tree)).media,
-              onProgress,
-              signal,
-            });
+            const result = await importer!(upload.path, store, { onProgress, signal });
             if (marker) library.clearImportPending(tree, marker);
             thumbnails.enqueueTree(store, library.dirOf(tree));
             return result;

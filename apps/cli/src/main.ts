@@ -4,19 +4,16 @@ import { basename, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { getPersonSummary, openTree } from '@open-ancestry/db';
-import {
-  importFile,
-  importGedcom,
-  type ImportPhase,
-  type ImportReport,
-} from '@open-ancestry/import';
+import { importGedcom, type ImportPhase, type ImportReport } from '@open-ancestry/import';
 import {
   DEFAULT_HOST,
   Library,
   defaultLibraryRoot,
+  devWorkerImporter,
   isLoopbackHost,
   startServer,
   treeNameProblem,
+  workerImporter,
   type RunningServer,
 } from '@open-ancestry/server';
 
@@ -99,6 +96,15 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     open: values.open ?? false,
     staticDir: values['static-dir'],
   };
+}
+
+/**
+ * Imports run in a worker thread: the bundled worker next to the bundled CLI
+ * (dist/import-worker.js), or the TypeScript source when run unbundled.
+ */
+function serverImporter() {
+  const bundled = new URL('./import-worker.js', import.meta.url);
+  return existsSync(fileURLToPath(bundled)) ? workerImporter(bundled) : devWorkerImporter();
 }
 
 /** The web build copied next to the bundled CLI (dist/public). */
@@ -334,7 +340,7 @@ export async function run(
     port: cli.port,
     library: cli.library,
     staticDir: cli.staticDir ?? bundledStaticDir(),
-    importer: importFile,
+    importer: serverImporter(),
   });
   log(`open-ancestry running at ${server.url}`);
   log(`Library: ${cli.library}`);

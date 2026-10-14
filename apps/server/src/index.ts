@@ -9,6 +9,7 @@ import fastifyEtag from '@fastify/etag';
 import fastifyMultipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
+import { IMPORT_LIMITS } from '@open-ancestry/import';
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import type { Deps } from './context';
 import { errorBody, registerErrorHandling, toApiError } from './errors';
@@ -35,6 +36,12 @@ export {
   type JobView,
 } from './jobs';
 export { SECURITY_HEADERS, TOKEN_HEADER, isLoopbackHost } from './security';
+export {
+  IMPORT_RESOURCE_LIMITS,
+  devWorkerImporter,
+  workerImporter,
+  type WorkerImporterOptions,
+} from './import-runner';
 
 export interface ServerOptions {
   /** Directory containing the built web app (index.html + assets). */
@@ -48,8 +55,10 @@ export interface ServerOptions {
   token?: string;
   /** Hostnames accepted in the Host header besides loopback. */
   allowedHosts?: readonly string[];
-  /** Largest import upload in bytes (default 1 GiB). */
+  /** Largest import upload in bytes (default: the import cap, 64 MiB). */
   uploadLimit?: number;
+  /** Largest media upload in bytes (default 1 GiB). */
+  mediaUploadLimit?: number;
   /** Concurrent imports (default 1) and how many may wait (default 4). */
   importConcurrency?: number;
   maxQueuedImports?: number;
@@ -68,7 +77,9 @@ export interface RunningServer {
 }
 
 export const DEFAULT_HOST = '127.0.0.1';
-export const DEFAULT_UPLOAD_LIMIT = 1024 * 1024 * 1024;
+/** Import uploads: no larger than the importer accepts (IMPORT_LIMITS.maxBytes). */
+export const DEFAULT_UPLOAD_LIMIT = IMPORT_LIMITS.maxBytes;
+export const DEFAULT_MEDIA_UPLOAD_LIMIT = 1024 * 1024 * 1024;
 /** JSON bodies are small edits; uploads go through multipart with their own limit. */
 export const JSON_BODY_LIMIT = 1024 * 1024;
 
@@ -137,6 +148,7 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     jobs,
     importer: options.importer,
     uploadLimit: options.uploadLimit ?? DEFAULT_UPLOAD_LIMIT,
+    mediaUploadLimit: options.mediaUploadLimit ?? DEFAULT_MEDIA_UPLOAD_LIMIT,
     thumbnails: new ThumbnailQueue(),
   };
 

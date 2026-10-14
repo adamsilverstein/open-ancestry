@@ -13,17 +13,16 @@ export interface ImportProgress {
 }
 
 export interface ImporterOptions {
-  /** The tree's media/ folder, for files extracted from a GEDZIP. */
-  mediaDir: string;
   onProgress: (progress: ImportProgress) => void;
   signal: AbortSignal;
 }
 
 /**
  * Imports a GEDCOM or GEDZIP file at `filePath` into the empty tree `target`.
- * Wire the real importer with
- * `(path, store, options) => importGedcom({ path }, store, options)` from
- * @open-ancestry/import; it is injected so tests can fake it.
+ * The real one runs @open-ancestry/import in a worker thread
+ * (`workerImporter` in import-runner.ts); it is injected so tests can fake it.
+ * A GEDZIP brings its own media; an upload never reads media from local
+ * folders.
  */
 export type Importer = (
   filePath: string,
@@ -87,6 +86,12 @@ export class JobManager {
     this.maxQueued = maxQueued;
     this.keepFinished = keepFinished;
     this.events.setMaxListeners(0);
+  }
+
+  /** Whether a new job could be queued now (checked before accepting an upload). */
+  hasRoom(): boolean {
+    const queued = [...this.jobs.values()].filter((j) => j.state === 'queued').length;
+    return queued < this.maxQueued;
   }
 
   get(id: string): JobView | undefined {

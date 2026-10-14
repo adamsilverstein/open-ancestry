@@ -157,6 +157,19 @@ describe('sibling chevrons', () => {
     }
   });
 
+  it('keep the parents together when cousins expand', () => {
+    const base = layoutFamily(siblings, 'me');
+    const open = layoutFamily(siblings, 'me', { expanded: ['aunt:down', 'uncle:down'] });
+    const gap = (l: TreeLayout) => node(l, 'mom').x - (node(l, 'dad').x + 120);
+    // Issue #32: the couple used to be pushed 400+px apart to make room.
+    expect(gap(open)).toBe(gap(base));
+    expect(node(open, 'dad').x).toBe(node(base, 'dad').x);
+    // The cousins slide out past the focus row instead, still under their own side.
+    expect(node(open, 'cousin2').x + 120).toBeLessThan(node(open, 'half').x);
+    expect(node(open, 'cousin3').x).toBeGreaterThan(node(open, 'younger').x + 120);
+    expect(crossings(open.edges)).toEqual([]);
+  });
+
   it("stop at cousins: great-aunts and a spouse's aunts get no chevron", () => {
     const g = makeGraph(
       {

@@ -43,10 +43,13 @@ interface TreeSearch {
   up?: number;
   down?: number;
 }
-const generations = (value: unknown) =>
-  typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 10
-    ? value
+/** A number of generations from the URL, clamped to what the server serves (0-10). */
+const generations = (value: unknown) => {
+  const n = typeof value === 'string' ? Number(value) : value;
+  return typeof n === 'number' && Number.isFinite(n)
+    ? Math.min(10, Math.max(0, Math.round(n)))
     : undefined;
+};
 
 const treeRoute = createRoute({
   getParentRoute: () => rootRoute,

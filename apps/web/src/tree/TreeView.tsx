@@ -22,7 +22,15 @@ import { useToast } from '../components/Toast/Toast';
 import type { PersonSummary } from '../lib/person';
 import { TreeToolbar, type TreeLayout as LayoutKind } from '../components/TreeToolbar/TreeToolbar';
 import { Skeleton } from '../components/Skeleton/Skeleton';
-import { ApiError, fetchHome, fetchNeighborhood, treeKeys, type NeighborhoodRequest } from './api';
+import {
+  ApiError,
+  clampGenerations,
+  fetchHome,
+  fetchNeighborhood,
+  MAX_GENERATIONS,
+  treeKeys,
+  type NeighborhoodRequest,
+} from './api';
 import { usePalette } from '../app/palette';
 import { lifeEvent, toPersonSummary } from './format';
 import { GraphCache } from './graphCache';
@@ -155,8 +163,9 @@ export function TreeView({
   const queryClient = useQueryClient();
   const toast = useToast();
   const kind: LayoutKind = search.layout ?? 'family';
-  const up = search.up ?? DEFAULT_DEPTH[kind].up;
-  const down = search.down ?? DEFAULT_DEPTH[kind].down;
+  // Hand-edited URLs can hold anything: clamp to what the server serves.
+  const up = clampGenerations(search.up ?? DEFAULT_DEPTH[kind].up);
+  const down = clampGenerations(search.down ?? DEFAULT_DEPTH[kind].down);
 
   const canvas = useRef<TreeCanvasHandle>(null);
   // The page remounts this view per tree, so one cache and worker per tree.
@@ -209,9 +218,10 @@ export function TreeView({
   const requestFor = useCallback(
     (focus: string): NeighborhoodRequest => ({
       focus,
-      // One generation past what is shown, so the next chevron needs no request.
-      up: kind === 'descendants' ? 0 : up + 1,
-      down: kind === 'pedigree' || kind === 'fan' ? 0 : down + 1,
+      // One generation past what is shown, so the next chevron needs no request,
+      // but never past the server's limit.
+      up: kind === 'descendants' ? 0 : Math.min(up + 1, MAX_GENERATIONS),
+      down: kind === 'pedigree' || kind === 'fan' ? 0 : Math.min(down + 1, MAX_GENERATIONS),
       // The family view shows siblings, aunts and uncles (with their spouses).
       siblingsDepth: kind === 'family' ? 2 : 0,
     }),

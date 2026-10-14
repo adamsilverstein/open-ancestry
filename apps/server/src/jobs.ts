@@ -69,6 +69,9 @@ export interface JobManagerOptions {
   keepFinished?: number;
 }
 
+/** Progress phases a cancel can no longer interrupt (importers run them to the end). */
+export const UNCANCELLABLE_PHASES: ReadonlySet<string> = new Set(['finalize', 'commit', 'done']);
+
 export class TooManyJobsError extends Error {
   constructor() {
     super('Too many imports are queued; try again when one finishes');
@@ -140,12 +143,26 @@ export class JobManager {
    * cleanup), a running one is aborted through its signal and fails when the
    * work stops. Returns false for unknown or finished jobs.
    */
+  /**
+   * Whether `cancel` can still stop the job: it is queued, or running in a
+   * phase the work checks its abort signal in. An importer reports `finalize`
+   * and `commit` for the stretch it runs to the end without checking.
+   */
+  cancellable(id: string): boolean {
+    const job = this.jobs.get(id);
+    if (!job) return false;
+    if (job.state === 'queued') return true;
+    if (job.state !== 'running') return false;
+    const phase = job.progress?.phase;
+    return !(typeof phase === 'string' && UNCANCELLABLE_PHASES.has(phase));
+  }
+
   cancel(id: string): boolean {
     const job = this.jobs.get(id);
-    if (!job || (job.state !== 'queued' && job.state !== 'running')) return false;
-    job.cancelled = true;
+    if (!job || !this.cancellable(id)) return false;
     job.controller.abort();
     if (job.state === 'queued' && !job.cancelling) {
+      job.cancelled = true;
       // Never picked up by pump(): it skips jobs that are cancelling.
       job.cancelling = true;
       job.error = 'Cancelled';
@@ -208,6 +225,7 @@ export class JobManager {
     let state: JobState = 'completed';
     if (job.controller.signal.aborted) {
       job.error = 'Cancelled';
+      job.cancelled = true;
       state = 'failed';
     } else {
       this.setState(job, 'running');
@@ -216,6 +234,8 @@ export class JobManager {
       } catch (error) {
         job.error = error instanceof Error ? error.message : String(error);
         state = 'failed';
+        // Only a failure after an abort is a cancel; work that finished anyway completed.
+        job.cancelled = job.controller.signal.aborted;
       }
     }
     // Clean up first, so a finished job never leaves its upload behind.

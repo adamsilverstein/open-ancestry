@@ -143,7 +143,14 @@ export function importRoutes(app: Api, deps: Deps): void {
   app.delete('/api/jobs/:id', { schema: { params: JobParams } }, async (request, reply) => {
     const { id } = request.params;
     if (!jobs.get(id)) throw notFound(`Job ${id} not found`);
-    if (!jobs.cancel(id)) throw conflict(`Job ${id} has already finished`);
+    if (!jobs.cancel(id)) {
+      const job = jobs.get(id)!;
+      throw conflict(
+        job.state === 'running'
+          ? `Job ${id} is saving and can no longer be cancelled`
+          : `Job ${id} has already finished`,
+      );
+    }
     return reply.code(202).send({ job: jobs.get(id) });
   });
 

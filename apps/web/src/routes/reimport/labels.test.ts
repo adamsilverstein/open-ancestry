@@ -57,6 +57,18 @@ describe('re-import labels', () => {
       [{ ...base, kind: 'child.add', parentNames: [] }, 'Child of unknown'],
       [{ ...base, kind: 'person.missing' }, 'Not in the new export'],
       [
+        { ...base, kind: 'family.missing', partnerNames: ['Noah Ashgrove', 'Ivy Fen'] },
+        'Not in the new export: partner Ivy Fen. Kept in your tree.',
+      ],
+      [
+        { ...base, kind: 'child.missing', parentNames: ['Ada Fen', 'Ivo Fen'] },
+        'Not in the new export: child of Ada Fen and Ivo Fen. Kept in your tree.',
+      ],
+      [
+        { ...base, kind: 'deleted-here' },
+        'You deleted Noah Ashgrove from this tree; not added back unless you tick it',
+      ],
+      [
         { ...base, kind: 'possibly-merged', existingName: 'Josiah Ashgrove' },
         'Possibly merged into Josiah Ashgrove earlier (shares a relative); not added unless you tick it',
       ],

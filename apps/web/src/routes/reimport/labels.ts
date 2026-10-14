@@ -61,6 +61,12 @@ export function describeChange(change: ReviewChange, personName: string): string
       return `Child of ${list(change.parentNames)}`;
     case 'person.missing':
       return 'Not in the new export';
+    case 'family.missing':
+      return `Not in the new export: partner ${list(change.partnerNames.filter((n) => n !== personName))}. Kept in your tree.`;
+    case 'child.missing':
+      return `Not in the new export: child of ${list(change.parentNames)}. Kept in your tree.`;
+    case 'deleted-here':
+      return `You deleted ${personName} from this tree; not added back unless you tick it`;
     case 'possibly-merged':
       return `Possibly merged into ${change.existingName} earlier (shares a relative); not added unless you tick it`;
     case 'merged':

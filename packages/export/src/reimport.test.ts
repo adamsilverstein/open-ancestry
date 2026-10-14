@@ -8,7 +8,7 @@ import { exportGedcom } from './gedcom';
 const SAMPLE = readFileSync(
   join(import.meta.dirname, '../../../fixtures/ancestry-sample.ged'),
   'utf8',
-).replace(/^﻿/, '');
+).replace(/^\uFEFF/, '');
 const NOW = new Date('2026-10-14T12:00:00Z');
 const renumber = (text: string) =>
   text.replace(/@([A-Z]+)(\d+)@/g, (_, p: string, n: string) => `@${p}${Number(n) + 100}@`);

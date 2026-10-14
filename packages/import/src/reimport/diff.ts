@@ -67,6 +67,12 @@ export type ReimportChange =
       parentNames: string[];
     }
   | { kind: 'person.missing' }
+  /** A partnership from an earlier import that this export no longer has. */
+  | { kind: 'family.missing'; existingFamilyId: string; partnerNames: string[] }
+  /** A parent link from an earlier import that this export no longer has. */
+  | { kind: 'child.missing'; existingFamilyId: string; parentNames: string[] }
+  /** The record matches someone the user deleted from this tree. */
+  | { kind: 'deleted-here' }
   /** Another exported record that was merged into this person here: folded in, never added. */
   | { kind: 'merged'; incomingId: string; incomingName: string }
   /** An unmatched record that shares a relative with someone merged here: likely the same person. */
@@ -119,6 +125,8 @@ const factOf = (e: SnapEvent): FactView => ({
   value: e.row.value,
 });
 
+type FamilyChildRef = Snapshot['familyChildren'][number];
+
 const sameText = (a: string | null, b: string | null) => norm(a) === norm(b);
 const sameFact = (a: SnapEvent, b: SnapEvent) =>
   a.row.type === b.row.type &&
@@ -137,15 +145,62 @@ function displayName(p: SnapPerson): string {
 const lifespan = (p: SnapPerson) =>
   p.birthYear || p.deathYear ? `${p.birthYear ?? '?'}–${p.deathYear ?? ''}` : '';
 
-/** Rows changed by the user (any applied change batch) since they were imported. */
-export function locallyEdited(store: TreeStore): Set<string> {
+/** What the user did to the tree since it was imported. */
+export interface LocalHistory {
+  /** Rows changed by the user, as `entity|id`. */
+  edited: Set<string>;
+  /** People whose names the user added, changed or removed. */
+  renamed: Set<string>;
+  /** Names (normalized) of people the user deleted. */
+  deletedNames: Set<string>;
+}
+
+const fullName = (n: { given: string | null; surname: string | null }) =>
+  [n.given, n.surname].filter(Boolean).join(' ');
+
+/** Reads the applied change batches for edits, renames and deletions. */
+export function localHistory(store: TreeStore): LocalHistory {
   const rows = store.db
     .prepare(
-      `SELECT DISTINCT l.entity, l.entity_id FROM change_log l
-       JOIN change_batch b ON b.id = l.batch_id WHERE b.state = 'applied'`,
+      `SELECT l.entity, l.entity_id, l.op,
+              CASE WHEN l.entity = 'person_name'
+                THEN coalesce(l.before_json, l.after_json) END AS name_json
+         FROM change_log l JOIN change_batch b ON b.id = l.batch_id
+        WHERE b.state = 'applied' AND l.entity NOT IN ('raw_record', 'unmapped_line')`,
     )
-    .all() as { entity: string; entity_id: string }[];
-  return new Set(rows.map((r) => `${r.entity}|${r.entity_id}`));
+    .all() as { entity: string; entity_id: string; op: string; name_json: string | null }[];
+  const edited = new Set<string>();
+  const renamed = new Set<string>();
+  const deleted = new Set<string>();
+  const namesOf = new Map<string, string[]>();
+  for (const r of rows) {
+    edited.add(`${r.entity}|${r.entity_id}`);
+    if (r.entity === 'person' && r.op === 'delete') deleted.add(r.entity_id);
+    if (r.name_json) {
+      const n = JSON.parse(r.name_json) as {
+        person_id: string;
+        given: string | null;
+        surname: string | null;
+      };
+      renamed.add(n.person_id);
+      if (r.op === 'delete')
+        namesOf.set(n.person_id, [...(namesOf.get(n.person_id) ?? []), norm(fullName(n))]);
+    }
+  }
+  // A merge (#70) also deletes a person, but first re-points its imported records at the survivor.
+  const mergedAway = store.db
+    .prepare(
+      `SELECT DISTINCT json_extract(l.before_json, '$.owner_id') FROM change_log l
+         JOIN change_batch b ON b.id = l.batch_id
+        WHERE b.state = 'applied' AND l.entity = 'raw_record' AND l.op = 'update'
+          AND json_extract(l.before_json, '$.owner_type') = 'person'
+          AND json_extract(l.after_json, '$.owner_id') IS NOT json_extract(l.before_json, '$.owner_id')`,
+    )
+    .pluck()
+    .all() as string[];
+  for (const id of mergedAway) deleted.delete(id);
+  const deletedNames = new Set([...deleted].flatMap((id) => namesOf.get(id) ?? []));
+  return { edited, renamed, deletedNames };
 }
 
 /**
@@ -315,8 +370,9 @@ export function diffTrees(
   existing: Snapshot,
   incoming: Snapshot,
   matches: Map<string, PersonMatch>,
-  edited: Set<string>,
+  local: LocalHistory,
 ): ReimportDiff {
+  const { edited } = local;
   const people: PersonReview[] = [];
   const reviews = new Map<string, PersonReview>();
   const toExisting = new Map([...matches.values()].map((m) => [m.incomingId, m.existingId]));
@@ -392,14 +448,19 @@ export function diffTrees(
       );
     }
     const names = new Set(e.names.map((n) => `${norm(n.given)}|${norm(n.surname)}`));
+    // A name the export has but the tree lacks may be one the user changed: keep their edit.
+    const renamed = local.renamed.has(e.row.id);
     for (const n of i.names) {
       if (names.has(`${norm(n.given)}|${norm(n.surname)}`)) continue;
-      add({
-        kind: 'name.add',
-        incomingNameId: n.id,
-        name: [n.given, n.surname].filter(Boolean).join(' '),
-        nameType: n.type,
-      });
+      add(
+        {
+          kind: 'name.add',
+          incomingNameId: n.id,
+          name: fullName(n),
+          nameType: n.type,
+        },
+        renamed ? { conflict: 'local-edit', defaultAccept: false } : {},
+      );
     }
     diffFacts(e, i, edited, add);
     diffCitations(null, null, add, { existing: e.citations, incoming: i.citations });
@@ -457,6 +518,10 @@ export function diffTrees(
       reasons: [],
       changes: [],
     }));
+    const deletedHere = i.names.some((n) => local.deletedNames.has(norm(fullName(n))));
+    if (deletedHere) {
+      adder(r, { applicable: false, defaultAccept: false })({ kind: 'deleted-here' });
+    }
     if (suspect) {
       // Until merges are recorded as aliases (#70), a shared relative is the hint: never pre-ticked.
       adder(r, { applicable: false, defaultAccept: false })({
@@ -470,7 +535,7 @@ export function diffTrees(
       i.row.id,
       adder(
         r,
-        suspect ? { defaultAccept: false } : {},
+        suspect || deletedHere ? { defaultAccept: false } : {},
       )({ kind: 'person.new', incomingId: i.row.id }).id,
     );
   }
@@ -576,6 +641,71 @@ export function diffTrees(
         },
         { requires: requiresFor(involved) },
       );
+    }
+  }
+
+  // Partnerships and parent links from an earlier import that the export dropped.
+  // Only between people still in the export: anyone missing is listed below.
+  const incomingFamilies = new Map<string, Set<string>>();
+  for (const f of incoming.families.values()) {
+    incomingFamilies.set(
+      familyKey(mapPerson(f.partner1_id), mapPerson(f.partner2_id)),
+      new Set((incomingChildren.get(f.id) ?? []).map((c) => mapPerson(c)!)),
+    );
+  }
+  const existingName = (id: string) => displayName(existing.people.get(id)!);
+  const matchedReview = (existingId: string) =>
+    reviews.get(`m:${existingId}`) ??
+    review(`m:${existingId}`, () => {
+      const e = existing.people.get(existingId)!;
+      const m = [...matches.values()].find((x) => x.existingId === existingId)!;
+      return {
+        key: `m:${existingId}`,
+        status: 'matched',
+        existingId,
+        incomingId: m.incomingId,
+        name: displayName(e),
+        lifespan: lifespan(e),
+        confidence: m.confidence,
+        reasons: m.reasons,
+        changes: [],
+      };
+    });
+  const info = { applicable: false, defaultAccept: false };
+  const childrenOf = new Map<string, FamilyChildRef[]>();
+  for (const c of existing.familyChildren) {
+    childrenOf.set(c.family_id, [...(childrenOf.get(c.family_id) ?? []), c]);
+  }
+  for (const f of existing.families.values()) {
+    if (!f.import_batch_id) continue;
+    const partners = [f.partner1_id, f.partner2_id].filter((p): p is string => !!p);
+    if (!partners.every((p) => matchedExisting.has(p))) continue;
+    const kids = incomingFamilies.get(familyKey(f.partner1_id, f.partner2_id));
+    const partnerNames = partners.map(existingName);
+    if (!kids && partners.length === 2) {
+      for (const p of partners) {
+        adder(
+          matchedReview(p),
+          info,
+        )({
+          kind: 'family.missing',
+          existingFamilyId: f.id,
+          partnerNames,
+        });
+      }
+    }
+    for (const c of childrenOf.get(f.id) ?? []) {
+      if (!matchedExisting.has(c.child_id) || kids?.has(c.child_id)) continue;
+      // A child the user linked here never came from an export.
+      if (edited.has(`family_child|${c.id}`)) continue;
+      adder(
+        matchedReview(c.child_id),
+        info,
+      )({
+        kind: 'child.missing',
+        existingFamilyId: f.id,
+        parentNames: partnerNames,
+      });
     }
   }
 

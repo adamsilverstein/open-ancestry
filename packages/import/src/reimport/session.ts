@@ -2,7 +2,7 @@ import { openMemoryTree, type TreeStore } from '@open-ancestry/db';
 import { importGedcom } from '../import';
 import type { ImportInput, ImportOptions, ImportReport } from '../types';
 import { treeRevision } from './apply';
-import { diffTrees, locallyEdited, type ReimportDiff } from './diff';
+import { diffTrees, localHistory, type ReimportDiff } from './diff';
 import { matchPeople, type PersonMatch } from './match';
 import { snapshot } from './snapshot';
 
@@ -35,7 +35,7 @@ export async function prepareReimport(
     const existingSnap = snapshot(store);
     const incomingSnap = snapshot(incoming);
     const matches = matchPeople(existingSnap, incomingSnap);
-    const diff = diffTrees(existingSnap, incomingSnap, matches, locallyEdited(store));
+    const diff = diffTrees(existingSnap, incomingSnap, matches, localHistory(store));
     return {
       incoming,
       report,

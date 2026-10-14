@@ -44,6 +44,7 @@ interface TreeSearch {
   layout?: TreeLayoutKind;
   up?: number;
   down?: number;
+  tag?: string;
 }
 const treeRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -59,6 +60,9 @@ const treeRoute = createRoute({
     // so an unset key would let `up=abc` reach the view as a string.
     valid.up = parseGenerations(search.up);
     valid.down = parseGenerations(search.down);
+    if (typeof search.tag === 'string' && /^[0-9A-Za-z_-]{1,64}$/.test(search.tag)) {
+      valid.tag = search.tag;
+    }
     return valid;
   },
   component: lazyRouteComponent(() => import('../routes/TreePage'), 'TreePage'),
@@ -109,6 +113,12 @@ const mergeRoute = createRoute({
   component: lazyRouteComponent(() => import('../routes/merge/MergePage'), 'MergePage'),
 });
 
+const tagsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/tags',
+  component: lazyRouteComponent(() => import('../routes/tags/TagsPage'), 'TagsPage'),
+});
+
 const importRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/import/$jobId',
@@ -131,6 +141,7 @@ const routeTree = rootRoute.addChildren([
   reimportRoute,
   checkerRoute,
   mergeRoute,
+  tagsRoute,
 ]);
 
 export const router = createRouter({

@@ -1,0 +1,129 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-5);
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--oa-space-6) var(--oa-space-4) var(--oa-space-8);
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--oa-space-4);
+}
+
+.title {
+  font: var(--oa-text-display);
+  font-weight: var(--oa-weight-semibold);
+}
+
+.intro {
+  max-width: 60ch;
+  margin-top: var(--oa-space-2);
+  color: var(--oa-text-muted);
+}
+
+.loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-2);
+}
+
+.category {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-2);
+}
+
+.categoryHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oa-space-2);
+  padding-bottom: var(--oa-space-1);
+  border-bottom: 1px solid var(--oa-border);
+}
+
+.categoryTitle {
+  font: var(--oa-text-lg);
+  font-weight: var(--oa-weight-semibold);
+}
+
+.categoryActions {
+  display: flex;
+  gap: var(--oa-space-1);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tag {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oa-space-3);
+  padding: var(--oa-space-2) var(--oa-space-2);
+  border-bottom: 1px solid var(--oa-border);
+}
+
+.count {
+  color: var(--oa-text-muted);
+  font: var(--oa-text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.links {
+  display: flex;
+  gap: var(--oa-space-3);
+  margin-left: auto;
+  font: var(--oa-text-sm);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-3);
+}
+
+.colors {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: var(--oa-space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.legend {
+  margin-bottom: var(--oa-space-1);
+  font: var(--oa-text-sm);
+  font-weight: var(--oa-weight-medium);
+}
+
+.swatch {
+  display: flex;
+  align-items: center;
+  gap: var(--oa-space-2);
+  font: var(--oa-text-sm);
+  cursor: pointer;
+}
+
+.swatch input {
+  margin: 0;
+  accent-color: var(--oa-accent);
+}
+
+.dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+}

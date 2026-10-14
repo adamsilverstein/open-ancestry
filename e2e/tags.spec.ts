@@ -53,7 +53,7 @@ test('creates, edits, recolors and deletes tags, with undo', async ({ page }) =>
   await page.getByRole('button', { name: 'New tag' }).click();
   let dialog = page.getByRole('dialog', { name: 'New tag' });
   await dialog.getByRole('textbox', { name: 'Name' }).fill('Brick wall');
-  await dialog.getByRole('textbox', { name: 'Category' }).fill('Research');
+  await dialog.getByRole('combobox', { name: 'Category' }).fill('Research');
   await dialog.getByRole('radio', { name: 'Violet' }).check();
   await dialog.getByRole('button', { name: 'Save' }).click();
   await expect(category(page, 'Research').getByText('Brick wall')).toBeVisible();

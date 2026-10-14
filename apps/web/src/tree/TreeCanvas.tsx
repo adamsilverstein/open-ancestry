@@ -98,6 +98,8 @@ export interface TreeCanvasProps {
   onViewportChange: (world: Rect) => void;
   /** The layout is on screen (cards mounted). */
   onRendered: () => void;
+  /** Highlight by tag: these people stand out, everyone else is dimmed. Null for none. */
+  highlight?: { personIds: ReadonlySet<string>; label: string } | null;
   children?: ReactNode;
 }
 
@@ -149,6 +151,8 @@ interface CardProps {
   lod: boolean;
   light: boolean;
   alternate: ParentFamilyChoice | undefined;
+  /** Not among the highlighted people. */
+  dimmed: boolean;
 }
 
 /** One card with its chevrons. Events are delegated to the canvas. */
@@ -161,11 +165,13 @@ const TreeCard = memo(function TreeCard({
   lod,
   light,
   alternate,
+  dimmed,
 }: CardProps) {
   const tabIndex = tabbable ? 0 : -1;
   const common = {
     'data-key': node.key,
     'data-generation': node.generation,
+    'data-dimmed': dimmed || undefined,
     'aria-label': label,
     'aria-haspopup': node.isDuplicate ? undefined : ('dialog' as const),
     'aria-expanded': node.isDuplicate ? undefined : expanded,
@@ -280,6 +286,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     layout,
     fan,
     kin,
+    highlight = null,
     focusPersonId,
     person,
     popoverKey,
@@ -1300,11 +1307,14 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
             const p = person(node.personId);
             if (!p) return null;
             const relation = kin[node.key];
-            const cardLabel = personCardLabel({
+            const highlighted = highlight ? highlight.personIds.has(node.personId) : false;
+            const baseLabel = personCardLabel({
               person: p,
               focusPerson: node.isFocus,
               duplicate: node.isDuplicate,
             });
+            // Highlighting is in the label too, not only in the dimming.
+            const cardLabel = highlighted ? `${baseLabel}, ${highlight!.label}` : baseLabel;
             return (
               <TreeCard
                 key={node.key}
@@ -1316,6 +1326,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
                 lod={shown.lod}
                 light={shown.light}
                 alternate={layout.alternateParentFamilies[node.personId]}
+                dimmed={highlight !== null && !highlighted}
               />
             );
           })}

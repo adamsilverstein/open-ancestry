@@ -180,6 +180,9 @@ Hover and focus can be forced for screenshots with `data-demo-hover` / `data-dem
 - **Person page** (`/person/$id`, tab in `?tab=`): header band on `--oa-canvas` marked `data-surface="canvas"` (avatar 120, serif display name, `BIRTH`/`DEATH` lines with date and place, relationship to the home person on a reserved line, tags, View in tree), tab bar (Facts, Gallery, Notes, LifeStory, Sources), then the Facts grid: Timeline 1.6fr, Sources 1fr, Relationships 1fr at `lg`; Timeline beside Sources over Relationships at `md`; one column below. Timeline rows: own events, alternates indented under the preferred fact, relatives' births and deaths shaded as family events, filterable by category. LifeStory is set in the serif face at a reading measure.
 - **Gallery tiles**: a 160px preview box on `--oa-surface-sunken` above the caption. Thumbnails are shown whole with `object-fit: scale-down`: portraits and very wide photos are letterboxed rather than cropped, and an image smaller than the box keeps its own size, centered. Tiles offer the `sm` and `md` thumbnails through `srcset` (plain `sm` for images no bigger than 160px). Media without a local file show a placeholder that says where the file is: "On Ancestry", "Online, not linked" or "File missing".
 
+- **Tool pages** (`/checker`, `/merge`, `/tags`): a single readable column up to about 1000px, serif display title with a one-line muted intro, then the work. Each row names the people involved with links to them, and every change goes through `useEdit`, so it is undoable and appears in History.
+- **Highlight in the tree** (`/tree/:id?tag=`): cards outside the highlighted set fade to 35% opacity; highlighted cards say so in their accessible name, and a status pill at the top offers Clear highlight.
+
 ## Content style
 
 - Dates as stored by the user, normalized for display to `D Mon YYYY` (`5 Sep 1941`), with qualifiers abbreviated (`abt.`, `bef.`, `aft.`, `bet. 1890 and 1895`).

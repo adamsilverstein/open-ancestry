@@ -9,7 +9,7 @@ import {
   type RefObject,
 } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { UserRoundX } from 'lucide-react';
 import {
@@ -31,7 +31,8 @@ import { useToast } from '../components/Toast/Toast';
 import type { PersonSummary } from '../lib/person';
 import { TreeToolbar, type TreeLayout as LayoutKind } from '../components/TreeToolbar/TreeToolbar';
 import { Skeleton } from '../components/Skeleton/Skeleton';
-import { isMissingPerson } from '../api/client';
+import { apiGet, isMissingPerson, seg } from '../api/client';
+import { tagsQuery } from '../api/search';
 import {
   fetchHome,
   fetchNeighborhood,
@@ -55,6 +56,8 @@ export interface TreeSearch {
   layout?: LayoutKind;
   up?: number;
   down?: number;
+  /** Tag id whose people are highlighted. */
+  tag?: string;
 }
 
 /** Search params with `undefined` entries dropped (the route's search has optional keys). */
@@ -64,6 +67,7 @@ function cleanSearch(search: { [K in keyof TreeSearch]?: TreeSearch[K] | undefin
   if (search.layout !== undefined) out.layout = search.layout;
   if (search.up !== undefined) out.up = search.up;
   if (search.down !== undefined) out.down = search.down;
+  if (search.tag !== undefined) out.tag = search.tag;
   return out;
 }
 
@@ -272,6 +276,22 @@ interface ViewState {
 }
 
 /** The tree canvas around one focus person: data, layout worker, toolbar, popover, find. */
+/** The people carrying `tagId`, for highlighting them in the tree. */
+function useTagHighlight(tree: string, tagId: string | undefined) {
+  const { data: tags } = useQuery({ ...tagsQuery(tree), enabled: !!tagId });
+  const { data: people } = useQuery({
+    queryKey: ['tag-people', tree, tagId],
+    queryFn: ({ signal }) =>
+      apiGet<{ personIds: string[] }>(`/trees/${seg(tree)}/tags/${seg(tagId!)}/people`, signal),
+    enabled: !!tagId,
+  });
+  return useMemo(() => {
+    const tag = tags?.find((t) => t.id === tagId);
+    if (!tag || !people) return null;
+    return { personIds: new Set(people.personIds), label: `tagged ${tag.name}` };
+  }, [tags, people, tagId]);
+}
+
 export function TreeView({
   tree,
   personId,
@@ -290,6 +310,8 @@ export function TreeView({
   const fanCapped = kind === 'fan' && requestedUp > MAX_FAN_GENERATIONS;
   const up = fanCapped ? MAX_FAN_GENERATIONS : requestedUp;
   const down = parseGenerations(search.down) ?? DEFAULT_DEPTH[kind].down;
+
+  const highlight = useTagHighlight(tree, search.tag);
 
   const canvas = useRef<TreeCanvasHandle>(null);
   // The page remounts this view per tree, so one cache and worker per tree.
@@ -807,6 +829,7 @@ export function TreeView({
         kind={kind}
         layout={shownResult?.layout ?? null}
         kin={shownResult?.kin ?? NO_KIN}
+        highlight={highlight}
         fan={shownResult?.fan ?? null}
         focusPersonId={personId}
         person={person}
@@ -851,6 +874,24 @@ export function TreeView({
           >
             Open the pedigree
           </Link>
+        </div>
+      )}
+      {highlight && (
+        <div className={styles.highlight} role="status" data-surface="raised">
+          Highlighting people {highlight.label}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() =>
+              void navigate({
+                to: '/tree/$personId',
+                params: { personId },
+                search: (prev) => cleanSearch({ ...prev, tag: undefined }),
+              })
+            }
+          >
+            Clear highlight
+          </Button>
         </div>
       )}
       {shownResult?.layout && minimapVisible && (

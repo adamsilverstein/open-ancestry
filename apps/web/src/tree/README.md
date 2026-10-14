@@ -49,8 +49,18 @@ URL focus ──> TreeView ──fetchQuery──> GET /api/trees/:tree/neighbor
 
 ## Budgets
 
-`e2e/tree-perf.spec.ts` on the seeded 10,000-person tree (Chromium, 1440x900): re-focus with
-cached data (fetch, worker layout, render) from the `oa-tree-refocus` performance measure with
-500+ people on screen, and frame times from `requestAnimationFrame` during a scripted pan and
-pinch over 2,796 laid-out cards, both at fit (2,000+ painted on screen) and just above the canvas
-threshold with cards mounted. The world layer reports `data-visible-count` for these checks.
+`e2e/tree-perf.spec.ts` (`npm run e2e:perf`, Chromium, 1440x900) checks design.md section 7 on
+seeded synthetic trees of 10,000 and 100,000 people (100k only with `OA_PERF_100K=1`, which the
+script sets):
+
+| Measure | Budget |
+| --- | --- |
+| First paint: navigation to the first rendered layout, median of 3 cold loads | < 1s |
+| Re-focus with cached data, key press to painted frame, 500+ on screen, p95 of 10 | < 50ms |
+| Pan and pinch with 2,796 laid out, at fit (all painted) and at 41% (cards mounted) | median >= 58fps, < 5% of frames over 33ms |
+| JS heap after GC, second round of re-focuses and pans vs the first | < 10MB growth |
+
+Time budgets scale by `OA_BENCH_FACTOR` (CI: 2.5). Results go to `perf-results/tree-view.md`, which
+CI's `perf` job adds to its summary. The app marks `oa-tree-ready` when each layout's frame is
+painted and measures `oa-tree-refocus` from the re-focus action to that mark; the world layer
+reports `data-visible-count`.

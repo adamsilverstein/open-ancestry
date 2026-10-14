@@ -85,6 +85,13 @@
   gap: var(--oa-space-1);
 }
 
+/* As the gallery's media-type filter. */
+.filter[aria-pressed='true'] {
+  border-color: var(--oa-accent);
+  background: var(--oa-surface-selected);
+  color: var(--oa-text);
+}
+
 /* Marked by an icon and a word, not only colour. */
 .flag {
   display: inline-flex;

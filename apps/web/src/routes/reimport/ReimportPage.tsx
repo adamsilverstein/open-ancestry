@@ -246,7 +246,8 @@ function Review({ review }: { review: ReimportReview }) {
               <Button
                 key={f.id}
                 size="sm"
-                variant={filter === f.id ? 'primary' : 'ghost'}
+                variant="secondary"
+                className={styles.filter}
                 aria-pressed={filter === f.id}
                 onClick={() => {
                   setFilter(f.id);

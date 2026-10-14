@@ -138,13 +138,17 @@ function Review({ review }: { review: ReimportReview }) {
   }
 
   function acceptHighConfidence() {
-    // Every change of confident matches and new people, but never over a local edit or delete.
+    // Every change of confident matches, but never over a local edit or delete; new
+    // people as suggested (a possible duplicate or a deleted person stays unticked).
     setSelected(
       new Set(
         review.diff.people
           .filter((p) => p.status === 'new' || (p.confidence ?? 0) >= HIGH_CONFIDENCE)
-          .flatMap((p) => p.changes)
-          .filter((c) => c.applicable && !c.conflict)
+          .flatMap((p) =>
+            p.changes.filter(
+              (c) => c.applicable && !c.conflict && (p.status !== 'new' || c.defaultAccept),
+            ),
+          )
           .map((c) => c.id),
       ),
     );

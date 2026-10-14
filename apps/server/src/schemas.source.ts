@@ -256,3 +256,32 @@ export const DismissBody = Type.Object(
   { keys: Type.Array(CheckKey, { minItems: 1, maxItems: 5000 }) },
   strict,
 );
+
+// ---------------------------------------------------------------- merge
+
+const Side = Type.Union([Type.Literal('keep'), Type.Literal('other')]);
+export const MergeBody = Type.Object(
+  {
+    /** The person merged into `:id` and then deleted. */
+    otherId: Id,
+    choices: Type.Optional(
+      Type.Object(
+        {
+          name: Type.Optional(Side),
+          sex: Type.Optional(Side),
+          living: Type.Optional(Side),
+          /** Needed when one record is locked and the other private or confidential. */
+          privacy: Type.Optional(Side),
+          /** Event type to whose fact is preferred, e.g. `{ "BIRT": "other" }`. */
+          preferred: Type.Optional(
+            Type.Record(Type.String({ pattern: '^[A-Z_][A-Z0-9_]{0,31}$' }), Side, {
+              additionalProperties: false,
+            }),
+          ),
+        },
+        strict,
+      ),
+    ),
+  },
+  strict,
+);

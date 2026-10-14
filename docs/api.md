@@ -63,7 +63,9 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 | `POST /api/import` (multipart `file`: .ged, .gedcom, .zip, .gdz) | Imports into a new tree named after the file (" 2", " 3", ... when taken); 202 `{ jobId, job }` with `job.tree` and `job.createdTree: true`. The server owns that tree: if the import fails or is cancelled it removes it, but only while it is still the empty tree it created. |
 | `POST /api/trees/:tree/import` (multipart `file`) | Starts an import into an existing, empty tree (202 `{ jobId, job }`); that tree is never removed. |
 | `POST /api/trees/:tree/reimport` (multipart `file`) | Compares an updated export with the tree as a job (`kind: 'reimport'`); its `result` is `{ reimportId, counts }`. Nothing is written. |
-| `GET /api/reimports/:id` | The review: `source`, `lines`, and `diff` (`people`: matched, new and missing people, each with `confidence`, `reasons` and `changes`; `counts`). Sessions live in memory for an hour, at most four at a time. |
+| `GET /api/reimports/:id` | The review: `source`, `lines`, `stale` (the tree changed since the comparison) and `diff` (`people`: matched, new and missing people, each with `confidence`, `reasons` and `changes`; `counts`). Each change has an `id` for this comparison and a `key` that stays the same when the review is compared again. Sessions live in memory for an hour, at most four at a time. |
+| `GET /api/reimports/:id/status` | `{ stale }`, cheap enough to ask whenever the review page regains focus. |
+| `POST /api/reimports/:id/refresh` | Compares the same export again with the tree as it is now, without reading the file again, and returns the new review. 409 while the tree is busy. |
 | `POST /api/reimports/:id/apply` `{ accept: [changeId] }` | Applies the accepted changes as one change batch labelled `Re-import <file>` (undo reverts all of it). 409 when the tree changed since the comparison. Returns `{ batchId, applied, skipped, blocked }`. |
 | `DELETE /api/reimports/:id` | Discards a review (204). |
 | `GET /api/jobs/:id` | Job state, progress, result or error. |

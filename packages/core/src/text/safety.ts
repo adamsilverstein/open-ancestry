@@ -7,7 +7,9 @@
  */
 
 /** C0 controls (tab and newline included), DEL and C1 controls. */
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/u;
+// eslint-disable-next-line no-control-regex -- as above
 const CONTROLS = /[\u0000-\u001f\u007f-\u009f]/gu;
 /** LRE, RLE, PDF, LRO, RLO: embeddings and overrides, which leak past the text they are in. */
 const EMBEDDING = /[‪-‮]/u;

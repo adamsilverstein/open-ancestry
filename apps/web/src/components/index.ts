@@ -17,6 +17,7 @@ export { IconButton, type IconButtonProps } from './IconButton/IconButton';
 export { IconButtonBase, type IconButtonBaseProps } from './IconButton/IconButtonBase';
 export { Input, type InputProps } from './Input/Input';
 export { LifespanText, type LifespanTextProps } from './LifespanText/LifespanText';
+export { PersonName, type PersonNameProps } from './PersonName/PersonName';
 export {
   Menu,
   MenuContent,

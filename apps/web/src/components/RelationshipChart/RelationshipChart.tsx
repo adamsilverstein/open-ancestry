@@ -5,6 +5,7 @@ import type { PersonSummary } from '../../lib/person';
 import { LifespanText } from '../LifespanText/LifespanText';
 import { Select } from '../Select/Select';
 import styles from './RelationshipChart.module.css';
+import { PersonName } from '../PersonName/PersonName';
 
 export type RelationshipChartRole = 'person' | 'between' | 'common-ancestor' | 'home';
 
@@ -135,7 +136,7 @@ function Chart({ cells, label }: RelationshipChartPath) {
                 className={styles.card}
                 aria-label={linkLabel(cell)}
               >
-                <span className={styles.name}>{cell.person.name}</span>
+                <PersonName className={styles.name} name={cell.person.name} />
                 <span className={styles.meta}>
                   {caption[cell.role] ?? <LifespanText {...cell.person} />}
                 </span>

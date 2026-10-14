@@ -22,6 +22,7 @@ import {
 } from './api';
 import { describeChange } from './labels';
 import styles from './Reimport.module.css';
+import { PersonName } from '../../components/PersonName/PersonName';
 
 /** People shown per page of the review. */
 export const PAGE = 100;
@@ -69,7 +70,7 @@ function PersonCard({
       <header className={styles.cardHeader}>
         <div>
           <h2 className={styles.name}>
-            {person.name}
+            <PersonName name={person.name} />
             {person.lifespan && <span className={styles.lifespan}> {person.lifespan}</span>}
           </h2>
           <p className={styles.meta}>

@@ -6,6 +6,7 @@ import { sexLabel, type PersonSummary } from '../../lib/person';
 import { Avatar } from '../Avatar/Avatar';
 import { LifespanText } from '../LifespanText/LifespanText';
 import styles from './PersonCard.module.css';
+import { PersonName } from '../PersonName/PersonName';
 
 export type PersonCardSize = 'compact' | 'regular';
 
@@ -97,7 +98,7 @@ export function PersonCard({
           </span>
         )}
       </span>
-      <span className={styles.name}>{isPrivate ? 'Private' : person.name}</span>
+      <PersonName className={styles.name} name={isPrivate ? 'Private' : person.name} />
       {!isPrivate && <LifespanText className={styles.lifespan} {...person} />}
       <span className={styles.badges} aria-hidden>
         {selected && <CircleCheck size={12} className={styles.selectedBadge} />}

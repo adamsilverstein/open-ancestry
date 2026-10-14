@@ -21,6 +21,7 @@ import { relationshipPath } from '../../lib/relationship';
 import { formatDate } from '@open-ancestry/core';
 import type { EventBrief } from '../../api/types';
 import styles from './PersonPage.module.css';
+import { PersonName } from '../../components/PersonName/PersonName';
 
 /** Stable tag color from its id, until tags carry a palette index. */
 function tagColor(id: string): TagColor {
@@ -121,7 +122,9 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
         className={styles.avatar}
       />
       <div className={styles.identity}>
-        <h1 className={styles.name}>{name}</h1>
+        <h1 className={styles.name}>
+          <PersonName name={name} />
+        </h1>
         <div className={styles.vitals}>
           <Vital label="Birth" event={summary.birth} />
           <Vital

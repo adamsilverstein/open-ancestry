@@ -220,6 +220,26 @@ test.describe('family view', () => {
     await expect(card(page, 'Nico Vale')).toHaveCount(0);
   });
 
+  test('a failed side branch still shows the tree, with a retry', async ({ page }) => {
+    const blocked = (url: URL) =>
+      url.pathname.endsWith('/neighborhood') &&
+      [ids.otto, ids.greta].includes(url.searchParams.get('focus') ?? '');
+    await page.route(blocked, (route) =>
+      route.fulfill({ status: 500, json: { error: { code: 'internal_error', message: 'x' } } }),
+    );
+    await open(page);
+    const notice = page
+      .getByRole('status')
+      .filter({ hasText: 'Some relatives could not be loaded' });
+    await expect(notice).toBeVisible();
+    await expect(card(page, 'Bram Vale')).toBeAttached();
+    await expect(card(page, 'Fenn Vale')).toHaveCount(0);
+    await page.unroute(blocked);
+    await notice.getByRole('button', { name: 'Retry' }).click();
+    await expect(card(page, 'Fenn Vale')).toBeAttached();
+    await expect(notice).toHaveCount(0);
+  });
+
   test('arrow keys move between related cards', async ({ page }) => {
     await open(page);
     await card(page, 'Ada Vale').focus();

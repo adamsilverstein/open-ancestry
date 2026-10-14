@@ -110,6 +110,19 @@ export class GraphCache {
     return [family.partner1Id, family.partner2Id].filter((p): p is string => p !== null);
   }
 
+  /** Everything merged so far as one slice, to seed a new worker. */
+  snapshot(): ApiNeighborhood {
+    return {
+      focusId: '',
+      people: [...this.people.values()],
+      families: [...this.families.values()],
+      children: [...this.children.values()],
+      moreUp: [...this.moreUp],
+      moreDown: [...this.moreDown],
+      truncated: false,
+    };
+  }
+
   input(): NeighborhoodInput {
     return {
       people: [...this.people.values()],

@@ -28,7 +28,7 @@ import { PersonCard, personCardLabel } from '../components/PersonCard/PersonCard
 import type { TreeLayout as LayoutKind } from '../components/TreeToolbar/TreeToolbar';
 import type { PersonSummary } from '../lib/person';
 import { FanChart } from './FanChart';
-import { buildRelations, kinship, neighbor, type Direction } from './relations';
+import { buildRelations, neighbor, type Direction } from './relations';
 import { GridIndex } from './spatial';
 import {
   centerOn,
@@ -68,6 +68,8 @@ export interface TreeCanvasProps {
   kind: LayoutKind;
   layout: TreeLayout | null;
   fan: FanLayout | null;
+  /** Kinship to the focus card by layout key, computed with the layout. */
+  kin: Record<string, string>;
   focusPersonId: string;
   person: (personId: string) => PersonSummary | undefined;
   popoverKey: string | null;
@@ -241,6 +243,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     kind,
     layout,
     fan,
+    kin,
     focusPersonId,
     person,
     popoverKey,
@@ -795,13 +798,6 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
 
   // ----- render.
   const focusName = person(focusPersonId)?.name ?? '';
-  const sexOf = useCallback(
-    (key: string) => {
-      const n = relations?.nodes.get(key);
-      return (n && person(n.personId)?.sex) || 'U';
-    },
-    [relations, person],
-  );
 
   const shown = visible.source === layout && layout ? visible : null;
   const cardIndexes = useMemo(() => {
@@ -877,7 +873,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
             const node = layout.nodes[i]!;
             const p = person(node.personId);
             if (!p) return null;
-            const kin = relations && kinship(relations, focusPersonId, node.key, sexOf);
+            const relation = kin[node.key];
             const cardLabel = personCardLabel({
               person: p,
               focusPerson: node.isFocus,
@@ -888,7 +884,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
                 key={node.key}
                 node={node}
                 person={p}
-                label={kin ? `${cardLabel}, ${kin} of ${focusName}` : cardLabel}
+                label={relation ? `${cardLabel}, ${relation} of ${focusName}` : cardLabel}
                 tabbable={node.key === active}
                 expanded={popoverKey === node.key}
                 lod={shown.lod}

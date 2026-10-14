@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { layoutFamily, type TreeGraph, type TreePerson } from '@open-ancestry/core';
-import { buildRelations, kinship, neighbor } from './relations';
+import { buildRelations, kinship, kinshipLabels, neighbor } from './relations';
 
 const person = (id: string, sex: 'M' | 'F'): TreePerson => ({ id, sex, name: id, living: false });
 const sexes: Record<string, 'M' | 'F'> = {
@@ -113,5 +113,17 @@ describe('kinship', () => {
     expect(ancestorTerm(4, 'M')).toBe('2nd great-grandfather');
     expect(ancestorTerm(5, 'F')).toBe('3rd great-grandmother');
     expect(ancestorTerm(1, 'U')).toBe('parent');
+  });
+});
+
+describe('kinshipLabels', () => {
+  it('labels every related card in one walk, matching kinship()', () => {
+    const labels = kinshipLabels(relations, 'ada', sexOf);
+    expect(labels.ada).toBeUndefined();
+    for (const node of layout.nodes) {
+      expect(labels[node.key] ?? null).toBe(kinship(relations, 'ada', node.key, sexOf));
+    }
+    expect(labels.fenn).toBe('uncle');
+    expect(kinshipLabels(relations, 'missing', sexOf)).toEqual({});
   });
 });

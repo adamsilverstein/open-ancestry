@@ -109,4 +109,12 @@ describe('GraphCache', () => {
     expect(cache.parentsOf('ada')).toEqual(['bram', 'elsa']);
     expect(cache.parentsOf('bram')).toEqual([]);
   });
+
+  it('snapshots everything merged as one slice for a new worker', () => {
+    const cache = new GraphCache();
+    cache.merge(first);
+    const copy = new GraphCache();
+    copy.merge(cache.snapshot());
+    expect(copy.input()).toEqual(cache.input());
+  });
 });

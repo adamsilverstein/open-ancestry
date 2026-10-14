@@ -11,6 +11,7 @@ import {
   type LayoutNode,
   type TreeLayout,
 } from '@open-ancestry/core';
+import { Button } from '../components/Button/Button';
 import { EmptyState } from '../components/EmptyState/EmptyState';
 import { Minimap } from '../components/Minimap/Minimap';
 import {
@@ -56,6 +57,7 @@ export const DEFAULT_DEPTH: Record<LayoutKind, { up: number; down: number }> = {
 };
 
 const STALE = 5 * 60_000;
+const NO_KIN: Record<string, string> = {};
 const REFOCUS_MARK = 'oa-tree-refocus-start';
 
 /** A tiny external store so the minimap re-renders on pan without the tree. */
@@ -124,6 +126,7 @@ function TreeMinimap({
 interface Result {
   layout: TreeLayout | null;
   fan: FanLayout | null;
+  kin: Record<string, string>;
   focus: string;
   kind: LayoutKind;
 }
@@ -156,10 +159,16 @@ export function TreeView({
   const canvas = useRef<TreeCanvasHandle>(null);
   // The page remounts this view per tree, so one cache and worker per tree.
   const [cache] = useState(() => new GraphCache());
-  const [client] = useState(() => new LayoutClient());
+  const [client] = useState(() => new LayoutClient(() => cache.snapshot()));
   const [dataVersion, setDataVersion] = useState(0);
   const [loaded, setLoaded] = useState<{ focus: string; kind: LayoutKind } | null>(null);
   const [failure, setFailure] = useState<{ focus: string; notFound: boolean } | null>(null);
+  /** Bumped by "Try again" to re-run loading and layout. */
+  const [attempt, setAttempt] = useState(0);
+  /** Side-branch requests that failed for this focus; the rest of the tree still shows. */
+  const [missing, setMissing] = useState<{ focus: string; requests: NeighborhoodRequest[] } | null>(
+    null,
+  );
   const [result, setResult] = useState<Result | null>(null);
   const [rendered, setRendered] = useState<Result | null>(null);
   const [popoverKey, setPopoverKey] = useState<string | null>(null);
@@ -231,8 +240,11 @@ export function TreeView({
     (async () => {
       try {
         await ensure(requestFor(personId));
-        if (kind === 'family') await Promise.all(sideBranches(personId).map(ensure));
+        const branches = kind === 'family' ? sideBranches(personId) : [];
+        const settled = await Promise.allSettled(branches.map(ensure));
         if (!cancelled) {
+          const failed = branches.filter((_, i) => settled[i]!.status === 'rejected');
+          setMissing(failed.length > 0 ? { focus: personId, requests: failed } : null);
           setFailure(null);
           setLoaded({ focus: personId, kind });
         }
@@ -247,7 +259,15 @@ export function TreeView({
     return () => {
       cancelled = true;
     };
-  }, [client, cache, personId, kind, ensure, requestFor, sideBranches]);
+  }, [client, cache, personId, kind, ensure, requestFor, sideBranches, attempt]);
+
+  const retryMissing = useCallback(async () => {
+    if (!missing) return;
+    const { focus, requests } = missing;
+    const settled = await Promise.allSettled(requests.map(ensure));
+    const failed = requests.filter((_, i) => settled[i]!.status === 'rejected');
+    setMissing(failed.length > 0 ? { focus, requests: failed } : null);
+  }, [missing, ensure]);
 
   // Lay out in the worker whenever data or view options change; latest wins.
   const latestRequest = useRef(0);
@@ -268,13 +288,24 @@ export function TreeView({
             selectedParentFamilies: current.parents,
           };
     const id = ++latestRequest.current;
-    void client.layout({ kind, focusId: personId, options }).then((response) => {
-      if (id !== latestRequest.current) return;
-      setResult({ layout: response.layout, fan: response.fan, focus: personId, kind });
-    });
+    client.layout({ kind, focusId: personId, options }).then(
+      (response) => {
+        if (id !== latestRequest.current) return;
+        setResult({
+          layout: response.layout,
+          fan: response.fan,
+          kin: response.kin,
+          focus: personId,
+          kind,
+        });
+      },
+      () => {
+        if (id === latestRequest.current) setFailure({ focus: personId, notFound: false });
+      },
+    );
     // `current` is rebuilt each render; its parts are the real dependencies.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, cache, dataVersion, loaded, personId, kind, up, down, view]);
+  }, [client, cache, dataVersion, loaded, personId, kind, up, down, view, attempt]);
 
   const shownResult = result && result.focus === personId && result.kind === kind ? result : null;
   const busy = !shownResult || rendered !== shownResult;
@@ -464,17 +495,30 @@ export function TreeView({
             description={
               failure.notFound
                 ? 'Nobody with this id is in the tree.'
-                : 'The server did not answer. Try again in a moment.'
+                : 'Something went wrong loading or drawing this part of the tree.'
             }
             action={
-              <Link
-                to="/tree/$personId"
-                params={{ personId: 'home' }}
-                search={{ tree }}
-                className={styles.emptyLink}
-              >
-                Go to the home person
-              </Link>
+              <div className={styles.emptyActions}>
+                {!failure.notFound && (
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setFailure(null);
+                      setAttempt((n) => n + 1);
+                    }}
+                  >
+                    Try again
+                  </Button>
+                )}
+                <Link
+                  to="/tree/$personId"
+                  params={{ personId: 'home' }}
+                  search={{ tree }}
+                  className={styles.emptyLink}
+                >
+                  Go to the home person
+                </Link>
+              </div>
             }
           />
         </div>
@@ -491,6 +535,7 @@ export function TreeView({
         busy={busy}
         kind={kind}
         layout={shownResult?.layout ?? null}
+        kin={shownResult?.kin ?? NO_KIN}
         fan={shownResult?.fan ?? null}
         focusPersonId={personId}
         person={person}
@@ -516,6 +561,14 @@ export function TreeView({
           </div>
         )}
       </TreeCanvas>
+      {missing?.focus === personId && (
+        <div className={styles.notice} role="status" data-surface="raised">
+          Some relatives could not be loaded.
+          <Button size="sm" variant="ghost" onClick={() => void retryMissing()}>
+            Retry
+          </Button>
+        </div>
+      )}
       <TreeToolbar
         className={styles.toolbar}
         layout={kind}

@@ -132,22 +132,11 @@ function lineTerm(n: number, base: string): string {
   return `${ordinal(n - 2)} great-grand${base}`;
 }
 
-/**
- * How `key` is related to the focus card, in words (`father`, `aunt`,
- * `son-in-law`), or null for the focus person and relationships too
- * distant or unusual to name from the cards on screen.
- */
-export function kinship(
-  rel: Relations,
-  focusKey: string,
-  key: string,
-  sexOf: (key: string) => Sex,
-): string | null {
-  if (key === focusKey || !rel.nodes.has(key) || !rel.nodes.has(focusKey)) return null;
-  // Breadth-first over U(p), D(own), S(pouse) and B(rother/sister) steps.
+/** Kinship path steps: U(p), D(own), S(pouse), B(rother or sister). */
+function kinshipPaths(rel: Relations, focusKey: string, stopAt?: string): Map<string, string> {
   const paths = new Map<string, string>([[focusKey, '']]);
   let frontier = [focusKey];
-  while (frontier.length > 0 && !paths.has(key)) {
+  while (frontier.length > 0 && !(stopAt && paths.has(stopAt))) {
     const next: string[] = [];
     for (const from of frontier) {
       const path = paths.get(from)!;
@@ -168,21 +157,21 @@ export function kinship(
     }
     frontier = next;
   }
-  const path = paths.get(key);
-  if (!path) return null;
-  const sex = sexOf(key);
-  const normalized = path.replace('UD', 'B');
+  return paths;
+}
+
+function term(path: string, sex: Sex, half: boolean): string | null {
   if (/^U+$/.test(path)) return ancestorTerm(path.length, sex);
   if (/^D+$/.test(path)) return descendantTerm(path.length, sex);
-  const half = rel.nodes.get(key)?.isHalfSibling ? 'half-' : '';
-  switch (normalized) {
+  const h = half ? 'half-' : '';
+  switch (path.replace('UD', 'B')) {
     case 'S':
       return gendered(sex, 'husband', 'wife', 'spouse');
     case 'B':
-      return half + gendered(sex, 'brother', 'sister', 'sibling');
+      return h + gendered(sex, 'brother', 'sister', 'sibling');
     case 'UB':
     case 'UBS':
-      return half + gendered(sex, 'uncle', 'aunt', 'parent’s sibling');
+      return h + gendered(sex, 'uncle', 'aunt', 'parent’s sibling');
     case 'BS':
       return gendered(sex, 'brother-in-law', 'sister-in-law', 'sibling-in-law');
     case 'DS':
@@ -198,4 +187,36 @@ export function kinship(
     default:
       return null;
   }
+}
+
+/**
+ * How `key` is related to the focus card, in words (`father`, `aunt`,
+ * `son-in-law`), or null for the focus person and relationships too
+ * distant or unusual to name from the cards on screen.
+ */
+export function kinship(
+  rel: Relations,
+  focusKey: string,
+  key: string,
+  sexOf: (key: string) => Sex,
+): string | null {
+  if (key === focusKey || !rel.nodes.has(key) || !rel.nodes.has(focusKey)) return null;
+  const path = kinshipPaths(rel, focusKey, key).get(key);
+  return path ? term(path, sexOf(key), rel.nodes.get(key)?.isHalfSibling === true) : null;
+}
+
+/** Every card's kinship to the focus card from one breadth-first walk. */
+export function kinshipLabels(
+  rel: Relations,
+  focusKey: string,
+  sexOf: (key: string) => Sex,
+): Record<string, string> {
+  const labels: Record<string, string> = {};
+  if (!rel.nodes.has(focusKey)) return labels;
+  for (const [key, path] of kinshipPaths(rel, focusKey)) {
+    if (!path) continue;
+    const label = term(path, sexOf(key), rel.nodes.get(key)?.isHalfSibling === true);
+    if (label) labels[key] = label;
+  }
+  return labels;
 }

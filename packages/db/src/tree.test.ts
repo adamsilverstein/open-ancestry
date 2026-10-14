@@ -1,6 +1,7 @@
 import {
   chmodSync,
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -55,6 +56,42 @@ describe.skipIf(process.platform === 'win32')('tree permissions', () => {
     for (const folder of [dir, paths.media, paths.thumbs]) expect(mode(folder), folder).toBe(0o700);
     expect(mode(paths.database)).toBe(0o600);
     store.close();
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('opening refuses linked tree files', () => {
+  it('refuses a tree folder that is a symlink', () => {
+    const real = join(root, 'Real.oatree');
+    createTree(real).close();
+    const link = join(root, 'Link.oatree');
+    symlinkSync(real, link);
+    expect(() => openTree(link)).toThrow(/symbolic link/);
+  });
+
+  it('refuses a tree.sqlite that is a symlink', () => {
+    const dir = join(root, 'Db.oatree');
+    createTree(dir).close();
+    const other = join(root, 'Other.oatree');
+    createTree(other).close();
+    const { database } = treePaths(dir);
+    rmSync(database);
+    symlinkSync(treePaths(other).database, database);
+    expect(() => openTree(dir)).toThrow(/symbolic link/);
+  });
+
+  it('refuses a tree.sqlite or -wal with another hard link', () => {
+    const dir = join(root, 'Hard.oatree');
+    createTree(dir).close();
+    const { database } = treePaths(dir);
+    // In a shared folder, someone could link any file of yours in as the tree.
+    linkSync(database, join(root, 'elsewhere.sqlite'));
+    expect(() => openTree(dir)).toThrow(/hard link/);
+  });
+
+  it('opens an ordinary tree', () => {
+    const dir = join(root, 'Plain.oatree');
+    createTree(dir).close();
+    expect(() => openTree(dir).close()).not.toThrow();
   });
 });
 

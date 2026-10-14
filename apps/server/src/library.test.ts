@@ -3,6 +3,7 @@ import { mkdtemp, readdir } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createServer } from './index';
 import { Library, defaultLibraryRoot, treeNameProblem } from './library';
 import { testApi, type TestApi } from './test/helpers';
 
@@ -201,6 +202,16 @@ describe.skipIf(process.platform === 'win32')('library permissions', () => {
     library.list();
     expect(warn).toHaveBeenCalledTimes(1);
     library.closeAll();
+  });
+
+  it('warns about a shared library folder once, at startup', async () => {
+    const root = await temp();
+    chmodSync(root, 0o775);
+    writeFileSync(join(root, 'notes.txt'), 'not a tree');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const app = createServer({ library: root });
+    expect(warn).toHaveBeenCalledTimes(1);
+    await app.close();
   });
 
   it('leaves an existing empty folder alone too, with a warning', async () => {

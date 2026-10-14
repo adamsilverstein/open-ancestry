@@ -652,6 +652,31 @@ export function TreeView({
   const shown = shownResult?.layout ?? shownResult?.fan ?? null;
   return (
     <>
+      {/* First in the DOM, so Tab reaches the toolbar before the canvas, as on screen. */}
+      <TreeToolbar
+        className={styles.toolbar}
+        layout={kind}
+        onLayoutChange={(layout) =>
+          void navigate({
+            to: '/tree/$personId',
+            params: { personId },
+            search: (prev) =>
+              cleanSearch({
+                tree: prev.tree,
+                layout: layout === 'family' ? undefined : layout,
+              }),
+          })
+        }
+        layoutMenuOpen={menuOpen}
+        onLayoutMenuOpenChange={setMenuOpen}
+        onFind={palette.open}
+        onHome={() => void goHome()}
+        onZoomIn={() => canvas.current?.zoomBy(ZOOM_STEP)}
+        onZoomOut={() => canvas.current?.zoomBy(1 / ZOOM_STEP)}
+        onFit={() => canvas.current?.fit()}
+        minimapVisible={minimapVisible}
+        onToggleMinimap={() => setMinimapVisible((v) => !v)}
+      />
       <TreeCanvas
         ref={canvas}
         label={focusName ? `Family tree centered on ${focusName}` : 'Family tree'}
@@ -705,30 +730,6 @@ export function TreeView({
           </Link>
         </div>
       )}
-      <TreeToolbar
-        className={styles.toolbar}
-        layout={kind}
-        onLayoutChange={(layout) =>
-          void navigate({
-            to: '/tree/$personId',
-            params: { personId },
-            search: (prev) =>
-              cleanSearch({
-                tree: prev.tree,
-                layout: layout === 'family' ? undefined : layout,
-              }),
-          })
-        }
-        layoutMenuOpen={menuOpen}
-        onLayoutMenuOpenChange={setMenuOpen}
-        onFind={palette.open}
-        onHome={() => void goHome()}
-        onZoomIn={() => canvas.current?.zoomBy(ZOOM_STEP)}
-        onZoomOut={() => canvas.current?.zoomBy(1 / ZOOM_STEP)}
-        onFit={() => canvas.current?.fit()}
-        minimapVisible={minimapVisible}
-        onToggleMinimap={() => setMinimapVisible((v) => !v)}
-      />
       {shownResult?.layout && minimapVisible && (
         <TreeMinimap
           onDismiss={() => setMinimapVisible(false)}

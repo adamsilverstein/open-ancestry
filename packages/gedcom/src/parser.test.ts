@@ -61,6 +61,14 @@ describe('parseGedcom: record tree', () => {
     expect(result.warnings).toEqual([]);
   });
 
+  it('reads a pointer written with extra spaces around it as a pointer', () => {
+    const r = parseGedcom(ged('0 @I1@ INDI', '1 ASSO  @I2@ ', '2 RELA Friend', '1 FAMS\t@F1@'));
+    const indi = r.records[0]!;
+    expect(indi.children[0]).toMatchObject({ tag: 'ASSO', pointer: '@I2@' });
+    expect(indi.children[0]!.value).toBeUndefined();
+    expect(indi.children[1]).toMatchObject({ tag: 'FAMS', pointer: '@F1@' });
+  });
+
   it('parses @VOID@ and keeps @#D calendar escapes as text', () => {
     const result = parseGedcom(
       ged('0 HEAD', '0 @F1@ FAM', '1 HUSB @VOID@', '1 MARR', '2 DATE @#DJULIAN@ 1700', '0 TRLR'),

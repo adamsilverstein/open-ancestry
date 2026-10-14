@@ -894,6 +894,52 @@ test.describe('generation depth in the URL', () => {
   }
 });
 
+test.describe('fan chart keyboard', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+  const segment = (page: Page, name: string) =>
+    page.getByTestId('tree-fan').getByRole('button', { name: new RegExp(`^${name},`) });
+
+  test('one tab stop, arrows by relationship, and focus follows a re-focus', async ({ page }) => {
+    await open(page, 'ada', '&layout=fan');
+    // The toolbar comes first in Tab order, as it does on screen.
+    const layoutButton = page.getByRole('button', { name: /^Layout:/ });
+    await layoutButton.focus();
+    await page.keyboard.press('Tab');
+    await expect(segment(page, 'Ada Vale')).toBeFocused();
+    await page.keyboard.press('Tab');
+    expect(
+      await page.evaluate(() =>
+        Boolean(document.activeElement?.closest('[data-testid="tree-fan"]')),
+      ),
+    ).toBe(false);
+    await page.keyboard.press('Shift+Tab');
+    await expect(segment(page, 'Ada Vale')).toBeFocused();
+    await expect(page.getByTestId('tree-fan').locator('[tabindex="0"]')).toHaveCount(1);
+
+    // Up is the father's side of the parent ring, down back toward the center.
+    await page.keyboard.press('ArrowUp');
+    await expect(segment(page, 'Bram Vale')).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await expect(segment(page, 'Otto Vale')).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(segment(page, 'Bram Vale')).toBeFocused();
+    // Along the ring.
+    await page.keyboard.press('ArrowRight');
+    await expect(segment(page, 'Elsa Hale')).toBeFocused();
+    await page.keyboard.press('ArrowLeft');
+    await expect(segment(page, 'Bram Vale')).toBeFocused();
+    await page.keyboard.press('Home');
+    await expect(segment(page, 'Ada Vale')).toBeFocused();
+
+    // Enter re-focuses; keyboard focus lands on the new center.
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?.*layout=fan`));
+    await expect(segment(page, 'Bram Vale')).toHaveAccessibleName(/focus person/);
+    await expect(segment(page, 'Bram Vale')).toBeFocused();
+  });
+});
+
 test.describe('visual snapshots', () => {
   // Baselines are Linux Chromium only, like design.spec.ts.
   test.skip(

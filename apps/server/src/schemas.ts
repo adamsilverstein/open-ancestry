@@ -27,6 +27,7 @@ export const {
   ExportQuery,
   GedzipQuery,
   NeighborhoodQuery,
+  RelationshipQuery,
   SearchQuery,
   HistoryQuery,
   HomeBody,

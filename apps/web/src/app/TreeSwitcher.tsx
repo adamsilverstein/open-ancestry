@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, Pencil, Plus, Trash2 } from 'lucide-react';
@@ -42,6 +42,7 @@ export default function TreeSwitcher() {
   const [name, setName] = useState('');
   const [error, setError] = useState<string | undefined>();
   const [pending, setPending] = useState(false);
+  const nameInput = useRef<HTMLInputElement>(null);
 
   const currentName = trees.find((t) => t.id === current)?.name ?? current;
 
@@ -53,6 +54,12 @@ export default function TreeSwitcher() {
 
   async function submit(event?: FormEvent) {
     event?.preventDefault();
+    if (mode !== 'delete' && !name.trim()) {
+      // Spaces pass `required`; say what is missing instead of sending it.
+      setError('Enter a tree name');
+      nameInput.current?.focus();
+      return;
+    }
     setPending(true);
     setError(undefined);
     try {
@@ -139,6 +146,7 @@ export default function TreeSwitcher() {
       >
         <form id="tree-name-form" onSubmit={(event) => void submit(event)}>
           <Input
+            ref={nameInput}
             label="Tree name"
             value={name}
             onChange={(event) => setName(event.target.value)}

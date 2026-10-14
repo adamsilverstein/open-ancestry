@@ -315,12 +315,31 @@ export const families = {
   delete(tx: Tx, id: string) {
     for (const link of familyChildren.listForFamily(tx.store, id))
       familyChildren.delete(tx, link.id);
+    families.deleteEvents(tx, id);
+    deleteOwned(tx, 'family', id);
+    return tx.delete('family', id);
+  },
+
+  /** Removes the family's events (marriage, divorce...), e.g. when the partnership ends. */
+  deleteEvents(tx: Tx, id: string) {
     for (const role of eventRoles.listForFamily(tx.store, id)) {
       tx.delete('event_role', role.id);
       deleteOrphanEvent(tx, role.event_id);
     }
-    deleteOwned(tx, 'family', id);
-    return tx.delete('family', id);
+  },
+
+  /**
+   * Deletes a family that no longer records a relationship: at most one
+   * partner and no children. Returns whether it was deleted.
+   */
+  pruneIfEmpty(tx: Tx, id: string): boolean {
+    const family = tx.store.getRow('family', id);
+    if (!family) return false;
+    const partners = [family.partner1_id, family.partner2_id].filter(Boolean).length;
+    const hasChildren = tx.store.stmt('SELECT 1 FROM family_child WHERE family_id = ?').get(id);
+    if (partners > 1 || hasChildren) return false;
+    families.delete(tx, id);
+    return true;
   },
 };
 

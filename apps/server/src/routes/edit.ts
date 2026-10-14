@@ -409,8 +409,18 @@ export function editRoutes(app: Api, { library }: Deps): void {
         (tx) => {
           const before = familyMembers(tx.store, id);
           const updated = families.update(tx, id, request.body);
-          refreshLiving(tx, [...before, ...familyMembers(tx.store, id)], { relatives: false });
-          return updated;
+          const removedPartner = (['partner1_id', 'partner2_id'] as const).some(
+            (slot) => request.body[slot] === null && family[slot],
+          );
+          let result: typeof updated | null = updated;
+          if (removedPartner) {
+            // The partnership has ended: its marriage and other events go with it,
+            // and a family left with one partner and no children goes too.
+            families.deleteEvents(tx, id);
+            if (families.pruneIfEmpty(tx, id)) result = null;
+          }
+          refreshLiving(tx, before, { relatives: false });
+          return result;
         },
       );
       return { batchId, family: result };
@@ -452,6 +462,8 @@ export function editRoutes(app: Api, { library }: Deps): void {
     const { batchId } = edit(store, label, (tx) => {
       const members = link ? familyMembers(tx.store, link.family_id) : [];
       familyChildren.delete(tx, request.params.id);
+      // A one-parent family whose last child left records nothing any more.
+      if (link) families.pruneIfEmpty(tx, link.family_id);
       refreshLiving(tx, members, { relatives: false });
     });
     return { batchId };

@@ -339,6 +339,42 @@ describe('families', () => {
   });
 });
 
+describe('ending a partnership', () => {
+  it('deletes family events, and prunes families left with one partner and no children', () => {
+    const store = memoryTree();
+    const { result: ids } = store.transact('seed', (tx) => {
+      const a = persons.create(tx, {});
+      const b = persons.create(tx, {});
+      const c = persons.create(tx, {});
+      const fam = families.create(tx, {
+        partner1_id: a.id,
+        partner2_id: b.id,
+        children: [{ child_id: c.id }],
+      });
+      events.create(tx, { type: 'MARR', roles: [{ family_id: fam.id, role: 'principal' }] });
+      return { a: a.id, b: b.id, c: c.id, fam: fam.id };
+    });
+    // Two partners: kept.
+    store.transact('noop', (tx) => expect(families.pruneIfEmpty(tx, ids.fam)).toBe(false));
+    store.transact('end', (tx) => {
+      families.update(tx, ids.fam, { partner2_id: null });
+      families.deleteEvents(tx, ids.fam);
+      // One partner but a child: kept.
+      expect(families.pruneIfEmpty(tx, ids.fam)).toBe(false);
+    });
+    expect(count(store, 'event')).toBe(0);
+    const link = familyChildren.listForChild(store, ids.c)[0]!;
+    store.transact('unlink', (tx) => {
+      familyChildren.delete(tx, link.id);
+      expect(families.pruneIfEmpty(tx, ids.fam)).toBe(true);
+      expect(families.pruneIfEmpty(tx, ids.fam)).toBe(false);
+    });
+    expect(families.get(store, ids.fam)).toBeUndefined();
+    expect(persons.get(store, ids.a)).toBeDefined();
+    store.close();
+  });
+});
+
 describe('parent families of a child', () => {
   it('orders parent sets and keeps exactly one preferred', () => {
     const store = memoryTree();

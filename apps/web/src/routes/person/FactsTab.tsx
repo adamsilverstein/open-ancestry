@@ -278,7 +278,12 @@ function RelationshipsColumn({
       actions={
         <Menu>
           <MenuTrigger asChild>
-            <Button size="sm" variant="ghost" iconStart={<UserPlus size={14} aria-hidden />}>
+            <Button
+              size="sm"
+              variant="ghost"
+              iconStart={<UserPlus size={14} aria-hidden />}
+              data-relationships-add=""
+            >
               Add family member
             </Button>
           </MenuTrigger>

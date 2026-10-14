@@ -84,6 +84,10 @@ test('removes a partner link, keeping both people, and undoes it', async ({ page
   await expect(confirm).toContainText('Both people stay in the tree');
   await confirm.getByRole('button', { name: 'Remove partner' }).click();
   await expect(group(page, 'Spouse and children')).toHaveCount(0);
+  // The group and its menu are gone, so focus lands on Add family member.
+  await expect(
+    relationships(page).getByRole('button', { name: 'Add family member' }),
+  ).toBeFocused();
   // No children: the partnership itself goes, with its events.
   await expect
     .poll(() => latestLabel(page))
@@ -106,6 +110,7 @@ test('removing a partner who has children keeps the children with the other pare
   await groupAction(page, 'Spouse and children', 'Remove partner…');
   const confirm = page.getByRole('alertdialog', { name: 'Remove Clara Penhallow as partner?' });
   await expect(confirm).toContainText('no longer be a parent of Rowan Ashdown');
+  await expect(confirm).toContainText('events (such as a marriage) are removed');
   await confirm.getByRole('button', { name: 'Remove partner' }).click();
   const family = group(page, 'Spouse and children');
   await expect(family.getByRole('link', { name: /Clara Penhallow/ })).toHaveCount(0);
@@ -147,8 +152,33 @@ test('removes a child link from the parent page and undoes it', async ({ page })
   });
   await confirm.getByRole('button', { name: 'Remove link' }).click();
   await expect(family.getByRole('link', { name: /Rowan Ashdown/ })).toHaveCount(0);
-  // The partnership itself stays.
+  // The partnership itself stays, and focus returns to the group's menu button.
   await expect(family.getByRole('link', { name: /Clara Penhallow/ })).toBeVisible();
+  await expect(
+    family.getByRole('button', { name: 'Actions for Spouse and children' }),
+  ).toBeFocused();
+
+  await page.keyboard.press(`${mod}+z`);
+  await expect(family.getByRole('link', { name: /Rowan Ashdown/ })).toBeVisible();
+});
+
+test('removing the last child of a one-parent family removes the empty family', async ({
+  page,
+}) => {
+  await openSeeded(page, seeded, seeded.edmund);
+  await groupAction(page, 'Spouse and children', 'Remove partner…');
+  await page
+    .getByRole('alertdialog', { name: 'Remove Clara Penhallow as partner?' })
+    .getByRole('button', { name: 'Remove partner' })
+    .click();
+  const family = group(page, 'Spouse and children');
+  await expect(family.getByRole('link', { name: /Clara Penhallow/ })).toHaveCount(0);
+
+  await groupAction(page, 'Spouse and children', 'Remove child Rowan Ashdown…');
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Remove link' }).click();
+  // Nothing is left to show: no empty, unremovable group.
+  await expect(family).toHaveCount(0);
+  await expect(relationships(page).getByText('No family recorded')).toBeVisible();
 
   await page.keyboard.press(`${mod}+z`);
   await expect(family.getByRole('link', { name: /Rowan Ashdown/ })).toBeVisible();

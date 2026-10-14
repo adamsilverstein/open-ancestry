@@ -14,6 +14,8 @@ export interface ConfirmDialogProps {
   onConfirm: () => void;
   /** Destructive actions get the danger button. */
   danger?: boolean;
+  /** Where focus goes on close when there is no trigger (call preventDefault first). */
+  onCloseAutoFocus?: (event: Event) => void;
 }
 
 /**
@@ -28,6 +30,7 @@ export function ConfirmDialog({
   confirmLabel,
   onConfirm,
   danger = true,
+  onCloseAutoFocus,
 }: ConfirmDialogProps) {
   return (
     <RadixDialog.Root open={open} onOpenChange={onOpenChange}>
@@ -35,6 +38,7 @@ export function ConfirmDialog({
         <RadixDialog.Overlay className={cx(dialogStyles.overlay, styles.overlay)} />
         <RadixDialog.Content
           role="alertdialog"
+          {...(onCloseAutoFocus ? { onCloseAutoFocus } : {})}
           className={cx(dialogStyles.content, dialogStyles.sm, styles.content)}
           {...(description ? {} : { 'aria-describedby': undefined })}
         >

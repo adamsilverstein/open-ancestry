@@ -147,6 +147,52 @@ describe('events', () => {
   });
 });
 
+describe('ending relationships', () => {
+  const familyOf = async (personId: string) =>
+    (await api.get(`${s.base}/people/${personId}`)).json();
+
+  it('drops partnership events when a partner with children is removed, undoably', async () => {
+    await api.post(`${s.base}/families/${s.marriage}/events`, { type: 'MARR', date_text: '1960' });
+    const fam = (await api.get(`${s.base}/families/${s.marriage}`)).json();
+    const slot = fam.family.partner1_id === s.dan ? 'partner1_id' : 'partner2_id';
+    const res = await api.patch(`${s.base}/families/${s.marriage}`, { [slot]: null });
+    expect(res.statusCode).toBe(200);
+    const ada = await familyOf(s.ada);
+    const left = ada.partnerFamilies.find(
+      (f: { family: { id: string } }) => f.family.id === s.marriage,
+    );
+    expect(left.partner).toBeNull();
+    expect(left.children).toHaveLength(1);
+    expect(left.events).toEqual([]);
+
+    await api.post(`${s.base}/undo`);
+    const restored = (await familyOf(s.ada)).partnerFamilies.find(
+      (f: { family: { id: string } }) => f.family.id === s.marriage,
+    );
+    expect(restored.partner.id).toBe(s.dan);
+    expect(restored.events).toHaveLength(1);
+  });
+
+  it('deletes a one-parent family when its last child link is removed', async () => {
+    const fam = (await api.get(`${s.base}/families/${s.marriage}`)).json();
+    const slot = fam.family.partner1_id === s.dan ? 'partner1_id' : 'partner2_id';
+    await api.patch(`${s.base}/families/${s.marriage}`, { [slot]: null });
+    const link = (await familyOf(s.eve)).parentFamilies[0].link.id;
+    await api.del(`${s.base}/family-children/${link}`);
+    expect((await api.get(`${s.base}/families/${s.marriage}`)).statusCode).toBe(404);
+    expect((await familyOf(s.ada)).partnerFamilies).toEqual([]);
+
+    await api.post(`${s.base}/undo`);
+    expect((await api.get(`${s.base}/families/${s.marriage}`)).statusCode).toBe(200);
+  });
+
+  it('keeps a family that still has two partners when a child leaves', async () => {
+    const link = (await familyOf(s.eve)).parentFamilies[0].link.id;
+    await api.del(`${s.base}/family-children/${link}`);
+    expect((await api.get(`${s.base}/families/${s.marriage}`)).statusCode).toBe(200);
+  });
+});
+
 describe('relationship history labels', () => {
   const latest = async () =>
     (await api.get(`${s.base}/history?limit=1`)).json().items[0].label as string;

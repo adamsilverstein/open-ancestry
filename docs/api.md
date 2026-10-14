@@ -81,8 +81,8 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 | `POST /api/trees/:tree/people/:id/spouses` `{ personId \| person, relationship_type? }` | New partner family. |
 | `POST /api/trees/:tree/people/:id/children` `{ personId \| person, familyId?, partner1_rel?, partner2_rel? }` | Add a child to `familyId` or a new single-parent family. |
 | `POST /api/trees/:tree/people/:id/siblings` `{ personId \| person }` | Add to the preferred parent family (created without parents if needed). |
-| `PATCH`, `DELETE /api/trees/:tree/families/:id` | Relationship type, partners (null removes one); delete the family and its events. History names the change ("Edit relationship type", "Remove partner", "Remove relationship"). |
-| `PATCH`, `DELETE /api/trees/:tree/family-children/:id` | Child relationship (`partner1_rel`, `partner2_rel`, `sort_order`, `is_preferred: true`); remove the child from the family. |
+| `PATCH`, `DELETE /api/trees/:tree/families/:id` | Relationship type, partners (null removes one: the partnership's events go with it, and a family left with one partner and no children is deleted); delete the family and its events. History names the change ("Edit relationship type", "Remove partner", "Remove relationship"). |
+| `PATCH`, `DELETE /api/trees/:tree/family-children/:id` | Child relationship (`partner1_rel`, `partner2_rel`, `sort_order`, `is_preferred: true`); remove the child from the family (a family left with one partner and no children is deleted). |
 | `POST /api/trees/:tree/notes` `{ text, owner_type, owner_id }`; `PATCH`, `DELETE /api/trees/:tree/notes/:id` | Notes. |
 | `POST /api/trees/:tree/tags`; `PATCH`, `DELETE /api/trees/:tree/tags/:id` | Tags. |
 | `POST /api/trees/:tree/people/:id/tags` `{ tagId }`; `DELETE /api/trees/:tree/people/:id/tags/:tagId` | Tag or untag a person. |

@@ -560,10 +560,28 @@ test.describe('family view', () => {
     await open(page);
     const minimap = page.getByRole('application', { name: 'Minimap' });
     await expect(minimap).toBeVisible();
-    const m = await box(minimap);
+    // The minimap may change corners once the view rests (150ms): measure it after.
+    const rested = async () => {
+      let last = '';
+      await expect
+        .poll(
+          async () => {
+            const now = JSON.stringify(await box(minimap));
+            const same = now === last;
+            last = now;
+            return same;
+          },
+          { intervals: [250] },
+        )
+        .toBe(true);
+      return box(minimap);
+    };
+    let m = await rested();
     const start = await transform(page);
     await page.mouse.click(m.x + 10, m.y + 10);
     await expect.poll(async () => (await transform(page)).x).not.toBe(start.x);
+    await settled(page);
+    m = await rested();
     const clicked = await transform(page);
     await page.mouse.move(m.x + 20, m.y + 20);
     await page.mouse.down();

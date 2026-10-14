@@ -1,3 +1,4 @@
+import { fromNeighborhood, layoutFamily } from '@open-ancestry/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seed, testApi, type Seeded, type TestApi } from './test/helpers';
 
@@ -122,6 +123,23 @@ describe('GET neighborhood', () => {
     expect(n.families).toHaveLength(2);
     expect(n.children).toHaveLength(2);
     expect(n).toMatchObject({ moreUp: [], moreDown: [], truncated: false });
+  });
+
+  it('feeds the layout engine unchanged', async () => {
+    const n = (await api.get(`${s.base}/neighborhood?focus=${s.ada}&up=2&down=2`)).json();
+    const graph = fromNeighborhood(n);
+    const people =
+      graph.people instanceof Map ? [...graph.people.values()] : Object.values(graph.people);
+    expect(people.map((p) => p.name).sort()).toEqual([
+      'Ada Vale',
+      'Bram Vale',
+      'Cora Vale',
+      'Dan Reed',
+      'Eve Reed',
+    ]);
+    expect(graph.families).toHaveLength(2);
+    const layout = layoutFamily(graph, s.ada);
+    expect(JSON.stringify(layout)).toContain(s.eve);
   });
 
   it('limits generations', async () => {

@@ -59,6 +59,8 @@ export default function TreeSwitcher() {
       if (mode === 'create') {
         const tree = await createTree(name.trim());
         await setCurrentTree(queryClient, tree.id);
+        // A new tree is empty: its people list offers Add person.
+        await navigate({ to: '/people' });
       } else if (mode === 'rename' && current) {
         const tree = await renameTree(current, name.trim());
         await setCurrentTree(queryClient, tree.id);

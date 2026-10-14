@@ -1,6 +1,6 @@
 import { useDeferredValue, useId, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import type { ChildRelationship, RelationshipType, Sex } from '@open-ancestry/db';
+import type { ChildRelationship, RelationshipType } from '@open-ancestry/db';
 import { seg } from '../../../api/client';
 import { useEdit } from '../../../api/edits';
 import { apiSend } from '../../../api/client';
@@ -8,13 +8,12 @@ import { searchQuery } from '../../../api/search';
 import type { ApiPersonSummary, PersonDetail } from '../../../api/types';
 import { Button } from '../../../components/Button/Button';
 import { Combobox } from '../../../components/Combobox/Combobox';
-import { DateInput } from '../../../components/DateInput/DateInput';
 import { Dialog, DialogClose } from '../../../components/Dialog/Dialog';
-import { Input } from '../../../components/Input/Input';
 import { Select } from '../../../components/Select/Select';
 import { formatLifespan } from '../../../lib/lifespan';
 import { fullName, lifeDate } from '../../../lib/person';
-import { CHILD_RELATIONSHIPS, RELATIONSHIP_TYPES, SEX_OPTIONS } from './EditPersonDialog';
+import { CHILD_RELATIONSHIPS, RELATIONSHIP_TYPES } from './EditPersonDialog';
+import { NewPersonFields, useNewPerson } from './NewPersonFields';
 import { SaveError, useSaveState } from './SaveError';
 import styles from './Edit.module.css';
 
@@ -57,10 +56,7 @@ export function AddRelativeDialog({
   const saveState = useSaveState(() => onOpenChange(false));
   const radioName = useId();
   const [mode, setMode] = useState<'new' | 'existing'>('new');
-  const [given, setGiven] = useState('');
-  const [surname, setSurname] = useState('');
-  const [sex, setSex] = useState<Sex>('U');
-  const [birth, setBirth] = useState('');
+  const draft = useNewPerson();
   const [query, setQuery] = useState('');
   const [existing, setExisting] = useState<ApiPersonSummary | null>(null);
   const [rel, setRel] = useState<ChildRelationship>('biological');
@@ -80,21 +76,11 @@ export function AddRelativeDialog({
     .filter((p) => p.id !== id)
     .map((p) => ({ value: p.id, label: describe(p) }));
 
-  const ready =
-    mode === 'existing' ? existing !== null : given.trim() !== '' || surname.trim() !== '';
+  const ready = mode === 'existing' ? existing !== null : draft.ready;
 
   function save() {
     if (!ready || edit.isPending) return;
-    const relative =
-      mode === 'existing'
-        ? { personId: existing!.id }
-        : {
-            person: {
-              sex,
-              names: [{ given: given.trim() || null, surname: surname.trim() || null }],
-              events: birth.trim() ? [{ type: 'BIRT', date_text: birth.trim() }] : [],
-            },
-          };
+    const relative = mode === 'existing' ? { personId: existing!.id } : { person: draft.body() };
     const base = `/trees/${seg(tree)}/people/${id}`;
     const body =
       kind === 'parent'
@@ -167,25 +153,7 @@ export function AddRelativeDialog({
         </fieldset>
 
         {mode === 'new' ? (
-          <div className={styles.grid}>
-            <Input
-              label="Given names"
-              value={given}
-              onChange={(e) => setGiven(e.currentTarget.value)}
-            />
-            <Input
-              label="Surname"
-              value={surname}
-              onChange={(e) => setSurname(e.currentTarget.value)}
-            />
-            <Select
-              label="Sex"
-              value={sex}
-              onValueChange={(value) => setSex(value as Sex)}
-              options={SEX_OPTIONS}
-            />
-            <DateInput label="Birth date" value={birth} onValueChange={setBirth} hint="" />
-          </div>
+          <NewPersonFields draft={draft} />
         ) : (
           <Combobox
             label="Person"

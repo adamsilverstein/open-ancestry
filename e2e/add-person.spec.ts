@@ -7,21 +7,29 @@ const h1 = (page: Page) => page.getByRole('heading', { level: 1 });
 const toasts = (page: Page) =>
   page.getByRole('region', { name: /Notifications/ }).getByRole('listitem');
 
+/** WebKit only tabs to buttons (the Sex select) with Alt held. */
+const tab = (page: Page) =>
+  page.keyboard.press(
+    page.context().browser()?.browserType().name() === 'webkit' ? 'Alt+Tab' : 'Tab',
+  );
+
 /** Fills the Add person form with the keyboard only and saves with Enter. */
 async function fillWithKeyboard(page: Page) {
   const dialog = page.getByRole('dialog', { name: 'Add person' });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('textbox', { name: 'Given names' })).toBeFocused();
   await page.keyboard.type('Wren');
-  await page.keyboard.press('Tab');
+  await tab(page);
   await expect(dialog.getByRole('textbox', { name: 'Surname' })).toBeFocused();
   await page.keyboard.type('Ashby');
-  await page.keyboard.press('Tab');
+  await tab(page);
   await expect(dialog.getByRole('combobox', { name: 'Sex' })).toBeFocused();
   await page.keyboard.press('Enter');
   await page.getByRole('option', { name: 'Female' }).press('Enter');
   await expect(dialog.getByRole('combobox', { name: 'Sex' })).toHaveText(/Female/);
-  await page.keyboard.press('Tab');
+  // The list hands focus back to its trigger once it has closed.
+  await expect(dialog.getByRole('combobox', { name: 'Sex' })).toBeFocused();
+  await tab(page);
   await expect(dialog.getByRole('textbox', { name: 'Birth date' })).toBeFocused();
   await page.keyboard.type('abt 1902');
   await expect(dialog.getByTestId('date-preview')).toContainText('1902');
@@ -73,7 +81,7 @@ test('adds an unconnected person from the people list header', async ({
   await fillWithKeyboard(page);
   await expect(h1(page)).toHaveText('Wren Ashby');
   // Not attached to anyone, and the existing home person is unchanged.
-  await expect(page.getByText('No family members recorded')).toBeVisible();
+  await expect(page.getByText('No family recorded')).toBeVisible();
   const home = await (
     await request.get(`/api/trees/${encodeURIComponent(seeded.tree)}/home`)
   ).json();

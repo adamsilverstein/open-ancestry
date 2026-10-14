@@ -1,5 +1,8 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { Outlet } from '@tanstack/react-router';
+import { useQuery } from '@tanstack/react-query';
+import { currentTreeQuery } from '../api/queries';
+import { AddPersonContext } from './addPerson';
 import { ToastProvider } from '../components/Toast/Toast';
 import { ChunkBoundary } from '../lib/ChunkBoundary';
 import { trackFocus } from '../lib/returnFocus';
@@ -10,6 +13,7 @@ import styles from './AppShell.module.css';
 
 const loadPalette = () => import('./ShellCommandPalette');
 const ShellCommandPalette = lazy(loadPalette);
+const AddPersonDialog = lazy(() => import('./AddPersonDialog'));
 
 /** Cmd on macOS, Ctrl elsewhere; both work everywhere. */
 function isPaletteShortcut(event: KeyboardEvent) {
@@ -26,6 +30,20 @@ export function AppShell() {
       open: () => {
         setPaletteLoaded(true);
         setPaletteOpen(true);
+      },
+    }),
+    [],
+  );
+
+  const { data: tree = null } = useQuery(currentTreeQuery);
+  // Bumped on every open so each Add person starts with an empty form.
+  const [addPersonKey, setAddPersonKey] = useState(0);
+  const [addPersonOpen, setAddPersonOpen] = useState(false);
+  const addPerson = useMemo(
+    () => ({
+      open: () => {
+        setAddPersonKey((key) => key + 1);
+        setAddPersonOpen(true);
       },
     }),
     [],
@@ -58,23 +76,37 @@ export function AppShell() {
 
   return (
     <PaletteContext value={palette}>
-      <ToastProvider>
-        <UndoShortcuts />
-        <a className={styles.skipLink} href="#main">
-          Skip to content
-        </a>
-        <TopBar onFind={palette.open} />
-        <main id="main" className={styles.main} tabIndex={-1}>
-          <Outlet />
-        </main>
-        {paletteLoaded && (
-          <ChunkBoundary fallback={null}>
-            <Suspense fallback={null}>
-              <ShellCommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
-            </Suspense>
-          </ChunkBoundary>
-        )}
-      </ToastProvider>
+      <AddPersonContext value={addPerson}>
+        <ToastProvider>
+          <UndoShortcuts />
+          <a className={styles.skipLink} href="#main">
+            Skip to content
+          </a>
+          <TopBar onFind={palette.open} />
+          <main id="main" className={styles.main} tabIndex={-1}>
+            <Outlet />
+          </main>
+          {paletteLoaded && (
+            <ChunkBoundary fallback={null}>
+              <Suspense fallback={null}>
+                <ShellCommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+              </Suspense>
+            </ChunkBoundary>
+          )}
+          {tree && addPersonKey > 0 && (
+            <ChunkBoundary fallback={null}>
+              <Suspense fallback={null}>
+                <AddPersonDialog
+                  key={addPersonKey}
+                  tree={tree}
+                  open={addPersonOpen}
+                  onOpenChange={setAddPersonOpen}
+                />
+              </Suspense>
+            </ChunkBoundary>
+          )}
+        </ToastProvider>
+      </AddPersonContext>
     </PaletteContext>
   );
 }

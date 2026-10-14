@@ -56,21 +56,22 @@ async function readHead(file: string): Promise<Buffer> {
   }
 }
 
-/** Resolves a media.local_path inside the tree's media folder, following symlinks; null if it escapes. */
 /** `resolveMediaPath` for synchronous callers (the profile-photo check inside a transaction). */
 export function resolveMediaPathSync(mediaRoot: string, localPath: string): string | null {
   const root = resolve(mediaRoot);
   const candidate = resolve(root, localPath);
   if (!candidate.startsWith(root + sep)) return null;
   try {
-    const realRoot = realpathSync(root);
-    const realFile = realpathSync(candidate);
+    // .native: the same realpath(3) the async version uses, so both agree on case.
+    const realRoot = realpathSync.native(root);
+    const realFile = realpathSync.native(candidate);
     return realFile.startsWith(realRoot + sep) ? realFile : null;
   } catch {
     return null;
   }
 }
 
+/** Resolves a media.local_path inside the tree's media folder, following symlinks; null if it escapes. */
 export async function resolveMediaPath(
   mediaRoot: string,
   localPath: string,

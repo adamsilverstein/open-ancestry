@@ -228,6 +228,49 @@ test('discarding a review changes nothing', async ({ page, request, baseURL }, t
   expect(history.items).toEqual([]);
 });
 
+test('cancelling the comparison keeps nothing and changes nothing', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  // Hold the progress stream so the page stays on the comparison, however fast it is.
+  await page.route('**/api/jobs/*/events', () => {});
+  await page.addInitScript((tree) => localStorage.setItem('oa-tree', tree), seeded.tree);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'File' }).click();
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('menuitem', { name: /Re-import updated export/ }).click();
+  await (
+    await chooser
+  ).setFiles({
+    name: 'Ashgrove 2026.ged',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from(laterExport()),
+  });
+  await expect(page.getByRole('heading', { name: 'Starting the comparison' })).toBeVisible();
+  const jobId = /\/reimport\/([^/?#]+)/.exec(page.url())![1]!;
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(
+    page.getByText('Re-import cancelled. Your tree was not changed.', { exact: true }),
+  ).toBeVisible();
+  // Whether the job was stopped or had already finished, no review is left behind.
+  const job = (await (await request.get(`/api/jobs/${jobId}`)).json()) as {
+    state: string;
+    result?: { reimportId: string } | null;
+  };
+  if (job.result?.reimportId) {
+    expect((await request.get(`/api/reimports/${job.result.reimportId}`)).status()).toBe(404);
+  } else {
+    expect(job.state).toBe('failed');
+  }
+  const history = (await (
+    await request.get(`/api/trees/${encodeURIComponent(seeded.tree)}/history`)
+  ).json()) as { items: unknown[] };
+  expect(history.items).toEqual([]);
+});
+
 test('the review screen has no accessibility violations', async ({
   page,
   request,

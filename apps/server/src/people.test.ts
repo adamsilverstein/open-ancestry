@@ -28,8 +28,13 @@ describe('GET people', () => {
       'Bram',
       'Dan',
     ]);
-    expect((await api.get(`${s.base}/people?living=dead,inferred_dead`)).json().total).toBe(0);
-    expect((await api.get(`${s.base}/people?living=unknown`)).json().total).toBe(5);
+    // Created people get inferred status like imported ones: Bram (abt. 1910)
+    // and Cora (1912) were born over 100 years ago.
+    expect(
+      names((await api.get(`${s.base}/people?living=dead,inferred_dead&sort=given`)).json().items),
+    ).toEqual(['Bram', 'Cora']);
+    expect((await api.get(`${s.base}/people?living=inferred_living`)).json().total).toBe(3);
+    expect((await api.get(`${s.base}/people?living=unknown`)).json().total).toBe(0);
     const tag = (await api.post(`${s.base}/tags`, { name: 'Research' })).json().tag;
     await api.post(`${s.base}/people/${s.cora}/tags`, { tagId: tag.id });
     expect(names((await api.get(`${s.base}/people?tag=${tag.id}`)).json().items)).toEqual(['Cora']);

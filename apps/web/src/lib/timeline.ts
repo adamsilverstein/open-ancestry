@@ -143,10 +143,17 @@ export function buildTimeline(
   options: TimelineOptions = {},
 ): TimelineEntry[] {
   const birthText = detail.summary.birth?.dateText ?? null;
-  // `25`, or `about 31` when either date is imprecise.
+  // Possible lifetime: earliest birth to latest death, so `abt.` and year-only
+  // dates never drop an event that might fall inside it.
+  const lifeStart = dateRange(birthText)?.[0] ?? -Infinity;
+  const lifeEnd = dateRange(detail.summary.death?.dateText)?.[1] ?? Infinity;
+  // `25`, or `about 31` when either date is imprecise. No age at zero (a
+  // same-year sibling would read "about 0") or after the death.
   const ageFor = (text: string | null | undefined) => {
     if (!birthText || !text) return undefined;
-    return ageAt(birthText, text)?.text;
+    if ((dateRange(text)?.[0] ?? -Infinity) > lifeEnd) return undefined;
+    const age = ageAt(birthText, text);
+    return age && age.years > 0 ? age.text : undefined;
   };
 
   const ownEntry = (item: EventDetail, title: string): TimelineEntry => ({
@@ -197,10 +204,6 @@ export function buildTimeline(
     }
   }
 
-  // Possible lifetime: earliest birth to latest death, so `abt.` and year-only
-  // dates never drop an event that might fall inside it.
-  const lifeStart = dateRange(birthText)?.[0] ?? -Infinity;
-  const lifeEnd = dateRange(detail.summary.death?.dateText)?.[1] ?? Infinity;
   const seen = new Set<string>();
   const relativeEvent = (
     relative: ApiPersonSummary,

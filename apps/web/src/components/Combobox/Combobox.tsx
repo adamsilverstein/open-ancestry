@@ -25,6 +25,13 @@ export interface ComboboxProps {
   hint?: string | undefined;
   error?: string | undefined;
   disabled?: boolean;
+  /**
+   * Server-side search: called as the user types, and `options` are shown as
+   * given (no client filtering). Show `emptyText` until there are results.
+   */
+  onSearchChange?: (query: string) => void;
+  /** Label for the selected value when it is not among the current `options`. */
+  selectedLabel?: string | undefined;
 }
 
 /** Searchable single select: a trigger button opening a filterable listbox. */
@@ -39,6 +46,8 @@ export function Combobox({
   hint,
   error,
   disabled,
+  onSearchChange,
+  selectedLabel,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
   const listId = useId();
@@ -58,7 +67,7 @@ export function Combobox({
             data-placeholder={selected ? undefined : ''}
             {...control}
           >
-            <span>{selected?.label ?? placeholder}</span>
+            <span>{selected?.label ?? selectedLabel ?? placeholder}</span>
             <ChevronDown size={16} aria-hidden className={selectStyles.chevron} />
           </RadixPopover.Trigger>
           <RadixPopover.Portal>
@@ -68,18 +77,20 @@ export function Combobox({
               sideOffset={4}
               aria-label={label}
             >
-              <Command filter={substringFilter} label={label}>
+              <Command filter={substringFilter} shouldFilter={!onSearchChange} label={label}>
                 <Command.Input
                   className={styles.input}
                   placeholder={searchLabel}
                   aria-label={searchLabel}
+                  onValueChange={onSearchChange}
                 />
                 <Command.List id={listId} className={selectStyles.viewport}>
                   <Command.Empty className={styles.empty}>{emptyText}</Command.Empty>
                   {options.map((option) => (
                     <Command.Item
                       key={option.value}
-                      value={option.label}
+                      // Remote results can share a label; the id keeps items distinct.
+                      value={onSearchChange ? option.value : option.label}
                       className={selectStyles.item}
                       onSelect={() => {
                         onValueChange?.(option.value);

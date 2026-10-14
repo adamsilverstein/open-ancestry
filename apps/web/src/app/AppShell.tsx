@@ -3,6 +3,7 @@ import { Outlet } from '@tanstack/react-router';
 import { ToastProvider } from '../components/Toast/Toast';
 import { PaletteContext } from './palette';
 import { TopBar } from './TopBar';
+import { UndoShortcuts } from './UndoShortcuts';
 import styles from './AppShell.module.css';
 
 const loadPalette = () => import('./ShellCommandPalette');
@@ -53,6 +54,7 @@ export function AppShell() {
   return (
     <PaletteContext value={palette}>
       <ToastProvider>
+        <UndoShortcuts />
         <a className={styles.skipLink} href="#main">
           Skip to content
         </a>

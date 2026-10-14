@@ -1,0 +1,46 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  max-height: min(420px, 50dvh);
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.list li {
+  display: flex;
+  align-items: center;
+  gap: var(--oa-space-2);
+  padding: var(--oa-space-2) 0;
+  border-bottom: 1px solid var(--oa-border);
+}
+
+.label {
+  font-weight: var(--oa-weight-medium);
+}
+
+/* Undone changes are struck through and labelled, not just dimmed. */
+.undone .label {
+  color: var(--oa-text-muted);
+  text-decoration: line-through;
+}
+
+.chip {
+  padding: 0 var(--oa-space-2);
+  border: 1px dashed var(--oa-border-strong);
+  border-radius: var(--oa-radius-full);
+  color: var(--oa-text-muted);
+  font: var(--oa-text-xs);
+}
+
+.time {
+  margin-left: auto;
+  color: var(--oa-text-muted);
+  font: var(--oa-text-xs);
+  white-space: nowrap;
+}
+
+.muted {
+  color: var(--oa-text-muted);
+}

@@ -1,6 +1,6 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { ChevronDown, Moon, Search, Sun, TreeDeciduous, Users } from 'lucide-react';
+import { ChevronDown, History, Moon, Search, Sun, TreeDeciduous, Users } from 'lucide-react';
 import { Button } from '../components/Button/Button';
 import buttonStyles from '../components/Button/Button.module.css';
 import { IconButtonBase } from '../components/IconButton/IconButtonBase';
@@ -11,6 +11,7 @@ import { treeSwitcherClass } from './treeSwitcherClass';
 
 const FileMenu = lazy(() => import('./FileMenu'));
 const TreeSwitcher = lazy(() => import('./TreeSwitcher'));
+const HistoryPanel = lazy(() => import('./HistoryPanel'));
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.userAgent);
 
@@ -44,6 +45,7 @@ function TreeSwitcherPlaceholder() {
 
 export function TopBar({ onFind }: { onFind: () => void }) {
   const { theme, toggle } = useTheme();
+  const [historyOpen, setHistoryOpen] = useState(false);
   const next = theme === 'dark' ? 'light' : 'dark';
 
   return (
@@ -80,6 +82,17 @@ export function TopBar({ onFind }: { onFind: () => void }) {
         <Suspense fallback={<FileMenuPlaceholder />}>
           <FileMenu />
         </Suspense>
+        <IconButtonBase
+          label="History"
+          title="History (undo and redo)"
+          icon={<History size={18} aria-hidden />}
+          onClick={() => setHistoryOpen(true)}
+        />
+        {historyOpen && (
+          <Suspense fallback={null}>
+            <HistoryPanel open={historyOpen} onOpenChange={setHistoryOpen} />
+          </Suspense>
+        )}
         <IconButtonBase
           label={`Switch to ${next} theme`}
           title={`Switch to ${next} theme`}

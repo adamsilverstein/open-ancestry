@@ -1,6 +1,7 @@
 .item {
   display: grid;
-  grid-template-columns: 72px 1fr auto;
+  /* Wide enough for "Age about 31" on one line. */
+  grid-template-columns: 92px 1fr auto;
   gap: var(--oa-space-3);
   padding: var(--oa-space-3);
   border-bottom: 1px solid var(--oa-border);
@@ -29,6 +30,7 @@
 
 .age {
   color: var(--oa-text-muted);
+  white-space: nowrap;
   font: var(--oa-text-xs);
 }
 

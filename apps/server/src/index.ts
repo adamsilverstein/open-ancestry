@@ -15,7 +15,7 @@ import { errorBody, registerErrorHandling, toApiError } from './errors';
 import { JobManager, type Importer } from './jobs';
 import { Library, defaultLibraryRoot } from './library';
 import { editRoutes } from './routes/edit';
-import { importRoutes } from './routes/imports';
+import { importRoutes, sweepStaleUploads } from './routes/imports';
 import { mediaRoutes } from './routes/media';
 import { peopleRoutes } from './routes/people';
 import { treeRoutes } from './routes/trees';
@@ -117,6 +117,9 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     concurrency: options.importConcurrency,
     maxQueued: options.maxQueuedImports,
   });
+  // Leftovers of imports a crash or restart interrupted: their empty trees and uploads.
+  library.sweepInterruptedImports();
+  void sweepStaleUploads();
   const deps: Deps = {
     library,
     jobs,

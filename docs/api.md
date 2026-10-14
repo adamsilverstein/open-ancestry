@@ -55,7 +55,8 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 | `GET /api/trees/:tree/history?limit` | Change batches, `canUndo`, `canRedo`. |
 | `POST /api/trees/:tree/undo`, `/redo` | Undo or redo the latest batch; `{ batch }` (null if none). |
 | `GET /api/trees/:tree/export.json` | Full open-ancestry JSON download. |
-| `POST /api/trees/:tree/import` (multipart `file`: .ged, .gedcom, .zip, .gdz) | Starts an import job (202 `{ jobId, job }`). |
+| `POST /api/import` (multipart `file`: .ged, .gedcom, .zip, .gdz) | Imports into a new tree named after the file (" 2", " 3", ... when taken); 202 `{ jobId, job }` with `job.tree` and `job.createdTree: true`. The server owns that tree: if the import fails or is cancelled it removes it, but only while it is still the empty tree it created. |
+| `POST /api/trees/:tree/import` (multipart `file`) | Starts an import into an existing, empty tree (202 `{ jobId, job }`); that tree is never removed. |
 | `GET /api/jobs/:id` | Job state, progress, result or error. |
 | `GET /api/jobs/:id/events` | Server-sent events: `state` (whole job) and `progress`; ends when the job finishes. |
 | `GET /api/trees/:tree/media/:id` | Original media file with `Range` support. |
@@ -76,4 +77,4 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 
 ## Import jobs
 
-The import route streams the upload to a private temp folder, then runs an injected `Importer` (`apps/server/src/jobs.ts`). The CLI and the dev server inject `importFile` from `@open-ancestry/import`, which imports the upload into the empty tree and reports progress as `{ phase, done, total }` (`phase` is `read`, `parse`, `map`, `finalize`, `commit` or `done`; `done`/`total` count records during `map`). The completed job's `result` is the import report (see `packages/import/README.md`). Without an importer the route answers 501. The temp file is deleted when the job ends, and rename or delete of a tree is refused while it is importing.
+The import route streams the upload to a private temp folder, then runs an injected `Importer` (`apps/server/src/jobs.ts`). The CLI and the dev server inject `importFile` from `@open-ancestry/import`, which imports the upload into the empty tree and reports progress as `{ phase, done, total }` (`phase` is `read`, `parse`, `map`, `finalize`, `commit` or `done`; `done`/`total` count records during `map`). The completed job's `result` is the import report (see `packages/import/README.md`). Without an importer the route answers 501. The temp file is deleted when the job ends, and rename or delete of a tree is refused while it is importing. On startup the server removes upload folders (`oa-upload-*` in the temp folder) older than six hours and empty trees left by imports that were interrupted over an hour earlier (trees still marked `import_pending`). Clients only display a failed import; they never delete trees.

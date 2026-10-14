@@ -21,6 +21,7 @@ import { peopleRoutes } from './routes/people';
 import { treeRoutes } from './routes/trees';
 import { SECURITY_HEADERS, createToken, isLoopbackHost, registerSecurity } from './security';
 import { sendShell } from './shell';
+import { staticFileIndex } from './static-files';
 import { lazyValidatorFactory, plainSerializerFactory } from './validation';
 
 export { Library, defaultLibraryRoot, treeNameProblem } from './library';
@@ -169,19 +170,30 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   const { staticDir } = options;
   const hasSpa = staticDir !== undefined && existsSync(join(staticDir, 'index.html'));
   const indexHtml = hasSpa ? readFileSync(join(staticDir, 'index.html'), 'utf8') : '';
+  const isBuildFile = hasSpa ? staticFileIndex(staticDir) : () => false;
   if (hasSpa) {
     app.register(fastifyStatic, {
       root: staticDir,
       // One wildcard route instead of a route per file, which needs a glob of
-      // the build at startup (cold start, #54). Missing files fall through to
-      // the not-found handler, which serves the shell.
+      // the build at startup (cold start, #54). Only exact files of the build
+      // are served; everything else (missing, dotfiles, directories, case
+      // variants, the raw index.html) falls through to the shell.
       wildcard: true,
       setHeaders: staticHeaders,
-      // The shell is rendered per request (CSP nonce), never served as a file.
       index: false,
-      allowedPath: (pathName) => pathName !== '/index.html',
+      dotfiles: 'deny',
+      allowedPath: (pathName) => isBuildFile(pathName),
     });
     app.get('/', (_request, reply) => sendShell(reply, indexHtml));
+    // Any other read that is not exactly a file of the build gets the shell
+    // before @fastify/static sees it, so it never serves dotfiles, directories
+    // or case aliases, and its own 403s never surface.
+    app.addHook('onRequest', async (request, reply) => {
+      if (request.method !== 'GET' && request.method !== 'HEAD') return;
+      const path = request.url.split('?', 1)[0]!;
+      if (path === '/' || path === '/api' || path.startsWith('/api/') || isBuildFile(path)) return;
+      return sendShell(reply, indexHtml);
+    });
   }
 
   app.setNotFoundHandler((request, reply) => {

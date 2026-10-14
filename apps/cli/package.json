@@ -13,7 +13,8 @@
   "dependencies": {
     "@open-ancestry/db": "*",
     "@open-ancestry/gedcom": "*",
-    "@open-ancestry/server": "*"
+    "@open-ancestry/server": "*",
+    "ajv": "^8.20.0"
   },
   "devDependencies": {
     "esbuild": "^0.28.2"

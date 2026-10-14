@@ -24,13 +24,16 @@ function freePort(): Promise<number> {
 process.env.E2E_PORT ??= String(await freePort());
 const port = Number(process.env.E2E_PORT);
 const baseURL = `http://127.0.0.1:${port}`;
-// A throwaway library per run, never the user's ~/OpenAncestry.
-const library = join(tmpdir(), `oa-e2e-library-${port}`);
+// A throwaway library per run, never the user's ~/OpenAncestry. Global setup
+// writes fixture trees into it before the tests run.
+process.env.OA_E2E_LIBRARY ??= join(tmpdir(), `oa-e2e-library-${port}`);
+const library = process.env.OA_E2E_LIBRARY;
 const ci = Boolean(process.env.CI);
 
 export default defineConfig({
   testDir: '.',
   outputDir: '../test-results',
+  globalSetup: ['./search-setup.ts'],
   fullyParallel: true,
   forbidOnly: ci,
   retries: ci ? 1 : 0,

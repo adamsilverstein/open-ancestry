@@ -738,6 +738,27 @@ test.describe('generation depth in the URL', () => {
     });
   }
 
+  test('the fan caps its rings and offers the pedigree for deeper', async ({ page }) => {
+    const seen = depths(page);
+    await open(page, 'ada', '&layout=fan&up=10');
+    await expect(canvas(page).getByRole('button', { name: /^Ada Vale/ })).toBeAttached();
+    // Six generations up (seven rings with the focus), plus one prefetched.
+    expect(seen.length).toBeGreaterThan(0);
+    for (const { up } of seen) expect(up).toBeLessThanOrEqual(7);
+    const note = page.getByRole('status').filter({ hasText: 'The fan shows 6 generations' });
+    await expect(note).toBeVisible();
+    await note.getByRole('link', { name: 'Open the pedigree' }).click();
+    await expect(page).toHaveURL(/layout=pedigree/);
+    await expect(page).toHaveURL(/up=10/);
+    await expect(note).toHaveCount(0);
+  });
+
+  test('the fan within its cap shows no note', async ({ page }) => {
+    await open(page, 'ada', '&layout=fan&up=6');
+    await expect(canvas(page).getByRole('button', { name: /^Ada Vale/ })).toBeAttached();
+    await expect(page.getByText('The fan shows 6 generations')).toHaveCount(0);
+  });
+
   test('out-of-range depths clamp instead of failing', async ({ page }) => {
     const seen = depths(page);
     await open(page, 'ada', '&up=99&down=-4');

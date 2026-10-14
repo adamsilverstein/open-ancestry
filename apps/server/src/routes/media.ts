@@ -1,41 +1,59 @@
 import { createReadStream } from 'node:fs';
-import { realpath, stat } from 'node:fs/promises';
-import { extname, resolve, sep } from 'node:path';
+import { open, realpath, stat } from 'node:fs/promises';
+import { resolve, sep } from 'node:path';
 import { treePaths } from '@open-ancestry/db';
 import type { FastifyReply } from 'fastify';
 import type { Api, Deps } from '../context';
 import { ApiError, errorBody, notFound } from '../errors';
 import { MediaThumbParams, TreeIdParams } from '../schemas';
 
-const TYPES: Record<string, string> = {
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.png': 'image/png',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.avif': 'image/avif',
-  '.heic': 'image/heic',
-  '.tif': 'image/tiff',
-  '.tiff': 'image/tiff',
-  '.bmp': 'image/bmp',
-  '.svg': 'image/svg+xml',
-  '.pdf': 'application/pdf',
-  '.mp3': 'audio/mpeg',
-  '.m4a': 'audio/mp4',
-  '.wav': 'audio/wav',
-  '.mp4': 'video/mp4',
-  '.mov': 'video/quicktime',
-  '.webm': 'video/webm',
-  '.txt': 'text/plain; charset=utf-8',
-};
+/*
+ * Media comes from untrusted GEDCOM/GEDZIP files, so neither media.mime nor
+ * the file extension is trusted. The type is sniffed from the file's first
+ * bytes against a fixed allowlist of inert formats; anything else (HTML, SVG,
+ * text, unknown) is served as an application/octet-stream attachment.
+ */
 
-/** Media files can be anything a GEDZIP contained; never let one run script. */
-const MEDIA_CSP =
-  "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; sandbox";
+/** Media is never allowed to run script, even when opened directly. */
+export const MEDIA_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+export const OPAQUE_TYPE = 'application/octet-stream';
+export const SNIFF_BYTES = 16;
 
-function contentType(mime: string | null, path: string): string {
-  if (mime && /^[a-z]+\/[a-z0-9.+-]+$/i.test(mime)) return mime.toLowerCase();
-  return TYPES[extname(path).toLowerCase()] ?? 'application/octet-stream';
+const ascii = (bytes: Buffer, at: number, text: string) =>
+  bytes.subarray(at, at + text.length).toString('latin1') === text;
+
+/** Content type from magic bytes, limited to formats a browser renders without script. */
+export function sniffMediaType(bytes: Buffer): string | null {
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
+  if (ascii(bytes, 0, '\x89PNG\r\n\x1a\n')) return 'image/png';
+  if (ascii(bytes, 0, 'GIF87a') || ascii(bytes, 0, 'GIF89a')) return 'image/gif';
+  if (ascii(bytes, 0, 'RIFF') && ascii(bytes, 8, 'WEBP')) return 'image/webp';
+  if (ascii(bytes, 0, 'RIFF') && ascii(bytes, 8, 'WAVE')) return 'audio/wav';
+  if (ascii(bytes, 0, '%PDF-')) return 'application/pdf';
+  if (ascii(bytes, 0, 'OggS')) return 'audio/ogg';
+  if (ascii(bytes, 0, 'fLaC')) return 'audio/flac';
+  if (ascii(bytes, 0, 'ID3') || (bytes[0] === 0xff && ((bytes[1] ?? 0) & 0xe0) === 0xe0))
+    return 'audio/mpeg';
+  if (bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3)
+    return 'video/webm';
+  if (ascii(bytes, 4, 'ftyp')) {
+    const brand = bytes.subarray(8, 12).toString('latin1');
+    if (brand === 'avif' || brand === 'avis') return 'image/avif';
+    if (brand === 'M4A ') return 'audio/mp4';
+    if (/^(isom|iso2|mp41|mp42|avc1|M4V |dash)$/.test(brand)) return 'video/mp4';
+  }
+  return null;
+}
+
+async function readHead(file: string): Promise<Buffer> {
+  const handle = await open(file, 'r');
+  try {
+    const buffer = Buffer.alloc(SNIFF_BYTES);
+    const { bytesRead } = await handle.read(buffer, 0, SNIFF_BYTES, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
 }
 
 /** Resolves a media.local_path inside the tree's media folder, following symlinks; null if it escapes. */
@@ -102,18 +120,16 @@ export function mediaRoutes(app: Api, { library }: Deps): void {
       if (!file || !info?.isFile()) throw notFound(`Media ${id} file is missing`);
 
       const etag = `"${info.size.toString(16)}-${Math.floor(info.mtimeMs).toString(16)}"`;
-      const type = contentType(media.mime, file);
+      const sniffed = await readHead(file).then(sniffMediaType);
       reply
         .header('content-security-policy', MEDIA_CSP)
+        .header('x-content-type-options', 'nosniff')
         .header('accept-ranges', 'bytes')
         .header('etag', etag)
         .header('last-modified', info.mtime.toUTCString())
         .header('cache-control', 'private, no-cache')
-        .header(
-          'content-disposition',
-          /html|xml/.test(type) && !type.includes('svg') ? 'attachment' : 'inline',
-        )
-        .type(type);
+        .header('content-disposition', sniffed ? 'inline' : 'attachment')
+        .type(sniffed ?? OPAQUE_TYPE);
       if (request.headers['if-none-match'] === etag) return reply.code(304).send();
 
       const range = parseRange(request.headers.range, info.size);

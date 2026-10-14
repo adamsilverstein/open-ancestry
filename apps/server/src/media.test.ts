@@ -3,13 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Library } from './library';
-import { parseRange, resolveMediaPath } from './routes/media';
+import { MEDIA_CSP, parseRange, resolveMediaPath, sniffMediaType } from './routes/media';
 import { createTestTree, testApi, type TestApi } from './test/helpers';
 
 let api: TestApi;
 let base: string;
 let library: Library;
-const BYTES = Buffer.from('0123456789abcdef');
+// A JPEG signature followed by filler, so the type is sniffed as image/jpeg.
+const BYTES = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('456789abcdef')]);
 
 function addMedia(fields: { local_path?: string | null; mime?: string | null }) {
   const store = library.open('Test');
@@ -35,7 +36,8 @@ describe('GET media', () => {
     expect(res.headers['content-type']).toBe('image/jpeg');
     expect(res.headers['content-length']).toBe('16');
     expect(res.headers['accept-ranges']).toBe('bytes');
-    expect(res.headers['content-security-policy']).toContain('sandbox');
+    expect(res.headers['content-security-policy']).toBe(MEDIA_CSP);
+    expect(res.headers['content-disposition']).toBe('inline');
     expect(res.headers['x-content-type-options']).toBe('nosniff');
     expect(res.rawPayload.equals(BYTES)).toBe(true);
     const head = await api.inject({
@@ -47,25 +49,48 @@ describe('GET media', () => {
     expect(head.body).toBe('');
   });
 
-  it('guesses the type from the extension when mime is missing or malformed', async () => {
-    const plain = addMedia({ local_path: 'photos/portrait.jpg' });
-    expect((await api.get(`${base}/media/${plain}`)).headers['content-type']).toBe('image/jpeg');
-    const bad = addMedia({ local_path: 'photos/portrait.jpg', mime: 'text/html\r\nx: y' });
-    expect((await api.get(`${base}/media/${bad}`)).headers['content-type']).toBe('image/jpeg');
+  it('ignores the stored mime type and the extension', async () => {
+    const lying = addMedia({ local_path: 'photos/portrait.jpg', mime: 'text/html' });
+    expect((await api.get(`${base}/media/${lying}`)).headers['content-type']).toBe('image/jpeg');
+    const injected = addMedia({
+      local_path: 'photos/portrait.jpg',
+      mime: 'image/jpeg; x=1\r\nx-evil: 1',
+    });
+    const res = await api.get(`${base}/media/${injected}`);
+    expect(res.headers['content-type']).toBe('image/jpeg');
+    expect(res.headers['x-evil']).toBeUndefined();
   });
 
-  it('serves HTML-like media as an attachment', async () => {
-    const id = addMedia({ local_path: 'photos/portrait.jpg', mime: 'text/html' });
-    const res = await api.get(`${base}/media/${id}`);
-    expect(res.headers['content-disposition']).toBe('attachment');
-  });
+  it.each([
+    ['page.html', '<!doctype html><script>alert(1)</script>', 'text/html'],
+    [
+      'logo.svg',
+      '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+      'image/svg+xml',
+    ],
+    ['photo.jpg', '<html><script>alert(1)</script></html>', 'image/jpeg'],
+    ['notes.txt', 'plain text', 'text/plain'],
+    ['empty.png', '', 'image/png'],
+  ])(
+    'serves %s (not an allowlisted format) as an opaque attachment',
+    async (name, content, mime) => {
+      await writeFile(join(library.root, 'Test.oatree', 'media', name), content);
+      const id = addMedia({ local_path: name, mime });
+      const res = await api.get(`${base}/media/${id}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-type']).toBe('application/octet-stream');
+      expect(res.headers['content-disposition']).toBe('attachment');
+      expect(res.headers['content-security-policy']).toBe(MEDIA_CSP);
+      expect(res.headers['x-content-type-options']).toBe('nosniff');
+    },
+  );
 
   it('supports byte ranges', async () => {
     const id = addMedia({ local_path: 'photos/portrait.jpg' });
     const first = await api.get(`${base}/media/${id}`, { range: 'bytes=0-3' });
     expect(first.statusCode).toBe(206);
     expect(first.headers['content-range']).toBe('bytes 0-3/16');
-    expect(first.body).toBe('0123');
+    expect(first.rawPayload.equals(BYTES.subarray(0, 4))).toBe(true);
     const suffix = await api.get(`${base}/media/${id}`, { range: 'bytes=-4' });
     expect(suffix.body).toBe('cdef');
     const open = await api.get(`${base}/media/${id}`, { range: 'bytes=10-' });
@@ -144,5 +169,36 @@ describe('parseRange', () => {
     ['items=0-1', null],
   ])('%j', (header, expected) => {
     expect(parseRange(header, 10)).toEqual(expected);
+  });
+});
+
+describe('sniffMediaType', () => {
+  const b = (...parts: (number[] | string)[]) =>
+    Buffer.concat(
+      parts.map((p) => (typeof p === 'string' ? Buffer.from(p, 'latin1') : Buffer.from(p))),
+    );
+  it.each([
+    [b([0xff, 0xd8, 0xff, 0xdb]), 'image/jpeg'],
+    [b([0x89], 'PNG\r\n\x1a\n'), 'image/png'],
+    [b('GIF89a'), 'image/gif'],
+    [b('GIF87a'), 'image/gif'],
+    [b('RIFF\0\0\0\0WEBPVP8 '), 'image/webp'],
+    [b('RIFF\0\0\0\0WAVEfmt '), 'audio/wav'],
+    [b('\0\0\0\x1cftypavif'), 'image/avif'],
+    [b('\0\0\0\x1cftypisom'), 'video/mp4'],
+    [b('\0\0\0\x1cftypM4A '), 'audio/mp4'],
+    [b('\0\0\0\x1cftypqt  '), null],
+    [b([0x1a, 0x45, 0xdf, 0xa3]), 'video/webm'],
+    [b('ID3\x04'), 'audio/mpeg'],
+    [b([0xff, 0xfb, 0x90]), 'audio/mpeg'],
+    [b('OggS'), 'audio/ogg'],
+    [b('fLaC'), 'audio/flac'],
+    [b('%PDF-1.7'), 'application/pdf'],
+    [b('<svg xmlns='), null],
+    [b('<!doctype html>'), null],
+    [b('BM'), null],
+    [b(''), null],
+  ])('%#', (bytes, expected) => {
+    expect(sniffMediaType(bytes)).toBe(expected);
   });
 });

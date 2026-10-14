@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures';
-import { readSeed } from './tree-fixtures';
+import { readSeed } from './tree-view-fixtures';
 
 const modKey = process.platform === 'darwin' ? 'Meta' : 'Control';
 

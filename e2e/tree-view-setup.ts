@@ -7,7 +7,7 @@ import {
   generateSyntheticTree,
   meta,
 } from '@open-ancestry/db';
-import { FAMILY_TREE, PERF_TREE, SEED_FILE, familyRows, type SeedInfo } from './tree-fixtures';
+import { FAMILY_TREE, PERF_TREE, SEED_FILE, familyRows, type SeedInfo } from './tree-view-fixtures';
 
 const PERF_PEOPLE = 10_000;
 

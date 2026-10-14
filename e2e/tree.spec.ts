@@ -1,11 +1,11 @@
 import AxeBuilder from '@axe-core/playwright';
 import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './fixtures';
-import { readSeed } from './tree-fixtures';
+import { readSeed } from './tree-view-fixtures';
 
 /*
  * The family tree view (F9) against the real server, on the synthetic family
- * seeded by global-setup.ts (see tree-fixtures.ts for the shape).
+ * seeded by global-setup.ts (see tree-view-fixtures.ts for the shape).
  */
 
 const seed = readSeed();

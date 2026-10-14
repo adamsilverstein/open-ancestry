@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures';
-import { readSeed } from './tree-fixtures';
+import { readSeed } from './tree-view-fixtures';
 
 /*
  * Tree view performance budgets (design.md section 7) on the seeded

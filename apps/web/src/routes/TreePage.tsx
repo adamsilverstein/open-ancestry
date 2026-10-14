@@ -3,7 +3,8 @@ import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query';
 import { FileUp } from 'lucide-react';
 import { EmptyState } from '../components/EmptyState/EmptyState';
-import { fetchHome, fetchTrees, treeKeys } from '../tree/api';
+import { currentTreeQuery } from '../api/queries';
+import { fetchHome, treeKeys } from '../tree/api';
 import { TreeView } from '../tree/TreeView';
 import styles from '../tree/TreeView.module.css';
 
@@ -13,12 +14,9 @@ export function TreePage() {
   const navigate = useNavigate();
   const { personId } = useParams({ from: '/tree/$personId' });
   const search = useSearch({ from: '/tree/$personId' });
-  const trees = useQuery({
-    queryKey: treeKeys.trees,
-    queryFn: ({ signal }) => fetchTrees(signal),
-    enabled: !search.tree,
-  });
-  const tree = search.tree ?? trees.data?.[0]?.id;
+  // `?tree=` wins (shareable links); otherwise the app's current tree.
+  const current = useQuery({ ...currentTreeQuery, enabled: !search.tree });
+  const tree = search.tree ?? current.data ?? undefined;
   const wantsHome = personId === 'home';
   const home = useQuery({
     queryKey: treeKeys.home(tree ?? ''),
@@ -37,7 +35,7 @@ export function TreePage() {
   }, [wantsHome, home.data, tree, search, navigate]);
 
   let body;
-  if (!search.tree && trees.data?.length === 0) {
+  if (!search.tree && current.data === null) {
     body = (
       <div className={styles.empty}>
         <div className={styles.emptyPanel} data-surface="raised">

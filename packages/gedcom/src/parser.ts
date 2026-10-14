@@ -10,7 +10,7 @@ import {
   mismatchWarnings,
 } from './encoding';
 import { analyzeHeader } from './header';
-import { LineSplitter, tokenizeLine, type Token } from './tokenizer';
+import { LineSplitter, looksStructural, parseLine, type Token } from './tokenizer';
 import type {
   Continuation,
   EncodingInfo,
@@ -64,7 +64,11 @@ export function subtreeLines(node: GedcomNode): number[] {
   const out: number[] = [];
   const visit = (n: GedcomNode) => {
     out.push(n.line);
-    if (n.continuations) for (const c of n.continuations) out.push(c.line);
+    if (n.extra) for (const e of n.extra) out.push(e.line);
+    for (const c of n.continuations ?? []) {
+      out.push(c.line);
+      if (c.extra) for (const e of c.extra) out.push(e.line);
+    }
     for (const child of n.children) visit(child);
   };
   visit(node);
@@ -77,13 +81,23 @@ class TreeBuilder {
   readonly index = new Map<string, GedcomNode>();
   readonly warnings: GedcomWarning[] = [];
   readonly skipped: SkippedLine[] = [];
+  readonly preamble: SkippedLine[] = [];
   warningCount = 0;
-  readonly lines: LineAccounting = { total: 0, nodes: 0, continuations: 0, blank: 0, skipped: 0 };
+  readonly lines: LineAccounting = {
+    total: 0,
+    nodes: 0,
+    continuations: 0,
+    blank: 0,
+    skipped: 0,
+    detached: 0,
+  };
 
   /** Open nodes from the current record down to the last node. */
   private stack: GedcomNode[] = [];
   /** Last node created; bare text lines continue its value. */
   private last: GedcomNode | undefined;
+  /** Last node or continuation line; blank and unparseable lines that follow attach to it. */
+  private lastUnit: GedcomNode | Continuation | undefined;
   /** Raw head-line values of nodes with continuations, needed to recompose `value`. */
   private heads = new Map<GedcomNode, string | undefined>();
   private pendingBlanks: SkippedLine[] = [];
@@ -113,26 +127,56 @@ class TreeBuilder {
       this.pendingBlanks.push({ line: lineNo, text });
       return;
     }
-    const token = tokenizeLine(text);
+    const token = parseLine(text);
     if (token) {
       this.flushBlanks();
-      this.addToken(token, lineNo);
+      if (token.repaired) {
+        this.warn('malformed-line', lineNo, 'Repaired a malformed line; check this record');
+      }
+      this.addToken(token, lineNo, text);
       return;
     }
-    if (this.last) {
+    if (looksStructural(text)) {
+      this.flushBlanks();
+      this.skip(text, lineNo, 'Malformed GEDCOM line skipped');
+      // A broken level-0 line starts a new record; never let its lines join the previous one.
+      if (/^[ \t]*0+[ \t]/.test(text)) {
+        this.stack = [];
+        this.last = undefined;
+      }
+      return;
+    }
+    if (this.last && this.last.pointer === undefined) {
       for (const blank of this.pendingBlanks) this.addBroken(blank.text, blank.line);
       this.pendingBlanks = [];
       this.addBroken(text, lineNo);
       return;
     }
     this.flushBlanks();
+    this.skip(text, lineNo, 'Line is not valid GEDCOM and has no text value to continue');
+  }
+
+  private skip(text: string, lineNo: number, message: string) {
+    const entry = { line: lineNo, text };
     this.lines.skipped++;
-    this.skipped.push({ line: lineNo, text });
-    this.warn('skipped-line', lineNo, 'Line is not valid GEDCOM and has nothing to attach to');
+    this.skipped.push(entry);
+    this.attach(entry);
+    this.warn('skipped-line', lineNo, message);
+  }
+
+  /** Keeps a blank or skipped line next to the line it followed, so records re-emit exactly. */
+  private attach(entry: SkippedLine) {
+    if (this.lastUnit) {
+      (this.lastUnit.extra ??= []).push(entry);
+    } else {
+      this.preamble.push(entry);
+      this.lines.detached++;
+    }
   }
 
   private flushBlanks() {
     this.lines.blank += this.pendingBlanks.length;
+    for (const blank of this.pendingBlanks) this.attach(blank);
     this.pendingBlanks = [];
   }
 
@@ -155,6 +199,7 @@ class TreeBuilder {
 
   private addContinuation(owner: GedcomNode, c: Continuation) {
     this.lines.continuations++;
+    this.lastUnit = c;
     if (!owner.continuations) {
       owner.continuations = [];
       this.heads.set(owner, owner.rawValue ?? owner.value);
@@ -162,7 +207,7 @@ class TreeBuilder {
     owner.continuations.push(c);
   }
 
-  private addToken(token: Token, lineNo: number) {
+  private addToken(token: Token, lineNo: number, text: string) {
     const { level, tag } = token;
     if (token.levelFormat) this.warn('level-format', lineNo, 'Level has a leading zero');
 
@@ -172,7 +217,10 @@ class TreeBuilder {
     if ((tag === 'CONC' || tag === 'CONT') && token.xref === undefined) {
       const owner = parent && level === parent.level + 1 ? parent : undefined;
       if (owner && owner.children.length === 0) {
-        this.addContinuation(owner, { tag, level, line: lineNo, value: token.value ?? '' });
+        const c: Continuation = { tag, level, line: lineNo, value: token.value ?? '' };
+        // Canonical output writes an empty continuation without a trailing space.
+        if (token.nonCanonical || token.value === '') c.source = text;
+        this.addContinuation(owner, c);
         return;
       }
       this.warn(
@@ -185,6 +233,7 @@ class TreeBuilder {
     this.lines.nodes++;
     const node: GedcomNode = { level, tag, children: [], line: lineNo };
     if (token.xref !== undefined) node.xref = token.xref;
+    if (token.nonCanonical) node.source = text;
     const raw = token.value;
     if (raw !== undefined) {
       if (isPointer(raw)) {
@@ -192,8 +241,8 @@ class TreeBuilder {
       } else {
         const value = decodeEscapes(raw, this.major);
         node.value = value;
-        // Kept whenever escapes are involved so the original text survives either escaping rule.
-        if (raw.includes('@@')) node.rawValue = raw;
+        // Kept whenever `@` is involved so the original escaping survives re-emission.
+        if (raw.includes('@')) node.rawValue = raw;
       }
     }
 
@@ -215,6 +264,7 @@ class TreeBuilder {
     }
     this.stack.push(node);
     this.last = node;
+    this.lastUnit = node;
   }
 
   private addRecord(node: GedcomNode, lineNo: number) {
@@ -280,6 +330,7 @@ function result(
     lineCount: builder.lines.total,
     lines: builder.lines,
     skipped: builder.skipped,
+    preamble: builder.preamble,
   };
 }
 

@@ -33,6 +33,41 @@ describe('serializeNode', () => {
     expect(serializeNode(doc.index.get('@I1@')!)).toBe('0 @I1@ INDI\n1 NOTE a@@b\n1 _X @@y\n');
   });
 
+  it('re-emits whitespace quirks, 01 levels, trailing spaces and blank lines exactly', () => {
+    const lines = [
+      '0 @I1@ INDI',
+      '  1 NAME Ann /Ash/',
+      '1\tSEX F',
+      '1  NOTE  two spaces',
+      '2 CONT ',
+      '',
+      '2 CONC x',
+      '01 BIRT',
+      '\t',
+      '2 DATE 1900',
+      '1 @N1@NOTE repaired',
+      '1 EMAIL a@b',
+      '1 NOTE @x',
+    ];
+    const doc = parseGedcom(`0 HEAD\n${lines.join('\n')}\n0 TRLR\n`);
+    expect(serializeNode(doc.index.get('@I1@')!)).toBe(lines.join('\n') + '\n');
+  });
+
+  it('falls back to the canonical line when a node with source text is edited', () => {
+    const indi = parseGedcom('0 @I1@ INDI\n  1 NAME Ann\n01 SEX F\n').records[0]!;
+    indi.children[0]!.value = 'Bea';
+    indi.children[1]!.level = 1;
+    expect(serializeNode(indi)).toBe('0 @I1@ INDI\n1 NAME Bea\n01 SEX F\n');
+    indi.children[1]!.tag = 'SEX';
+    indi.children[1]!.value = 'M';
+    expect(serializeNode(indi)).toBe('0 @I1@ INDI\n1 NAME Bea\n1 SEX M\n');
+  });
+
+  it('emits the preamble of unparseable lines before the first record', () => {
+    const src = 'junk\n\n0 HEAD\n0 TRLR\n';
+    expect(serializeGedcom(parseGedcom(src))).toBe(src);
+  });
+
   it('supports CRLF output', () => {
     const indi = parseGedcom('0 @I1@ INDI\n1 SEX M\n').records[0]!;
     expect(serializeNode(indi, { eol: '\r\n' })).toBe('0 @I1@ INDI\r\n1 SEX M\r\n');

@@ -99,6 +99,17 @@ describe('fuzz: parser never throws', () => {
     );
   });
 
+  it('on GEDCOM-like documents, serializing an unedited parse reproduces the input exactly', () => {
+    const lineArb = gedcomLine.map((l) => l.replace(/[\r\n]/g, ''));
+    fc.assert(
+      fc.property(fc.array(lineArb, { maxLength: 80, size: 'max' }), eol, (lines, e) => {
+        const text = lines.map((l) => l + e).join('');
+        expect(serializeGedcom(parseGedcom(text), { eol: e })).toBe(text);
+      }),
+      { numRuns: RUNS },
+    );
+  });
+
   it('streaming matches whole-buffer parsing for any chunking', async () => {
     await fc.assert(
       fc.asyncProperty(document, fc.integer({ min: 1, max: 50 }), async (text, size) => {

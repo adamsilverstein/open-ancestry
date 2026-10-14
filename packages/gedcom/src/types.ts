@@ -18,6 +18,8 @@ export type WarningCode =
   | 'replacement-char'
   | 'broken-line'
   | 'skipped-line'
+  | 'malformed-line'
+  | 'decode-failed'
   | 'level-jump'
   | 'level-format'
   | 'orphan-line'
@@ -46,6 +48,10 @@ export interface Continuation {
    * It is treated as CONT and re-emitted exactly as found.
    */
   broken?: true;
+  /** Original line text, present only when it differs from the canonical rendering. */
+  source?: string;
+  /** Blank or unparseable lines that followed this line, re-emitted after it. */
+  extra?: SkippedLine[];
 }
 
 export interface GedcomNode {
@@ -60,10 +66,17 @@ export interface GedcomNode {
   children: GedcomNode[];
   /** 1-based source line of this node's own line. */
   line: number;
-  /** Raw head-line value, present when it has `@@` escapes or continuations follow. */
+  /** Raw head-line value, present when it contains `@` or continuations follow. */
   rawValue?: string;
   /** CONC/CONT lines merged into `value`, in source order. */
   continuations?: Continuation[];
+  /**
+   * Original line text, present only when it differs from the canonical
+   * rendering (indentation, tabs, repeated spaces, `01` levels, repaired lines).
+   */
+  source?: string;
+  /** Blank or unparseable lines that followed this node's own line, re-emitted after it. */
+  extra?: SkippedLine[];
 }
 
 export interface SkippedLine {
@@ -73,6 +86,9 @@ export interface SkippedLine {
 
 /**
  * Where every physical source line went. `nodes + continuations + blank + skipped === total`.
+ * Blank and skipped lines inside a record are attached to it (`extra`); the
+ * `detached` ones before the first record are in `preamble`. So the
+ * `subtreeLines` of all records plus `detached` also equals `total`.
  */
 export interface LineAccounting {
   total: number;
@@ -80,6 +96,7 @@ export interface LineAccounting {
   continuations: number;
   blank: number;
   skipped: number;
+  detached: number;
 }
 
 export interface AncestryInfo {
@@ -134,6 +151,8 @@ export interface ParseResult {
   /** Number of physical lines in the source. */
   lineCount: number;
   lines: LineAccounting;
-  /** Lines that could not be parsed or attached anywhere. */
+  /** Every line that could not be parsed (also kept in `extra` or `preamble`). */
   skipped: SkippedLine[];
+  /** Blank or unparseable lines before the first record. */
+  preamble: SkippedLine[];
 }

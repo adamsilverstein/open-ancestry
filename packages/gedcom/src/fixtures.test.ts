@@ -15,18 +15,11 @@ const find = (node: GedcomNode | undefined, ...tags: string[]): GedcomNode | und
 const codes = (r: ParseResult) => r.warnings.map((w) => w.code);
 
 /**
- * The documented differences between a source file and `serializeGedcom` of
- * its parse: no BOM, `\n` line endings, no whitespace before levels, and a
- * terminator on the last line. (Also, not exercised by these fixtures:
- * repeated delimiters collapse to one space, level leading zeros are dropped,
- * blank lines are dropped unless inside Ancestry bare-text continuations,
- * empty CONC/CONT lose a trailing delimiter, and skipped lines are dropped.)
+ * The only differences between a source file and `serializeGedcom` of its
+ * parse: no BOM, `\n` line endings and a terminator on the last line.
  */
 function normalize(text: string): string {
-  const body = text
-    .replace(/^\uFEFF/, '')
-    .replace(/\r\n?/g, '\n')
-    .replace(/^[ \t]+(?=\d)/gm, '');
+  const body = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
   return body.endsWith('\n') ? body : body + '\n';
 }
 
@@ -138,11 +131,20 @@ describe('fixtures/gedcom', () => {
     );
     expect(find(indi, '_LONG')?.value?.length).toBeGreaterThan(255);
     expect(codes(result).filter((c) => c === 'broken-line')).toHaveLength(3);
-    expect(result.lines).toEqual({ total: 20, nodes: 15, continuations: 5, blank: 0, skipped: 0 });
+    expect(result.lines).toEqual({
+      total: 20,
+      nodes: 15,
+      continuations: 5,
+      blank: 0,
+      skipped: 0,
+      detached: 0,
+    });
   });
 
   it('malformed.ged: warnings with line numbers, nothing thrown', () => {
-    const result = parseGedcom(read('gedcom/malformed.ged'));
+    const bytes = read('gedcom/malformed.ged');
+    const result = parseGedcom(bytes);
+    expect(serializeGedcom(result)).toBe(decodeGedcom(bytes).text);
     expect(result.warnings.map((w) => [w.code, w.line])).toEqual([
       ['invalid-bytes', 0],
       ['skipped-line', 1],
@@ -154,7 +156,14 @@ describe('fixtures/gedcom', () => {
     ]);
     expect(find(result.index.get('@I1@'), 'NAME')?.value).toBe('Bad\uFFFD\uFFFD /Bytes/');
     expect(result.index.get('@I2@')).toBeDefined();
-    expect(result.lines).toEqual({ total: 13, nodes: 12, continuations: 0, blank: 0, skipped: 1 });
+    expect(result.lines).toEqual({
+      total: 13,
+      nodes: 12,
+      continuations: 0,
+      blank: 0,
+      skipped: 1,
+      detached: 1,
+    });
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LineSplitter, splitLines, tokenizeLine } from './tokenizer';
+import { LineSplitter, looksStructural, parseLine, splitLines, tokenizeLine } from './tokenizer';
 
 describe('splitLines', () => {
   it('splits on LF, CRLF and CR', () => {
@@ -76,7 +76,24 @@ describe('tokenizeLine', () => {
       tag: 'NAME',
       value: 'x',
       levelFormat: true,
+      nonCanonical: true,
     });
+  });
+
+  it('flags lines that differ from their canonical rendering', () => {
+    for (const line of [
+      '  1 NAME x',
+      '1\tNAME x',
+      '1  NAME x',
+      '0 @I1@  INDI',
+      '1 NAME\tx',
+      '01 NAME x',
+    ]) {
+      expect(tokenizeLine(line)?.nonCanonical, line).toBe(true);
+    }
+    for (const line of ['1 NAME x', '0 @I1@ INDI', '1 NAME  x', '1 NOTE ', '1 BIRT']) {
+      expect(tokenizeLine(line)?.nonCanonical, line).toBeUndefined();
+    }
   });
 
   it('accepts lines longer than 255 characters', () => {
@@ -100,4 +117,45 @@ describe('tokenizeLine', () => {
   ])('returns undefined for %s', (_, line) => {
     expect(tokenizeLine(line)).toBeUndefined();
   });
+});
+
+describe('parseLine', () => {
+  it('repairs a level-0 record line with no space after the xref', () => {
+    expect(parseLine('0 @I2@INDI')).toEqual({
+      level: 0,
+      xref: '@I2@',
+      tag: 'INDI',
+      nonCanonical: true,
+      repaired: true,
+    });
+  });
+
+  it('repairs an uppercase tag after a broken xref spacing and keeps the value', () => {
+    expect(parseLine('1 @N1@NOTE text\u2028more')).toMatchObject({
+      tag: 'NOTE',
+      value: 'text\u2028more',
+    });
+  });
+
+  it('returns valid lines unchanged and rejects text', () => {
+    expect(parseLine('1 NAME x')).toEqual({ level: 1, tag: 'NAME', value: 'x' });
+    expect(parseLine('1850 was a hard year')).toBeUndefined();
+    expect(parseLine('1 name John')).toBeUndefined();
+  });
+});
+
+describe('looksStructural', () => {
+  it.each(['0 @I2@', '0 @@ INDI', '00 x', '100 FOO x', '1 NA:ME x', '1850 WAS'])(
+    '%s is structure',
+    (line) => {
+      expect(looksStructural(line)).toBe(true);
+    },
+  );
+
+  it.each(['1850 was a hard year', '1 The Bible', 'plain text', '12 apples'])(
+    '%s is text',
+    (line) => {
+      expect(looksStructural(line)).toBe(false);
+    },
+  );
 });

@@ -6,6 +6,13 @@ export interface Token {
   value?: string;
   /** Level had a leading zero (`01`), which GEDCOM forbids. */
   levelFormat?: true;
+  /**
+   * The line is not exactly `level [xref ]tag[ value]` with single spaces:
+   * indentation, tabs, repeated delimiters or a leading-zero level.
+   */
+  nonCanonical?: true;
+  /** Recovered by `parseLine` from a line `tokenizeLine` rejects. */
+  repaired?: true;
 }
 
 const SPACE = 0x20;
@@ -37,6 +44,13 @@ export function tokenizeLine(line: string): Token | undefined {
   const n = line.length;
   let i = 0;
   while (i < n && isDelimiter(line.charCodeAt(i))) i++;
+  let canonical = i === 0;
+  /** Skips a delimiter run; canonical runs are exactly one space. */
+  const skip = () => {
+    const from = i;
+    while (i < n && isDelimiter(line.charCodeAt(i))) i++;
+    if (i - from !== 1 || line.charCodeAt(from) !== SPACE) canonical = false;
+  };
 
   const levelStart = i;
   while (i < n && line.charCodeAt(i) >= ZERO && line.charCodeAt(i) <= NINE) i++;
@@ -46,7 +60,7 @@ export function tokenizeLine(line: string): Token | undefined {
     digits === 1
       ? line.charCodeAt(levelStart) - ZERO
       : (line.charCodeAt(levelStart) - ZERO) * 10 + line.charCodeAt(levelStart + 1) - ZERO;
-  while (i < n && isDelimiter(line.charCodeAt(i))) i++;
+  skip();
 
   let xref: string | undefined;
   if (line.charCodeAt(i) === AT) {
@@ -56,7 +70,7 @@ export function tokenizeLine(line: string): Token | undefined {
     if (xref.includes(' ')) return undefined;
     i = close + 1;
     if (i === n || !isDelimiter(line.charCodeAt(i))) return undefined;
-    while (i < n && isDelimiter(line.charCodeAt(i))) i++;
+    skip();
   }
 
   const tagStart = i;
@@ -73,9 +87,48 @@ export function tokenizeLine(line: string): Token | undefined {
 
   const token: Token = { level, tag };
   if (xref !== undefined) token.xref = xref;
-  if (i < n) token.value = line.slice(i + 1);
-  if (digits === 2 && line.charCodeAt(levelStart) === ZERO) token.levelFormat = true;
+  if (i < n) {
+    token.value = line.slice(i + 1);
+    if (line.charCodeAt(i) !== SPACE) canonical = false;
+  }
+  if (digits === 2 && line.charCodeAt(levelStart) === ZERO) {
+    token.levelFormat = true;
+    canonical = false;
+  }
+  if (!canonical) token.nonCanonical = true;
   return token;
+}
+
+/** A broken line that still has a 0-99 level, an optional xref and an uppercase or `_` tag. */
+const REPAIRABLE =
+  /^[ \t]*(\d{1,2})[ \t]+(?:(@[^@ \t]+@)[ \t]*)?([A-Z0-9_]+|_[A-Za-z0-9_]+)(?:[ \t]([\s\S]*))?$/;
+
+/**
+ * `tokenizeLine`, plus repair of near-misses such as `0 @I2@INDI` (no space
+ * after the xref). Repaired tokens are flagged so the parser can warn.
+ */
+export function parseLine(line: string): Token | undefined {
+  const token = tokenizeLine(line);
+  if (token) return token;
+  const m = REPAIRABLE.exec(line);
+  if (!m) return undefined;
+  const repaired: Token = { level: Number(m[1]), tag: m[3]!, nonCanonical: true, repaired: true };
+  if (m[2] !== undefined) repaired.xref = m[2];
+  if (m[4] !== undefined) repaired.value = m[4];
+  return repaired;
+}
+
+/**
+ * Whether an unparseable line was meant as structure rather than text: any
+ * level-0 attempt, or a number followed by an uppercase tag-like word
+ * (`100 FOO x`). Such lines must not be glued onto the previous value.
+ * Note text such as `1850 was a hard year` does not match.
+ */
+export function looksStructural(line: string): boolean {
+  return (
+    /^[ \t]*0+[ \t]/.test(line) ||
+    /^[ \t]*\d+[ \t]+(?:@[^ \t]*[ \t]*)?[A-Z_][A-Z0-9_]*(?![a-z])/.test(line)
+  );
 }
 
 /**

@@ -145,7 +145,14 @@ describe('parseGedcom: Ancestry broken lines', () => {
 
   it('counts blank lines that are not followed by broken text as blank', () => {
     const result = parseGedcom('0 HEAD\n\n0 @I1@ INDI\n\n\n0 TRLR\n\n');
-    expect(result.lines).toEqual({ total: 7, nodes: 3, continuations: 0, blank: 4, skipped: 0 });
+    expect(result.lines).toEqual({
+      total: 7,
+      nodes: 3,
+      continuations: 0,
+      blank: 4,
+      skipped: 0,
+      detached: 0,
+    });
     expect(result.warnings).toEqual([]);
   });
 });
@@ -163,7 +170,7 @@ describe('parseGedcom: escapes', () => {
     const result = parseGedcom(ged('0 HEAD', '0 @I1@ INDI', '1 EMAIL ann@example.com', '0 TRLR'));
     const email = find(result.index.get('@I1@'), 'EMAIL');
     expect(email?.value).toBe('ann@example.com');
-    expect(email?.rawValue).toBeUndefined();
+    expect(email?.rawValue).toBe('ann@example.com');
   });
 
   it('decodes only a leading @@ in GEDCOM 7', () => {
@@ -253,6 +260,45 @@ describe('parseGedcom: malformed input never throws', () => {
   });
 });
 
+describe('parseGedcom: malformed record lines never join the previous record', () => {
+  it('repairs `0 @I2@INDI` into its own record with a warning', () => {
+    const result = parseGedcom(
+      ged('0 HEAD', '0 @I1@ INDI', '1 NAME A', '0 @I2@INDI', '1 NAME B /Bad/', '1 BIRT', '0 TRLR'),
+    );
+    expect(find(result.index.get('@I1@'), 'NAME')?.value).toBe('A');
+    expect(result.index.get('@I1@')?.children).toHaveLength(1);
+    const i2 = result.index.get('@I2@');
+    expect(i2?.children.map((c) => c.tag)).toEqual(['NAME', 'BIRT']);
+    expect(result.warnings).toContainEqual(
+      expect.objectContaining({ code: 'malformed-line', line: 4 }),
+    );
+  });
+
+  it('skips an unrepairable level-0 line and orphans what follows instead of attaching it', () => {
+    const result = parseGedcom(
+      ged('0 HEAD', '0 @I1@ INDI', '1 NAME A', '0 @I2@', '1 NAME B', '0 TRLR'),
+    );
+    expect(result.index.get('@I1@')?.children).toHaveLength(1);
+    expect(find(result.index.get('@I1@'), 'NAME')?.value).toBe('A');
+    expect(result.skipped).toEqual([{ line: 4, text: '0 @I2@' }]);
+    expect(result.records.map((r) => r.tag)).toEqual(['HEAD', 'INDI', 'NAME', 'TRLR']);
+    expect(codes(result)).toEqual(['skipped-line', 'orphan-line']);
+  });
+
+  it('skips `100 FOO x` instead of treating it as note text', () => {
+    const result = parseGedcom(ged('0 HEAD', '0 @I1@ INDI', '1 NOTE a', '100 FOO x', '0 TRLR'));
+    expect(find(result.index.get('@I1@'), 'NOTE')?.value).toBe('a');
+    expect(codes(result)).toEqual(['skipped-line']);
+  });
+
+  it('does not continue a pointer with bare text', () => {
+    const result = parseGedcom(ged('0 HEAD', '0 @I1@ INDI', '1 FAMS @F1@', 'stray text', '0 TRLR'));
+    expect(find(result.index.get('@I1@'), 'FAMS')).toMatchObject({ pointer: '@F1@' });
+    expect(find(result.index.get('@I1@'), 'FAMS')?.value).toBeUndefined();
+    expect(codes(result)).toEqual(['skipped-line']);
+  });
+});
+
 describe('parseGedcom: line accounting', () => {
   it('maps every node and continuation to its source lines', () => {
     const result = parseGedcom(
@@ -260,7 +306,18 @@ describe('parseGedcom: line accounting', () => {
     );
     expect(subtreeLines(result.index.get('@I1@')!)).toEqual([2, 3, 4, 5, 6]);
     const all = result.records.flatMap((r) => subtreeLines(r));
-    expect(all.length + result.lines.blank + result.lines.skipped).toBe(result.lineCount);
+    expect(all.length + result.lines.detached).toBe(result.lineCount);
+  });
+
+  it('attaches blank and skipped lines inside a record to it, and earlier ones to the preamble', () => {
+    const result = parseGedcom(
+      ged('', 'junk', '0 HEAD', '0 @I1@ INDI', '', '1 NAME a', '0 @X', '0 TRLR', ''),
+    );
+    expect(result.preamble.map((p) => p.line)).toEqual([1, 2]);
+    expect(subtreeLines(result.index.get('@I1@')!)).toEqual([4, 5, 6, 7]);
+    expect(result.lines).toMatchObject({ total: 9, blank: 3, skipped: 2, detached: 2 });
+    const all = result.records.flatMap((r) => subtreeLines(r));
+    expect(all.length + result.lines.detached).toBe(result.lineCount);
   });
 });
 

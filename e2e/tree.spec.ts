@@ -968,6 +968,44 @@ test.describe('far zoom', () => {
   });
 });
 
+test.describe('step and adoptive kinship (#138)', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+  const sample = seed.sample;
+  const openSample = async (page: Page, given: string) => {
+    await page.goto(`/tree/${sample.ids[given]}?tree=${encodeURIComponent(sample.tree)}`);
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+  };
+
+  test('a stepfather and half-sister keep their words in either parent set', async ({ page }) => {
+    await openSample(page, 'George');
+    await expect(card(page, 'Iris Hollowell')).toHaveAccessibleName(
+      /half-sister of George Eldermoor$/,
+    );
+    await canvas(page)
+      .getByRole('button', { name: /^Switch parents of George Eldermoor/ })
+      .click();
+    await expect(card(page, 'Leopold Hollowell')).toHaveAccessibleName(
+      /, stepfather of George Eldermoor$/,
+    );
+    await expect(card(page, 'Iris Hollowell')).toHaveAccessibleName(
+      /, half-sister of George Eldermoor$/,
+    );
+  });
+
+  test('adoptive parents are named as such', async ({ page }) => {
+    await openSample(page, 'Peter');
+    await expect(card(page, 'Harold Ashgrove')).toHaveAccessibleName(
+      /, adoptive father of Peter Ashgrove$/,
+    );
+    await expect(card(page, 'Dorothy Ingleby')).toHaveAccessibleName(
+      /, adoptive mother of Peter Ashgrove$/,
+    );
+    await expect(card(page, 'Thomas Ashgrove')).toHaveAccessibleName(
+      /, brother of Peter Ashgrove$/,
+    );
+  });
+});
+
 test.describe('visual snapshots', () => {
   // Baselines are Linux Chromium only, like design.spec.ts.
   test.skip(

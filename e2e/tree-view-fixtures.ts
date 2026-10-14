@@ -29,12 +29,15 @@ import type { BulkData } from '@open-ancestry/db';
 
 export interface SeedInfo {
   family: { tree: string; ids: Record<string, string> };
+  /** fixtures/ancestry-sample.ged, imported: ids by given name. */
+  sample: { tree: string; ids: Record<string, string> };
   perf: PerfTree;
   /** Only with OA_PERF_100K=1 (the perf job): seeding 100,000 people takes several seconds. */
   perf100k?: PerfTree;
 }
 
 export const FAMILY_TREE = 'e2e tree view family';
+export const SAMPLE_TREE = 'e2e tree view sample';
 export const PERF_TREE = 'e2e tree view 10k';
 export const PERF_TREE_100K = 'e2e tree view 100k';
 

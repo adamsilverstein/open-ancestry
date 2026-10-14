@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   TREE_EXTENSION,
@@ -7,8 +7,10 @@ import {
   generateSyntheticTree,
   meta,
 } from '@open-ancestry/db';
+import { importGedcom } from '../packages/import/src/index';
 import {
   FAMILY_TREE,
+  SAMPLE_TREE,
   PERF_TREE,
   PERF_TREE_100K,
   SEED_FILE,
@@ -18,7 +20,7 @@ import {
 } from './tree-view-fixtures';
 
 /** Seeds the tree view's synthetic trees into the e2e library. */
-export function seedTreeViewTrees(library: string): void {
+export async function seedTreeViewTrees(library: string): Promise<void> {
   mkdirSync(library, { recursive: true });
 
   const fresh = (name: string) => {
@@ -47,8 +49,25 @@ export function seedTreeViewTrees(library: string): void {
     } satisfies PerfTree;
   };
 
+  // The Ancestry sample, for its step, adoptive and multi-parent links.
+  const sampleStore = fresh(SAMPLE_TREE);
+  await importGedcom(
+    { bytes: readFileSync(join(import.meta.dirname, '..', 'fixtures', 'ancestry-sample.ged')) },
+    sampleStore,
+  );
+  const sampleIds = Object.fromEntries(
+    sampleStore.db
+      .prepare<[], { given: string; person_id: string }>(
+        "SELECT given, person_id FROM person_name WHERE type = 'birth' AND given IS NOT NULL",
+      )
+      .all()
+      .map((row) => [row.given, row.person_id]),
+  );
+  sampleStore.close();
+
   const seed: SeedInfo = {
     family: { tree: FAMILY_TREE, ids },
+    sample: { tree: SAMPLE_TREE, ids: sampleIds },
     perf: perfTree(PERF_TREE, 10_000, 7, 'founder'),
   };
   // Another seed, so its first 10,000 people are not the 10k tree, and the

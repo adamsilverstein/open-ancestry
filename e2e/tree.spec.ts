@@ -1155,6 +1155,18 @@ test.describe('wide descendant charts (#74)', () => {
   });
 });
 
+test.describe('phone held in landscape (#173 review)', () => {
+  test.use({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true });
+
+  test('gets the phone layout: bottom toolbar, minimap hidden', async ({ page }) => {
+    await open(page);
+    await settled(page);
+    const tools = page.getByRole('toolbar', { name: 'Tree tools' });
+    await expect(tools).toHaveAttribute('aria-orientation', 'horizontal');
+    await expect(page.getByTestId('tree-minimap')).toHaveCount(0);
+  });
+});
+
 test.describe('phone width (#139)', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
@@ -1202,23 +1214,61 @@ test.describe('phone width (#139)', () => {
     }
   });
 
-  test('chevrons and the parent switcher take a 44px tap', async ({ page }) => {
+  for (const width of [390, 320]) {
+    test(`chevrons and the parent switcher take a 44px tap at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 });
+      await open(page);
+      await settled(page);
+      const view = await box(canvas(page));
+      const bar = await box(toolbar(page));
+      let checked = 0;
+      for (const el of await canvas(page).locator('[data-chevron], [data-switch]').all()) {
+        const b = await el.boundingBox();
+        if (!b) continue;
+        const c = { x: b.x + b.width / 2 - 22, y: b.y + b.height / 2 - 22, width: 44, height: 44 };
+        // Only targets fully on screen and clear of the toolbar.
+        if (c.x < view.x || c.y < view.y || c.x + 44 > view.x + view.width) continue;
+        if (c.y + 44 > view.y + view.height || overlaps(c, bar)) continue;
+        expect(await reachable(page, el), String(await el.getAttribute('aria-label'))).toBe(true);
+        checked++;
+      }
+      expect(checked).toBeGreaterThan(2);
+    });
+  }
+
+  test('the explicitly opened minimap always shows, never just a pressed button', async ({
+    page,
+  }) => {
     await open(page);
     await settled(page);
-    const view = await box(canvas(page));
+    const button = toolbar(page).getByRole('button', { name: 'Minimap' });
+    await expect(button).toHaveAttribute('aria-pressed', 'false');
+    await button.click();
+    await expect(button).toHaveAttribute('aria-pressed', 'true');
+    const minimap = page.getByTestId('tree-minimap');
+    await expect(minimap).not.toHaveAttribute('data-settling');
+    await expect(minimap).toBeVisible();
+    // Panning cards under it does not hide it again.
+    await page.touchscreen.tap(200, 300);
+    await expect(minimap).not.toHaveAttribute('data-settling');
+    await expect(minimap).toBeVisible();
+    // Above the toolbar, not under it.
+    expect(overlaps(await box(minimap), await box(toolbar(page)))).toBe(false);
+  });
+
+  test('the bottom bar height is shared for other overlays to clear', async ({ page }) => {
+    await open(page);
+    await settled(page);
     const bar = await box(toolbar(page));
-    let checked = 0;
-    for (const el of await canvas(page).locator('[data-chevron], [data-switch]').all()) {
-      const b = await el.boundingBox();
-      if (!b) continue;
-      const c = { x: b.x + b.width / 2 - 22, y: b.y + b.height / 2 - 22, width: 44, height: 44 };
-      // Only targets fully on screen and clear of the toolbar.
-      if (c.x < view.x || c.y < view.y || c.x + 44 > view.x + view.width) continue;
-      if (c.y + 44 > view.y + view.height || overlaps(c, bar)) continue;
-      expect(await reachable(page, el), String(await el.getAttribute('aria-label'))).toBe(true);
-      checked++;
-    }
-    expect(checked).toBeGreaterThan(2);
+    const reserved = await page.evaluate(() =>
+      parseFloat(
+        getComputedStyle(document.documentElement).getPropertyValue('--oa-tree-bottom-bar'),
+      ),
+    );
+    const view = page.viewportSize()!;
+    // From the toolbar's top to the bottom of the screen.
+    expect(reserved).toBeGreaterThanOrEqual(view.height - bar.y);
+    expect(reserved).toBeLessThan(view.height - bar.y + 16);
   });
 
   test('a double tap on a card re-centers on that person', async ({ page }) => {

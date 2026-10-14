@@ -67,6 +67,7 @@ export function TopBar({ onFind }: { onFind: () => void }) {
           to="/people"
           className={cx(buttonStyles.button, buttonStyles.ghost, buttonStyles.sm, styles.find)}
           activeProps={{ 'aria-current': 'page' }}
+          title="People"
         >
           <Users size={16} aria-hidden />
           <span className={styles.label}>People</span>
@@ -77,6 +78,7 @@ export function TopBar({ onFind }: { onFind: () => void }) {
           className={styles.find}
           iconStart={<Search size={16} aria-hidden />}
           onClick={onFind}
+          title={`Find (${isMac ? '⌘K' : 'Ctrl+K'})`}
           aria-keyshortcuts="Meta+K Control+K"
         >
           <span className={styles.label}>Find</span>

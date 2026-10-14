@@ -92,6 +92,14 @@
     flex: 1 1 auto;
     max-width: none;
   }
+
+  /* Icon-only now: square and the same size as History and the theme switch. */
+  .find {
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding-inline: 0;
+  }
 }
 
 /* A large library scrolls inside the menu instead of running off screen. */

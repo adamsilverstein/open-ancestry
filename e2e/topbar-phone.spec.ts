@@ -34,6 +34,15 @@ test('the top bar shows the tree name at 390px', async ({ page, request, baseURL
   // The labels are still the controls' names, and nothing overflows the bar.
   await expect(banner.getByRole('link', { name: 'People' })).toBeVisible();
   await expect(banner.getByRole('button', { name: /^Find/ })).toBeVisible();
+  // Icon-only controls get a tooltip and are square, like History.
+  for (const control of [
+    banner.getByRole('link', { name: 'People' }),
+    banner.getByRole('button', { name: /^Find/ }),
+  ]) {
+    await expect(control).toHaveAttribute('title', /People|Find/);
+    const box = (await control.boundingBox())!;
+    expect(Math.abs(box.width - box.height)).toBeLessThanOrEqual(1);
+  }
   const overflow = await banner.evaluate((el) => el.scrollWidth - el.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
 

@@ -50,17 +50,19 @@ URL focus ──> TreeView ──fetchQuery──> GET /api/trees/:tree/neighbor
 ## Budgets
 
 `e2e/tree-perf.spec.ts` (`npm run e2e:perf`, Chromium, 1440x900) checks design.md section 7 on
-seeded synthetic trees of 10,000 and 100,000 people (100k only with `OA_PERF_100K=1`, which the
-script sets):
+seeded synthetic trees of 10,000 and 100,000 people. The 100k tree (only with `OA_PERF_100K=1`,
+which the script sets) uses another seed and its densest view, so its checks lay out more cards
+than the 10k ones, and they assert that.
 
 | Measure | Budget |
 | --- | --- |
-| First paint: navigation to the first rendered layout, median of 3 cold loads | < 1s |
-| Re-focus with cached data, key press to painted frame, 500+ on screen, p95 of 10 | < 50ms |
-| Pan and pinch with 2,796 laid out, at fit (all painted) and at 41% (cards mounted) | median >= 58fps, < 5% of frames over 33ms |
-| JS heap after GC, second round of re-focuses and pans vs the first | < 10MB growth |
+| First paint: home person's family view, navigation to first rendered layout, median of 5 cold loads | < 1s |
+| Re-focus with cached data, key press to painted frame, p95 of 10: at fit (500+ painted) and at 35-45% zoom (cards mounted) | < 50ms |
+| Pan and pinch with 2,000+ laid out, at fit (all painted) and at 35-45% (cards mounted) | median >= 58fps, < 5% of frames over 33ms, no long tasks |
+| JS heap after GC, each round of re-focuses and pans after the first | < 2MB growth |
 
-Time budgets scale by `OA_BENCH_FACTOR` (CI: 2.5). Results go to `perf-results/tree-view.md`, which
-CI's `perf` job adds to its summary. The app marks `oa-tree-ready` when each layout's frame is
-painted and measures `oa-tree-refocus` from the re-focus action to that mark; the world layer
-reports `data-visible-count`.
+Time budgets scale by `OA_BENCH_FACTOR` (CI: 2.5; CI also allows two long tasks). Results go to
+`perf-results/tree-view.md`, which CI's `perf` job adds to its summary. The app marks
+`oa-tree-first-paint` once and `oa-tree-ready` (replaced each time) when a layout's frame has
+painted, and measures `oa-tree-refocus` from the re-focus action to that mark, keeping at most
+100 of them; the world layer reports `data-visible-count`.

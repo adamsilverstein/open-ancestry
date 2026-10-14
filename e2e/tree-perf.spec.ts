@@ -6,15 +6,20 @@ import { readSeed, type PerfTree } from './tree-view-fixtures';
 
 /*
  * Tree view performance budgets (design.md section 7), Chromium only, on the
- * seeded synthetic trees (10,000 people always; 100,000 with OA_PERF_100K=1):
+ * seeded synthetic trees (10,000 people always; 100,000 with OA_PERF_100K=1,
+ * generated from another seed and viewed at its densest person, so its checks
+ * lay out more than the 10k ones and must):
  *
- * - First paint: navigation to the first rendered layout < 1s (the LCP budget).
+ * - First paint: opening the home person's family view, navigation to the
+ *   first rendered layout, median of 5 cold loads < 1s (the LCP budget).
  * - Re-focus with cached data, from the key press to the painted frame (fetch,
- *   worker layout, render), ~500+ people on screen: p95 < 50ms over 10.
- * - Pan and zoom with 2,000+ laid-out cards: median frame at 58fps or better,
- *   under 5% of frames over 33ms.
- * - Memory: the JS heap after a second round of re-focuses and pans stays
- *   within 10MB of the first round (no growth per interaction).
+ *   worker layout, render), p95 < 50ms over 10: at fit (~500+ people painted)
+ *   and at 35-45% zoom (cards mounted as DOM).
+ * - Pan and zoom with 2,000+ laid-out cards, at fit and with cards mounted:
+ *   median frame at 58fps or better, under 5% of frames over 33ms, and no long
+ *   tasks.
+ * - Memory: after the first round of re-focuses and pans, each further round
+ *   grows the JS heap by under 2MB (no growth per interaction).
  *
  * OA_BENCH_FACTOR scales the time budgets for slower machines (CI sets it), as
  * in `npm run bench`. Results are appended to perf-results/tree-view.md, which
@@ -68,6 +73,28 @@ async function lastRefocus(page: Page) {
   return page.evaluate(
     () => performance.getEntriesByName('oa-tree-refocus', 'measure').at(-1)!.duration,
   );
+}
+
+async function scale(page: Page) {
+  return Number(await page.getByTestId('tree-world').getAttribute('data-scale'));
+}
+
+/** Zooms out step by step to the lowest zoom that still mounts cards (35-45%). */
+async function zoomToMountedCards(page: Page) {
+  while ((await scale(page)) > 0.45) {
+    await page.keyboard.press('-');
+    await settled(page);
+  }
+  expect(await scale(page)).toBeGreaterThanOrEqual(0.35);
+}
+
+/** Results of the 10k checks, which the 100k ones must exceed in size. */
+const sizes = new Map<string, number>();
+function checkSize(measure: string, laidOut: number) {
+  const tenK = sizes.get(measure);
+  // The 100k checks run after the 10k ones and must lay out more.
+  if (tenK === undefined) sizes.set(measure, laidOut);
+  else expect(laidOut, `${measure}: laid out vs the 10k tree`).toBeGreaterThan(tenK);
 }
 
 const percentile = (values: number[], p: number) => {
@@ -141,24 +168,26 @@ for (const tree of trees) {
   test.describe(`${people}-person tree`, () => {
     test('first paint', async ({ browser }) => {
       const times: number[] = [];
-      // Fresh contexts: nothing cached, as on opening the app.
-      for (let i = 0; i < 3; i++) {
+      // Fresh contexts: nothing cached, as on opening the app at the home person.
+      for (let i = 0; i < 5; i++) {
         const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
         const page = await context.newPage();
-        await page.goto(url(tree.founderId, '&down=7&up=1'));
+        await page.goto(url(tree.focusId, ''));
         await ready(page);
-        times.push(
-          await page.evaluate(
-            () => performance.getEntriesByName('oa-tree-ready', 'mark')[0]!.startTime,
-          ),
-        );
+        // The mark lands after the frame paints, just after the view stops being busy.
+        const firstPaint = () =>
+          page.evaluate(
+            () => performance.getEntriesByName('oa-tree-first-paint', 'mark')[0]?.startTime ?? 0,
+          );
+        await expect.poll(firstPaint).toBeGreaterThan(0);
+        times.push(await firstPaint());
         await context.close();
       }
       const median = percentile(times, 0.5);
       const budget = 1000 * factor;
       report(
         tree,
-        'First paint (navigation to tree on screen), median of 3',
+        'First paint (home person, family view; navigation to tree on screen), median of 5',
         `${median.toFixed(0)}ms`,
         `< ${budget}ms`,
         median < budget,
@@ -166,49 +195,68 @@ for (const tree of trees) {
       expect(median).toBeLessThan(budget);
     });
 
-    test('re-focus with ~500+ people on screen', async ({ page }) => {
-      await page.goto(url(tree.founderId, '&down=7&up=1'));
-      await ready(page);
-      await page.getByRole('button', { name: 'Fit to screen' }).click();
-      await settled(page);
-      const { laidOut } = await stats(page);
-
-      // Keyboard: down to a child, Enter to re-focus, up to the founder, Enter
-      // again. The first round trip loads both neighborhoods; then they are cached.
-      await canvas(page).locator(`[data-key="${tree.founderId}"]`).focus();
-      const visible: number[] = [];
-      const refocus = async (key: string) => {
-        await page.keyboard.press(key);
-        const before = await refocusCount(page);
-        await page.keyboard.press('Enter');
-        await expect.poll(() => refocusCount(page)).toBeGreaterThan(before);
+    for (const zoom of ['fit', 'mounted'] as const) {
+      const title =
+        zoom === 'fit'
+          ? 're-focus with ~500+ people on screen (fit, painted)'
+          : 're-focus with cards mounted (35-45% zoom)';
+      test(title, async ({ page }) => {
+        await page.goto(url(tree.wideId, '&down=7&up=1'));
         await ready(page);
+        await canvas(page).locator(`[data-key="${tree.wideId}"]`).focus();
+        if (zoom === 'fit') await page.keyboard.press('0');
+        else await zoomToMountedCards(page);
         await settled(page);
-        visible.push((await stats(page)).visible);
-        return lastRefocus(page);
-      };
-      // Uncached: the first visit to each fetches its neighborhood.
-      const uncached = [await refocus('ArrowDown'), await refocus('ArrowUp')];
+        const { laidOut } = await stats(page);
 
-      visible.length = 0;
-      const durations: number[] = [];
-      for (let i = 0; i < 5; i++) {
-        durations.push(await refocus('ArrowDown'));
-        durations.push(await refocus('ArrowUp'));
-      }
-      const p95 = percentile(durations, 0.95);
-      const meanVisible = Math.round(visible.reduce((a, b) => a + b, 0) / visible.length);
-      const budget = 50 * factor;
-      report(
-        tree,
-        `Re-focus, cached (${laidOut} laid out, ${meanVisible} on screen), p95 of 10`,
-        `${p95.toFixed(1)}ms (median ${percentile(durations, 0.5).toFixed(1)}ms; uncached ${uncached.map((d) => d.toFixed(0)).join(' and ')}ms)`,
-        `< ${budget}ms`,
-        p95 < budget,
-      );
-      expect(meanVisible).toBeGreaterThanOrEqual(500);
-      expect(p95).toBeLessThan(budget);
-    });
+        // Keyboard: down to a child, Enter to re-focus, up again, Enter again. The
+        // first round trip loads both neighborhoods; then they are cached. The zoom
+        // is kept across re-focuses.
+        const visible: number[] = [];
+        const mounted: number[] = [];
+        const refocus = async (key: string) => {
+          await page.keyboard.press(key);
+          const before = await refocusCount(page);
+          await page.keyboard.press('Enter');
+          await expect.poll(() => refocusCount(page)).toBeGreaterThan(before);
+          await ready(page);
+          await settled(page);
+          const now = await stats(page);
+          visible.push(now.visible);
+          mounted.push(now.mounted);
+          return lastRefocus(page);
+        };
+        // Uncached: the first visit to each fetches its neighborhood.
+        const uncached = [await refocus('ArrowDown'), await refocus('ArrowUp')];
+
+        visible.length = 0;
+        mounted.length = 0;
+        const durations: number[] = [];
+        for (let i = 0; i < 5; i++) {
+          durations.push(await refocus('ArrowDown'));
+          durations.push(await refocus('ArrowUp'));
+        }
+        const p95 = percentile(durations, 0.95);
+        const mean = (values: number[]) =>
+          Math.round(values.reduce((a, b) => a + b, 0) / values.length);
+        const budget = 50 * factor;
+        report(
+          tree,
+          `Re-focus, cached, ${zoom === 'fit' ? 'fit' : `${Math.round((await scale(page)) * 100)}% zoom`} (${laidOut} laid out, ${mean(visible)} on screen, ${mean(mounted)} mounted), p95 of 10`,
+          `${p95.toFixed(1)}ms (median ${percentile(durations, 0.5).toFixed(1)}ms; uncached ${uncached.map((d) => d.toFixed(0)).join(' and ')}ms)`,
+          `< ${budget}ms`,
+          p95 < budget,
+        );
+        if (zoom === 'fit') {
+          expect(mean(visible)).toBeGreaterThanOrEqual(500);
+          checkSize(`refocus ${zoom}`, laidOut);
+        } else {
+          // Cards are DOM here, not painted.
+          expect(mean(mounted)).toBeGreaterThanOrEqual(20);
+        }
+        expect(p95).toBeLessThan(budget);
+      });
+    }
 
     for (const scenario of [
       {
@@ -217,51 +265,68 @@ for (const tree of trees) {
         minVisible: 2000,
       },
       {
-        // Four zoom steps out from 100% (41%): just above the canvas level of detail,
-        // so cards are mounted DOM. Arrow down into the denser lower generations first.
-        name: '41% zoom, cards mounted',
+        // Just above the canvas level of detail, so cards are mounted DOM. Arrow
+        // down into the denser lower generations first.
+        name: '35-45% zoom, cards mounted',
         prepare: async (page: Page) => {
           for (let i = 0; i < 6; i++) {
             await page.keyboard.press('ArrowDown');
             await settled(page);
           }
-          for (let i = 0; i < 4; i++) await page.keyboard.press('-');
+          await zoomToMountedCards(page);
         },
         minVisible: 25,
       },
     ]) {
       test(`pan and zoom with 2,000+ laid-out cards: ${scenario.name}`, async ({ page }) => {
-        await page.goto(url(tree.founderId, '&down=8&up=1'));
+        await page.goto(url(tree.wideId, '&down=8&up=1'));
         await ready(page);
-        await canvas(page).locator(`[data-key="${tree.founderId}"]`).focus();
+        await canvas(page).locator(`[data-key="${tree.wideId}"]`).focus();
         await scenario.prepare(page);
         await settled(page);
         const before = await stats(page);
         expect(before.laidOut).toBeGreaterThanOrEqual(2000);
         expect(before.visible).toBeGreaterThanOrEqual(scenario.minVisible);
 
+        if (scenario.minVisible >= 2000) checkSize('pan fit', before.laidOut);
+
+        // Long tasks (over 50ms on the main thread) are the direct jank signal;
+        // rAF deltas are quantized to whole frames.
+        await page.evaluate(() => {
+          const w = window as unknown as { __longTasks: number[] };
+          w.__longTasks = [];
+          new PerformanceObserver((list) => {
+            for (const entry of list.getEntries()) w.__longTasks.push(entry.duration);
+          }).observe({ type: 'longtask' });
+        });
         const frames = await recordFrames(page, () => panAndPinch(page));
+        const longTasks = await page.evaluate(
+          () => (window as unknown as { __longTasks: number[] }).__longTasks,
+        );
         const fps = 1000 / frames.median;
         const maxOver = 0.05 * factor;
-        const ok = fps >= 58 && frames.over33 < maxOver;
+        // None on a laptop; shared runners get a couple of scheduling hiccups.
+        const maxLongTasks = factor > 1 ? 2 : 0;
+        const ok = fps >= 58 && frames.over33 < maxOver && longTasks.length <= maxLongTasks;
         report(
           tree,
           `Pan and pinch, ${scenario.name} (${before.laidOut} laid out, ${before.visible} on screen, ${before.mounted} mounted)`,
-          `median ${fps.toFixed(0)}fps, p95 ${frames.p95.toFixed(1)}ms, ${(frames.over33 * 100).toFixed(1)}% over 33ms (${frames.count} frames)`,
-          `>= 58fps, < ${(maxOver * 100).toFixed(1)}% over 33ms`,
+          `median ${fps.toFixed(0)}fps, p95 ${frames.p95.toFixed(1)}ms, ${(frames.over33 * 100).toFixed(1)}% over 33ms (${frames.count} frames), ${longTasks.length} long tasks${longTasks.length ? ` (max ${Math.max(...longTasks).toFixed(0)}ms)` : ''}`,
+          `>= 58fps, < ${(maxOver * 100).toFixed(1)}% over 33ms, <= ${maxLongTasks} long tasks`,
           ok,
         );
         expect(fps).toBeGreaterThanOrEqual(58);
         expect(frames.over33).toBeLessThan(maxOver);
+        expect(longTasks.length).toBeLessThanOrEqual(maxLongTasks);
       });
     }
 
     test('memory stays flat across repeated interactions', async ({ page }) => {
-      await page.goto(url(tree.founderId, '&down=7&up=1'));
+      await page.goto(url(tree.wideId, '&down=7&up=1'));
       await ready(page);
       await page.getByRole('button', { name: 'Fit to screen' }).click();
       await settled(page);
-      await canvas(page).locator(`[data-key="${tree.founderId}"]`).focus();
+      await canvas(page).locator(`[data-key="${tree.wideId}"]`).focus();
       const round = async () => {
         for (const key of ['ArrowDown', 'ArrowUp', 'ArrowDown', 'ArrowUp']) {
           await page.keyboard.press(key);
@@ -272,22 +337,24 @@ for (const tree of trees) {
           await settled(page);
         }
         await panAndPinch(page);
-        await canvas(page).locator(`[data-key="${tree.founderId}"]`).focus();
+        await canvas(page).locator(`[data-key="${tree.wideId}"]`).focus();
       };
-      const start = await heapMB(page);
-      await round();
-      const first = await heapMB(page);
-      await round();
-      const second = await heapMB(page);
-      const growth = second - first;
+      // The first round fills caches (neighborhoods, layouts); later rounds
+      // repeat it and must not keep growing.
+      const heap = [await heapMB(page)];
+      for (let i = 0; i < 3; i++) {
+        await round();
+        heap.push(await heapMB(page));
+      }
+      const growth = Math.max(heap[2]! - heap[1]!, heap[3]! - heap[2]!);
       report(
         tree,
-        'JS heap after GC: loaded, after one round, after a second round',
-        `${start.toFixed(1)} / ${first.toFixed(1)} / ${second.toFixed(1)}MB`,
-        '< 10MB growth in the second round',
-        growth < 10,
+        'JS heap after GC: loaded, then after each of three rounds of re-focuses and pans',
+        `${heap.map((h) => h.toFixed(1)).join(' / ')}MB`,
+        '< 2MB growth per round after the first',
+        growth < 2,
       );
-      expect(growth).toBeLessThan(10);
+      expect(growth).toBeLessThan(2);
     });
   });
 }

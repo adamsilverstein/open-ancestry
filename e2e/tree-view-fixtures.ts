@@ -41,8 +41,11 @@ export const PERF_TREE_100K = 'e2e tree view 100k';
 export interface PerfTree {
   tree: string;
   focusId: string;
-  /** The first founder: thousands of descendants within eight generations. */
-  founderId: string;
+  /**
+   * A person with thousands of descendants within eight generations: the first
+   * founder in the 10k tree, the densest such view in the 100k tree.
+   */
+  wideId: string;
   people: number;
 }
 export const SEED_FILE = 'tree-view-seed.json';

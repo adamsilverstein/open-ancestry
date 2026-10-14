@@ -1,7 +1,12 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   BulkWriter,
   bulkInsert,
+  createTree,
+  openTree,
   dumpSchema,
   exportJsonString,
   generateSyntheticTree,
@@ -94,5 +99,34 @@ describe('batched inserts', () => {
     expect(store.db.inTransaction).toBe(false);
     expect(persons.list(store)).toEqual([]);
     store.close();
+  });
+});
+
+describe('journal mode during a fresh-tree load', () => {
+  it('writes a new on-disk tree without WAL, then switches WAL back on', () => {
+    const root = mkdtempSync(join(tmpdir(), 'oa-fresh-'));
+    try {
+      const store = createTree(join(root, 'f.oatree'));
+      expect(store.db.pragma('journal_mode', { simple: true })).toBe('wal');
+      const writer = new BulkWriter(store, { freshTree: true });
+      // A rollback journal writes new pages once; WAL writes them twice (log, then checkpoint).
+      expect(store.db.pragma('journal_mode', { simple: true })).toBe('delete');
+      writer.insert('person', { id: 'P1' });
+      writer.commit();
+      expect(store.db.pragma('journal_mode', { simple: true })).toBe('wal');
+      store.close();
+
+      const reopened = openTree(join(root, 'f.oatree'));
+      expect(persons.list(reopened)).toHaveLength(1);
+      reopened.close();
+
+      const other = createTree(join(root, 'g.oatree'));
+      const aborted = new BulkWriter(other, { freshTree: true });
+      aborted.rollback();
+      expect(other.db.pragma('journal_mode', { simple: true })).toBe('wal');
+      other.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

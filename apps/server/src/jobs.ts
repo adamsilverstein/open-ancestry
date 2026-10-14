@@ -45,6 +45,8 @@ export interface JobView {
   /** The importer's report once completed. */
   result: unknown;
   error: string | null;
+  /** Stopped by a cancel (DELETE /api/jobs/:id or server shutdown), not by an error. */
+  cancelled: boolean;
   createdAt: string;
   finishedAt: string | null;
 }
@@ -115,6 +117,7 @@ export class JobManager {
       progress: null,
       result: null,
       error: null,
+      cancelled: false,
       createdAt: new Date().toISOString(),
       finishedAt: null,
       controller: new AbortController(),
@@ -140,6 +143,7 @@ export class JobManager {
   cancel(id: string): boolean {
     const job = this.jobs.get(id);
     if (!job || (job.state !== 'queued' && job.state !== 'running')) return false;
+    job.cancelled = true;
     job.controller.abort();
     if (job.state === 'queued' && !job.cancelling) {
       // Never picked up by pump(): it skips jobs that are cancelling.
@@ -239,6 +243,7 @@ function view(job: Job): JobView {
     progress: job.progress,
     result: job.result,
     error: job.error,
+    cancelled: job.cancelled,
     createdAt: job.createdAt,
     finishedAt: job.finishedAt,
   };

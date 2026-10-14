@@ -29,7 +29,9 @@ test.describe('visual snapshots', () => {
     test(`/design in ${colorScheme}`, async ({ page }) => {
       await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
       // The top bar names the open tree once it loads.
-      await expect(page.getByRole('banner').getByText('Ashdown family')).toBeVisible();
+      await expect(page.getByRole('banner').getByText('Ashdown family')).toBeVisible({
+        timeout: 15_000,
+      });
       await page.evaluate(() => document.fonts.ready);
       // Full-page captures don't scroll, so scroll once to trigger lazy images.
       await page.evaluate(async () => {

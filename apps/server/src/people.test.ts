@@ -251,7 +251,7 @@ describe('tags, home and export', () => {
     expect((await api.get(s.base)).json().tree.homePersonId).toBe(s.cora);
     expect((await api.put(`${s.base}/home`, { personId: '01NOPE' })).statusCode).toBe(404);
     expect((await api.put(`${s.base}/home`, { personId: null })).json().personId).toBeNull();
-    expect((await api.get(`${s.base}/home`)).json().personId).toBeNull();
+    expect((await api.get(`${s.base}/home`)).json()).toEqual({ personId: null, person: null });
   });
 
   it('exports the tree as open-ancestry JSON', async () => {

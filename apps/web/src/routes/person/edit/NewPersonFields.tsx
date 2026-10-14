@@ -34,16 +34,30 @@ export function useNewPerson() {
 
 export type NewPerson = ReturnType<typeof useNewPerson>;
 
-export function NewPersonFields({ draft }: { draft: NewPerson }) {
+/** Matches the server's limit on name parts (`nameFields` in schemas.source.ts). */
+export const NAME_MAX_LENGTH = 200;
+
+export function NewPersonFields({
+  draft,
+  errors = {},
+}: {
+  draft: NewPerson;
+  /** Messages for fields the server refused, keyed by API field name. */
+  errors?: Partial<Record<'given' | 'surname' | 'date_text', string>>;
+}) {
   return (
     <div className={styles.grid}>
       <Input
         label="Given names"
+        maxLength={NAME_MAX_LENGTH}
+        error={errors.given}
         value={draft.given}
         onChange={(e) => draft.setGiven(e.currentTarget.value)}
       />
       <Input
         label="Surname"
+        maxLength={NAME_MAX_LENGTH}
+        error={errors.surname}
         value={draft.surname}
         onChange={(e) => draft.setSurname(e.currentTarget.value)}
       />
@@ -53,7 +67,13 @@ export function NewPersonFields({ draft }: { draft: NewPerson }) {
         onValueChange={(value) => draft.setSex(value as Sex)}
         options={SEX_OPTIONS}
       />
-      <DateInput label="Birth date" value={draft.birth} onValueChange={draft.setBirth} hint="" />
+      <DateInput
+        label="Birth date"
+        value={draft.birth}
+        onValueChange={draft.setBirth}
+        hint=""
+        error={errors.date_text}
+      />
     </div>
   );
 }

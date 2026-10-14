@@ -132,3 +132,64 @@ test('a tree made with New tree opens on its people list, ready to add someone',
   await expect(page).toHaveURL(/\/people$/);
   await expect(page.getByRole('button', { name: 'Add person' })).toBeVisible();
 });
+
+test('names are capped at the server limit, and a refused field gets a plain message', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const tree = await createEmptyTree(request, baseURL!, `${testInfo.project.name} limits`);
+  await openTree(page, tree, '/people');
+  await page.getByRole('button', { name: 'Add person' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Add person' });
+  const given = dialog.getByRole('textbox', { name: 'Given names' });
+  await given.fill('A'.repeat(250));
+  await expect(given).toHaveValue('A'.repeat(200));
+  await expect(dialog.getByRole('textbox', { name: 'Surname' })).toHaveAttribute(
+    'maxlength',
+    '200',
+  );
+
+  // Should the server still refuse a field, the form says so in words, on that field.
+  await page.route('**/people', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: {
+              code: 'validation_failed',
+              message:
+                'body/names/0/given must NOT have more than 200 characters, body/names/0/given must be null',
+            },
+          }),
+        })
+      : route.fallback(),
+  );
+  await dialog.getByRole('button', { name: 'Add person' }).click();
+  await expect(dialog.getByRole('alert')).toHaveText(/Given names can be at most 200 characters\./);
+  await expect(dialog.getByRole('alert')).not.toContainText('body/');
+  await expect(given).toHaveAccessibleDescription(/at most 200 characters/);
+});
+
+test('Cmd/Ctrl-K, Add person, Escape returns focus to where it was', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const tree = await createEmptyTree(request, baseURL!, `${testInfo.project.name} focus`);
+  await openTree(page, tree, '/people');
+  const people = page.getByRole('banner').getByRole('link', { name: 'People' });
+  await people.focus();
+  await page.keyboard.press(`${mod}+k`);
+  const palette = page.getByRole('dialog', { name: 'Command palette' });
+  await expect(palette).toBeVisible();
+  await page.keyboard.type('add person');
+  await expect(palette.getByRole('option', { name: 'Add person' })).toBeVisible();
+  await page.keyboard.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Add person' });
+  await expect(dialog.getByRole('textbox', { name: 'Given names' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(people).toBeFocused();
+});

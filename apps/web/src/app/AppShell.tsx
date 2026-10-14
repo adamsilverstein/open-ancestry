@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Outlet } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { currentTreeQuery } from '../api/queries';
@@ -20,14 +20,25 @@ function isPaletteShortcut(event: KeyboardEvent) {
   return (event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k';
 }
 
+/** The focused control outside any dialog, or null. */
+function focusedOutsideDialogs(): HTMLElement | null {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement) || active === document.body) return null;
+  return active.closest('[role="dialog"], [role="alertdialog"]') ? null : active;
+}
+
 export function AppShell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // What had focus before the palette opened: a dialog launched from the
+  // palette returns focus there, since the palette's input is gone by then.
+  const beforePalette = useRef<HTMLElement | null>(null);
   // The palette chunk loads on first use, then stays mounted so it opens instantly.
   const [paletteLoaded, setPaletteLoaded] = useState(false);
 
   const palette = useMemo(
     () => ({
       open: () => {
+        beforePalette.current = focusedOutsideDialogs();
         setPaletteLoaded(true);
         setPaletteOpen(true);
       },
@@ -39,9 +50,11 @@ export function AppShell() {
   // Bumped on every open so each Add person starts with an empty form.
   const [addPersonKey, setAddPersonKey] = useState(0);
   const [addPersonOpen, setAddPersonOpen] = useState(false);
+  const [addPersonOpener, setAddPersonOpener] = useState<HTMLElement | null>(null);
   const addPerson = useMemo(
     () => ({
       open: () => {
+        setAddPersonOpener(focusedOutsideDialogs() ?? beforePalette.current);
         setAddPersonKey((key) => key + 1);
         setAddPersonOpen(true);
       },
@@ -63,6 +76,8 @@ export function AppShell() {
       if (!isPaletteShortcut(event)) return;
       event.preventDefault();
       setPaletteLoaded(true);
+      // Focus is inside the palette while it is open, so this only records on open.
+      beforePalette.current = focusedOutsideDialogs() ?? beforePalette.current;
       setPaletteOpen((open) => !open);
     }
     window.addEventListener('keydown', onKeyDown);
@@ -98,6 +113,7 @@ export function AppShell() {
               <Suspense fallback={null}>
                 <AddPersonDialog
                   key={addPersonKey}
+                  opener={addPersonOpener}
                   tree={tree}
                   open={addPersonOpen}
                   onOpenChange={setAddPersonOpen}

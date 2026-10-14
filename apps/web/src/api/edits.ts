@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useToast } from '../components/Toast/Toast';
+import { ApiError } from './client';
 import { personQuery } from './queries';
 import type { PersonDetail } from './types';
 
@@ -33,6 +34,50 @@ export function onTreeChanged(listener: (tree: string) => void): () => void {
   return () => changeListeners.delete(listener);
 }
 
+const FIELD_LABELS: Record<string, string> = {
+  given: 'Given names',
+  surname: 'Surname',
+  surname_prefix: 'Surname prefix',
+  prefix: 'Prefix',
+  suffix: 'Suffix',
+  nickname: 'Nickname',
+  date_text: 'Date',
+  place: 'Place',
+  text: 'Note',
+};
+
+/** One field a server validation error names, e.g. `given`, with a plain sentence. */
+export interface FieldError {
+  field: string;
+  message: string;
+}
+
+/**
+ * Server validation errors read like `body/names/0/given must NOT have more
+ * than 200 characters, body/names/0/given must be null`: turn the first one
+ * we can name into a plain sentence for the form field it belongs to.
+ */
+export function fieldError(error: unknown): FieldError | null {
+  if (!(error instanceof ApiError) || error.status !== 400) return null;
+  const match = /body\/(?:[\w]+\/\d+\/)?(\w+) must NOT have more than (\d+) characters/.exec(
+    error.message,
+  );
+  if (!match) return null;
+  const [, field = '', max] = match;
+  const label = FIELD_LABELS[field] ?? 'This field';
+  return { field, message: `${label} can be at most ${max} characters.` };
+}
+
+/** What to tell the user about a failed edit: a plain sentence, never a schema dump. */
+export function friendlyMessage(error: unknown): string {
+  const field = fieldError(error);
+  if (field) return field.message;
+  if (error instanceof ApiError && error.status === 400 && error.code === 'validation_failed') {
+    return 'Some of the values are not valid.';
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 /** Refetches every query of the tree (keys are `[kind, tree, ...]`) and notifies `onTreeChanged`. */
 export function invalidateTree(queryClient: QueryClient, tree: string) {
   for (const listener of changeListeners) listener(tree);
@@ -54,7 +99,7 @@ export function useEdit(tree: string) {
       if (rollback) queryClient.setQueryData(rollback.key, rollback.previous);
       toast({
         title: 'Could not save',
-        description: `${edit.label}: ${error instanceof Error ? error.message : String(error)}`,
+        description: `${edit.label}: ${friendlyMessage(error)}`,
         variant: 'error',
       });
       edit.onError?.(error);

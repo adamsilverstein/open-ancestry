@@ -24,6 +24,16 @@ async function open(page: Page, key = 'ada', extra = '') {
   await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
 }
 
+/**
+ * Waits until `name` is the laid-out focus person and the view has stopped
+ * moving: the URL changes first, the layout and re-centering come after.
+ */
+async function focusedOn(page: Page, name: string) {
+  await expect(card(page, name)).toHaveAccessibleName(/focus person/);
+  await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+  await settled(page);
+}
+
 /** Waits for pan/zoom animations to finish. */
 async function settled(page: Page) {
   await expect(world(page)).not.toHaveAttribute('data-animating');
@@ -380,6 +390,8 @@ test.describe('family view', () => {
 
   test('zoom in, zoom out, fit, wheel, drag and home', async ({ page }) => {
     await open(page, 'bram');
+    // The first view frames the family with an animation; measure from where it lands.
+    await settled(page);
     const start = await transform(page);
     await page.getByRole('button', { name: 'Zoom in' }).click();
     await expect.poll(async () => (await transform(page)).scale).toBeGreaterThan(start.scale);
@@ -434,14 +446,19 @@ test.describe('family view', () => {
 
     await page.getByRole('button', { name: 'Go to home person' }).click();
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.ada}\\?`));
+    // The new focus re-centers once its relatives load; a card is only a stable
+    // target after that, not merely after the URL changed.
+    await focusedOn(page, 'Ada Vale');
     await card(page, 'Ada Vale').focus();
     await settled(page);
     await card(page, 'Elsa Hale').dblclick();
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.elsa}\\?`));
+    await focusedOn(page, 'Elsa Hale');
     // Keyboard focus follows to the new focus card.
     await expect(card(page, 'Elsa Hale')).toBeFocused();
     await page.keyboard.press('h');
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.ada}\\?`));
+    await focusedOn(page, 'Ada Vale');
 
     // Single-key shortcuts only act while focus is in the tree (WCAG 2.1.4).
     await expect(card(page, 'Ada Vale')).toHaveAccessibleName(/focus person/);

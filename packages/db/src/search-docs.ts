@@ -1,8 +1,21 @@
 import type { Database } from 'better-sqlite3';
 
+/**
+ * `expr` without invisible characters the tokenizer would split a word at
+ * (zero-width space, non-joiner and joiner, word joiner, BOM, soft hyphen),
+ * so "Ro\u200bwan" is indexed as "Rowan" (#190).
+ */
+const visible = (expr: string) =>
+  [0x200b, 0x200c, 0x200d, 0x2060, 0xfeff, 0xad].reduce(
+    (sql, code) => `replace(${sql}, char(${code}), '')`,
+    expr,
+  );
+
 /** The search document columns (names, phonetic, places, years) for `search_doc d`. */
 export const DOC_COLUMNS = `
-  (SELECT group_concat(concat_ws(' ', n.prefix, n.given, n.nickname, n.surname_prefix, n.surname, n.suffix), ' ' ORDER BY n.sort_order, n.id)
+  (SELECT ${visible(
+    "group_concat(concat_ws(' ', n.prefix, n.given, n.nickname, n.surname_prefix, n.surname, n.suffix), ' ' ORDER BY n.sort_order, n.id)",
+  )}
      FROM person_name n WHERE n.person_id = d.person_id),
   (SELECT group_concat(n.surname_key, ' ' ORDER BY n.sort_order, n.id)
      FROM person_name n WHERE n.person_id = d.person_id),

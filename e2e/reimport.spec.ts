@@ -425,6 +425,52 @@ test('match percent and reasons say what differs, and why a new person is new', 
   ).toBeVisible();
 });
 
+test('the comparison page names the file and phase while it runs (#161)', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  // Hold the job at the compare phase, however fast the real one is.
+  await page.route('**/api/jobs/*/events', (route) => {
+    const id = /jobs\/([^/]+)\/events/.exec(route.request().url())![1];
+    const job = {
+      id,
+      kind: 'reimport',
+      tree: seeded.tree,
+      fileName: 'Ashgrove 2026.ged',
+      createdTree: false,
+      state: 'running',
+      progress: { phase: 'compare', done: 0, total: 1 },
+      result: null,
+      error: null,
+      cancelled: false,
+    };
+    void route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: `event: state\ndata: ${JSON.stringify(job)}\n\n`,
+    });
+  });
+  await page.addInitScript((tree) => localStorage.setItem('oa-tree', tree), seeded.tree);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'File' }).click();
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('menuitem', { name: /Re-import updated export/ }).click();
+  await (
+    await chooser
+  ).setFiles({
+    name: 'Ashgrove 2026.ged',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from(laterExport()),
+  });
+  await expect(
+    page.getByRole('heading', { name: 'Comparing Ashgrove 2026.ged with your tree' }),
+  ).toBeVisible();
+  await expect(page.getByText('Comparing with your tree', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+});
+
 test('discarding a review changes nothing', async ({ page, request, baseURL }, testInfo) => {
   const seeded = await seed(request, baseURL!, testInfo);
   await startReimport(page, seeded);

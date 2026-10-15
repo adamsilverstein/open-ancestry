@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readdir } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -66,6 +66,39 @@ describe('Library', () => {
     const reopened = library.open('One');
     expect(reopened).not.toBe(created);
     expect(library.open('One')).toBe(reopened);
+    library.closeAll();
+  });
+
+  it('sweeps its own stale .reimport-* folders when a tree opens, and nothing else', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'oa-lib-'));
+    const library = new Library(root);
+    library.create('One');
+    library.closeAll();
+    const dir = library.dirOf('One');
+    const hoursAgo = (h: number) => (Date.now() - h * 60 * 60 * 1000) / 1000;
+    const folder = (name: string, ageHours: number) => {
+      const path = join(dir, name);
+      mkdirSync(path);
+      writeFileSync(join(path, 'file.jpg'), 'x');
+      utimesSync(path, hoursAgo(ageHours), hoursAgo(ageHours));
+      return path;
+    };
+    const stale = folder('.reimport-Ab12cd', 2);
+    const staleTree = folder('.reimport-0b3c4d5e-6f70-4182-9a3b-4c5d6e7f8091.oatree', 2);
+    const fresh = folder('.reimport-Fresh1', 0);
+    const lookalike = folder('.reimportant', 2);
+    // A symlink is never followed or removed, whatever it points at.
+    const elsewhere = join(root, 'elsewhere');
+    mkdirSync(elsewhere);
+    writeFileSync(join(elsewhere, 'keep.jpg'), 'x');
+    symlinkSync(elsewhere, join(dir, '.reimport-Link12'));
+    library.open('One');
+    expect(existsSync(stale)).toBe(false);
+    expect(existsSync(staleTree)).toBe(false);
+    expect(existsSync(fresh)).toBe(true);
+    expect(existsSync(lookalike)).toBe(true);
+    expect(existsSync(join(dir, '.reimport-Link12'))).toBe(true);
+    expect(existsSync(join(elsewhere, 'keep.jpg'))).toBe(true);
     library.closeAll();
   });
 

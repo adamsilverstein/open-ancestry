@@ -13,7 +13,7 @@ PR numbers point to the change on GitHub.
 - **Import Ancestry GEDCOM and GEDZIP files** from the start page (drag and drop) or with `open-ancestry import`. Ancestry's own tags are understood: record links (`_APID`), MyTreeTags, photos and primary photos, adopted and step relationships, and military events. Nothing is dropped: every line is either mapped or kept as is, so the tree can be exported again. (#22, #30, #43, #44)
 - **Import report** with counts, warnings by line number, and the tags that could not be mapped. (#30, #43)
 - **Media from a GEDZIP or a media folder** is linked by its relative path. Missing files are reported but keep their path, so an export still names them, and existing files are never overwritten. (#45, #51, #221)
-- **Re-import an updated Ancestry export** into an existing tree. People are matched, with a confidence and the reasons for each match, and a review screen lets you accept or reject each change before anything is written. (#72, #184, #192)
+- **Re-import an updated Ancestry export** into an existing tree. People are matched, with a confidence and the reasons for each match, and a review screen lets you accept or reject each change before anything is written. The review is grouped by what needs a decision, with counts that filter the list, conflicts marked by more than colour, and dates written the app's way. Matching stays fast on large trees by comparing people nearest in birth year. (#72, #184, #192, #194, #222)
 - **Dates as they appear in real trees**: `ABT`, `BEF`, `AFT`, `BET … AND`, `FROM … TO`, US-style `05/28/1960`, ISO dates, decades, centuries and year ranges. Text that is not a date is kept as typed. (#21, #52, #66)
 - **GEDCOM 7** files, including calendar dates, which are validated. (#64, #142)
 - **Accented names stay consistent**: text is normalized to NFC on import and edit, so names, places and media paths match however they were typed. (#164)
@@ -28,6 +28,7 @@ PR numbers point to the change on GitHub.
 - **Expand and collapse** ancestors, descendants and siblings card by card. Half siblings hang from their shared parent, and cousins keep their parents together. (#31, #53, #73)
 - **Pan, zoom, minimap and keyboard navigation**: arrow keys move between related cards. The URL names the focus person, so any view can be bookmarked, and a hand-edited URL falls back to the default view instead of breaking it. (#39, #77, #214)
 - **Pedigree collapse** (the same person reached twice) is drawn as a linked duplicate card. (#39)
+- **Quick view polish**: Edit opens the editor directly, a living person shows "Living" once, and people without a photo get a silhouette tinted by sex. (#178)
 - **Copied trees are told apart**: a tree folder copied by hand shows its folder name next to the tree name in the switcher, start page and export dialog. (#235)
 - **Kinship labels** on tree cards name step, adoptive and foster links, not just birth relationships. (#157)
 
@@ -42,7 +43,8 @@ PR numbers point to the change on GitHub.
   (#35)
 - **Gallery tab** with thumbnails, a lightbox, and attaching media to the person or an event. Remote Ancestry photos are shown as placeholders and are never downloaded. (#51, #168, #183)
 - **Notes, LifeStory and Sources tabs.** (#35)
-- **Relationship calculator**: the relationship between any two people ("2nd cousin once removed", "step-mother", "sister-in-law"), with every path when there is more than one. (#37, #176)
+- **Half, step, adoptive, foster and guardian kin are named as such** in the timeline ("Birth of half-sister …"), the Relationships column (separate Siblings, Half-siblings and Step-siblings groups) and LifeStory, which also reads dates as prose ("was born about 1842") and tells adoptions and step-parents in their own sentences. A relative's event that may fall after the person's death sorts before it, without an age. (#152, #231)
+- **Relationship calculator**: the relationship between any two people ("2nd cousin once removed", "step-mother", "sister-in-law", "step-first cousin", "guardian"), with every path when there is more than one. (#37, #176, #231)
 
 ### Search and the people list
 
@@ -55,16 +57,19 @@ PR numbers point to the change on GitHub.
 - **Add, edit and delete** people, names, events (with a live preview of how the date is read), notes, tags and relationships. (#48)
 - **Relationship fixes**: set or change a partnership's type, and remove a wrong parent, partner or child link. People are never deleted by these. (#165)
 - **Merge duplicate people** in one step. Each merge is recorded, so a later re-import still recognizes the person who was merged away. (#70, #219)
+- **Edits run in order**: each change to a tree waits for the one before it, undo waits for edits still on their way, and a save that gets no answer gives up after 30 seconds with a clear message. (#205)
 - **Undo and redo everything**: Cmd/Ctrl-Z, Shift-Cmd/Ctrl-Z, and a History panel listing recent changes. Each dialog save is one undo step, and history survives app upgrades. (#48, #148)
 - **A failed save keeps the dialog open**, with what you typed and the reason, so you can try again. (#177)
 - **Edits to someone deleted elsewhere** (in another window, or by undo) get one plain message, no retry that can't work, and land on a close relative. (#240)
 - **Delete a person** and their own notes, media and citations go with them, while anything still used by someone else stays. You land on a close relative (or the people list), with an Undo button in the toast. Undo brings you back to the restored person. (#181, #232)
+- **Phone-width top bar** keeps the open tree's name readable: People and Find become icons with tooltips. (#217)
 - **Keyboard friendly**: focus returns to whatever opened a dialog, including after a mouse click in Safari, and the History list scrolls from the keyboard. (#59, #171, #208)
 
 ### Privacy and export
 
 - **Your data stays on your computer.** Each tree is a folder (a SQLite database plus media) in your library. The app makes no third-party network requests. (#23, #29)
 - **Export GEDCOM 5.5.1** (Ancestry compatible, keeping Ancestry's custom tags), **GEDCOM 7**, **GEDZIP** with media, and **JSON** for backup and tools. Original records are re-read by their own GEDCOM version, so nothing is lost when a GEDCOM 7 import is exported as 5.5.1, and a line that should point at a record but holds text is reported, not silently dropped. GEDCOM 7 exports give each media file's format as a MIME type. (#23, #46, #221, #223)
+- **GEDZIP exports stream** one media file at a time, so a large media library exports without loading it all, and an archive too big for the ZIP format is refused before anything is sent. (#227)
 - **JSON exports can leave out edit history**, and do by default from the export dialog, since that history holds anything you deleted. (#220)
 - **Privatize living people**, on by default when exporting. Private and confidential records are hidden, and record ids are renumbered so nothing about a hidden person leaks. (#46, #104)
 - **Living status** is worked out from dates and can be set by hand. (#21, #48)
@@ -73,7 +78,8 @@ PR numbers point to the change on GitHub.
 
 - The server listens on `127.0.0.1` only. Requests are checked by Host and Origin, every change needs a per-session token, and a strict Content Security Policy is sent with no inline scripts. Nothing in the app trips that policy, and every end-to-end test fails if anything does. (#29, #34, #47, #174)
 - GEDCOM files are treated as untrusted. Values cannot inject extra GEDCOM lines on export, text that looks like a pointer stays text, coordinates are parsed safely, and control characters are escaped in command-line output. (#26, #150, #166, #179)
-- Media is served without path traversal, and uploads have size limits. (#29, #51)
+- Media is served without path traversal, hard-linked media files and a symlinked media folder are refused, and uploads have size limits. (#29, #51, #236)
+- The library folder is private to your user account, and the API refuses navigations from other sites. (#151)
 
 ### Performance
 

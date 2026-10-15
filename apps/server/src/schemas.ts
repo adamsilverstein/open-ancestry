@@ -32,6 +32,7 @@ export const {
   RelationshipQuery,
   SearchQuery,
   HistoryQuery,
+  UndoQuery,
   HomeBody,
   NameBody,
   EventBody,

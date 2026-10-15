@@ -17,4 +17,8 @@ export interface BenchCase {
   time?: number;
   /** Untimed warmup runs (tinybench default 16); 0 disables warmup for slow cases. */
   warmupIterations?: number;
+  /** Peak resident memory in MB the case measured (for example, of a child process). */
+  peakMemoryMB?: () => number | undefined;
+  /** Fails `npm run bench` when `peakMemoryMB` exceeds this. Not scaled by OA_BENCH_FACTOR. */
+  memoryBudgetMB?: number;
 }

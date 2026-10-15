@@ -383,9 +383,8 @@ export function ReimportPage() {
   /** Stops the comparison, or discards its review if it finished in the meantime. */
   async function cancel() {
     setCancelling(true);
-    try {
-      await cancelJob(jobId);
-    } catch {
+    // False (409): the comparison already finished, so discard its review.
+    if (!(await cancelJob(jobId).catch(() => false))) {
       const latest = await getJob(jobId).catch(() => null);
       const done = latest?.result as unknown as { reimportId?: string } | undefined;
       if (done?.reimportId) await discardReimport(done.reimportId).catch(() => {});

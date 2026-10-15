@@ -173,8 +173,21 @@ const MIME: Record<string, [string, MediaRow['kind']]> = {
 const MIME_BY_EXT = new Map(Object.entries(MIME).map(([mime, [ext]]) => [ext, mime]));
 MIME_BY_EXT.set('jpeg', 'image/jpeg').set('tiff', 'image/tiff');
 
-const mimeOfPath = (path: string | null | undefined) =>
+export const mimeOfPath = (path: string | null | undefined) =>
   path ? MIME_BY_EXT.get(path.split('?')[0]!.split('.').pop()!.toLowerCase()) : undefined;
+
+/**
+ * An imported FILE.FORM value in the output version's form: a media type in
+ * GEDCOM 7, a file extension in 5.5.1 (when the type is one we know).
+ */
+export function formValue(form: string, v7: boolean): string {
+  const value = form.trim().toLowerCase();
+  if (v7) {
+    if (value.includes('/')) return value;
+    return MIME_BY_EXT.get(value) ?? 'application/octet-stream';
+  }
+  return value.includes('/') ? (MIME[value]?.[0] ?? form) : form;
+}
 
 /** GEDCOM 7 AGE grammar: `> 25y 3m`, `8w`, `< 1d`. */
 const AGE_7 =

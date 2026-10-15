@@ -90,8 +90,11 @@ test.describe('person', () => {
       .click();
     await expect(h1(page)).toHaveText('Tobias');
     await page.keyboard.press(`${mod}+z`);
-    await expect(page).toHaveURL(new RegExp(`/person/${seeded.rowan}$`));
-    await expect(toasts(page).filter({ hasText: 'Tobias is no longer in the tree' })).toBeVisible();
+    // To the nearest relative (a parent first), not back through history (#189).
+    await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}$`));
+    await expect(
+      toasts(page).filter({ hasText: 'Tobias was deleted (in another window or by undo)' }),
+    ).toBeVisible();
   });
 
   test('Cmd/Ctrl-Z does nothing while a dialog is open', async ({ page }) => {

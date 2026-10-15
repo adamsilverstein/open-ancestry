@@ -2228,6 +2228,15 @@
       }
     }
   },
+  "JsonExportQuery": {
+    "type": "object",
+    "properties": {
+      "history": {
+        "enum": ["0", "1", "false", "true"]
+      }
+    },
+    "additionalProperties": false
+  },
   "Living": {
     "enum": ["living", "dead", "inferred_living", "inferred_dead", "unknown"]
   },
@@ -2949,7 +2958,6 @@
     "properties": {
       "name": {
         "type": "string",
-        "minLength": 1,
         "maxLength": 100
       }
     },

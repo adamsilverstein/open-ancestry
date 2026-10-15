@@ -18,6 +18,7 @@ const VERBATIM_TABLES = new Set([
   'derived_state',
   'search_doc',
   'person_search',
+  'person_sort',
 ]);
 
 /** Columns that name things outside the database (files, URLs) or are machine values. */

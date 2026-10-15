@@ -42,7 +42,11 @@ const SERVE_OPTIONS = `Options for serve:
 const IMPORT_OPTIONS = `Options for import:
   --name <tree>        Tree name (default: the file name)
   --media <dir>        Folder holding the media files a .ged file refers to
-  --library <dir>      Folder holding your trees (default $OA_LIBRARY or ~/OpenAncestry)`;
+  --library <dir>      Folder holding your trees (default $OA_LIBRARY or ~/OpenAncestry)
+
+Import size limits (serve and import):
+  --max-gedcom-mb <n>  Largest GEDCOM text, also inside a GEDZIP (default 64; $OA_MAX_GEDCOM_MB)
+  --max-archive-mb <n> Largest GEDZIP with its photos (default 1024; $OA_MAX_ARCHIVE_MB)`;
 
 const USAGE = `Usage: open-ancestry <command> [options]
 

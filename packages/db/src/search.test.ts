@@ -11,6 +11,8 @@ import {
   searchPeople,
   type TreeStore,
 } from './index';
+import { bulkInsert, generateSyntheticTree } from './index';
+import { refreshSearch } from './search';
 import { memoryTree, seedSmallFamily } from './test/helpers';
 
 describe('searchPeople', () => {
@@ -254,3 +256,31 @@ function recordQueries(store: TreeStore, fn: () => unknown): { sql: string; args
   }
   return seen;
 }
+
+describe('full search rebuild', () => {
+  it('builds the same documents as per-person refreshes', () => {
+    const store = memoryTree();
+    bulkInsert(store, generateSyntheticTree({ people: 300, seed: 11 }));
+    seedSmallFamily(store);
+    store.transact('edge cases', (tx) => {
+      persons.create(tx, {}); // no names, no events
+      persons.create(tx, { names: [{ given: 'Ada' }, { surname: 'Lyle', type: 'aka' }] });
+    });
+    const docs = () =>
+      store.db
+        .prepare(
+          `SELECT d.person_id, s.names, s.phonetic, s.places, s.years
+           FROM search_doc d JOIN person_search s ON s.rowid = d.doc_id ORDER BY d.person_id`,
+        )
+        .all();
+    rebuildSearchIndex(store);
+    const rebuilt = docs();
+    const ids = (store.db.prepare('SELECT id FROM person').all() as { id: string }[]).map(
+      (r) => r.id,
+    );
+    store.db.transaction(() => refreshSearch(store, ids))();
+    expect(rebuilt).toEqual(docs());
+    expect(rebuilt).toHaveLength(ids.length);
+    store.close();
+  });
+});

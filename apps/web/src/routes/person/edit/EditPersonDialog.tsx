@@ -2,10 +2,17 @@ import { useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2 } from 'lucide-react';
-import type { ChildRelationship, LivingStatus, NameType, Sex } from '@open-ancestry/db';
+import type {
+  ChildRelationship,
+  LivingStatus,
+  NameType,
+  RelationshipType,
+  Sex,
+} from '@open-ancestry/db';
 import { seg } from '../../../api/client';
 import { useEdit } from '../../../api/edits';
-import { apiSend } from '../../../api/client';
+import { ApiError, apiSend } from '../../../api/client';
+import { rememberDeletedPerson, undoRedo } from '../../../api/history';
 import { personQuery } from '../../../api/queries';
 import type { PersonDetail } from '../../../api/types';
 import { Button } from '../../../components/Button/Button';
@@ -15,7 +22,8 @@ import { IconButton } from '../../../components/IconButton/IconButton';
 import { Input } from '../../../components/Input/Input';
 import { Select } from '../../../components/Select/Select';
 import { useToast } from '../../../components/Toast/Toast';
-import { fullName, isLivingStatus } from '../../../lib/person';
+import { fullName, isLivingStatus, nearestRelative } from '../../../lib/person';
+import { useOpenRestored } from '../../../lib/useOpenRestored';
 import { applyNames, applyPerson, nameChanges, toDraft, type NameDraft } from './optimistic';
 import { SaveError, useSaveState } from './SaveError';
 import styles from './Edit.module.css';
@@ -37,6 +45,17 @@ export const SEX_OPTIONS: { value: Sex; label: string }[] = [
   { value: 'X', label: 'Other' },
   { value: 'U', label: 'Unknown' },
 ];
+
+export const RELATIONSHIP_TYPES: { value: RelationshipType; label: string }[] = [
+  { value: 'married', label: 'Married' },
+  { value: 'civil_union', label: 'Civil union' },
+  { value: 'partners', label: 'Partners' },
+  { value: 'unknown', label: 'Unknown' },
+];
+
+/** Shown under a partnership in Relationships; unknown says nothing. */
+export const relationshipTypeLabel = (type: RelationshipType): string | undefined =>
+  type === 'unknown' ? undefined : RELATIONSHIP_TYPES.find((t) => t.value === type)?.label;
 
 export const CHILD_RELATIONSHIPS: { value: ChildRelationship; label: string }[] = [
   { value: 'biological', label: 'Biological' },
@@ -102,6 +121,7 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
   const saveState = useSaveState(() => onOpenChange(false));
   const toast = useToast();
   const navigate = useNavigate();
+  const onRestored = useOpenRestored();
   const queryClient = useQueryClient();
   const [names, setNames] = useState<NameDraft[]>(() => detail.names.map(toDraft));
   const [sex, setSex] = useState<Sex>(detail.person.sex);
@@ -171,14 +191,46 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
 
   function deletePerson() {
     onOpenChange(false);
+    const nearby = nearestRelative(detail);
     edit.mutate({
       label: 'Delete person',
-      send: () => apiSend('DELETE', `${base}/people/${id}`),
-      onDone: () => {
-        // Leave first, so the page does not refetch a person who is gone.
-        void navigate({ to: '/' });
+      send: () => apiSend<{ batchId: string }>('DELETE', `${base}/people/${id}`),
+      onDone: ({ batchId }) => {
+        rememberDeletedPerson(batchId, id);
+        // Leave first, so the page does not refetch a person who is gone. Stay
+        // near where the user was working: a relative, else the people list.
+        void (nearby
+          ? navigate({ to: '/person/$personId', params: { personId: nearby } })
+          : navigate({ to: '/people' }));
         queryClient.removeQueries({ queryKey: personQuery(tree, id).queryKey });
-        toast({ title: `Deleted ${name}`, description: 'Press Ctrl+Z (⌘Z on a Mac) to undo.' });
+        toast({
+          title: `Deleted ${name}`,
+          description: 'Press Ctrl+Z (⌘Z on a Mac) to undo.',
+          duration: 8000,
+          action: {
+            label: 'Undo',
+            // This delete only: refused if anything was changed after it.
+            onClick: () =>
+              void undoRedo(queryClient, 'undo', { expect: batchId, onRestored }).then(
+                ({ batch }) => batch && toast({ title: `Undid ${batch.label}`, duration: 3000 }),
+                (error: unknown) =>
+                  toast(
+                    error instanceof ApiError && error.code === 'not_newest'
+                      ? {
+                          title: "Can't undo the delete",
+                          description:
+                            'Newer changes were made since. Undo them first from History.',
+                          variant: 'error',
+                        }
+                      : {
+                          title: 'Could not undo',
+                          description: error instanceof Error ? error.message : String(error),
+                          variant: 'error',
+                        },
+                  ),
+              ),
+          },
+        });
       },
     });
   }

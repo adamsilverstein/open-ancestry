@@ -78,6 +78,14 @@ export class TooManyJobsError extends Error {
   }
 }
 
+/** The server is shutting down and takes no new jobs. */
+export class ShuttingDownError extends Error {
+  constructor() {
+    super('The server is shutting down; try again once it has restarted');
+    this.name = 'ShuttingDownError';
+  }
+}
+
 export class JobManager {
   private readonly jobs = new Map<string, Job>();
   private readonly events = new EventEmitter();
@@ -85,6 +93,7 @@ export class JobManager {
   private readonly maxQueued: number;
   private readonly keepFinished: number;
   private running = 0;
+  private draining = false;
 
   constructor({ concurrency = 1, maxQueued = 4, keepFinished = 50 }: JobManagerOptions = {}) {
     this.concurrency = concurrency;
@@ -95,6 +104,7 @@ export class JobManager {
 
   /** Whether a new job could be queued now (checked before accepting an upload). */
   hasRoom(): boolean {
+    if (this.draining) throw new ShuttingDownError();
     const queued = [...this.jobs.values()].filter((j) => j.state === 'queued').length;
     return queued < this.maxQueued;
   }
@@ -113,6 +123,7 @@ export class JobManager {
     run: (signal: AbortSignal, progress: (p: ImportProgress) => void) => Promise<unknown>,
     cleanup: () => Promise<void> = async () => {},
   ): JobView {
+    if (this.draining) throw new ShuttingDownError();
     const queued = [...this.jobs.values()].filter((j) => j.state === 'queued').length;
     if (queued >= this.maxQueued) throw new TooManyJobsError();
     const id = randomUUID();
@@ -182,6 +193,8 @@ export class JobManager {
 
   /** Cancels every active job and waits for them to settle (server shutdown). */
   async shutdown(): Promise<void> {
+    // From now on new work is refused (503), so the wait below can only shrink.
+    this.draining = true;
     const active = [...this.jobs.values()].filter(
       (j) => j.state === 'queued' || j.state === 'running',
     );

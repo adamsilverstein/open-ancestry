@@ -57,7 +57,7 @@ const HELD_KEYS = new Set([
   'PageDown',
 ]);
 
-/** Typing is released to the page if the palette has not taken it by then. */
+/** Typing is released to the page if the palette has not taken it this long after its chunk loaded. */
 const TYPE_AHEAD_LIMIT_MS = 3000;
 
 export function AppShell() {
@@ -85,11 +85,17 @@ export function AppShell() {
           failedRef.current = false;
           setAttempt((n) => n + 1);
         }
-        typeAhead.current = { text: '' };
-        // Typing must never stay captured when the palette does not show up.
+        const session: TypeAhead = { text: '' };
+        typeAhead.current = session;
         clearTimeout(releaseTimer.current);
-        releaseTimer.current = setTimeout(release, TYPE_AHEAD_LIMIT_MS);
-        loadPalette().catch(release);
+        // Typing must never stay captured when the palette does not show up: released
+        // if the chunk fails, or if the input has not taken it within the limit after
+        // the chunk loaded (not after Cmd-K, so a slow network keeps a word whole).
+        loadPalette().then(() => {
+          if (typeAhead.current !== session) return;
+          clearTimeout(releaseTimer.current);
+          releaseTimer.current = setTimeout(release, TYPE_AHEAD_LIMIT_MS);
+        }, release);
       }
       if (!open) release();
       openRef.current = open;
@@ -139,7 +145,10 @@ export function AppShell() {
       else if (isTyping(event)) {
         typed.text += event.key;
         typed.enter = undefined;
-      } else if (!HELD_KEYS.has(event.key)) return;
+      } else if (!HELD_KEYS.has(event.key) || event.altKey || event.metaKey || event.ctrlKey) {
+        // Modified arrows are navigation (Alt+Left is Back), not palette keys.
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
     }

@@ -17,9 +17,10 @@ import { readSeed, type PerfTree } from './tree-view-fixtures';
  *   (~500+ people painted) and at 35-45% zoom (cards mounted as DOM), each warm
  *   (the keyboard rested on the card past the prefetch dwell, so its layout was
  *   prepared) and cold (Enter at once, as after Find).
- * - Re-focus after browsing: 50 re-focuses on different people (each merges
- *   another neighborhood), then the cached round trip, p95 of 20 < 50ms, so a
- *   long session does not slow re-focus down (#210).
+ * - Re-focus after browsing: the cached round trip (40 re-focuses) before and
+ *   after 50 re-focuses on different people seven generations deep (each merges
+ *   another slice): the end p95 < 50ms and the end median within 1.5x of the
+ *   start (+10ms), so a long session does not slow re-focus down (#210).
  * - Pan and zoom with 2,000+ laid-out cards, at fit and with cards mounted:
  *   median frame at 58fps or better and under 5% of frames over 33ms. Long
  *   tasks and the longest frame are reported, not asserted: on a loaded machine
@@ -292,8 +293,10 @@ for (const tree of trees) {
       });
     }
 
-    test('re-focus after browsing 50 people stays in budget', async ({ page }) => {
-      await page.goto(url(tree.wideId, '&down=3&up=2'));
+    test('re-focus after browsing 50 people stays as fast as at the start', async ({ page }) => {
+      // Seven generations down: each new focus merges a slice of up to 5,000
+      // people, so 50 of them merge tens of thousands in the 100k tree.
+      await page.goto(url(tree.wideId, '&down=7&up=1'));
       await ready(page);
       const refocusOn = async (key: string) => {
         await canvas(page).locator(`[data-key="${key}"]`).focus();
@@ -304,50 +307,60 @@ for (const tree of trees) {
         await settled(page);
         return lastRefocus(page);
       };
-      // Browse: re-focus on 50 different people, each a card on screen that was
-      // not the focus before, so every visit merges another neighborhood.
+      const mountedKeys = () =>
+        canvas(page)
+          .locator('[data-key]')
+          .evaluateAll((cards) =>
+            cards
+              .map((card) => ({
+                key: card.getAttribute('data-key')!,
+                y: card.getBoundingClientRect().y,
+              }))
+              .filter((c) => !c.key.includes('~'))
+              .sort((x, y) => y.y - x.y)
+              .map((c) => c.key),
+          );
+      /** The cached round trip between two people: p95 and median of 40. */
+      const roundTrip = async (from: string) => {
+        const to = (await mountedKeys()).find((k) => k !== from)!;
+        await refocusOn(to);
+        await refocusOn(from);
+        const durations: number[] = [];
+        for (let i = 0; i < 20; i++) {
+          durations.push(await refocusOn(to));
+          durations.push(await refocusOn(from));
+        }
+        return { p95: percentile(durations, 0.95), median: percentile(durations, 0.5) };
+      };
+
+      const start = await roundTrip(tree.wideId);
+      // Browse: re-focus on 50 different people, each the lowest card on screen
+      // not visited yet, so every visit reaches new descendants.
       const seen = new Set<string>([tree.wideId]);
       let current = tree.wideId;
       for (let visit = 0; visit < 50; visit++) {
-        const keys = await canvas(page)
-          .locator('[data-key]')
-          .evaluateAll((cards) => cards.map((card) => card.getAttribute('data-key')!));
-        const fresh = keys.filter((key) => !key.includes('~') && !seen.has(key));
-        const next =
-          fresh[(visit * 7) % Math.max(1, fresh.length)] ?? keys.find((k) => k !== current);
+        const keys = await mountedKeys();
+        const next = keys.find((key) => !seen.has(key)) ?? keys.find((k) => k !== current);
         expect(next, `visit ${visit}: a card to move to`).toBeTruthy();
         seen.add(next!);
         await refocusOn(next!);
         current = next!;
       }
-      // Then the cached round trip of the re-focus checks, on everything merged so far.
-      const other = (await canvas(page)
-        .locator('[data-key]')
-        .evaluateAll(
-          (cards, focus) =>
-            cards
-              .map((card) => card.getAttribute('data-key')!)
-              .find((k) => k !== focus && !k.includes('~')),
-          current,
-        ))!;
-      await refocusOn(other);
-      await refocusOn(current);
-      const durations: number[] = [];
-      for (let i = 0; i < 10; i++) {
-        durations.push(await refocusOn(other));
-        durations.push(await refocusOn(current));
-      }
-      const p95 = percentile(durations, 0.95);
-      const median = percentile(durations, 0.5);
+      const end = await roundTrip(current);
+
       const budget = 50 * factor;
+      // Laying out from everything merged made each re-focus slower as the
+      // session went on (#210): the end must stay close to the start.
+      const allowed = start.median * 1.5 + 10 * factor;
       report(
         tree,
-        `Re-focus after browsing 50 people (${seen.size} visited), cached, p95 of 20`,
-        `${p95.toFixed(1)}ms (median ${median.toFixed(1)}ms)`,
-        `p95 < ${budget}ms`,
-        p95 < budget,
+        `Re-focus after browsing 50 people, cached, p95 and median of 40 (start vs end)`,
+        `start ${start.median.toFixed(1)}ms (p95 ${start.p95.toFixed(1)}); end ${end.median.toFixed(1)}ms (p95 ${end.p95.toFixed(1)})`,
+        `end p95 < ${budget}ms; end median < ${allowed.toFixed(0)}ms`,
+        end.p95 < budget && end.median < allowed,
       );
-      expect(p95).toBeLessThan(budget);
+      expect(end.median).toBeLessThan(allowed);
+      expect(end.p95).toBeLessThan(budget);
     });
 
     for (const scenario of [

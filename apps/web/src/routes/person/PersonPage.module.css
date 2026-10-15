@@ -66,7 +66,8 @@
 /* The mini chart can be wider than a regular popover. */
 .pathPopover {
   max-width: min(640px, calc(100vw - 16px));
-  max-height: min(480px, calc(100vh - 16px));
+  /* Radix gives the room left between the trigger and the viewport edge. */
+  max-height: min(480px, var(--radix-popover-content-available-height, calc(100vh - 16px)));
   overflow: auto;
 }
 
@@ -204,4 +205,21 @@
   font-family: var(--oa-font-serif);
   font-size: 18px;
   line-height: 1.6;
+}
+
+.calculatorPickers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--oa-space-3);
+  margin-bottom: var(--oa-space-4);
+}
+
+.calculatorName {
+  margin: 0 0 var(--oa-space-3);
+  font: var(--oa-text-md);
+}
+
+.calculatorHint {
+  margin: 0;
+  color: var(--oa-text-muted);
 }

@@ -2,7 +2,13 @@ import { useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2 } from 'lucide-react';
-import type { ChildRelationship, LivingStatus, NameType, Sex } from '@open-ancestry/db';
+import type {
+  ChildRelationship,
+  LivingStatus,
+  NameType,
+  RelationshipType,
+  Sex,
+} from '@open-ancestry/db';
 import { seg } from '../../../api/client';
 import { useEdit } from '../../../api/edits';
 import { apiSend } from '../../../api/client';
@@ -17,6 +23,7 @@ import { Select } from '../../../components/Select/Select';
 import { useToast } from '../../../components/Toast/Toast';
 import { fullName, isLivingStatus } from '../../../lib/person';
 import { applyNames, applyPerson, nameChanges, toDraft, type NameDraft } from './optimistic';
+import { SaveError, useSaveState } from './SaveError';
 import styles from './Edit.module.css';
 
 export const NAME_TYPES: { value: NameType; label: string }[] = [
@@ -36,6 +43,17 @@ export const SEX_OPTIONS: { value: Sex; label: string }[] = [
   { value: 'X', label: 'Other' },
   { value: 'U', label: 'Unknown' },
 ];
+
+export const RELATIONSHIP_TYPES: { value: RelationshipType; label: string }[] = [
+  { value: 'married', label: 'Married' },
+  { value: 'civil_union', label: 'Civil union' },
+  { value: 'partners', label: 'Partners' },
+  { value: 'unknown', label: 'Unknown' },
+];
+
+/** Shown under a partnership in Relationships; unknown says nothing. */
+export const relationshipTypeLabel = (type: RelationshipType): string | undefined =>
+  type === 'unknown' ? undefined : RELATIONSHIP_TYPES.find((t) => t.value === type)?.label;
 
 export const CHILD_RELATIONSHIPS: { value: ChildRelationship; label: string }[] = [
   { value: 'biological', label: 'Biological' },
@@ -97,6 +115,8 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
   const id = detail.person.id;
   const base = `/trees/${seg(tree)}`;
   const edit = useEdit(tree);
+  // Stays open until the save succeeds, so a failure keeps the edits.
+  const saveState = useSaveState(() => onOpenChange(false));
   const toast = useToast();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -117,6 +137,10 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
     );
 
   function save() {
+    // First: while a save is in flight the optimistic update makes the page match the
+    // draft, so the "nothing changed" check below would close the dialog and lose the
+    // edits if that save then fails.
+    if (edit.isPending) return;
     const removed = detail.names.filter((row) => !names.some((n) => n.id === row.id));
     const operations: Record<string, unknown>[] = names.flatMap((draft) => {
       const row = detail.names.find((n) => n.id === draft.id);
@@ -148,8 +172,7 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
       });
     }
 
-    onOpenChange(false);
-    if (operations.length === 0) return;
+    if (operations.length === 0) return onOpenChange(false);
     const label = `Edit person: ${name}`;
     edit.mutate({
       label,
@@ -159,6 +182,7 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
       },
       // One request, one change batch: the whole save is a single undo step.
       send: () => apiSend('POST', `${base}/batch`, { label, operations }),
+      ...saveState.handlers(),
     });
   }
 
@@ -200,8 +224,8 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
             <DialogClose asChild>
               <Button variant="ghost">Cancel</Button>
             </DialogClose>
-            <Button variant="primary" onClick={save}>
-              Save
+            <Button variant="primary" onClick={save} loading={edit.isPending}>
+              {saveState.submitLabel('Save')}
             </Button>
           </div>
         }
@@ -328,6 +352,7 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
             </fieldset>
           )}
           {/* Lets Enter in a field submit the form. */}
+          <SaveError error={saveState.error} />
           <button type="submit" hidden />
         </form>
       </Dialog>

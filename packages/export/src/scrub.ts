@@ -30,12 +30,26 @@ const SUB_WORD = /(?<=\p{Ll}\p{M}*)(?=\p{Lu})|(?<=[\p{L}\p{M}])(?=\p{N})|(?<=\p{
 const UNSPACED =
   /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u;
 
+/** A run of text between spaces (and `<`, `>`, `"`), which may be a link or address. */
+const CHUNK = /[^\s<>"]+/g;
+const SCHEME = /^(?:[a-z][a-z0-9+.-]*:\/\/|www\.)/i;
+const DOMAIN = /^[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+$/u;
+const MAIL = /@[\p{L}\p{N}-]+\./u;
+
 /**
- * A link or e-mail address inside prose: a scheme or `www.`, a domain followed
- * by a path, or `name@domain`.
+ * Whether a chunk of prose is a link or e-mail address: a scheme or `www.`,
+ * `name@domain`, or a domain followed by a path. Each test is anchored or
+ * scans the chunk once, so a long note stays linear (no backtracking over
+ * the whole text, as a single unanchored pattern did).
  */
-const LINK =
-  /(?:[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s<>"]+|[^\s@<>"()]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+|(?<![\p{L}\p{N}@.])[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+\/[^\s<>"]*/giu;
+function isLink(chunk: string): boolean {
+  if (SCHEME.test(chunk) || MAIL.test(chunk)) return true;
+  const slash = chunk.indexOf('/');
+  return slash > 0 && DOMAIN.test(chunk.slice(0, slash));
+}
+
+/** How many layers of percent-encoding are undone (`%255A` is `%5A` is `Z`). */
+const MAX_DECODE_LAYERS = 4;
 
 /** Words shorter than this are too common on their own ("al", "li", "le"). */
 const MIN_WORD = 3;
@@ -44,7 +58,14 @@ const MIN_SUBSTRING = 4;
 
 /** Lower-case, without accents: "Zoë" and "ZOE" both give "zoe". */
 const fold = (text: string) =>
-  text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().normalize('NFC');
+  text
+    // Compatibility forms read the same: fullwidth Ｚ, the ﬀ ligature, superscripts.
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/ß/g, 'ss')
+    .replace(/ı/g, 'i')
+    .normalize('NFC');
 
 /** `text` folded, with the index in `text` that each folded character came from. */
 function foldWithMap(text: string): { folded: string; map: number[] } {
@@ -134,7 +155,8 @@ export class NameScrubber {
     const ranges = mode === 'file' ? this.encodedRanges(text) : this.ranges(text, 'text');
     if (mode === 'text') {
       // Links and e-mail addresses inside prose follow the file-name rules.
-      for (const m of text.matchAll(LINK)) {
+      for (const m of text.matchAll(CHUNK)) {
+        if (!isLink(m[0])) continue;
         for (const [a, b] of this.encodedRanges(m[0])) ranges.push([m.index + a, m.index + b]);
       }
     }
@@ -146,38 +168,14 @@ export class NameScrubber {
    * found in the decoded text and mapped back, so only the name's own bytes are
    * replaced and the rest (`%26`, `%2F`) stays exactly as it was.
    */
-  private encodedRanges(text: string): [number, number][] {
-    if (!/%[0-9A-Fa-f]{2}/.test(text)) return this.ranges(text, 'file');
-    let decoded = '';
-    const starts: number[] = [];
-    for (let i = 0; i < text.length;) {
-      const run = /^(?:%[0-9A-Fa-f]{2})+/.exec(text.slice(i))?.[0];
-      let chars: string | undefined;
-      if (run) {
-        try {
-          chars = decodeURIComponent(run);
-        } catch {
-          chars = undefined;
-        }
-      }
-      if (run && chars !== undefined) {
-        // Each decoded character stands for its share of the run's bytes.
-        const bytes = [...chars].map((c) => new TextEncoder().encode(c).length * 3);
-        let at = i;
-        [...chars].forEach((c, k) => {
-          for (let u = 0; u < c.length; u++) starts.push(at);
-          decoded += c;
-          at += bytes[k]!;
-        });
-        i += run.length;
-      } else {
-        starts.push(i);
-        decoded += text[i];
-        i++;
-      }
-    }
-    starts.push(text.length);
-    return this.ranges(decoded, 'file').map(([a, b]) => [starts[a]!, starts[b]!]);
+  private encodedRanges(text: string, depth = 0): [number, number][] {
+    const layer = depth < MAX_DECODE_LAYERS ? decodeLayer(text) : undefined;
+    if (!layer) return this.ranges(text, 'file');
+    // Names may hide under several layers (%255A): decode again before matching.
+    return this.encodedRanges(layer.decoded, depth + 1).map(([a, b]) => [
+      layer.starts[a]!,
+      layer.starts[b]!,
+    ]);
   }
 
   /** Where withheld names occur in `text` (already NFC). */
@@ -235,4 +233,47 @@ function replace(text: string, ranges: [number, number][]): string {
     open = [...range];
   }
   return out + text.slice(at, open![0]) + 'Private' + text.slice(open![1]);
+}
+
+/** A run of %XX escapes starting at `lastIndex` (sticky, so no scanning ahead). */
+const ENCODED_RUN = /(?:%[0-9A-Fa-f]{2})+/y;
+
+/**
+ * One layer of percent-decoding, with the index in `text` where each decoded
+ * UTF-16 unit starts (and `text.length` at the end); undefined when nothing
+ * decodes. Runs that are not valid UTF-8 are left as they are.
+ */
+function decodeLayer(text: string): { decoded: string; starts: number[] } | undefined {
+  if (!/%[0-9A-Fa-f]{2}/.test(text)) return undefined;
+  let decoded = '';
+  const starts: number[] = [];
+  const encoder = new TextEncoder();
+  for (let i = 0; i < text.length;) {
+    ENCODED_RUN.lastIndex = i;
+    const run = ENCODED_RUN.exec(text)?.[0];
+    let chars: string | undefined;
+    if (run) {
+      try {
+        chars = decodeURIComponent(run);
+      } catch {
+        chars = undefined;
+      }
+    }
+    if (run && chars !== undefined) {
+      // Each decoded character stands for its own bytes of the run.
+      let at = i;
+      for (const c of chars) {
+        for (let u = 0; u < c.length; u++) starts.push(at);
+        decoded += c;
+        at += encoder.encode(c).length * 3;
+      }
+      i += run.length;
+    } else {
+      starts.push(i);
+      decoded += text[i];
+      i++;
+    }
+  }
+  starts.push(text.length);
+  return decoded === text ? undefined : { decoded, starts };
 }

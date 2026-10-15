@@ -142,7 +142,7 @@ test.describe('facts', () => {
       'Birth of brother Tobias Ashdown',
       'Residence',
       'Death of father Edmund Ashdown',
-      'Birth of half sister Nell Marsh',
+      'Birth of half-sister Nell Marsh',
       'Marriage to Iris Vale',
       'Birth of daughter Lena Ashdown',
       'Birth of son Arthur Ashdown',
@@ -204,8 +204,8 @@ test.describe('facts', () => {
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await expect(family.getByRole('link', { name: /Tobias Ashdown/ })).toBeHidden();
 
-    const half = family.getByRole('button', { name: /Half siblings/ });
-    await expect(half).toHaveText('Half siblings (1)');
+    const half = family.getByRole('button', { name: /Half-siblings/ });
+    await expect(half).toHaveText('Half-siblings (1)');
     await expect(family.getByRole('link', { name: /Nell Marsh/ })).toBeVisible();
 
     const spouse = family.getByRole('region', { name: 'Spouse and children' });
@@ -260,6 +260,12 @@ test('unknown person shows a not found state', async ({ page }) => {
   await page.goto('/person/01NOSUCHPERSON0000000000000');
   await expect(page.getByRole('heading', { level: 1, name: 'Person not found' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Go home' })).toBeVisible();
+});
+
+test('an id that cannot exist shows the not found state, not an error (#143)', async ({ page }) => {
+  await page.goto("/person/x'y");
+  await expect(page.getByRole('heading', { level: 1, name: 'Person not found' })).toBeVisible();
+  await expect(page.getByText(/Something went wrong|must match pattern/)).toHaveCount(0);
 });
 
 test('shows a sized skeleton while loading', async ({ page }) => {

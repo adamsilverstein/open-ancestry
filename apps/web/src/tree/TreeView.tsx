@@ -31,8 +31,8 @@ import { useToast } from '../components/Toast/Toast';
 import type { PersonSummary } from '../lib/person';
 import { TreeToolbar, type TreeLayout as LayoutKind } from '../components/TreeToolbar/TreeToolbar';
 import { Skeleton } from '../components/Skeleton/Skeleton';
+import { isMissingPerson } from '../api/client';
 import {
-  ApiError,
   fetchHome,
   fetchNeighborhood,
   MAX_GENERATIONS,
@@ -411,7 +411,7 @@ export function TreeView({
         if (cancelled) return;
         setFailure({
           focus: personId,
-          notFound: error instanceof ApiError && error.status === 404,
+          notFound: isMissingPerson(error, personId),
         });
       }
     })();

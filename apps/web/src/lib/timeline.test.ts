@@ -85,12 +85,20 @@ describe('buildTimeline', () => {
     expect(adopted.map((e) => e.title)).toContain('Death of adoptive mother Clara Penhallow');
   });
 
-  it('adds half siblings passed in', () => {
+  it('adds siblings from other partnerships, worded by kind', () => {
     const nell = fixtureDetail('nell').summary;
-    const titles = buildTimeline(fixtureDetail('rowan'), { halfSiblings: [nell] }).map(
-      (e) => e.title,
-    );
-    expect(titles.indexOf('Birth of half sister Nell Marsh')).toBe(
+    const silas = { ...nell, id: 'silas', given: 'Silas', sex: 'M' as const };
+    const finn = { ...nell, id: 'finn', given: 'Finn', sex: 'M' as const };
+    const titles = buildTimeline(fixtureDetail('rowan'), {
+      otherSiblings: [
+        { person: nell, kind: 'half' },
+        { person: silas, kind: 'step' },
+        { person: finn, kind: 'foster' },
+      ],
+    }).map((e) => e.title);
+    expect(titles).toContain('Birth of stepbrother Silas Marsh');
+    expect(titles).toContain('Birth of foster brother Finn Marsh');
+    expect(titles.indexOf('Birth of half-sister Nell Marsh')).toBe(
       titles.indexOf('Death of father Edmund Ashdown') + 1,
     );
   });
@@ -215,5 +223,104 @@ describe('lifetime window', () => {
       parentFamilies: [{ ...family!, siblings: [sibling('1885', 18850701)] }],
     });
     expect(entries.some((e) => e.title.includes('Sib'))).toBe(false);
+  });
+
+  describe('family events that may follow the death', () => {
+    const partner = detail.partnerFamilies[0]!;
+    const withPartnerDeath = (dateText: string, dateSort: number) =>
+      buildTimeline({
+        ...withSummary('1880', '4 NOV 1911'),
+        summary: {
+          ...withSummary('1880', '4 NOV 1911').summary,
+          death: { ...brief('4 NOV 1911', 19111104), type: 'DEAT' },
+        },
+        events: detail.events.filter((e) => e.event.type === 'DEAT'),
+        parentFamilies: [],
+        partnerFamilies: [
+          {
+            ...partner,
+            children: [],
+            events: [],
+            partner: { ...partner.partner!, death: { ...brief(dateText, dateSort), type: 'DEAT' } },
+          },
+        ],
+      });
+    const titles = (entries: ReturnType<typeof buildTimeline>) => entries.map((e) => e.title);
+
+    it('keeps a BEF death that straddles the death date before it, with no age', () => {
+      const entries = withPartnerDeath('BEF 1920', 19200100);
+      expect(titles(entries)).toEqual(['Death of wife Iris Vale', 'Death']);
+      expect(entries[0]!.age).toBeUndefined();
+    });
+
+    it('keeps an AFT death that starts in the lifetime, with no age', () => {
+      const entries = withPartnerDeath('AFT 1905', 19051232);
+      expect(titles(entries)).toEqual(['Death of wife Iris Vale', 'Death']);
+      expect(entries[0]!.age).toBeUndefined();
+    });
+
+    it('keeps the age of a BEF death that cannot follow the death', () => {
+      const entries = withPartnerDeath('BEF 1910', 19100100);
+      expect(entries[0]).toMatchObject({ title: 'Death of wife Iris Vale', age: 'about 30' });
+    });
+
+    it('leaves out an AFT death that starts after the death, like an exact one', () => {
+      expect(titles(withPartnerDeath('AFT 1912', 19121232))).toEqual(['Death']);
+      expect(titles(withPartnerDeath('1915', 19150701))).toEqual(['Death']);
+    });
+  });
+});
+
+describe('half and step wording', () => {
+  const detail = fixtureDetail('rowan');
+  const [family] = detail.parentFamilies;
+  const tobias = family!.siblings.find((s) => s.person.given === 'Tobias')!;
+
+  it('names a sibling who shares one parent as a half-sibling', () => {
+    const entries = buildTimeline({
+      ...detail,
+      parentFamilies: [
+        {
+          ...family!,
+          siblings: [{ ...tobias, link: { ...tobias.link, partner1_rel: 'step' } }],
+        },
+      ],
+    });
+    expect(entries.map((e) => e.title)).toContain('Birth of half-brother Tobias Ashdown');
+  });
+
+  it('names a sibling who shares no parent as a step-sibling', () => {
+    const entries = buildTimeline({
+      ...detail,
+      parentFamilies: [
+        {
+          ...family!,
+          link: { ...family!.link, partner1_rel: 'step' },
+          siblings: [{ ...tobias, link: { ...tobias.link, partner2_rel: 'step' } }],
+        },
+      ],
+    });
+    expect(entries.map((e) => e.title)).toContain('Birth of stepbrother Tobias Ashdown');
+  });
+
+  it('names stepchildren and adopted children', () => {
+    const partner = detail.partnerFamilies[0]!;
+    const side = partner.family.partner1_id === detail.person.id ? 'partner1_rel' : 'partner2_rel';
+    const [lena, arthur] = partner.children;
+    const entries = buildTimeline({
+      ...detail,
+      partnerFamilies: [
+        {
+          ...partner,
+          children: [
+            { ...lena!, link: { ...lena!.link, [side]: 'step' } },
+            { ...arthur!, link: { ...arthur!.link, [side]: 'adopted' } },
+          ],
+        },
+      ],
+    });
+    const titles = entries.map((e) => e.title);
+    expect(titles).toContain('Birth of stepdaughter Lena Ashdown');
+    expect(titles).toContain('Birth of adopted son Arthur Ashdown');
   });
 });

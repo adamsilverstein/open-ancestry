@@ -18,6 +18,7 @@ export const {
   TreeIdParams,
   JobParams,
   ReimportApplyBody,
+  ReimportStatusQuery,
   TreeBody,
   Sex,
   Living,

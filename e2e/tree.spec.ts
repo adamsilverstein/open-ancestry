@@ -733,6 +733,12 @@ test.describe('family view', () => {
     await expect(card(page, 'Fenn Vale')).toBeAttached();
   });
 
+  test('an id that cannot exist shows Person not found (#143)', async ({ page }) => {
+    await page.goto(`/tree/x'y?tree=${encodeURIComponent(tree)}`);
+    await expect(page.getByRole('heading', { name: 'Person not found' })).toBeVisible();
+    await expect(page.getByText('Could not load the tree')).toHaveCount(0);
+  });
+
   test('a person with no tree data shows an empty state', async ({ page }) => {
     await page.goto(`/tree/nobody?tree=${encodeURIComponent(tree)}`);
     await expect(page.getByRole('heading', { name: 'Person not found' })).toBeVisible();

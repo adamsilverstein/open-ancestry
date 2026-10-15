@@ -15,6 +15,8 @@ export interface ConfirmDialogProps {
   onConfirm: () => void;
   /** Destructive actions get the danger button. */
   danger?: boolean;
+  /** Where focus goes on close when there is no trigger (call preventDefault first). */
+  onCloseAutoFocus?: (event: Event) => void;
 }
 
 /**
@@ -29,6 +31,7 @@ export function ConfirmDialog({
   confirmLabel,
   onConfirm,
   danger = true,
+  onCloseAutoFocus,
 }: ConfirmDialogProps) {
   // What opened it, then the last control used outside overlays (for a dialog
   // opened from the command palette, whose input is gone by the time it closes).
@@ -45,6 +48,7 @@ export function ConfirmDialog({
             outside.current = lastControlOutside();
           }}
           onCloseAutoFocus={(event) => {
+            if (onCloseAutoFocus) return onCloseAutoFocus(event);
             // No landmark fallback: a dialog under the confirm may still place focus itself.
             if (returnFocus(opener.current, outside.current)) event.preventDefault();
           }}

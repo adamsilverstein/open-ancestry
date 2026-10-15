@@ -262,6 +262,12 @@ test('unknown person shows a not found state', async ({ page }) => {
   await expect(page.getByRole('link', { name: 'Go home' })).toBeVisible();
 });
 
+test('an id that cannot exist shows the not found state, not an error (#143)', async ({ page }) => {
+  await page.goto("/person/x'y");
+  await expect(page.getByRole('heading', { level: 1, name: 'Person not found' })).toBeVisible();
+  await expect(page.getByText(/Something went wrong|must match pattern/)).toHaveCount(0);
+});
+
 test('shows a sized skeleton while loading', async ({ page }) => {
   let release: () => void = () => undefined;
   const gate = new Promise<void>((resolve) => (release = resolve));

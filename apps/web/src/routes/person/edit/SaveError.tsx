@@ -1,13 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
 import { CircleAlert } from 'lucide-react';
+import { isNotFound } from '../../../api/client';
+import { fieldError, friendlyMessage, type FieldError } from '../../../api/edits';
 import styles from './Edit.module.css';
 
 /**
  * State for a form that stays open until its save succeeds: the error to
  * show, and handlers to pass to `edit.mutate` as `onDone` and `onError`.
  */
-export function useSaveState(onSaved: () => void) {
+/**
+ * `onSaved` gets the save's result, or undefined when what the form edits was
+ * deleted elsewhere (a 404), in which case the form should just close.
+ */
+export function useSaveState<T = unknown>(onSaved: (result: T | undefined) => void) {
   const [error, setError] = useState<string | null>(null);
+  // The field a server validation error names, so the form can mark it.
+  const [field, setField] = useState<FieldError | null>(null);
   // A save that finishes after its form closed (Cancel) must not act on a newer one.
   const mounted = useRef(true);
   useEffect(() => {
@@ -18,18 +26,31 @@ export function useSaveState(onSaved: () => void) {
   }, []);
   return {
     error,
+    field,
     /** Clears a stale error, e.g. when another form opens. */
-    reset: () => setError(null),
+    reset: () => {
+      setError(null);
+      setField(null);
+    },
     /** Label for the submit button: after a failure it says what pressing it does. */
     submitLabel: (label: string) => (error ? 'Try again' : label),
     handlers: () => {
       setError(null);
+      setField(null);
       return {
-        onDone: () => {
-          if (mounted.current) onSaved();
+        onDone: (result: T) => {
+          if (mounted.current) onSaved(result);
         },
+        // Plain sentences only: a server validation error never shows its schema text.
         onError: (cause: unknown) => {
-          if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause));
+          if (!mounted.current) return;
+          // Deleted elsewhere: a retry cannot succeed, so close; a toast says why.
+          if (isNotFound(cause)) {
+            onSaved(undefined);
+            return;
+          }
+          setError(friendlyMessage(cause));
+          setField(fieldError(cause));
         },
       };
     },

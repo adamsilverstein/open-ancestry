@@ -9,6 +9,7 @@ import fastifyEtag from '@fastify/etag';
 import fastifyMultipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
+import { IMPORT_LIMITS, resolveImportLimits, type ImportLimits } from '@open-ancestry/import';
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import type { Deps } from './context';
 import { errorBody, registerErrorHandling, toApiError } from './errors';
@@ -38,12 +39,27 @@ export {
   type JobView,
 } from './jobs';
 export { SECURITY_HEADERS, TOKEN_HEADER, isLoopbackHost } from './security';
+export {
+  IMPORT_RESOURCE_LIMITS,
+  devWorkerImporter,
+  workerImporter,
+  type WorkerImporterOptions,
+} from './import-runner';
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    /** Cancels what can be cancelled, waits for every job and thumbnail to finish. */
+    drain(): Promise<void>;
+  }
+}
 
 export interface ServerOptions {
   /** Directory containing the built web app (index.html + assets). */
   staticDir?: string | undefined;
   logger?: boolean;
   /** Library folder or instance (default OA_LIBRARY or ~/OpenAncestry). Created on first use. */
+  /** Open trees even when other accounts can write to the library folder (--shared-library). */
+  sharedLibrary?: boolean;
   library?: string | Library;
   /** GEDCOM importer; without one the import endpoint answers 501. */
   importer?: Importer;
@@ -51,8 +67,17 @@ export interface ServerOptions {
   token?: string;
   /** Hostnames accepted in the Host header besides loopback. */
   allowedHosts?: readonly string[];
-  /** Largest import upload in bytes (default 1 GiB). */
+  /**
+   * The importer's caps, which also size import uploads (default
+   * IMPORT_LIMITS). Pass the same ones to the importer.
+   */
+  importLimits?: Partial<ImportLimits>;
+  /** Largest GEDCOM upload in bytes (default: importLimits.maxBytes, 64 MiB). */
   uploadLimit?: number;
+  /** Largest GEDZIP upload in bytes (default: importLimits.maxArchiveBytes, 1 GiB). */
+  archiveUploadLimit?: number;
+  /** Largest media upload in bytes (default 1 GiB). */
+  mediaUploadLimit?: number;
   /** Concurrent imports (default 1) and how many may wait (default 4). */
   importConcurrency?: number;
   maxQueuedImports?: number;
@@ -71,7 +96,11 @@ export interface RunningServer {
 }
 
 export const DEFAULT_HOST = '127.0.0.1';
-export const DEFAULT_UPLOAD_LIMIT = 1024 * 1024 * 1024;
+/** GEDCOM uploads: no larger than the importer accepts (IMPORT_LIMITS.maxBytes). */
+export const DEFAULT_UPLOAD_LIMIT = IMPORT_LIMITS.maxBytes;
+/** GEDZIP uploads, photos included (IMPORT_LIMITS.maxArchiveBytes). */
+export const DEFAULT_ARCHIVE_UPLOAD_LIMIT = IMPORT_LIMITS.maxArchiveBytes;
+export const DEFAULT_MEDIA_UPLOAD_LIMIT = 1024 * 1024 * 1024;
 /** JSON bodies are small edits; uploads go through multipart with their own limit. */
 export const JSON_BODY_LIMIT = 1024 * 1024;
 
@@ -127,19 +156,27 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   const library =
     options.library instanceof Library
       ? options.library
-      : new Library(options.library ?? defaultLibraryRoot());
+      : new Library(options.library ?? defaultLibraryRoot(), {
+          shared: options.sharedLibrary ?? false,
+        });
   const jobs = new JobManager({
     concurrency: options.importConcurrency,
     maxQueued: options.maxQueuedImports,
   });
   // Leftovers of imports a crash or restart interrupted: their empty trees and uploads.
+  // Once, at startup: warn if others can see an existing library folder
+  // (a missing one is created, private, on first use).
+  if (existsSync(library.root)) library.ensureRoot();
   library.sweepInterruptedImports();
   void sweepStaleUploads();
+  const importLimits = resolveImportLimits(options.importLimits);
   const deps: Deps = {
     library,
     jobs,
     importer: options.importer,
-    uploadLimit: options.uploadLimit ?? DEFAULT_UPLOAD_LIMIT,
+    uploadLimit: options.uploadLimit ?? importLimits.maxBytes,
+    archiveUploadLimit: options.archiveUploadLimit ?? importLimits.maxArchiveBytes,
+    mediaUploadLimit: options.mediaUploadLimit ?? DEFAULT_MEDIA_UPLOAD_LIMIT,
     thumbnails: new ThumbnailQueue(),
     reimports: new ReimportSessions(),
   };
@@ -226,11 +263,16 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   });
 
   // Before the HTTP server stops: aborting jobs ends their event streams, which
-  // close() would otherwise wait on forever, and runs their cleanup.
-  app.addHook('preClose', async () => {
+  // close() would otherwise wait on forever, and runs their cleanup. A job past
+  // the point of no return saves first, which can take longer than Fastify's
+  // 10s hook timeout, so startServer drains before close(); this hook then has
+  // nothing left to wait for (and still covers a plain app.close()).
+  const drain = async () => {
     await jobs.shutdown();
     await deps.thumbnails.idle();
-  });
+  };
+  app.decorate('drain', drain);
+  app.addHook('preClose', drain);
   app.addHook('onClose', async () => {
     deps.reimports.closeAll();
     library.closeAll();
@@ -262,6 +304,10 @@ export async function startServer(options: StartOptions = {}): Promise<RunningSe
   return {
     url: `http://${host.includes(':') ? `[${host}]` : host}:${port}`,
     app,
-    close: () => app.close(),
+    // Drain outside close(): its preClose hooks time out after 10s.
+    close: async () => {
+      await app.drain();
+      await app.close();
+    },
   };
 }

@@ -37,3 +37,14 @@ describe('peopleQueryString', () => {
     );
   });
 });
+
+describe('validatePeopleSearch over the raw search (#146)', () => {
+  // TanStack Router merges a route's validated search over the raw one, so
+  // the validator must overwrite every key it owns, even when invalid.
+  it('leaves nothing invalid behind', () => {
+    const raw = { sort: 'evil', limit: '-5', dir: 'sideways', sex: 'Q', living: 'x', tag: '../t' };
+    const merged = { ...raw, ...validatePeopleSearch(raw) };
+    for (const key of Object.keys(raw))
+      expect(merged[key as keyof typeof merged], key).toBeUndefined();
+  });
+});

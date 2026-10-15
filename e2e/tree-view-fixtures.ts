@@ -29,12 +29,52 @@ import type { BulkData } from '@open-ancestry/db';
 
 export interface SeedInfo {
   family: { tree: string; ids: Record<string, string> };
+  /** Six generations of hard-to-fit names for the fan (see fanNamesGedcom). */
+  fanNames: { tree: string; focusId: string };
+  /** fixtures/ancestry-sample.ged, imported: ids by given name. */
+  sample: { tree: string; ids: Record<string, string> };
   perf: PerfTree;
   /** Only with OA_PERF_100K=1 (the perf job): seeding 100,000 people takes several seconds. */
   perf100k?: PerfTree;
+  /** Only with OA_PERF=1: one couple with 2,000 children (#209). */
+  bigFamily?: { tree: string; fatherId: string; people: number };
 }
 
 export const FAMILY_TREE = 'e2e tree view family';
+export const SAMPLE_TREE = 'e2e tree view sample';
+export const FAN_NAMES_TREE = 'e2e tree view fan names';
+
+/** Names that are hard to fit in a fan segment. Every one is invented. */
+const HARD_NAMES = [
+  'Johann Maximilian Wilhelm Friedrich /von Hohenzollern-Sigmaringen/',
+  'Maria Theresia Wilhelmina Katharina /van Hoek/',
+  '山田花子',
+  '𝒜lice /Zed/',
+  'John /Smith/ Jr.',
+  'Ζωή /Παπαδοπούλου/',
+  'Bartholomew /Featherstonehaugh/',
+  'Wu',
+];
+
+/**
+ * A GEDCOM of six generations (person n's parents are 2n and 2n + 1) whose
+ * ancestors all carry hard names, for the fan's label fitting.
+ */
+export function fanNamesGedcom(): string {
+  const lines = ['0 HEAD', '1 GEDC', '2 VERS 5.5.1', '1 CHAR UTF-8'];
+  for (let n = 1; n < 64; n++) {
+    const name = n === 1 ? 'Ann /Lee/' : HARD_NAMES[(n - 2) % HARD_NAMES.length]!;
+    lines.push(`0 @I${n}@ INDI`, `1 NAME ${name}`, `1 SEX ${n % 2 === 0 ? 'M' : 'F'}`);
+    lines.push('1 BIRT', `2 DATE ${2000 - 25 * Math.floor(Math.log2(n))}`);
+    if (n < 32) lines.push(`1 FAMC @F${n}@`);
+    if (n > 1) lines.push(`1 FAMS @F${Math.floor(n / 2)}@`);
+  }
+  for (let n = 1; n < 32; n++) {
+    lines.push(`0 @F${n}@ FAM`, `1 HUSB @I${2 * n}@`, `1 WIFE @I${2 * n + 1}@`, `1 CHIL @I${n}@`);
+  }
+  lines.push('0 TRLR');
+  return lines.join('\n') + '\n';
+}
 export const PERF_TREE = 'e2e tree view 10k';
 export const PERF_TREE_100K = 'e2e tree view 100k';
 
@@ -48,6 +88,7 @@ export interface PerfTree {
   wideId: string;
   people: number;
 }
+export const BIG_FAMILY_TREE = 'e2e tree view big family';
 export const SEED_FILE = 'tree-view-seed.json';
 
 type Sex = 'M' | 'F';
@@ -189,6 +230,52 @@ export function familyRows(): { data: BulkData; ids: Record<string, string> } {
     });
   }
   return { data, ids };
+}
+
+/**
+ * One couple with `children` children: bad data the import accepts (one
+ * "unknown parents" family holding everyone), which once took 38 seconds to
+ * label (#209).
+ */
+export function bigFamilyRows(children: number): BulkData {
+  const person = (id: string, sex: Sex, given: string, born: number) => ({ id, sex, given, born });
+  const everyone = [
+    person('p-big-father', 'M', 'Aldous', 1800),
+    person('p-big-mother', 'F', 'Briony', 1802),
+    ...Array.from({ length: children }, (_, i) =>
+      person(`p-big-${i}`, i % 2 ? 'F' : 'M', `Kit ${i + 1}`, 1820 + (i % 40)),
+    ),
+  ];
+  return {
+    person: everyone.map(({ id, sex }) => ({ id, sex, living: 'dead', ...stamp })),
+    person_name: everyone.map(({ id, given }) => ({
+      id: `n-${id}`,
+      person_id: id,
+      given,
+      surname: 'Mallow',
+      full_text: `${given} /Mallow/`,
+      is_primary: 1,
+    })),
+    family: [
+      {
+        id: 'f-big',
+        partner1_id: 'p-big-father',
+        partner2_id: 'p-big-mother',
+        relationship_type: 'married',
+        ...stamp,
+      },
+    ],
+    family_child: Array.from({ length: children }, (_, i) => ({
+      id: `c-big-${i}`,
+      family_id: 'f-big',
+      child_id: `p-big-${i}`,
+      partner1_rel: 'biological',
+      partner2_rel: 'biological',
+      sort_order: i,
+      child_order: 0,
+      is_preferred: 1,
+    })),
+  };
 }
 
 /** The seed written by global-setup.ts, read by the specs. */

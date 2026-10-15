@@ -94,7 +94,8 @@ describe('POST import', () => {
     const [call] = fake.calls;
     expect(call!.content).toContain('1 SOUR Ancestry');
     expect(call!.path).toMatch(/oa-upload-[^/]+\/upload\.ged$/);
-    expect(call!.options.mediaDir).toBe(`${api.root}/Test.oatree/media`);
+    // Uploads never read media from local folders; a GEDZIP brings its own.
+    expect(call!.options).not.toHaveProperty('mediaDir');
     const running = await waitForJob(api, jobId, 'running');
     expect(running.progress).toEqual({ phase: 'parse', done: 1, total: 2 });
 
@@ -203,6 +204,106 @@ describe('POST import', () => {
     // Running is set before the importer has read its file.
     await vi.waitFor(() => expect(fake.calls).toHaveLength(2));
     fake.release();
+  });
+
+  it('refuses a new upload when the queue is full, before reading the body', async () => {
+    const fake = controllableImporter();
+    api = await testApi({ importer: fake.importer, maxQueuedImports: 1, uploadLimit: 1024 });
+    const [a, b, c] = [
+      await createTestTree(api, 'A'),
+      await createTestTree(api, 'B'),
+      await createTestTree(api, 'C'),
+    ];
+    const first = (await upload(api, a)).json().jobId;
+    await waitForJob(api, first, 'running');
+    expect((await upload(api, b)).statusCode).toBe(202);
+    // Over the size limit too: a 429 (not 413) shows the body was never streamed.
+    const third = await upload(api, c, 'big.ged', Buffer.alloc(4096, 'x'));
+    expect(third.statusCode).toBe(429);
+    expect(third.json().error.code).toBe('too_many_jobs');
+    const fresh = await api.inject({
+      method: 'POST',
+      url: '/api/import',
+      ...multipart('another.ged', '0 HEAD\n0 TRLR\n'),
+    });
+    expect(fresh.statusCode).toBe(429);
+    expect((await api.get('/api/trees')).json().trees.map((t: { id: string }) => t.id)).toEqual([
+      'A',
+      'B',
+      'C',
+    ]);
+    fake.release();
+  });
+
+  it('refuses an import into a tree with people before reading the body (issue #98)', async () => {
+    const fake = controllableImporter();
+    api = await testApi({ importer: fake.importer, uploadLimit: 1024 });
+    const base = await createTestTree(api);
+    await api.post(`${base}/people`, { names: [{ given: 'Ada' }] });
+    // Over the size limit too: a 409 (not 413) shows the body was never streamed.
+    const res = await upload(api, base, 'big.ged', Buffer.alloc(4096, 'x'));
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error.message).toMatch(/empty tree/);
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it('limits import uploads to the import size caps by default', async () => {
+    const { DEFAULT_UPLOAD_LIMIT, DEFAULT_ARCHIVE_UPLOAD_LIMIT } = await import('./index');
+    const { IMPORT_LIMITS } = await import('@open-ancestry/import');
+    expect(DEFAULT_UPLOAD_LIMIT).toBe(IMPORT_LIMITS.maxBytes);
+    expect(DEFAULT_ARCHIVE_UPLOAD_LIMIT).toBe(IMPORT_LIMITS.maxArchiveBytes);
+  });
+
+  it('lets a GEDZIP upload past the GEDCOM cap, up to the archive cap', async () => {
+    // A GEDZIP with photos is far larger than its GEDCOM text, which the
+    // importer caps once it has inflated it.
+    const fake = controllableImporter();
+    api = await testApi({
+      importer: fake.importer,
+      importLimits: { maxBytes: 1024, maxArchiveBytes: 8192 },
+    });
+    const base = await createTestTree(api);
+    expect((await upload(api, base, 'big.ged', Buffer.alloc(4096, 'x'))).statusCode).toBe(413);
+    const huge = await upload(api, base, 'huge.gdz', Buffer.alloc(16_384, 'x'));
+    expect(huge.statusCode).toBe(413);
+    // In units a person reads (issue #120).
+    expect(huge.json().error.message).toBe('GEDZIP uploads are limited to 8 KB');
+    expect((await api.get('/api/limits')).json()).toEqual({
+      importUpload: { gedcomBytes: 1024, archiveBytes: 8192 },
+      mediaUploadBytes: 1024 ** 3,
+    });
+    expect(fake.calls).toHaveLength(0);
+    const zip = await upload(api, base, 'photos.zip', Buffer.alloc(4096, 'x'));
+    expect(zip.statusCode, zip.body).toBe(202);
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(1));
+    fake.release({});
+    await waitForJob(api, zip.json().jobId, 'completed');
+  });
+
+  it('refuses new imports with 503 while the server drains for shutdown', async () => {
+    const fake = controllableImporter();
+    api = await testApi({ importer: fake.importer });
+    const base = await createTestTree(api);
+    expect((await upload(api, base)).statusCode).toBe(202);
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(1));
+    // Saving: shutdown waits for it, and must not take on more work meanwhile.
+    fake.calls[0]!.options.onProgress({ phase: 'commit', done: 0, total: 1 });
+    const draining = api.app.drain();
+    const other = await createTestTree(api, 'Other');
+    for (const res of [
+      await upload(api, other),
+      await api.inject({
+        method: 'POST',
+        url: '/api/import',
+        ...multipart('new.ged', '0 HEAD\n0 TRLR\n'),
+      }),
+    ]) {
+      expect(res.statusCode, res.body).toBe(503);
+      expect(res.json().error.code).toBe('service_unavailable');
+    }
+    expect(fake.calls).toHaveLength(1);
+    fake.release({});
+    await draining;
   });
 
   it('enforces the upload size limit', async () => {
@@ -314,12 +415,38 @@ describe('POST /api/import (new tree owned by the server)', () => {
     expect(cancelled.statusCode).toBe(202);
     expect(cancelled.json().job.id).toBe(jobId);
     expect(fake.calls[0]!.options.signal.aborted).toBe(true);
-    expect(await waitForJob(api, jobId, 'failed')).toMatchObject({ error: 'aborted' });
+    expect(await waitForJob(api, jobId, 'failed')).toMatchObject({
+      error: 'aborted',
+      cancelled: true,
+    });
     expect(existsSync(`${api.root}/${job.tree}.oatree`)).toBe(false);
     expect(existsSync(fake.calls[0]!.path)).toBe(false);
 
     expect((await api.del(`/api/jobs/${jobId}`)).statusCode).toBe(409);
     expect((await api.del('/api/jobs/00000000-0000-4000-8000-000000000000')).statusCode).toBe(404);
+  });
+
+  it('answers 409 to a cancel once the import is finalizing or saving', async () => {
+    let release!: () => void;
+    const finalizing: Importer = async (_path, store, { onProgress }) => {
+      onProgress({ phase: 'finalize', done: 0, total: 1 });
+      await new Promise<void>((r) => (release = r));
+      store.transact('import', (tx) => tx.insert('person', {}));
+      return { people: 1 };
+    };
+    api = await testApi({ importer: finalizing });
+    const { jobId, job } = (await importNew('Late.ged')).json();
+    await vi.waitFor(async () =>
+      expect((await api.get(`/api/jobs/${jobId}`)).json().progress).toMatchObject({
+        phase: 'finalize',
+      }),
+    );
+    const late = await api.del(`/api/jobs/${jobId}`);
+    expect(late.statusCode).toBe(409);
+    expect(late.json().error.message).toMatch(/can no longer be cancelled/);
+    release();
+    expect(await waitForJob(api, jobId, 'completed')).toMatchObject({ cancelled: false });
+    expect(existsSync(`${api.root}/${job.tree}.oatree`)).toBe(true);
   });
 
   it('aborts imports and cleans up on shutdown, even with an event stream open', async () => {

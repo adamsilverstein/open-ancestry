@@ -93,6 +93,11 @@ jobs:
 
       - run: npm ci
 
+      # The cold-start and import benches spawn apps/cli/dist/cli.js, and the
+      # CLI build bundles the web app and the import worker.
+      - name: Build
+        run: npm run build
+
       - name: Benchmarks
         run: npm run bench
         env:

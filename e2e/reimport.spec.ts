@@ -306,6 +306,34 @@ test('match percent and reasons say what differs, and why a new person is new', 
   ).toBeVisible();
 });
 
+test('a second re-import follows Ancestry for a value the first one set (#185)', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const josiah = (await personByName(request, seeded.tree, 'Josiah'))!;
+  const applied = () =>
+    expect(
+      page
+        .getByRole('region', { name: /Notifications/ })
+        .getByRole('listitem')
+        .filter({ hasText: /Applied \d+ change/ })
+        .last(),
+    ).toBeVisible({ timeout: 30_000 });
+  await startReimport(page, seeded);
+  await page.getByRole('button', { name: /^Apply \d+ changes?$/ }).click();
+  await applied();
+  expect((await eventDate(request, seeded.tree, josiah, 'DEAT')).date_text).toBe('1940');
+  // The next export changes it again; nobody edited it here, so it is offered ticked.
+  await startReimport(page, seeded, laterExport().replace('2 DATE 1940', '2 DATE 1941'));
+  const death = card(page, 'Josiah Ashgrove').getByRole('checkbox', { name: /Death: 1940 → 1941/ });
+  await expect(death).toBeChecked();
+  await page.getByRole('button', { name: /^Apply \d+ changes?$/ }).click();
+  await applied();
+  expect((await eventDate(request, seeded.tree, josiah, 'DEAT')).date_text).toBe('1941');
+});
+
 test("a renamed person's export name is offered as an alternate, saying so", async ({
   page,
   request,

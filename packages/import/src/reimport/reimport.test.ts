@@ -1469,6 +1469,150 @@ describe('three-way re-import (#185)', () => {
   });
 });
 
+describe('three-way re-import, review findings (#224)', () => {
+  const pidOf = (xref: string) => pid(store, xref);
+  const eventIdOf = (xref: string, type: string) =>
+    value<string>(
+      store,
+      'SELECT e.id FROM event e JOIN event_role r ON r.event_id = e.id WHERE r.person_id = ? AND e.type = ?',
+      pidOf(xref),
+      type,
+    );
+  const changesOf = (s: ReimportSession, xref: string) =>
+    s.diff.people.filter((p) => p.existingId === pidOf(xref)).flatMap((p) => p.changes);
+  /** The sample with one person's record lines rewritten, renumbered. */
+  const edited = (xref: string, map: (line: string) => string[] | string, offset = 100) =>
+    renumber(
+      replaceRecord(
+        SAMPLE,
+        xref,
+        recordOf(SAMPLE, xref).flatMap((l) => map(l)),
+      ),
+      offset,
+    );
+  const josiah1940 = (offset = 100) =>
+    edited('@I3@', (l) => (l === '2 DATE 1939' ? '2 DATE 1940' : l), offset);
+
+  it('does not offer a declined change again for the same export (P6)', async () => {
+    const death = eventIdOf('@I3@', 'DEAT');
+    store.transact('Edit', (tx) => tx.update('event', death, { date_text: '3 MAY 1939' }));
+    const first = await prepareReimport(store, { bytes: josiah1940() }, { today: TODAY });
+    expect(changesOf(first, '@I3@')).toEqual([
+      expect.objectContaining({ kind: 'fact.change', conflict: 'local-edit' }),
+    ]);
+    applyReimport(store, first, new Set(), 'Re-import, declined');
+    closeReimport(first);
+    const again = await prepareReimport(store, { bytes: josiah1940(200) }, { today: TODAY });
+    try {
+      expect(changesOf(again, '@I3@')).toEqual([]);
+    } finally {
+      closeReimport(again);
+    }
+    // When Ancestry changes it again, both sides differ: a conflict once more.
+    const later = edited('@I3@', (l) => (l === '2 DATE 1939' ? '2 DATE 1941' : l), 300);
+    const third = await prepareReimport(store, { bytes: later }, { today: TODAY });
+    try {
+      expect(changesOf(third, '@I3@')).toEqual([
+        expect.objectContaining({ kind: 'fact.change', conflict: 'local-edit' }),
+      ]);
+    } finally {
+      closeReimport(third);
+    }
+  });
+
+  it('is no conflict when the user edited a value back by hand (P8)', async () => {
+    const death = eventIdOf('@I3@', 'DEAT');
+    store.transact('Edit', (tx) => tx.update('event', death, { date_text: '3 MAY 1939' }));
+    store.transact('Edit back', (tx) => tx.update('event', death, { date_text: '1939' }));
+    const s2 = await prepareReimport(store, { bytes: josiah1940() }, { today: TODAY });
+    try {
+      const [change] = changesOf(s2, '@I3@');
+      expect(change).toMatchObject({ kind: 'fact.change', defaultAccept: true });
+      expect(change!.conflict).toBeUndefined();
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  it('is no conflict when the user changed another column of the row (P7)', async () => {
+    store.transact('Privacy', (tx) => tx.update('person', pidOf('@I3@'), { privacy: 'private' }));
+    const s2 = await prepareReimport(
+      store,
+      { bytes: edited('@I3@', (l) => (l === '1 SEX M' ? '1 SEX F' : l)) },
+      { today: TODAY },
+    );
+    try {
+      const [change] = changesOf(s2, '@I3@').filter((c) => c.kind === 'sex');
+      // A different sex lowers the match's confidence, but the change is no local-edit conflict.
+      expect(change).toMatchObject({ kind: 'sex', after: 'F' });
+      expect(change!.conflict).toBeUndefined();
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  it('brings back a deleted multi-valued fact Ancestry changed as an unticked conflict (P4)', async () => {
+    const resi = eventIdOf('@I3@', 'RESI');
+    store.transact('Delete residence', (tx) => {
+      for (const r of rows<{ id: string }>(
+        store,
+        'SELECT id FROM event_role WHERE event_id = ?',
+        resi,
+      ))
+        tx.delete('event_role', r.id);
+      tx.delete('event', resi);
+    });
+    let inResi = false;
+    const s2 = await prepareReimport(
+      store,
+      {
+        bytes: edited('@I3@', (l) => {
+          if (l.startsWith('1 ')) inResi = l === '1 RESI';
+          return inResi && l === '2 DATE 1900' ? '2 DATE 1901' : l;
+        }),
+      },
+      { today: TODAY },
+    );
+    try {
+      const resiAdds = changesOf(s2, '@I3@').filter(
+        (c) => c.kind === 'fact.add' && c.fact.type === 'RESI',
+      );
+      expect(resiAdds).toEqual([
+        expect.objectContaining({ conflict: 'local-delete', defaultAccept: false }),
+      ]);
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  it('adds a name Ancestry added after a rename plainly, if it still has the old name (P5c)', async () => {
+    const mercy = pidOf('@I2@');
+    const name = value<string>(store, 'SELECT id FROM person_name WHERE person_id = ?', mercy);
+    store.transact('Rename', (tx) => tx.update('person_name', name, { given: 'Marcy' }));
+    const s2 = await prepareReimport(
+      store,
+      {
+        bytes: edited('@I2@', (l) =>
+          l === '2 SURN Bellweather' ? [l, '1 NAME Mercy /Ashgrove/', '2 TYPE married'] : l,
+        ),
+      },
+      { today: TODAY },
+    );
+    try {
+      const [change, ...rest] = changesOf(s2, '@I2@');
+      expect(rest).toEqual([]);
+      expect(change).toMatchObject({
+        kind: 'name.add',
+        name: 'Mercy Ashgrove',
+        defaultAccept: true,
+      });
+      expect(change!.conflict).toBeUndefined();
+    } finally {
+      closeReimport(s2);
+    }
+  });
+});
+
 describe('name conflict wording (#160)', () => {
   it('gives a name type only when the export states one', async () => {
     const typed = renumber(

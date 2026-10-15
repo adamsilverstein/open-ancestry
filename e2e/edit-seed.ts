@@ -51,6 +51,13 @@ export const person = (
   ],
 });
 
+/** Opens `path` with `tree` as the current tree. */
+export async function openTree(page: Page, tree: string, path: string) {
+  await page.addInitScript((name) => localStorage.setItem('oa-tree', name), tree);
+  await page.goto(path);
+  await page.locator('html[data-shell-ready]').waitFor({ state: 'attached' });
+}
+
 /** A tree name no other test (or repeat) uses; the unique part comes first. */
 export function uniqueTreeName(prefix: string, label: string): string {
   const unique = `${Date.now()}${Math.random().toString(36).slice(2, 6)}`;

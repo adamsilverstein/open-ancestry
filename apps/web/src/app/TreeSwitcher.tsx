@@ -44,12 +44,14 @@ export default function TreeSwitcher() {
   const [pending, setPending] = useState(false);
   const nameInput = useRef<HTMLInputElement>(null);
 
-  const currentName = trees.find((t) => t.id === current)?.name ?? current;
+  const currentTree = trees.find((t) => t.id === current);
+  const currentName = currentTree?.label ?? current;
 
   function open(next: Mode) {
     setMode(next);
     setError(undefined);
-    setName(next === 'rename' ? (currentName ?? '') : '');
+    // Rename edits the stored name, not the label with its folder suffix.
+    setName(next === 'rename' ? (currentTree?.name ?? current ?? '') : '');
   }
 
   async function submit(event?: FormEvent) {
@@ -121,7 +123,7 @@ export default function TreeSwitcher() {
               >
                 {trees.map((tree) => (
                   <MenuRadioItem key={tree.id} value={tree.id}>
-                    {tree.name}
+                    {tree.label}
                   </MenuRadioItem>
                 ))}
               </MenuRadioGroup>

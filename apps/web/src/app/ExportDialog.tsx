@@ -175,7 +175,7 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
         <div className={styles.fields}>
           <Select
             label="Tree"
-            options={list.map((t) => ({ value: t.id, label: t.name }))}
+            options={list.map((t) => ({ value: t.id, label: t.label }))}
             value={selected}
             onValueChange={(id) => {
               setTree(id);

@@ -42,7 +42,7 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
       const people = graph.people as ReadonlyMap<string, TreePerson>;
       const nodes = new Map(layout.nodes.map((n) => [n.key, n.personId]));
       kin = kinshipLabels(
-        buildRelations(layout),
+        buildRelations(layout, graph),
         layout.focusKey,
         (key) => people.get(nodes.get(key)!)?.sex ?? 'U',
       );

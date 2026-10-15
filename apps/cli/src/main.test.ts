@@ -34,6 +34,17 @@ describe('parseCliArgs', () => {
     });
   });
 
+  it('reads --shared-library and OA_SHARED_LIBRARY=1 (issue #211)', () => {
+    expect(parseCliArgs(['serve'], {})).toMatchObject({ sharedLibrary: false });
+    expect(parseCliArgs(['serve', '--shared-library'], {})).toMatchObject({ sharedLibrary: true });
+    expect(parseCliArgs(['serve'], { OA_SHARED_LIBRARY: '1' })).toMatchObject({
+      sharedLibrary: true,
+    });
+    expect(parseCliArgs(['import', 'a.ged', '--shared-library'], {})).toMatchObject({
+      sharedLibrary: true,
+    });
+  });
+
   it('rejects an invalid port', () => {
     expect(() => parseCliArgs(['serve', '--port', 'abc'])).toThrow(/port/);
   });

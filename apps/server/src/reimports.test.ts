@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { importFile } from '@open-ancestry/import';
+import { devWorkerComparer } from './import-runner';
 import { MUTATION_HEADERS, testApi, type TestApi } from './test/helpers';
 
 const SAMPLE = readFileSync(
@@ -222,4 +223,25 @@ describe('re-import', () => {
     expect(job.error).toMatch(/does not look like GEDCOM/);
     expect((await api.get(base)).json().tree.peopleCount).toBe(26);
   });
+});
+
+describe('re-import compare in a worker (#161)', () => {
+  it('compares through the worker comparer and applies the review', async () => {
+    await api.close();
+    api = await testApi({ importer: importFile, comparer: devWorkerComparer() });
+    const base = await importedTree();
+    const { reimportId, counts } = await startReimport(base);
+    expect(counts).toMatchObject({ matched: 26, newPeople: 1 });
+    const review = (await api.get(`/api/reimports/${reimportId}`)).json();
+    const accept = review.diff.people.flatMap(
+      (p: { changes: { id: string; defaultAccept: boolean }[] }) =>
+        p.changes.filter((c) => c.defaultAccept).map((c) => c.id),
+    );
+    const applied = await api.post(`/api/reimports/${reimportId}/apply`, {
+      accept,
+      comparison: review.comparison,
+    });
+    expect(applied.statusCode).toBe(200);
+    expect((await api.get(base)).json().tree.peopleCount).toBe(27);
+  }, 60_000);
 });

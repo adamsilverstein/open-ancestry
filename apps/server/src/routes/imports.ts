@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { prepareReimport } from '@open-ancestry/import';
 import type { FastifyRequest } from 'fastify';
 import type { Api, Deps } from '../context';
 import { ApiError, badRequest, conflict, notFound } from '../errors';
@@ -35,7 +34,16 @@ export async function sweepStaleUploads(now = Date.now(), dir = tmpdir()): Promi
 
 /** Import uploads (multipart, streamed to a temp file) and job status over JSON and SSE. */
 export function importRoutes(app: Api, deps: Deps): void {
-  const { library, jobs, importer, uploadLimit, archiveUploadLimit, thumbnails, reimports } = deps;
+  const {
+    library,
+    jobs,
+    importer,
+    comparer,
+    uploadLimit,
+    archiveUploadLimit,
+    thumbnails,
+    reimports,
+  } = deps;
 
   /** Streams the one uploaded file to a private temp folder. */
   async function receive(request: FastifyRequest) {
@@ -182,11 +190,10 @@ export function importRoutes(app: Api, deps: Deps): void {
         const job = jobs.enqueue(
           { tree, fileName: upload.fileName, kind: 'reimport' },
           async (signal, onProgress) => {
-            const session = await prepareReimport(
-              library.open(tree),
-              { path: upload.path },
-              { signal, onProgress: (phase, done, total) => onProgress({ phase, done, total }) },
-            );
+            const session = await comparer(upload.path, library.open(tree), {
+              signal,
+              onProgress,
+            });
             const stored = reimports.add(tree, upload.fileName, session);
             return { reimportId: stored.id, counts: session.diff.counts };
           },

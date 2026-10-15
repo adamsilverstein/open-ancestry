@@ -1,3 +1,4 @@
+import type { ReimportSession } from '@open-ancestry/import';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { TreeStore } from '@open-ancestry/db';
@@ -29,6 +30,17 @@ export type Importer = (
   target: TreeStore,
   options: ImporterOptions,
 ) => Promise<unknown>;
+
+/**
+ * Reads an updated export at `filePath` and compares it with `tree`, giving
+ * back the review. The real one runs in a worker thread (`workerComparer`),
+ * so a large compare never blocks the server (#161).
+ */
+export type Comparer = (
+  filePath: string,
+  tree: TreeStore,
+  options: ImporterOptions,
+) => Promise<ReimportSession>;
 
 export type JobState = 'queued' | 'running' | 'completed' | 'failed';
 

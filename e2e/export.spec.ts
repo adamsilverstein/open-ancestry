@@ -74,7 +74,7 @@ const sameFileName = (actual: string, expected: string) =>
   actual.replace(/_/g, ' ') === expected.replace(/_/g, ' ');
 
 const treeName = (title: string, project: string) =>
-  `export ${project} ${title.replace(/[^\w ]/g, '')} ${Date.now()}`.slice(0, 100);
+  `export ${project} ${title.replace(/[^\w ]/g, '')} ${Date.now()}`.slice(0, 100).trimEnd();
 
 test('exports GEDCOM 7 that re-imports with everyone in it', async ({
   page,

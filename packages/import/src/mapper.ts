@@ -12,6 +12,7 @@ import type {
 import { CITATION_OWNERS, MEDIA_OWNERS, NOTE_OWNERS, TAG_OWNERS, toNFC } from '@open-ancestry/db';
 import { serializeNode, type GedcomNode, type ParseResult } from '@open-ancestry/gedcom';
 import { createHash } from 'node:crypto';
+import { imageSize } from './image-size';
 import { classifyFile, kindFromType, mediaType, storeMediaFile, type MediaSource } from './media';
 import { Places, coordinate, placeParts } from './places';
 import {
@@ -1116,6 +1117,9 @@ export class Mapper {
       row.local_path = this.storeMedia(toNFC(file.path), bytes, hash);
       row.byte_size = bytes.length;
       row.sha256 = hash;
+      // The real size, so clients can pick thumbnails without probing (and before _WDTH).
+      const dimensions = imageSize(bytes);
+      if (dimensions) Object.assign(row, dimensions);
       this.linkedMedia++;
       this.use(node);
     } catch (error) {

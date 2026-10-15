@@ -48,6 +48,20 @@ test.describe('focus returns to the opener', () => {
     await expect(opener).toBeFocused();
   });
 
+  test('Edit person opened with a mouse click returns focus to it', async ({ page }) => {
+    // WebKit does not focus a clicked button and focuses the <main> landmark
+    // (tabindex=-1) instead; that must not become the place focus returns to.
+    await openSeeded(page, seeded);
+    const opener = page.getByRole('button', { name: 'Edit person', exact: true });
+    await opener.click();
+    const dialog = page.getByRole('dialog', { name: 'Edit person' });
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(opener).toBeFocused();
+    await expect(page.locator('main')).not.toBeFocused();
+  });
+
   test('Delete person confirm: Cancel returns to Delete person', async ({ page }) => {
     await openSeeded(page, seeded);
     await openWithKeyboard(page.getByRole('button', { name: 'Edit person', exact: true }));

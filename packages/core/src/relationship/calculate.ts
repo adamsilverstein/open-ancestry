@@ -65,6 +65,8 @@ const LINES_PER_CHILD = 4;
  */
 function modifierOf(path: RelationshipPath, up: number): Modifier {
   const rels = path.steps.map((s) => s.rel);
+  // A guardian is named as such directly ("guardian", "ward"); further out, as foster care.
+  if (rels.length === 1 && parentLink(rels[0]) === 'guardian') return 'guardian';
   const adopted = rels.findIndex((rel) => parentLink(rel) === 'adoptive');
   return lineQualifier(rels, adopted < up ? 'adopted' : 'adoptive');
 }

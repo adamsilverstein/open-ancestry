@@ -122,7 +122,7 @@ describe('relationship names (A is B’s ...)', () => {
     ['gson', 'hus', 'grandson'],
     ['dadStep', 'gf', 'step-grandson'],
     ['fosterkid', 'cousin1', 'foster sister'],
-    ['halfnephew', 'nephew', 'half 1st cousin'],
+    ['halfnephew', 'nephew', 'half first cousin'],
     ['gaunt', 'son', 'great-grandaunt'],
     ['ggUncle', 'son', '2nd great-granduncle'],
     ['son', 'gaunt', 'great-grandnephew'],

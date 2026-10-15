@@ -25,6 +25,7 @@ import {
 } from './canonical';
 import { dirtyRecords, nameTextStates, type NameTextState } from './dirty';
 import { mergeUnmapped, type MergeContext } from './merge';
+import { NameScrubber, type ScrubMode } from './scrub';
 import { TreeData, ownerKey } from './load';
 import type { GedcomExport, GedcomExportOptions } from './types';
 
@@ -82,8 +83,8 @@ function allowlist(record: GedcomNode): void {
     .map((c) => ({ ...c, ...(c.tag === 'NAME' && { value: 'Private' }), children: [] }));
 }
 
-/** A word in free text: letters (with combining marks) and digits. */
-const WORD = /[\p{L}\p{M}\p{N}]+/gu;
+/** Values that are web or mail addresses: names glued into them are matched too. */
+const LINK_TAGS = new Set(['WWW', 'EMAIL', '_LINK', '_URL']);
 
 /**
  * Values that are not free text and keep their words when privatizing: dates,
@@ -157,8 +158,8 @@ class GedcomWriter implements WriterContext, MergeContext {
   private importedXrefs: Map<string, { kind: RecordKind; id: string } | null> | undefined;
   /** Imported xrefs, upper-cased, for scrubbing text in privatized exports. */
   private importedIds: Set<string> | undefined;
-  /** Words of withheld people's names, for `scrubName`. */
-  private nameWords: Set<string> | undefined;
+  /** Withheld people's names, for `scrubName`. */
+  private scrubber: NameScrubber | undefined;
   private readonly generated = new Map<string, GedcomNode>();
   private readonly slots: Slot[] = [];
   private readonly slotByKey = new Map<string, Slot>();
@@ -672,46 +673,28 @@ class GedcomWriter implements WriterContext, MergeContext {
     return changed;
   }
 
-  /**
-   * Every word, three letters or more, of every name a withheld person goes by
-   * (given names, surnames, nicknames, the name as written), lower-cased NFC.
-   */
-  private withheldWords(): Set<string> {
-    if (this.nameWords) return this.nameWords;
-    const words = new Set<string>();
-    for (const id of this.living) {
-      for (const n of this.data.names.get(id) ?? []) {
-        for (const text of [n.given, n.surname, n.nickname, n.full_text]) {
-          for (const word of (text ?? '').normalize('NFC').toLowerCase().match(WORD) ?? []) {
-            if (word.length >= 3) words.add(word);
-          }
-        }
-      }
-    }
-    return (this.nameWords = words);
+  private nameScrubber(): NameScrubber {
+    this.scrubber ??= new NameScrubber(
+      [...this.living].flatMap((id) => this.data.names.get(id) ?? []),
+    );
+    return this.scrubber;
   }
 
   /**
-   * Text with every word of a withheld person's names replaced by "Private"
-   * (#195): living relatives are named in notes, event types, photo titles
-   * and file names on deceased people's records. Matching is by whole word,
-   * so it fails closed: a deceased person or place sharing the word loses it
-   * too, except in their own NAME (see `scrubNames`).
+   * Text with every name of a withheld person this recognizes replaced by
+   * "Private" (#195, #212; see scrub.ts). A file name or URL also matches
+   * names inside longer words. A deceased person's own NAME is left alone
+   * (see `scrubNames`).
    */
-  readonly scrubName = (text: string): string => {
-    if (!this.privatize) return text;
-    const words = this.withheldWords();
-    if (!words.size) return text;
-    return text
-      .normalize('NFC')
-      .replace(WORD, (word) => (words.has(word.toLowerCase()) ? 'Private' : word));
-  };
+  readonly scrubName = (text: string, mode: ScrubMode = 'file'): string =>
+    this.privatize ? this.nameScrubber().scrub(text, mode) : text;
 
   /** Applies `scrubName` to a generated record's text. Returns whether anything changed. */
   private scrubNames(node: GedcomNode): boolean {
     let changed = false;
     if (node.value !== undefined && node.pointer === undefined && !KEPT_TEXT.has(node.tag)) {
-      const value = this.scrubName(node.value);
+      const link = LINK_TAGS.has(node.tag) || /^(?:[a-z][a-z0-9+.-]*:\/\/|www\.)/i.test(node.value);
+      const value = this.scrubName(node.value, link ? 'file' : 'text');
       if (value !== node.value) {
         node.value = value;
         delete node.rawValue;

@@ -4,7 +4,7 @@ import { conflict, notFound } from '../errors';
 import { JobParams, ReimportApplyBody } from '../schemas';
 
 /** Review, apply and discard re-imports started by `POST /api/trees/:tree/reimport`. */
-export function reimportRoutes(app: Api, { library, reimports }: Deps): void {
+export function reimportRoutes(app: Api, { library, reimports, thumbnails }: Deps): void {
   const find = (id: string) => {
     const stored = reimports.get(id);
     if (!stored) throw notFound(`Re-import ${id} not found (it may have expired)`);
@@ -22,6 +22,8 @@ export function reimportRoutes(app: Api, { library, reimports }: Deps): void {
       source: report.source,
       warningCount: report.warningCount,
       lines: report.lines,
+      // Files found in the export (GEDZIP or media folder), as the import report counts them.
+      media: report.media,
       timings: session.timings,
       // familyMatches is apply's bookkeeping; the review doesn't need it.
       diff: { people: session.diff.people, counts: session.diff.counts },
@@ -46,6 +48,11 @@ export function reimportRoutes(app: Api, { library, reimports }: Deps): void {
           ),
         );
         reimports.remove(stored.id);
+        const dir = library.dirOf(stored.tree);
+        for (const id of result.media.copied) {
+          const media = store.getRow('media', id);
+          if (media?.local_path) thumbnails.enqueue(dir, id, media.local_path);
+        }
         return result;
       } catch (error) {
         if (error instanceof ReimportStaleError) throw conflict(error.message);

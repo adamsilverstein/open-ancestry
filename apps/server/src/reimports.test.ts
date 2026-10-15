@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { importFile } from '@open-ancestry/import';
+import { zipSync } from 'fflate';
 import { MUTATION_HEADERS, testApi, type TestApi } from './test/helpers';
 
 const SAMPLE = readFileSync(
@@ -27,7 +28,7 @@ function laterSample() {
     .replace(/@([A-Z]+)(\d+)@/g, (_, p: string, n: string) => `@${p}${Number(n) + 100}@`);
 }
 
-function multipart(fileName: string, content: string) {
+function multipart(fileName: string, content: string | Uint8Array) {
   const boundary = '----oa-reimport';
   return {
     payload: Buffer.concat([
@@ -116,6 +117,36 @@ describe('re-import', () => {
     const undo = await api.post(`${base}/undo`);
     expect(undo.json().batch.label).toBe('Re-import Family 2026.ged');
     expect((await api.get(base)).json().tree.peopleCount).toBe(26);
+  });
+
+  it("copies a GEDZIP export's new photo into the tree when applied (#75)", async () => {
+    const base = await importedTree();
+    const ged = laterSample().replace(
+      '0 @I127@ INDI\n1 NAME Noah /Ashgrove/',
+      '0 @I127@ INDI\n1 NAME Noah /Ashgrove/\n1 OBJE\n2 FILE photos/noah.jpg\n3 TITL Noah',
+    );
+    expect(ged).toContain('photos/noah.jpg');
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+    const zip = zipSync({ 'tree.ged': new TextEncoder().encode(ged), 'photos/noah.jpg': jpeg });
+    const res = await api.inject({
+      method: 'POST',
+      url: `${base}/reimport`,
+      ...multipart('Family 2026.zip', zip),
+    });
+    const job = await waitForJob(res.json().jobId);
+    const { reimportId } = job.result as { reimportId: string };
+    const review = (await api.get(`/api/reimports/${reimportId}`)).json();
+    expect(review.media).toMatchObject({ linked: 1, rejected: 0 });
+    const accept = review.diff.people.flatMap(
+      (p: { changes: { id: string; defaultAccept: boolean }[] }) =>
+        p.changes.filter((c) => c.defaultAccept).map((c) => c.id),
+    );
+    const applied = (await api.post(`/api/reimports/${reimportId}/apply`, { accept })).json();
+    expect(applied.media).toMatchObject({ refused: [] });
+    expect(applied.media.copied).toHaveLength(1);
+    const photo = await api.get(`${base}/media/${applied.media.copied[0]}`);
+    expect(photo.statusCode).toBe(200);
+    expect(photo.rawPayload).toEqual(jpeg);
   });
 
   it('refuses a stale review and validates the request', async () => {

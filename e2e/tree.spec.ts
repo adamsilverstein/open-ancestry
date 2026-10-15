@@ -1043,6 +1043,9 @@ for (const [width, height] of [
       test.slow();
       await open(page);
       await settled(page);
+      // The minimap picks its corner after the view settles; measure after that,
+      // or a card clear of it now can be under it in the next fresh view.
+      await minimapRested(page);
       const topBar = (await page.getByRole('banner').boundingBox())!;
       const top = topBar.y + topBar.height;
       const touchTargets = await page.evaluate(
@@ -1074,6 +1077,7 @@ for (const [width, height] of [
         if (i > 0) {
           await open(page);
           await settled(page);
+          await minimapRested(page);
         }
         const name = (await target.getAttribute('aria-label'))!.split(',')[0]!;
         const cardBox = await box(target);

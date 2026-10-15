@@ -209,6 +209,10 @@ describe('matching at scale: undated people still match themselves', () => {
     );
     const matches = matchPeople(snapshot(existing), snapshot(incoming));
     expect(matches.size).toBe(41);
+    existing.close();
+    incoming.close();
+  });
+});
 
 // #234: blocking on every given name a person has (so "Joe" meets Joseph) must
 // stay bounded when many people share a short nickname.

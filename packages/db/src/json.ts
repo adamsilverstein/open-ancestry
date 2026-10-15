@@ -1,10 +1,11 @@
 import { createRequire } from 'node:module';
 import type { Ajv2020 as Ajv2020Class } from 'ajv/dist/2020.js';
 import type { ValidateFunction } from 'ajv';
+import Database from 'better-sqlite3';
 import { BulkWriter } from './bulk';
 import { refreshDerivedColumns } from './derived';
 import { ENUM_COLUMNS } from './enums';
-import { listTables, upgradeRow, type TableRowsByName } from './migrations/index';
+import { listTables, migrate, upgradeRow, type TableRowsByName } from './migrations/index';
 import type { TreeStore } from './store';
 import { parseLogImage } from './undo';
 import type { ChangeBatchRow, ChangeLogRow, TableRows } from './types';
@@ -36,9 +37,38 @@ export interface OaJsonDocument {
 }
 
 export interface ExportOptions {
-  /** Include change_batch and change_log (default true). */
+  /**
+   * Include change_batch and change_log (default true). Without them, import
+   * warnings (which can quote imported lines) are left out too.
+   */
   history?: boolean;
+  /**
+   * Records (`owner_type|owner_id`) whose raw_record and unmapped_line rows are
+   * left out: the imported text of records changed or deleted since import,
+   * which still holds what was edited away (see changedSinceImport in
+   * @open-ancestry/export).
+   */
+  omitImportedText?: ReadonlySet<string>;
 }
+
+/**
+ * An import batch without the imported lines it quotes: warnings, and the
+ * example line of each unmapped tag in its counts.
+ */
+function withoutImportedLines(row: Record<string, unknown>): Record<string, unknown> {
+  let counts = row.counts_json;
+  try {
+    const parsed = JSON.parse(String(counts)) as { unmapped?: { example?: unknown }[] };
+    for (const u of parsed.unmapped ?? []) delete u.example;
+    counts = JSON.stringify(parsed);
+  } catch {
+    counts = '{}';
+  }
+  return { ...row, warnings_json: '[]', counts_json: counts };
+}
+
+/** Tables holding a record's imported GEDCOM text, by owner. */
+const IMPORTED_TEXT_TABLES = new Set(['raw_record', 'unmapped_line']);
 
 function exportedTables(store: TreeStore, history: boolean): string[] {
   return listTables(store.db)
@@ -49,11 +79,22 @@ function exportedTables(store: TreeStore, history: boolean): string[] {
 
 export function exportJson(
   store: TreeStore,
-  { history = true }: ExportOptions = {},
+  { history = true, omitImportedText }: ExportOptions = {},
 ): OaJsonDocument {
   const tables: Record<string, unknown[]> = {};
   for (const name of exportedTables(store, history)) {
-    tables[name] = store.db.prepare(`SELECT * FROM ${name} ORDER BY ${store.plan(name).key}`).all();
+    let rows = store.db
+      .prepare(`SELECT * FROM ${name} ORDER BY ${store.plan(name).key}`)
+      .all() as Record<string, unknown>[];
+    if (omitImportedText?.size && IMPORTED_TEXT_TABLES.has(name)) {
+      rows = rows.filter(
+        (r) =>
+          r.owner_id == null ||
+          !omitImportedText.has(`${String(r.owner_type)}|${String(r.owner_id)}`),
+      );
+    }
+    if (!history && name === 'import_batch') rows = rows.map(withoutImportedLines);
+    tables[name] = rows;
   }
   return {
     format: OA_JSON_FORMAT,
@@ -149,8 +190,15 @@ export function importJson(
     if (!rows.every(isObject)) throw new Error(`Table ${name} rows must be objects`);
     tables[name] = rows as unknown as Record<string, unknown>[];
   }
-  if (version < store.schemaVersion) tables = upgradeTables(store, version, tables);
   const known = exportedTables(store, true);
+  if (version < store.schemaVersion) {
+    tables = upgradeTables(store, version, tables);
+    // A table added by a later migration has no rows in an older backup.
+    const existed = tablesAtVersion(store, version);
+    for (const name of known) {
+      if (!HISTORY_TABLES.has(name) && !existed.has(name)) tables[name] ??= [];
+    }
+  }
   const knownSet = new Set(known);
   for (const name of Object.keys(tables)) {
     if (!knownSet.has(name)) throw new Error(`Unknown table ${JSON.stringify(name)} in document`);
@@ -216,6 +264,17 @@ function upgradeTables(store: TreeStore, from: number, input: TableRowsByName): 
     migration.upgradeTables?.(tables);
   }
   return tables;
+}
+
+/** Tables the schema had at `version`, from an in-memory database migrated that far. */
+function tablesAtVersion(store: TreeStore, version: number): Set<string> {
+  const db = new Database(':memory:');
+  try {
+    migrate(db, { migrations: store.migrations, to: version });
+    return new Set(listTables(db).map((t) => t.name));
+  } finally {
+    db.close();
+  }
 }
 
 /** Parses and imports a JSON document, refusing oversized input before parsing. */

@@ -1,6 +1,8 @@
 import type { Database } from 'better-sqlite3';
 import v001 from './v001-initial';
 import v002 from './v002-history-order';
+import * as v003 from './v003-nfc-text';
+import v004 from './v004-person-alias';
 
 /** How a migration changed one table's columns, so rows written before it can be upgraded. */
 export interface ColumnChanges {
@@ -74,6 +76,16 @@ export const MIGRATIONS: readonly Migration[] = [
     columns: { change_batch: { added: { seq: 0 } }, change_log: { added: { schema_version: 1 } } },
     upgradeTables: numberBatches,
   },
+  {
+    version: 3,
+    name: 'nfc-text',
+    sql: '',
+    run: v003.normalizeText,
+    upgradeRow: v003.upgradeRow,
+    upgradeTables: v003.upgradeTables,
+  },
+  // A new table: no column map; importing an older backup gives it an empty list.
+  { version: 4, name: 'person-alias', sql: v004 },
 ];
 
 /**

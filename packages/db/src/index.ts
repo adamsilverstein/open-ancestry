@@ -22,6 +22,7 @@ export {
   Tx,
   type StoreOptions,
 } from './store';
+export { isNfcColumn, nfcRow, toNFC } from './nfc';
 export {
   TREE_EXTENSION,
   createTree,
@@ -33,6 +34,7 @@ export {
 } from './tree';
 export * from './repositories';
 export * from './queries';
+export { ancestorGenerations, wouldCreateCycle } from './lineage';
 export {
   MAX_SEARCH_LENGTH,
   MAX_SEARCH_WORDS,
@@ -53,8 +55,17 @@ export {
   redoLast,
   undo,
   undoLast,
+  undoLatest,
+  touchesMergedRows,
 } from './undo';
-export { BULK_TABLE_ORDER, BulkWriter, bulkInsert, type BulkCounts, type BulkData } from './bulk';
+export {
+  BULK_TABLE_ORDER,
+  BulkWriter,
+  bulkInsert,
+  type BulkWriterOptions,
+  type BulkCounts,
+  type BulkData,
+} from './bulk';
 export {
   OA_JSON_FORMAT,
   OA_JSON_FORMAT_VERSION,
@@ -77,3 +88,4 @@ export {
   refreshDerivedColumns,
   type RefreshOptions,
 } from './derived';
+export { getRelationship, type RelationshipView } from './kinship';

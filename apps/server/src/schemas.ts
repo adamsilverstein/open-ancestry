@@ -18,6 +18,7 @@ export const {
   TreeIdParams,
   JobParams,
   ReimportApplyBody,
+  ReimportStatusQuery,
   TreeBody,
   Sex,
   Living,
@@ -26,10 +27,13 @@ export const {
   RelationshipType,
   PeopleQuery,
   ExportQuery,
+  JsonExportQuery,
   GedzipQuery,
   NeighborhoodQuery,
+  RelationshipQuery,
   SearchQuery,
   HistoryQuery,
+  UndoQuery,
   HomeBody,
   NameBody,
   EventBody,
@@ -53,6 +57,7 @@ export const {
   BatchBody,
   CheckKey,
   DismissBody,
+  MergeBody,
 } = schemas;
 
 export type NameBody = Source.NameBody;

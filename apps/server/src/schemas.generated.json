@@ -2228,6 +2228,15 @@
       }
     }
   },
+  "JsonExportQuery": {
+    "type": "object",
+    "properties": {
+      "history": {
+        "enum": ["0", "1", "false", "true"]
+      }
+    },
+    "additionalProperties": false
+  },
   "Living": {
     "enum": ["living", "dead", "inferred_living", "inferred_dead", "unknown"]
   },
@@ -2251,6 +2260,91 @@
         "maxLength": 16
       }
     }
+  },
+  "MergeBody": {
+    "type": "object",
+    "required": ["otherId"],
+    "properties": {
+      "otherId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      },
+      "choices": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "keep"
+              },
+              {
+                "type": "string",
+                "const": "other"
+              }
+            ]
+          },
+          "sex": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "keep"
+              },
+              {
+                "type": "string",
+                "const": "other"
+              }
+            ]
+          },
+          "living": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "keep"
+              },
+              {
+                "type": "string",
+                "const": "other"
+              }
+            ]
+          },
+          "privacy": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "keep"
+              },
+              {
+                "type": "string",
+                "const": "other"
+              }
+            ]
+          },
+          "preferred": {
+            "type": "object",
+            "patternProperties": {
+              "^[A-Z_][A-Z0-9_]{0,31}$": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "keep"
+                  },
+                  {
+                    "type": "string",
+                    "const": "other"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "additionalProperties": false
   },
   "NameBody": {
     "type": "object",
@@ -2737,7 +2831,7 @@
   },
   "ReimportApplyBody": {
     "type": "object",
-    "required": ["accept"],
+    "required": ["accept", "comparison"],
     "properties": {
       "accept": {
         "type": "array",
@@ -2746,9 +2840,41 @@
           "maxLength": 32
         },
         "maxItems": 1000000
+      },
+      "comparison": {
+        "type": "integer",
+        "minimum": 1
       }
     },
     "additionalProperties": false
+  },
+  "ReimportStatusQuery": {
+    "type": "object",
+    "properties": {
+      "comparison": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "additionalProperties": false
+  },
+  "RelationshipQuery": {
+    "type": "object",
+    "required": ["from"],
+    "properties": {
+      "from": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      },
+      "to": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      }
+    }
   },
   "RelationshipType": {
     "enum": ["married", "civil_union", "partners", "unknown"]
@@ -2863,6 +2989,17 @@
         "type": "string",
         "minLength": 1,
         "maxLength": 100
+      }
+    }
+  },
+  "UndoQuery": {
+    "type": "object",
+    "properties": {
+      "expect": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
       }
     }
   }

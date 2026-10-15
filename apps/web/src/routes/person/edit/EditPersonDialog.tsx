@@ -2,10 +2,17 @@ import { useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2 } from 'lucide-react';
-import type { ChildRelationship, LivingStatus, NameType, Sex } from '@open-ancestry/db';
+import type {
+  ChildRelationship,
+  LivingStatus,
+  NameType,
+  RelationshipType,
+  Sex,
+} from '@open-ancestry/db';
 import { seg } from '../../../api/client';
 import { useEdit } from '../../../api/edits';
-import { apiSend } from '../../../api/client';
+import { ApiError, apiSend } from '../../../api/client';
+import { rememberDeletedPerson, undoRedo } from '../../../api/history';
 import { personQuery } from '../../../api/queries';
 import type { PersonDetail } from '../../../api/types';
 import { Button } from '../../../components/Button/Button';
@@ -15,8 +22,11 @@ import { IconButton } from '../../../components/IconButton/IconButton';
 import { Input } from '../../../components/Input/Input';
 import { Select } from '../../../components/Select/Select';
 import { useToast } from '../../../components/Toast/Toast';
-import { fullName, isLivingStatus } from '../../../lib/person';
+import { fullName, isLivingStatus, nearestRelative } from '../../../lib/person';
+import { useOpenRestored } from '../../../lib/useOpenRestored';
 import { applyNames, applyPerson, nameChanges, toDraft, type NameDraft } from './optimistic';
+import { useDirtyForm } from './dirty';
+import { SaveError, useSaveState } from './SaveError';
 import styles from './Edit.module.css';
 
 export const NAME_TYPES: { value: NameType; label: string }[] = [
@@ -36,6 +46,17 @@ export const SEX_OPTIONS: { value: Sex; label: string }[] = [
   { value: 'X', label: 'Other' },
   { value: 'U', label: 'Unknown' },
 ];
+
+export const RELATIONSHIP_TYPES: { value: RelationshipType; label: string }[] = [
+  { value: 'married', label: 'Married' },
+  { value: 'civil_union', label: 'Civil union' },
+  { value: 'partners', label: 'Partners' },
+  { value: 'unknown', label: 'Unknown' },
+];
+
+/** Shown under a partnership in Relationships; unknown says nothing. */
+export const relationshipTypeLabel = (type: RelationshipType): string | undefined =>
+  type === 'unknown' ? undefined : RELATIONSHIP_TYPES.find((t) => t.value === type)?.label;
 
 export const CHILD_RELATIONSHIPS: { value: ChildRelationship; label: string }[] = [
   { value: 'biological', label: 'Biological' },
@@ -105,14 +126,18 @@ export function EditPersonDialog({
   const id = detail.person.id;
   const base = `/trees/${seg(tree)}`;
   const edit = useEdit(tree);
+  // Stays open until the save succeeds, so a failure keeps the edits.
+  const saveState = useSaveState(() => onOpenChange(false));
   const toast = useToast();
   const navigate = useNavigate();
+  const onRestored = useOpenRestored();
   const queryClient = useQueryClient();
   const [names, setNames] = useState<NameDraft[]>(() => detail.names.map(toDraft));
   const [sex, setSex] = useState<Sex>(detail.person.sex);
   const [living, setLiving] = useState<LivingChoice>(livingChoice(detail.person.living));
   const [links, setLinks] = useState<ParentLink[]>(() => parentLinks(detail));
   const [confirmDelete, setConfirmDelete] = useState(false);
+  useDirtyForm({ names, sex, living, links });
   // Given names is what people edit most, so focus starts there.
   const firstGiven = useRef<HTMLInputElement>(null);
   const name = fullName(detail.summary);
@@ -125,6 +150,10 @@ export function EditPersonDialog({
     );
 
   function save() {
+    // First: while a save is in flight the optimistic update makes the page match the
+    // draft, so the "nothing changed" check below would close the dialog and lose the
+    // edits if that save then fails.
+    if (edit.isPending) return;
     const removed = detail.names.filter((row) => !names.some((n) => n.id === row.id));
     const operations: Record<string, unknown>[] = names.flatMap((draft) => {
       const row = detail.names.find((n) => n.id === draft.id);
@@ -156,8 +185,7 @@ export function EditPersonDialog({
       });
     }
 
-    onOpenChange(false);
-    if (operations.length === 0) return;
+    if (operations.length === 0) return onOpenChange(false);
     const label = `Edit person: ${name}`;
     edit.mutate({
       label,
@@ -167,19 +195,52 @@ export function EditPersonDialog({
       },
       // One request, one change batch: the whole save is a single undo step.
       send: () => apiSend('POST', `${base}/batch`, { label, operations }),
+      ...saveState.handlers(),
     });
   }
 
   function deletePerson() {
     onOpenChange(false);
+    const nearby = nearestRelative(detail);
     edit.mutate({
       label: 'Delete person',
-      send: () => apiSend('DELETE', `${base}/people/${id}`),
-      onDone: () => {
-        // Leave first, so the page does not refetch a person who is gone.
-        void navigate({ to: '/' });
+      send: () => apiSend<{ batchId: string }>('DELETE', `${base}/people/${id}`),
+      onDone: ({ batchId }) => {
+        rememberDeletedPerson(batchId, id);
+        // Leave first, so the page does not refetch a person who is gone. Stay
+        // near where the user was working: a relative, else the people list.
+        void (nearby
+          ? navigate({ to: '/person/$personId', params: { personId: nearby } })
+          : navigate({ to: '/people' }));
         queryClient.removeQueries({ queryKey: personQuery(tree, id).queryKey });
-        toast({ title: `Deleted ${name}`, description: 'Press Ctrl+Z (⌘Z on a Mac) to undo.' });
+        toast({
+          title: `Deleted ${name}`,
+          description: 'Press Ctrl+Z (⌘Z on a Mac) to undo.',
+          duration: 8000,
+          action: {
+            label: 'Undo',
+            // This delete only: refused if anything was changed after it.
+            onClick: () =>
+              void undoRedo(queryClient, 'undo', { expect: batchId, onRestored }).then(
+                ({ batch }) => batch && toast({ title: `Undid ${batch.label}`, duration: 3000 }),
+                (error: unknown) =>
+                  toast(
+                    error instanceof ApiError && error.code === 'not_newest'
+                      ? {
+                          title: "Can't undo the delete",
+                          description:
+                            'Newer changes were made since. Undo them first from History.',
+                          variant: 'error',
+                        }
+                      : {
+                          title: 'Could not undo',
+                          description: error instanceof Error ? error.message : String(error),
+                          variant: 'error',
+                        },
+                  ),
+              ),
+          },
+        });
       },
     });
   }
@@ -209,8 +270,8 @@ export function EditPersonDialog({
             <DialogClose asChild>
               <Button variant="ghost">Cancel</Button>
             </DialogClose>
-            <Button variant="primary" onClick={save}>
-              Save
+            <Button variant="primary" onClick={save} loading={edit.isPending}>
+              {saveState.submitLabel('Save')}
             </Button>
           </div>
         }
@@ -337,6 +398,7 @@ export function EditPersonDialog({
             </fieldset>
           )}
           {/* Lets Enter in a field submit the form. */}
+          <SaveError error={saveState.error} />
           <button type="submit" hidden />
         </form>
       </Dialog>

@@ -5,13 +5,24 @@ import {
   listBatches,
   meta,
   redoLast,
-  undoLast,
+  undo,
+  undoLatest,
   type TreeStore,
 } from '@open-ancestry/db';
-import { buildGedcomExport, buildGedzipExport } from '@open-ancestry/export';
+import { buildGedcomExport, buildGedzipExport, changedSinceImport } from '@open-ancestry/export';
 import type { Api, Deps } from '../context';
 import { edit } from '../edits';
-import { ExportQuery, GedzipQuery, HistoryQuery, HomeBody, TreeBody, TreeParams } from '../schemas';
+import {
+  ExportQuery,
+  GedzipQuery,
+  HistoryQuery,
+  HomeBody,
+  JsonExportQuery,
+  TreeBody,
+  TreeParams,
+  UndoQuery,
+} from '../schemas';
+import { notNewest } from '../errors';
 
 function treeDetail(deps: Deps, id: string) {
   const store = deps.library.open(id);
@@ -141,22 +152,49 @@ export function treeRoutes(app: Api, deps: Deps): void {
     },
   );
 
-  app.post('/api/trees/:tree/undo', { schema: { params: TreeParams } }, async (request) => {
-    const store = library.open(request.params.tree);
-    return { batch: undoLast(store) };
-  });
+  app.post(
+    '/api/trees/:tree/undo',
+    { schema: { params: TreeParams, querystring: UndoQuery } },
+    async (request) => {
+      const store = library.open(request.params.tree);
+      const { expect } = request.query;
+      if (expect === undefined) {
+        // `skipped`: newer batches stepped over because the NFC upgrade made them un-undoable.
+        return undoLatest(store);
+      }
+      // A toast's Undo names its own batch: undo exactly that one, and only while nothing
+      // newer exists, so it never undoes a later change in its place.
+      const newest = store
+        .stmt("SELECT id FROM change_batch WHERE state = 'applied' ORDER BY seq DESC LIMIT 1")
+        .get() as { id: string } | undefined;
+      if (newest?.id !== expect) {
+        throw notNewest('Newer changes were made since; undo them from History first');
+      }
+      return { batch: undo(store, expect), skipped: [] };
+    },
+  );
 
   app.post('/api/trees/:tree/redo', { schema: { params: TreeParams } }, async (request) => {
     const store = library.open(request.params.tree);
-    return { batch: redoLast(store) };
+    return { batch: redoLast(store), skipped: [] };
   });
 
   app.get(
     '/api/trees/:tree/export.json',
-    { schema: { params: TreeParams } },
+    { schema: { params: TreeParams, querystring: JsonExportQuery } },
     async (request, reply) => {
       const { tree } = request.params;
-      const json = exportJsonString(library.open(tree));
+      // Mid-import the tree is not the user's yet: export it once the import ends (#186).
+      library.assertIdle(tree);
+      // A full backup keeps the edit history (undo, and the text of deleted rows) unless asked not to.
+      const { history } = request.query;
+      const store = library.open(tree);
+      const keep = history !== '0' && history !== 'false';
+      // Without the history, deleted and edited-away text must not survive elsewhere either.
+      const json = exportJsonString(store, {
+        history: keep,
+        ...(!keep && { omitImportedText: changedSinceImport(store) }),
+      });
       return reply
         .type('application/json; charset=utf-8')
         .header('content-disposition', attachment(tree, 'json'))
@@ -169,6 +207,8 @@ export function treeRoutes(app: Api, deps: Deps): void {
     { schema: { params: TreeParams, querystring: ExportQuery } },
     async (request, reply) => {
       const { tree } = request.params;
+      // Mid-import the tree is not the user's yet: export it once the import ends (#186).
+      library.assertIdle(tree);
       const { text, warnings } = buildGedcomExport(library.open(tree), {
         version: request.query.version ?? '5.5.1',
         privatizeLiving: request.query.privatize ?? false,
@@ -189,6 +229,8 @@ export function treeRoutes(app: Api, deps: Deps): void {
     { schema: { params: TreeParams, querystring: GedzipQuery } },
     async (request, reply) => {
       const { tree } = request.params;
+      // Mid-import the tree is not the user's yet: export it once the import ends (#186).
+      library.assertIdle(tree);
       const { bytes, warnings } = buildGedzipExport(library.open(tree), {
         privatizeLiving: request.query.privatize ?? false,
       });

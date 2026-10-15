@@ -14,7 +14,7 @@
       "const": 1
     },
     "schemaVersion": {
-      "const": 2
+      "const": 4
     },
     "tables": {
       "type": "object",
@@ -33,6 +33,7 @@
         "note",
         "note_link",
         "person",
+        "person_alias",
         "person_name",
         "place",
         "raw_record",
@@ -131,6 +132,12 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/person"
+          }
+        },
+        "person_alias": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/person_alias"
           }
         },
         "person_name": {
@@ -828,6 +835,42 @@
           "type": "string"
         },
         "updated_at": {
+          "type": "string"
+        }
+      }
+    },
+    "person_alias": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "person_id",
+        "merged_person_id",
+        "merged_xref",
+        "import_batch_id",
+        "apids_json",
+        "merged_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "person_id": {
+          "type": "string"
+        },
+        "merged_person_id": {
+          "type": "string"
+        },
+        "merged_xref": {
+          "type": ["string", "null"]
+        },
+        "import_batch_id": {
+          "type": ["string", "null"]
+        },
+        "apids_json": {
+          "type": "string"
+        },
+        "merged_at": {
           "type": "string"
         }
       }

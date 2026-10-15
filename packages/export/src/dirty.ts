@@ -1,5 +1,5 @@
-import type { TreeStore } from '@open-ancestry/db';
-import { ownerKey, type TreeData } from './load';
+import { toNFC, type TreeStore } from '@open-ancestry/db';
+import { TreeData, ownerKey } from './load';
 
 /** Columns no GEDCOM line is written from; changing only these leaves a record verbatim. */
 const IGNORED_COLUMNS = new Set(['updated_at', 'created_at', 'living', 'surname_key']);
@@ -14,6 +14,13 @@ const OWNER_COLUMNS: Record<string, string> = {
 };
 
 const BOOKKEEPING = new Set(['import_batch', 'unmapped_line', 'meta']);
+
+/**
+ * Column values that write the same GEDCOM: equal, or text that differs only
+ * in Unicode form (the NFC upgrade rewrites decomposed text without changing it).
+ */
+const sameValue = (a: unknown, b: unknown) =>
+  a === b || (typeof a === 'string' && typeof b === 'string' && toNFC(a) === toNFC(b));
 
 interface LogRow {
   entity: string;
@@ -103,7 +110,7 @@ export function dirtyRecords(store: TreeStore, data: TreeData): Set<string> {
     const after = row.after_json ? (JSON.parse(row.after_json) as Record<string, unknown>) : null;
     if (before && after) {
       const changed = Object.keys(after).filter(
-        (c) => !IGNORED_COLUMNS.has(c) && before[c] !== after[c],
+        (c) => !IGNORED_COLUMNS.has(c) && !sameValue(before[c], after[c]),
       );
       if (changed.length === 0) continue;
     }
@@ -158,8 +165,8 @@ export function nameTextStates(store: TreeStore): Map<string, NameTextState> {
   for (const row of rows) {
     const before = JSON.parse(row.before_json) as Record<string, unknown>;
     const after = JSON.parse(row.after_json) as Record<string, unknown>;
-    if (before.full_text !== after.full_text) states.delete(row.entity_id);
-    else if (NAME_PARTS.some((c) => before[c] !== after[c])) {
+    if (!sameValue(before.full_text, after.full_text)) states.delete(row.entity_id);
+    else if (NAME_PARTS.some((c) => !sameValue(before[c], after[c]))) {
       states.set(row.entity_id, { kind: 'stale' });
     } else if (before.nickname !== after.nickname && !states.has(row.entity_id)) {
       states.set(row.entity_id, {
@@ -169,4 +176,13 @@ export function nameTextStates(store: TreeStore): Map<string, NameTextState> {
     }
   }
   return states;
+}
+
+/**
+ * Records (`person|<id>`, ...) changed or deleted since import: their imported
+ * text may still hold what was edited away (a JSON export without history
+ * leaves it out, #220).
+ */
+export function changedSinceImport(store: TreeStore): Set<string> {
+  return dirtyRecords(store, new TreeData(store));
 }

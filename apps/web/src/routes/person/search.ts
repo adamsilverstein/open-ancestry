@@ -8,15 +8,17 @@ export interface PersonSearch {
   edit?: true;
 }
 
+/**
+ * Every key is set, undefined when invalid: TanStack Router merges a route's
+ * validated search over the raw one, so an unset key lets the raw value through.
+ */
 export function validatePersonSearch(search: Record<string, unknown>): PersonSearch {
-  const valid: PersonSearch = {};
   const tab = search.tab;
-  if (
-    typeof tab === 'string' &&
-    tab !== 'facts' &&
-    (PERSON_TABS as readonly string[]).includes(tab)
-  )
-    valid.tab = tab as PersonSearch['tab'];
-  if (search.edit === true || search.edit === 'true') valid.edit = true;
-  return valid;
+  return {
+    tab:
+      typeof tab === 'string' && tab !== 'facts' && (PERSON_TABS as readonly string[]).includes(tab)
+        ? (tab as PersonSearch['tab'])
+        : undefined,
+    edit: search.edit === true || search.edit === 'true' ? true : undefined,
+  };
 }

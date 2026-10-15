@@ -1,7 +1,8 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Redo2, Undo2 } from 'lucide-react';
-import { historyQuery, undoRedo } from '../api/history';
+import { historyQuery, undoRedo, undoRedoMessage } from '../api/history';
 import { currentTreeQuery } from '../api/queries';
+import { useOpenRestored } from '../lib/useOpenRestored';
 import { Button } from '../components/Button/Button';
 import { Dialog } from '../components/Dialog/Dialog';
 import { useToast } from '../components/Toast/Toast';
@@ -32,12 +33,15 @@ interface HistoryPanelProps {
 export default function HistoryPanel({ open, onOpenChange }: HistoryPanelProps) {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const onRestored = useOpenRestored();
   const { data: tree } = useQuery(currentTreeQuery);
   const { data: history } = useQuery({ ...historyQuery(tree ?? ''), enabled: !!tree });
 
   const run = async (direction: 'undo' | 'redo') => {
     try {
-      await undoRedo(queryClient, direction);
+      const result = await undoRedo(queryClient, direction, { onRestored });
+      // The panel shows what changed; only a step-over needs saying.
+      if (result.skipped.length) toast({ ...undoRedoMessage(direction, result), duration: 6000 });
     } catch (error) {
       toast({
         title: `Could not ${direction}`,

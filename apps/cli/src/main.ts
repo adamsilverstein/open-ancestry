@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { getPersonSummary, openTree } from '@open-ancestry/db';
 import {
-  importFile,
   importGedcom,
+  type ImportLimits,
   type ImportPhase,
   type ImportReport,
 } from '@open-ancestry/import';
@@ -14,10 +14,13 @@ import {
   DEFAULT_HOST,
   Library,
   defaultLibraryRoot,
+  devWorkerImporter,
   isLoopbackHost,
   startServer,
   treeNameProblem,
+  workerImporter,
   type RunningServer,
+  type WorkerImporterOptions,
 } from '@open-ancestry/server';
 import { escapeControls } from './escape';
 
@@ -36,11 +39,16 @@ Options for serve:
   --library <dir>      Folder holding your trees (default $OA_LIBRARY or ~/OpenAncestry)
   --open               Open the app in your browser
   --static-dir <dir>   Built web app to serve (default: bundled build)
+  --import-heap-mb <n> Memory for each import's worker, in MB (default 2048; $OA_IMPORT_HEAP_MB)
 
 Options for import:
   --name <tree>        Tree name (default: the file name)
   --media <dir>        Folder holding the media files a .ged file refers to
-  --library <dir>      Folder holding your trees (default $OA_LIBRARY or ~/OpenAncestry)`;
+  --library <dir>      Folder holding your trees (default $OA_LIBRARY or ~/OpenAncestry)
+
+Import size limits (serve and import):
+  --max-gedcom-mb <n>  Largest GEDCOM text, also inside a GEDZIP (default 64; $OA_MAX_GEDCOM_MB)
+  --max-archive-mb <n> Largest GEDZIP with its photos (default 1024; $OA_MAX_ARCHIVE_MB)`;
 
 export type CliCommand =
   | { command: 'help' }
@@ -51,6 +59,9 @@ export type CliCommand =
       library: string;
       open: boolean;
       staticDir: string | undefined;
+      importLimits: Partial<ImportLimits>;
+      /** Heap for each import worker, in MB (default IMPORT_RESOURCE_LIMITS). */
+      importHeapMb: number | undefined;
     }
   | {
       command: 'import';
@@ -58,7 +69,39 @@ export type CliCommand =
       name: string | undefined;
       media: string | undefined;
       library: string;
+      importLimits: Partial<ImportLimits>;
     };
+
+const MiB = 1024 * 1024;
+
+/** A positive whole number of MB from a flag, else the environment variable, else undefined. */
+function megabytes(
+  flag: string,
+  value: string | undefined,
+  env: NodeJS.ProcessEnv,
+  variable: string,
+): number | undefined {
+  const [source, raw] =
+    value !== undefined ? [`--${flag}`, value] : [variable, env[variable] || undefined];
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) {
+    throw new Error(`Invalid ${source}: ${raw} (a whole number of MB)`);
+  }
+  return n;
+}
+
+function importLimits(
+  values: { 'max-gedcom-mb'?: string; 'max-archive-mb'?: string },
+  env: NodeJS.ProcessEnv,
+): Partial<ImportLimits> {
+  const gedcom = megabytes('max-gedcom-mb', values['max-gedcom-mb'], env, 'OA_MAX_GEDCOM_MB');
+  const archive = megabytes('max-archive-mb', values['max-archive-mb'], env, 'OA_MAX_ARCHIVE_MB');
+  return {
+    ...(gedcom !== undefined && { maxBytes: gedcom * MiB }),
+    ...(archive !== undefined && { maxArchiveBytes: archive * MiB }),
+  };
+}
 
 export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliCommand {
   const { positionals, values } = parseArgs({
@@ -72,6 +115,9 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
       'static-dir': { type: 'string' },
       name: { type: 'string' },
       media: { type: 'string' },
+      'max-gedcom-mb': { type: 'string' },
+      'max-archive-mb': { type: 'string' },
+      'import-heap-mb': { type: 'string' },
     },
   });
   if (positionals[0] === 'import') {
@@ -84,6 +130,7 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
       name: values.name,
       media: values.media,
       library: values.library ?? defaultLibraryRoot(env),
+      importLimits: importLimits(values, env),
     };
   }
   if (positionals[0] !== 'serve') return { command: 'help' };
@@ -99,7 +146,24 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     library: values.library ?? defaultLibraryRoot(env),
     open: values.open ?? false,
     staticDir: values['static-dir'],
+    importLimits: importLimits(values, env),
+    importHeapMb: megabytes('import-heap-mb', values['import-heap-mb'], env, 'OA_IMPORT_HEAP_MB'),
   };
+}
+
+/**
+ * Imports run in a worker thread: the bundled worker next to the bundled CLI
+ * (dist/import-worker.js), or the TypeScript source when run unbundled.
+ */
+function serverImporter(limits: Partial<ImportLimits>, heapMb: number | undefined) {
+  const options: WorkerImporterOptions = {
+    limits,
+    ...(heapMb !== undefined && { resourceLimits: { maxOldGenerationSizeMb: heapMb } }),
+  };
+  const bundled = new URL('./import-worker.js', import.meta.url);
+  return existsSync(fileURLToPath(bundled))
+    ? workerImporter(bundled, options)
+    : devWorkerImporter(options);
 }
 
 /** The web build copied next to the bundled CLI (dist/public). */
@@ -153,7 +217,7 @@ const STOP_SIGNALS = ['SIGINT', 'SIGTERM'] as const;
  * clean up (their upload and any empty tree they created) before the process
  * ends. A second signal exits at once.
  */
-function stopOnSignals(
+export function stopOnSignals(
   server: RunningServer,
   signals: Pick<NodeJS.Process, 'on' | 'off'>,
   exit: (code: number) => void,
@@ -166,7 +230,10 @@ function stopOnSignals(
     log(`Stopping (${signal})...`);
     server.close().then(
       () => exit(0),
-      () => exit(1),
+      (error: unknown) => {
+        log(`Could not stop cleanly: ${error instanceof Error ? error.message : String(error)}`);
+        exit(1);
+      },
     );
   };
   for (const signal of STOP_SIGNALS) signals.on(signal, onSignal);
@@ -298,6 +365,7 @@ async function importCommand(
     { path: cli.file },
     { dir, name },
     {
+      limits: cli.importLimits,
       ...(cli.media && { mediaDir: cli.media }),
       ...(progress && { onProgress: progressReporter(progress) }),
     },
@@ -361,7 +429,8 @@ export async function run(
     port: cli.port,
     library: cli.library,
     staticDir: cli.staticDir ?? bundledStaticDir(),
-    importer: importFile,
+    importer: serverImporter(cli.importLimits, cli.importHeapMb),
+    importLimits: cli.importLimits,
   });
   log(`open-ancestry running at ${escapeControls(server.url)}`);
   log(`Library: ${escapeControls(cli.library)}`);

@@ -6,6 +6,7 @@ import {
   getPersonDetail,
   getPersonSummaries,
   getPersonSummary,
+  getRelationship,
   listPeople,
   meta,
   searchPeople,
@@ -14,7 +15,14 @@ import {
 import type { Api, Deps } from '../context';
 import { requireRow } from '../edits';
 import { badRequest, notFound } from '../errors';
-import { NeighborhoodQuery, PeopleQuery, SearchQuery, TreeIdParams, TreeParams } from '../schemas';
+import {
+  NeighborhoodQuery,
+  PeopleQuery,
+  RelationshipQuery,
+  SearchQuery,
+  TreeIdParams,
+  TreeParams,
+} from '../schemas';
 
 function parseLiving(value: string | undefined): LivingStatus[] | undefined {
   if (value === undefined) return undefined;
@@ -24,7 +32,10 @@ function parseLiving(value: string | undefined): LivingStatus[] | undefined {
   return list as LivingStatus[];
 }
 
-/** Read endpoints: people list, person detail and summary, families, neighborhood, search. */
+/**
+ * Read endpoints: people list, person detail and summary, families,
+ * neighborhood, relationship, search.
+ */
 export function peopleRoutes(app: Api, { library }: Deps): void {
   app.get(
     '/api/trees/:tree/people',
@@ -95,6 +106,20 @@ export function peopleRoutes(app: Api, { library }: Deps): void {
       const focusId = focus ?? meta.getHomePersonId(store);
       if (!focusId) throw badRequest('Give a focus person (no home person is set)');
       return getNeighborhood(store, focusId, { up, down, siblings, siblingsDepth });
+    },
+  );
+
+  app.get(
+    '/api/trees/:tree/relationship',
+    { schema: { params: TreeParams, querystring: RelationshipQuery } },
+    async (request) => {
+      const store = library.open(request.params.tree);
+      const { from } = request.query;
+      const to = request.query.to ?? meta.getHomePersonId(store);
+      if (!to) throw badRequest('Give a second person (no home person is set)');
+      requireRow(store, 'person', from);
+      requireRow(store, 'person', to);
+      return getRelationship(store, from, to);
     },
   );
 

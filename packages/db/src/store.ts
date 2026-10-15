@@ -1,5 +1,6 @@
 import type { Database, Statement } from 'better-sqlite3';
 import { MIGRATIONS, migrate, type Migration } from './migrations/index';
+import { nfcRow } from './nfc';
 import { markSearchDirty, refreshSearch } from './search';
 import { assertDataTable } from './tables';
 import type { InsertRow, PatchRow, TableName, TableRows } from './types';
@@ -43,6 +44,8 @@ export interface StoreOptions {
   /** ISO-8601 timestamp source; injectable for deterministic tests. */
   clock?: () => string;
   newId?: () => string;
+  /** How long to wait for another connection's lock before SQLITE_BUSY (default 5000ms). */
+  busyTimeoutMs?: number;
   /**
    * The migration chain to apply (default MIGRATIONS). Tests pass a longer
    * chain to simulate a future schema version.
@@ -87,7 +90,7 @@ export class TreeStore {
     db.pragma('synchronous = NORMAL');
     db.pragma('temp_store = MEMORY');
     db.pragma('cache_size = -65536');
-    db.pragma('busy_timeout = 5000');
+    db.pragma(`busy_timeout = ${Math.max(0, Math.floor(options.busyTimeoutMs ?? 5000))}`);
     this.log = options.log ?? ((message) => console.info(message));
     this.migrations = options.migrations ?? MIGRATIONS;
     this.schemaVersion = this.migrations.length;
@@ -244,7 +247,11 @@ export class Tx {
 
   insert<T extends TableName>(table: T, input: InsertRow<T>): TableRows[T] {
     assertDataTable(table);
-    const row = this.store.completeRow(table, input as Record<string, unknown>, this.now);
+    const row = this.store.completeRow(
+      table,
+      nfcRow(table, input as Record<string, unknown>),
+      this.now,
+    );
     this.store.insertStatement(table).run(Object.values(row));
     this.record(table, null, row);
     return row as unknown as TableRows[T];
@@ -259,7 +266,7 @@ export class Tx {
     }
     const before = this.store.getRow(table, id) as Record<string, unknown> | undefined;
     if (!before) throw new NotFoundError(table, id);
-    const changed = Object.entries(patch).filter(
+    const changed = Object.entries(nfcRow(table, patch as Record<string, unknown>)).filter(
       ([column, value]) => value !== undefined && before[column] !== value,
     );
     if (changed.length === 0) return before as unknown as TableRows[T];

@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useToast } from '../components/Toast/Toast';
+import { isNotFound } from './client';
 import { personQuery } from './queries';
 import type { PersonDetail } from './types';
 
@@ -17,6 +18,8 @@ export interface Edit<T = unknown> {
   optimistic?: { personId: string; update: (detail: PersonDetail) => PersonDetail };
   /** Runs after success, before queries refetch (e.g. navigate away from a deleted person). */
   onDone?: (result: T) => void;
+  /** Runs after the rollback and error toast, e.g. so a dialog can show the error and stay open. */
+  onError?: (error: unknown) => void;
 }
 
 const changeListeners = new Set<(tree: string) => void>();
@@ -37,6 +40,24 @@ export function invalidateTree(queryClient: QueryClient, tree: string) {
   return queryClient.invalidateQueries({ predicate: (q) => q.queryKey[1] === tree });
 }
 
+/*
+ * An edit refused with 404 (what it changes was deleted in another window or
+ * by undo) is announced once: by the person page if its person is gone (it
+ * also has to move away), else by the edit hook just after the refetch.
+ */
+let unsaved: { tree: string; label: string } | null = null;
+
+/** Takes the pending "deleted elsewhere" notice for `tree`, so only one place shows it. */
+export function takeUnsaved(tree: string): string | null {
+  if (unsaved?.tree !== tree) return null;
+  const { label } = unsaved;
+  unsaved = null;
+  return label;
+}
+
+/** Long enough for a page whose person is gone to see the refetch and claim the notice. */
+const CLAIM_MS = 300;
+
 interface Run {
   edit: Edit;
   /** The detail before the optimistic update, for rollback. */
@@ -50,21 +71,41 @@ export function useEdit(tree: string) {
     mutationFn: ({ edit }: Run) => edit.send(),
     onError: (error, { edit, rollback }) => {
       if (rollback) queryClient.setQueryData(rollback.key, rollback.previous);
+      if (isNotFound(error)) {
+        // The server message names row types and ids; say what happened instead.
+        unsaved = { tree, label: edit.label };
+        edit.onError?.(error);
+        return;
+      }
       toast({
         title: 'Could not save',
         description: `${edit.label}: ${error instanceof Error ? error.message : String(error)}`,
         variant: 'error',
       });
+      edit.onError?.(error);
     },
     onSuccess: (result, { edit }) => edit.onDone?.(result),
-    onSettled: () => invalidateTree(queryClient, tree),
+    onSettled: async () => {
+      await invalidateTree(queryClient, tree);
+      if (unsaved?.tree !== tree) return;
+      setTimeout(() => {
+        const label = takeUnsaved(tree);
+        if (label) {
+          toast({
+            title: 'Not saved',
+            description: `${label}: part of it was deleted (in another window or by undo), so your changes couldn't be saved.`,
+            variant: 'error',
+          });
+        }
+      }, CLAIM_MS);
+    },
   });
 
   /**
    * Starts an edit. The optimistic update is applied synchronously, in the same
    * event as the click, so a controlled checkbox or field never flips back.
    */
-  const mutate = (edit: Edit) => {
+  const mutate = <T>(edit: Edit<T>) => {
     let rollback: Run['rollback'] = null;
     if (edit.optimistic) {
       const { queryKey } = personQuery(tree, edit.optimistic.personId);
@@ -77,7 +118,7 @@ export function useEdit(tree: string) {
         rollback = { key: queryKey, previous };
       }
     }
-    mutation.mutate({ edit, rollback });
+    mutation.mutate({ edit: edit as Edit, rollback });
   };
 
   return { mutate, isPending: mutation.isPending };

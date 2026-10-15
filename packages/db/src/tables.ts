@@ -26,6 +26,7 @@ export const DATA_TABLES: readonly TableName[] = [
   'tag_link',
   'raw_record',
   'unmapped_line',
+  'person_alias',
 ];
 
 /** Change history tables, written only by the unit of work itself and the JSON importer. */

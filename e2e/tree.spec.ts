@@ -770,6 +770,12 @@ test.describe('family view', () => {
     await expect(card(page, 'Fenn Vale')).toBeAttached();
   });
 
+  test('an id that cannot exist shows Person not found (#143)', async ({ page }) => {
+    await page.goto(`/tree/x'y?tree=${encodeURIComponent(tree)}`);
+    await expect(page.getByRole('heading', { name: 'Person not found' })).toBeVisible();
+    await expect(page.getByText('Could not load the tree')).toHaveCount(0);
+  });
+
   test('a person with no tree data shows an empty state', async ({ page }) => {
     await page.goto(`/tree/nobody?tree=${encodeURIComponent(tree)}`);
     await expect(page.getByRole('heading', { name: 'Person not found' })).toBeVisible();
@@ -909,6 +915,20 @@ test.describe('pedigree, descendant and fan views', () => {
     await expect(empty).not.toHaveCount(0);
     await expect(empty.first()).toHaveAttribute('aria-hidden', 'true');
   });
+});
+
+test.describe('hand-edited layouts (#146)', () => {
+  for (const layout of ['bogus', 'descendant', 'toString', '__proto__']) {
+    test(`layout=${layout} opens the family view`, async ({ page }) => {
+      await open(page, 'ada', `&layout=${layout}`);
+      await expect(page.getByRole('heading', { name: 'Something went wrong' })).toHaveCount(0);
+      await expect(page.getByText('Could not load the tree')).toHaveCount(0);
+      await expect(card(page, 'Ada Vale')).toBeAttached();
+      await expect(
+        page.getByRole('toolbar', { name: 'Tree tools' }).getByRole('button', { name: /Layout/ }),
+      ).toHaveAccessibleName('Layout: Family view');
+    });
+  }
 });
 
 test.describe('generation depth in the URL', () => {
@@ -1069,6 +1089,44 @@ test.describe('far zoom', () => {
   });
 });
 
+test.describe('step and adoptive kinship (#138)', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+  const sample = seed.sample;
+  const openSample = async (page: Page, given: string) => {
+    await page.goto(`/tree/${sample.ids[given]}?tree=${encodeURIComponent(sample.tree)}`);
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+  };
+
+  test('a stepfather and half-sister keep their words in either parent set', async ({ page }) => {
+    await openSample(page, 'George');
+    await expect(card(page, 'Iris Hollowell')).toHaveAccessibleName(
+      /half-sister of George Eldermoor$/,
+    );
+    await canvas(page)
+      .getByRole('button', { name: /^Switch parents of George Eldermoor/ })
+      .click();
+    await expect(card(page, 'Leopold Hollowell')).toHaveAccessibleName(
+      /, stepfather of George Eldermoor$/,
+    );
+    await expect(card(page, 'Iris Hollowell')).toHaveAccessibleName(
+      /, half-sister of George Eldermoor$/,
+    );
+  });
+
+  test('adoptive parents are named as such', async ({ page }) => {
+    await openSample(page, 'Peter');
+    await expect(card(page, 'Harold Ashgrove')).toHaveAccessibleName(
+      /, adoptive father of Peter Ashgrove$/,
+    );
+    await expect(card(page, 'Dorothy Ingleby')).toHaveAccessibleName(
+      /, adoptive mother of Peter Ashgrove$/,
+    );
+    await expect(card(page, 'Thomas Ashgrove')).toHaveAccessibleName(
+      /, adopted brother of Peter Ashgrove$/,
+    );
+  });
+});
+
 test.describe('wide descendant charts (#74)', () => {
   test.use({ viewport: { width: 900, height: 700 } });
 
@@ -1199,6 +1257,91 @@ test('the fan has no minimap, so its toolbar offers none (#134)', async ({ page 
   await expect(tools.getByRole('button', { name: 'Minimap' })).toHaveCount(0);
   await page.keyboard.press('m');
   await expect(page.getByTestId('tree-minimap')).toHaveCount(0);
+});
+
+test.describe('fan labels (#137)', () => {
+  const sample = seed.sample;
+  async function openFan(page: Page) {
+    await page.goto(`/tree/${sample.ids.Lily}?tree=${encodeURIComponent(sample.tree)}&layout=fan`);
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    await page.evaluate(() => document.fonts.ready);
+  }
+
+  /** Each segment's label: its text, and whether all four corners lie in the segment. */
+  function labels(page: Page) {
+    return page.getByTestId('tree-fan').evaluate((svg) =>
+      [...svg.querySelectorAll<SVGGElement>('g[role="button"]')].map((g) => {
+        const text = g.querySelector('text');
+        const path = g.querySelector('path')!;
+        if (!text) return { text: null, inside: true, fontSize: 0 };
+        const box = text.getBBox();
+        const matrix = text.transform.baseVal.consolidate()?.matrix ?? new DOMMatrix();
+        const corners = [
+          [box.x, box.y],
+          [box.x + box.width, box.y],
+          [box.x, box.y + box.height],
+          [box.x + box.width, box.y + box.height],
+        ];
+        return {
+          text: [...text.querySelectorAll('tspan')].map((t) => t.textContent).join(' | '),
+          inside: corners.every(([x, y]) =>
+            path.isPointInFill(new DOMPoint(x, y).matrixTransform(matrix)),
+          ),
+          fontSize: parseFloat(getComputedStyle(text).fontSize),
+        };
+      }),
+    );
+  }
+
+  test('names stay inside their segments, with years where they fit', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openFan(page);
+    const all = await labels(page);
+    expect(all.filter((l) => !l.inside).map((l) => l.text)).toEqual([]);
+    // Nearly every ancestor is named, and the inner rings with their years.
+    expect(all.filter((l) => l.text).length).toBeGreaterThanOrEqual(all.length - 2);
+    const withYears = all.filter((l) => l.text && /\d{4}/.test(l.text));
+    expect(withYears.length).toBeGreaterThanOrEqual(3);
+  });
+
+  for (const [width, height] of [
+    [1440, 900],
+    [390, 844],
+  ] as const) {
+    test(`hard names fit, whole, at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height });
+      const { tree, focusId } = seed.fanNames;
+      await page.goto(`/tree/${focusId}?tree=${encodeURIComponent(tree)}&layout=fan`);
+      await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+      await page.evaluate(() => document.fonts.ready);
+      await page.getByRole('button', { name: 'Fit to screen' }).click();
+      await settled(page);
+      const all = await labels(page);
+      expect(all.filter((l) => !l.inside).map((l) => l.text)).toEqual([]);
+      const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+      for (const l of all) expect(l.text ?? '').not.toMatch(lone);
+      // The father's long name, in the widest ring, keeps his first name
+      // (and at least the surname's initial), never initials alone.
+      const father = all[1]!.text ?? '';
+      expect(father).toMatch(/^Johann .*(v\.|von)/);
+      // The single-word name is shown, whole or shortened, in every ring.
+      expect(all.filter((l) => l.text?.startsWith('山田')).length).toBeGreaterThan(0);
+    });
+  }
+
+  test('Fit on a phone keeps names readable', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openFan(page);
+    await page.getByRole('button', { name: 'Fit to screen' }).click();
+    await settled(page);
+    const { scale } = await transform(page);
+    const all = await labels(page);
+    expect(all.filter((l) => !l.inside).map((l) => l.text)).toEqual([]);
+    for (const l of all.filter((l) => l.text))
+      expect(l.fontSize * scale).toBeGreaterThanOrEqual(10);
+    // The focus person stays on screen.
+    await expect(canvas(page).getByRole('button', { name: /^Lily Mosswood/ })).toBeInViewport();
+  });
 });
 
 test.describe('visual snapshots', () => {

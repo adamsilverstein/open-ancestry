@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useToast } from '../components/Toast/Toast';
+import { useOpenRestored } from '../lib/useOpenRestored';
 
 /** Text fields keep their own Cmd/Ctrl-Z. */
 function isEditable(target: EventTarget | null): boolean {
@@ -43,6 +44,7 @@ export function historyShortcut(event: KeyboardEvent): 'undo' | 'redo' | null {
 export function UndoShortcuts() {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const onRestored = useOpenRestored();
   useEffect(() => {
     let busy = false;
     async function onKeyDown(event: KeyboardEvent) {
@@ -54,14 +56,10 @@ export function UndoShortcuts() {
       busy = true;
       try {
         // Loaded on first use so the undo code stays off the initial bundle.
-        const { undoRedo } = await import('../api/history');
-        const batch = await undoRedo(queryClient, action);
-        toast({
-          title: batch
-            ? `${action === 'undo' ? 'Undid' : 'Redid'} ${batch.label}`
-            : `Nothing to ${action}`,
-          duration: 3000,
-        });
+        const { undoRedo, undoRedoMessage } = await import('../api/history');
+        const result = await undoRedo(queryClient, action, { onRestored });
+        const message = undoRedoMessage(action, result);
+        toast({ ...message, duration: message.description ? 6000 : 3000 });
       } catch (error) {
         toast({
           title: `Could not ${action}`,
@@ -74,6 +72,6 @@ export function UndoShortcuts() {
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [queryClient, toast]);
+  }, [queryClient, toast, onRestored]);
   return null;
 }

@@ -63,7 +63,7 @@ export default defineConfig({
   // The real built app, served by the CLI exactly as users run it.
   // `npm run e2e` builds first.
   webServer: {
-    command: `node ../apps/cli/dist/cli.js serve --port ${port} --library "${library}"`,
+    command: `node ../apps/cli/dist/cli.js serve --no-open --port ${port} --library "${library}"`,
     url: `${baseURL}/api/health`,
     reuseExistingServer: false,
     timeout: 30_000,

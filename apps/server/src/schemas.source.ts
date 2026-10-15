@@ -41,7 +41,8 @@ export const ReimportStatusQuery = Type.Object(
 );
 
 export const TreeBody = Type.Object(
-  { name: Type.String({ minLength: 1, maxLength: 100 }) },
+  // No minLength: a blank name gets treeNameProblem's plain message, not a schema error.
+  { name: Type.String({ maxLength: 100 }) },
   strict,
 );
 
@@ -67,6 +68,12 @@ export const ExportQuery = Type.Object(
     version: Type.Optional(Type.Enum(['5.5.1', '7'])),
     privatize: Type.Optional(Type.Boolean()),
   },
+  strict,
+);
+
+/** `history=0` (or `false`) leaves the edit history, and the deleted text it keeps, out. */
+export const JsonExportQuery = Type.Object(
+  { history: Type.Optional(Type.Enum(['0', '1', 'false', 'true'])) },
   strict,
 );
 

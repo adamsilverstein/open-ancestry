@@ -23,6 +23,12 @@ import {
   sources,
   tagLinks,
   tags,
+  BIRTH_TYPES,
+  DEATH_TYPES,
+  bulkInsert,
+  generateSyntheticTree,
+  type ListPeopleOptions,
+  type TreeStore,
 } from './index';
 import { memoryTree, seedSmallFamily } from './test/helpers';
 import { makeTempDir } from '../../../fixtures/temp-dir';
@@ -415,6 +421,95 @@ describe('listPeople', () => {
     expect(listPeople(store, { tagId }).items.map((p) => p.given)).toEqual(['Quill']);
     expect(listPeople(store, { living: ['dead'] }).items.map((p) => p.given)).toEqual(['Orrin']);
     expect(listPeople(store, { sort: 'death' }).items[0]?.given).toBe('Tamsin');
+    store.close();
+  });
+
+  it('orders exactly as the SQL definition, for every sort, direction and filter (#114)', () => {
+    // The people list order, as one SQL query (what listPeople computed before #114).
+    const oracle = (
+      store: TreeStore,
+      sort: 'surname' | 'given' | 'birth' | 'death',
+      dir: 'ASC' | 'DESC',
+      where: string,
+    ): string[] => {
+      const types = sort === 'birth' ? BIRTH_TYPES : DEATH_TYPES;
+      const vital = `LEFT JOIN (SELECT r.person_id, min(e.date_sort) AS k FROM event_role r
+        JOIN event e ON e.id = r.event_id
+        WHERE r.role = 'principal' AND e.type IN (${types.map((t) => `'${t}'`).join(', ')})
+          AND e.date_sort IS NOT NULL GROUP BY r.person_id) v ON v.person_id = p.id`;
+      const key = {
+        surname: `n.surname IS NULL, n.surname COLLATE NOCASE ${dir}, n.given COLLATE NOCASE ${dir}`,
+        given: `n.given IS NULL, n.given COLLATE NOCASE ${dir}, n.surname COLLATE NOCASE ${dir}`,
+        birth: `v.k IS NULL, v.k ${dir}`,
+        death: `v.k IS NULL, v.k ${dir}`,
+      }[sort];
+      return store.db
+        .prepare(
+          `SELECT p.id FROM person p LEFT JOIN person_name n ON n.person_id = p.id AND n.is_primary = 1
+           ${vital} ${where} ORDER BY ${key}, p.id`,
+        )
+        .pluck()
+        .all() as string[];
+    };
+    const store = memoryTree();
+    bulkInsert(store, generateSyntheticTree({ people: 1500, seed: 11 }));
+    // Ties and edge cases the generator rarely makes: case-only differences, missing
+    // names and parts, equal dates, several birth events, non-principal roles.
+    store.transact('edges', (tx) => {
+      const add = (given: string | null, surname: string | null, born?: number) => {
+        const p = persons.create(tx, { sex: 'F' });
+        if (given !== null || surname !== null) {
+          names.create(tx, { person_id: p.id, given, surname, is_primary: 1 });
+        }
+        if (born)
+          events.create(tx, { type: 'BIRT', date_sort: born, roles: [{ person_id: p.id }] });
+        return p;
+      };
+      add('ada', 'vale', 18500101);
+      add('Ada', 'Vale', 18500101);
+      add('ADA', 'vale', 18500101);
+      add(null, 'Vale');
+      add('Zed', null, 19000101);
+      add(null, null);
+      add('Émile', 'Ørsted', 17990101);
+      const twice = add('Twice', 'Born', 19100101);
+      events.create(tx, { type: 'CHR', date_sort: 19090101, roles: [{ person_id: twice.id }] });
+      const witness = add('Wit', 'Ness');
+      events.create(tx, {
+        type: 'BIRT',
+        date_sort: 16000101,
+        roles: [{ person_id: witness.id, role: 'witness' }],
+      });
+      persons.create(tx, {});
+    });
+    const { result: tagId } = store.transact('tag', (tx) => {
+      const t = tags.create(tx, { name: 'Line' });
+      for (const id of listPeople(store, { limit: 40 }).items.map((p) => p.id)) {
+        tagLinks.create(tx, { tag_id: t.id, owner_type: 'person', owner_id: id });
+      }
+      return t.id;
+    });
+    const filters: [ListPeopleOptions, string][] = [
+      [{}, ''],
+      [{ sex: 'M' }, "WHERE p.sex = 'M'"],
+      [{ living: ['dead', 'inferred_dead'] }, "WHERE p.living IN ('dead', 'inferred_dead')"],
+      [
+        { tagId },
+        `WHERE EXISTS (SELECT 1 FROM tag_link t WHERE t.tag_id = '${tagId}' AND t.owner_type = 'person' AND t.owner_id = p.id)`,
+      ],
+    ];
+    for (const sort of ['surname', 'given', 'birth', 'death'] as const) {
+      for (const direction of ['asc', 'desc'] as const) {
+        for (const [options, where] of filters) {
+          const label = JSON.stringify({ sort, direction, ...options });
+          const all = listPeople(store, { sort, direction, ...options, limit: 100_000 });
+          expect(
+            all.items.map((p) => p.id),
+            label,
+          ).toEqual(oracle(store, sort, direction === 'asc' ? 'ASC' : 'DESC', where));
+        }
+      }
+    }
     store.close();
   });
 

@@ -44,6 +44,8 @@ export function ImportDropZone({ children }: { children?: ReactNode }) {
         type="file"
         accept={IMPORT_ACCEPT}
         aria-label="Choose a GEDCOM or GEDZIP"
+        // The "Import GEDCOM" button is the one control; this input is behind it.
+        aria-hidden="true"
         className="oa-visually-hidden"
         tabIndex={-1}
         onChange={(event) => {

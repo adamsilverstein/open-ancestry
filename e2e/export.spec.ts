@@ -118,6 +118,10 @@ test('JSON export is a full backup, so privatize is not offered', async ({ page 
   await dialog.getByRole('combobox', { name: 'Format' }).click();
   await page.getByRole('option', { name: 'JSON (full backup)' }).click();
   await expect(dialog.getByRole('checkbox', { name: /^Privatize/ })).toBeDisabled();
+  // The edit history keeps deleted text, so it is left out unless asked for (#197).
+  const history = dialog.getByRole('checkbox', { name: /^Include edit history/ });
+  await expect(history).not.toBeChecked();
+  await expect(dialog).toContainText('including anything you have deleted');
   await dialog.getByRole('button', { name: 'Cancel' }).click();
   await expect(dialog).toBeHidden();
   await expect(page.getByRole('button', { name: 'File' })).toBeFocused();

@@ -275,6 +275,8 @@ describe('edited records', () => {
           store.db.prepare(`UPDATE ${table} SET ${column} = ? WHERE id = ?`).run(nfd(r.v), r.id);
         }
       }
+      // Tables later versions add go too, so reopening runs their migrations again.
+      store.db.exec('DROP TABLE person_alias; DROP TABLE person_sort');
       store.db.prepare("UPDATE meta SET value = '2' WHERE key = 'schema_version'").run();
       const before = exportGedcom(store, { version: '5.5.1', now: TODAY });
       store.close();

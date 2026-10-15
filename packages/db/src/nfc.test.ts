@@ -183,6 +183,8 @@ describe('schema v3: NFC normalization of existing trees', () => {
     ).batchId;
     more?.(store, ids);
     // Pretend this tree and its history were written by version 2.
+    // Tables later versions add go too, so reopening runs their migrations again.
+    store.db.exec('DROP TABLE person_alias; DROP TABLE person_sort');
     store.db.prepare("UPDATE meta SET value = '2' WHERE key = 'schema_version'").run();
     store.db.prepare('UPDATE change_log SET schema_version = 2').run();
     store.close();

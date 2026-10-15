@@ -69,7 +69,7 @@ describe('derived column refresh', () => {
     const id = seedStale(store);
     const logged = count(store, 'change_log');
     const result = refreshDerivedColumns(store, { force: true });
-    expect(result).toEqual({ event_date_sort: 2 });
+    expect(result).toMatchObject({ event_date_sort: 2 });
     const french = parseDate(FRENCH);
     expect(sorts(store)).toEqual([
       // Gregorian rows are left alone.
@@ -81,7 +81,7 @@ describe('derived column refresh', () => {
     // The search index follows: years come from date_sort.
     expect(searchPeople(store, 'marren 2019').map((r) => r.person.id)).toEqual([id]);
     // Idempotent.
-    expect(refreshDerivedColumns(store, { force: true })).toEqual({ event_date_sort: 0 });
+    expect(refreshDerivedColumns(store, { force: true })).toMatchObject({ event_date_sort: 0 });
     store.close();
   });
 

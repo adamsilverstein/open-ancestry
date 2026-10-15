@@ -59,13 +59,25 @@ function controllableImporter() {
   let release: (value?: unknown) => void = () => {};
   let fail: (error: Error) => void = () => {};
   const importer: Importer = async (path, _store, options) => {
-    calls.push({ path, content: await readFile(path, 'utf8'), options });
-    options.onProgress({ phase: 'parse', done: 1, total: 2 });
-    return new Promise((resolve, reject) => {
-      release = resolve;
-      fail = reject;
-      options.signal.addEventListener('abort', () => reject(new Error('aborted')));
+    // Like the real importers, honor an abort that came before the work
+    // started listening (a cancel during the read below), or the job never
+    // ends and server shutdown waits forever.
+    const aborted = new Promise<never>((_, reject) => {
+      const abort = () => reject(new Error('aborted'));
+      if (options.signal.aborted) abort();
+      else options.signal.addEventListener('abort', abort, { once: true });
     });
+    aborted.catch(() => {});
+    calls.push({ path, content: await readFile(path, 'utf8'), options });
+    if (options.signal.aborted) throw new Error('aborted');
+    options.onProgress({ phase: 'parse', done: 1, total: 2 });
+    return Promise.race([
+      aborted,
+      new Promise((resolve, reject) => {
+        release = resolve;
+        fail = reject;
+      }),
+    ]);
   };
   return { importer, calls, release: (v?: unknown) => release(v), fail: (e: Error) => fail(e) };
 }

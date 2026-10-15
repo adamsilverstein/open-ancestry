@@ -3,8 +3,8 @@ import { createWriteStream } from 'node:fs';
 import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
+import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { treePaths } from '@open-ancestry/db';
 import { prepareReimport } from '@open-ancestry/import';
 import type { FastifyRequest } from 'fastify';
 import type { Api, Deps } from '../context';
@@ -13,6 +13,7 @@ import { TooManyJobsError, type JobEvent } from '../jobs';
 import { JobParams, TreeParams } from '../schemas';
 
 export const IMPORT_EXTENSIONS = new Set(['.ged', '.gedcom', '.zip', '.gdz']);
+const ARCHIVE_EXTENSIONS = new Set(['.zip', '.gdz']);
 
 export const UPLOAD_PREFIX = 'oa-upload-';
 /** Upload folders older than this are left over from a crash and swept on startup. */
@@ -34,15 +35,25 @@ export async function sweepStaleUploads(now = Date.now(), dir = tmpdir()): Promi
 
 /** Import uploads (multipart, streamed to a temp file) and job status over JSON and SSE. */
 export function importRoutes(app: Api, deps: Deps): void {
-  const { library, jobs, importer, uploadLimit, thumbnails, reimports } = deps;
+  const { library, jobs, importer, uploadLimit, archiveUploadLimit, thumbnails, reimports } = deps;
 
   /** Streams the one uploaded file to a private temp folder. */
   async function receive(request: FastifyRequest) {
     if (!importer) throw new ApiError(501, 'not_implemented', 'GEDCOM import is not available');
+    // Refuse before streaming up to the size cap to disk for a job that cannot queue.
+    if (!jobs.hasRoom()) {
+      throw new ApiError(
+        429,
+        'too_many_jobs',
+        'Too many imports are queued; try again when one finishes',
+      );
+    }
     if (!request.isMultipart()) {
       throw new ApiError(415, 'unsupported_media_type', 'Upload the file as multipart/form-data');
     }
-    const file = await request.file({ limits: { fileSize: uploadLimit, files: 1, fields: 0 } });
+    const file = await request.file({
+      limits: { fileSize: Math.max(uploadLimit, archiveUploadLimit), files: 1, fields: 0 },
+    });
     if (!file) throw badRequest('Attach a GEDCOM or GEDZIP file');
     const extension = extname(file.filename).toLowerCase();
     if (!IMPORT_EXTENSIONS.has(extension)) {
@@ -53,15 +64,31 @@ export function importRoutes(app: Api, deps: Deps): void {
         `Expected a ${[...IMPORT_EXTENSIONS].join(', ')} file`,
       );
     }
+    // A GEDZIP carries its photos, so it may be larger; the importer caps the
+    // GEDCOM inside it like a plain file.
+    const limit = ARCHIVE_EXTENSIONS.has(extension) ? archiveUploadLimit : uploadLimit;
+    const tooLarge = () =>
+      new ApiError(
+        413,
+        'payload_too_large',
+        `Uploads of ${extension} files are limited to ${limit} bytes`,
+      );
+    // Past the limit, stop writing but keep reading (up to the larger cap,
+    // where the parser stops), so the request ends cleanly with a 413.
+    let received = 0;
+    const cap = new Transform({
+      transform(chunk: Buffer, _encoding, done) {
+        received += chunk.length;
+        done(null, received > limit ? undefined : chunk);
+      },
+    });
     // The upload is untrusted: only its extension is used in the temp path.
     const dir = await mkdtemp(join(tmpdir(), UPLOAD_PREFIX));
     const cleanup = () => rm(dir, { recursive: true, force: true });
     const path = join(dir, `upload${extension}`);
     try {
-      await pipeline(file.file, createWriteStream(path, { flags: 'wx' }));
-      if (file.file.truncated) {
-        throw new ApiError(413, 'payload_too_large', `Uploads are limited to ${uploadLimit} bytes`);
-      }
+      await pipeline(file.file, cap, createWriteStream(path, { flags: 'wx' }));
+      if (file.file.truncated || received > limit) throw tooLarge();
     } catch (error) {
       await cleanup();
       throw error;
@@ -83,11 +110,7 @@ export function importRoutes(app: Api, deps: Deps): void {
         { tree, fileName: upload.fileName, createdTree: marker !== null },
         async (signal, onProgress) => {
           const store = library.open(tree);
-          const result = await importer!(upload.path, store, {
-            mediaDir: treePaths(library.dirOf(tree)).media,
-            onProgress,
-            signal,
-          });
+          const result = await importer!(upload.path, store, { onProgress, signal });
           if (marker) library.clearImportPending(tree, marker);
           thumbnails.enqueueTree(store, library.dirOf(tree));
           return result;
@@ -129,8 +152,14 @@ export function importRoutes(app: Api, deps: Deps): void {
     '/api/trees/:tree/import',
     { schema: { params: TreeParams } },
     async (request, reply) => {
-      const { tree } = request.params;
-      library.open(tree);
+      const store = library.open(request.params.tree);
+      const tree = library.canonical(request.params.tree);
+      // The importer would refuse a tree with data; say so before reading the upload.
+      const used = store.db
+        .prepare('SELECT (SELECT count(*) FROM person) + (SELECT count(*) FROM import_batch)')
+        .pluck()
+        .get() as number;
+      if (used > 0) throw conflict('Imports go into a new, empty tree');
       const upload = await receive(request);
       const job = start(tree, upload, null);
       return reply.code(202).send({ jobId: job.id, job });
@@ -142,8 +171,9 @@ export function importRoutes(app: Api, deps: Deps): void {
     '/api/trees/:tree/reimport',
     { schema: { params: TreeParams } },
     async (request, reply) => {
-      const { tree } = request.params;
-      library.open(tree);
+      library.open(request.params.tree);
+      // The id as spelled on disk, so the busy guard and the stored review match other requests.
+      const tree = library.canonical(request.params.tree);
       const upload = await receive(request);
       // Busy from queueing to the end of cleanup, like an import: the tree is
       // not written, renamed or deleted under the compare.
@@ -187,7 +217,14 @@ export function importRoutes(app: Api, deps: Deps): void {
   app.delete('/api/jobs/:id', { schema: { params: JobParams } }, async (request, reply) => {
     const { id } = request.params;
     if (!jobs.get(id)) throw notFound(`Job ${id} not found`);
-    if (!jobs.cancel(id)) throw conflict(`Job ${id} has already finished`);
+    if (!jobs.cancel(id)) {
+      const job = jobs.get(id)!;
+      throw conflict(
+        job.state === 'running'
+          ? `Job ${id} is saving and can no longer be cancelled`
+          : `Job ${id} has already finished`,
+      );
+    }
     return reply.code(202).send({ job: jobs.get(id) });
   });
 

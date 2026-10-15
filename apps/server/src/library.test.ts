@@ -108,6 +108,23 @@ describe('Library', () => {
     expect(library.list().map((t) => t.id)).toEqual(['Other']);
     library.closeAll();
   });
+
+  it('resolves an id to its folder as spelled on disk, without folding case', async () => {
+    const library = new Library(await mkdtemp(join(tmpdir(), 'oa-lib-')));
+    const created = library.create('Caf\u00e9');
+    // NFD and NFC spellings are one tree: one connection, one busy state.
+    expect(library.open('Cafe\u0301')).toBe(created);
+    expect(library.canonical('Cafe\u0301')).toBe('Caf\u00e9');
+    const release = library.markBusy('Cafe\u0301');
+    expect(library.isBusy('Caf\u00e9')).toBe(true);
+    release();
+    expect(library.isBusy('Caf\u00e9')).toBe(false);
+    // A case variant is a different (missing) tree on every file system.
+    expect(library.exists('CAF\u00c9')).toBe(false);
+    expect(() => library.open('caf\u00e9')).toThrow(/not found/);
+    expect(library.list().map((t) => t.id)).toEqual(['Caf\u00e9']);
+    library.closeAll();
+  });
 });
 
 describe('tree routes', () => {

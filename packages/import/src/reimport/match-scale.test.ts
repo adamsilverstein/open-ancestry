@@ -2,7 +2,7 @@ import { openMemoryTree } from '@open-ancestry/db';
 import { describe, expect, it } from 'vitest';
 import { importGedcom } from '../import';
 import { TODAY, ged } from '../test-helpers';
-import { matchPeople, type MatchStats } from './match';
+import { matchPeople, type MatchStats, type NearMiss } from './match';
 import { snapshot } from './snapshot';
 
 /** `count` people who all share one name, born a year apart from 1400 on. */
@@ -93,6 +93,42 @@ describe('matching at scale', () => {
     );
     const matches = matchPeople(snapshot(existing), snapshot(incoming));
     expect(matches.size).toBe(3);
+    existing.close();
+    incoming.close();
+  });
+});
+
+describe('matching at scale: rare names and undated people (review of #222)', () => {
+  it('still compares a rare name whose birth year has two digits swapped', async () => {
+    const existing = await tree(
+      ged('0 @I1@ INDI', '1 NAME Ottilie /Brandvold/', '1 SEX F', '1 BIRT', '2 DATE 1857'),
+    );
+    const incoming = await tree(
+      ged('0 @I9@ INDI', '1 NAME Ottilie /Brandvold/', '1 SEX F', '1 BIRT', '2 DATE 1875'),
+    );
+    const near = new Map<string, NearMiss>();
+    const matches = matchPeople(snapshot(existing), snapshot(incoming), near);
+    const treeId = existing.db.prepare('SELECT id FROM person').pluck().get() as string;
+    const found = [...matches.values()][0]?.existingId ?? [...near.values()][0]?.existingId;
+    expect(found).toBe(treeId);
+    existing.close();
+    incoming.close();
+  });
+
+  it('caps comparisons for people without a birth year in a crowded name', async () => {
+    const undated = (count: number, offset: number) => {
+      const lines: string[] = [];
+      for (let n = 0; n < count; n++) lines.push(`0 @I${n + offset}@ INDI`, '1 NAME John /Smith/');
+      return lines;
+    };
+    const existing = await tree(
+      sameNames(300, 1).replace('0 TRLR', [...undated(300, 5001), '0 TRLR'].join('\n')),
+    );
+    const incoming = await tree(ged(...undated(300, 9001)));
+    const stats: MatchStats = { comparisons: 0 };
+    matchPeople(snapshot(existing), snapshot(incoming), undefined, stats);
+    // Every pair would be 300 x 600 = 180,000.
+    expect(stats.comparisons).toBeLessThan(300 * 80);
     existing.close();
     incoming.close();
   });

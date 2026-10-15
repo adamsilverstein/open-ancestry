@@ -249,7 +249,10 @@ export function snapshot(store: TreeStore): Snapshot {
 }
 
 /**
- * Name ids whose export gave a name type (`2 TYPE` under the NAME). Others
+ * Name ids whose export gave a name type (`2 TYPE` under the NAME). Matched
+ * by the NAME value, which is enough for Ancestry's exports: two identical
+ * NAME lines where only one is typed would both count, and a NAME continued
+ * with CONC would not match. Others
  * get the importer's default, which the review should not present as fact.
  */
 export function statedNameTypes(store: TreeStore): Set<string> {

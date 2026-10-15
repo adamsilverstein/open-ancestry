@@ -33,6 +33,8 @@ export type ReimportChange =
       name: string;
       /** Only when the export states it; otherwise null (the importer's default is not news). */
       nameType: string | null;
+      /** For a primary name both sides changed: the name it had before the user renamed them. */
+      was?: string;
     }
   | {
       kind: 'fact.add';
@@ -180,6 +182,8 @@ export interface LocalHistory {
   base: Map<string, Record<string, unknown>>;
   /** Names (normalized) a person had before the user changed or removed them. */
   formerNames: Map<string, Set<string>>;
+  /** People whose primary name the user changed or removed, with what it was (as written). */
+  renamedPrimary: Map<string, string>;
   /** People the user deleted: their names (normalized) and birth year. */
   deletedPeople: { names: Set<string>; birthYear: number | null }[];
   /** Things the user removed from people and families still in the tree. */
@@ -240,6 +244,7 @@ export function localHistory(store: TreeStore): LocalHistory {
   const renamed = new Set<string>();
   const base = new Map<string, Image>();
   const formerNames = new Map<string, Set<string>>();
+  const renamedPrimary = new Map<string, string>();
   /** Deleted rows as they were, by `entity|id`. */
   const gone = new Map<string, Image>();
   const deletes: { entity: string; id: string; row: Image }[] = [];
@@ -247,8 +252,10 @@ export function localHistory(store: TreeStore): LocalHistory {
     const person = row.person_id as string;
     renamed.add(person);
     const set = formerNames.get(person) ?? new Set<string>();
-    set.add(norm(fullName(row as { given: string | null; surname: string | null })));
+    const name = fullName(row as { given: string | null; surname: string | null });
+    set.add(norm(name));
     formerNames.set(person, set);
+    if (row.is_primary && !renamedPrimary.has(person)) renamedPrimary.set(person, name);
   };
   for (const r of rows) {
     const key = `${r.entity}|${r.entity_id}`;
@@ -374,6 +381,7 @@ export function localHistory(store: TreeStore): LocalHistory {
     renamed,
     base,
     formerNames,
+    renamedPrimary,
     deletedPeople,
     removed: { facts, names, citations, media, families, childLinks },
   };
@@ -685,22 +693,24 @@ export function diffTrees(
       );
     }
     const names = new Set(e.names.map((n) => `${norm(n.given)}|${norm(n.surname)}`));
-    // A name the export has but the tree lacks may be one the user changed: keep their edit.
-    const renamed = local.renamed.has(e.row.id);
+    // The user renamed this person, and the export renamed them too: their name stays primary.
+    const renamedFrom = local.renamedPrimary.get(e.row.id);
     const removedNames = gone.names.get(e.row.id);
     const formerNames = local.formerNames.get(e.row.id);
     for (const n of i.names) {
       if (names.has(`${norm(n.given)}|${norm(n.surname)}`)) continue;
       // A name the user changed or removed, still in the export as it was: their edit stands.
       if (formerNames?.has(norm(fullName(n))) || removedNames?.has(norm(fullName(n)))) continue;
+      const bothRenamed = renamedFrom !== undefined && !!n.is_primary;
       add(
         {
           kind: 'name.add',
           incomingNameId: n.id,
           name: fullName(n),
           nameType: typedNames.has(n.id) ? n.type : null,
+          ...(bothRenamed ? { was: renamedFrom } : {}),
         },
-        renamed ? { conflict: 'local-edit', defaultAccept: false } : {},
+        bothRenamed ? { conflict: 'local-edit', defaultAccept: false } : {},
       );
     }
     diffFacts(e, i, edited, add, removed);

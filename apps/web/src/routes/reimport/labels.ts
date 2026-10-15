@@ -37,10 +37,8 @@ const list = (names: string[]) =>
 /** What ticking a conflicting change does, under its checkbox; undefined for other changes. */
 export function conflictText(change: ReviewChange, personName: string): string | undefined {
   if (change.kind === 'name.add' && change.conflict === 'local-edit') {
-    return `The export still calls this person ${change.name}; you renamed them ${personName} here. Tick to also keep ${change.name} as an alternate name; ${personName} stays the primary name.`;
-  }
-  if (change.kind === 'name.add' && change.conflict === 'local-delete') {
-    return `You deleted the name ${change.name} here. Tick to add it back as an alternate name.`;
+    const was = change.was ? ` (it was ${change.was})` : '';
+    return `The export now calls this person ${change.name}${was}; you renamed them ${personName} here. Tick to also keep ${change.name} as an alternate name; ${personName} stays the primary name.`;
   }
   if (change.conflict === 'local-edit') {
     return 'Edited in this tree since the last import; your edit is kept unless you tick this.';
@@ -58,12 +56,13 @@ export function describeChange(change: ReviewChange, personName: string): string
       return `Add ${personName}`;
     case 'sex':
       return `Sex: ${SEX[change.before] ?? change.before} → ${SEX[change.after] ?? change.after}`;
-    case 'name.add':
+    case 'name.add': {
       // Ticking adds an alternate name: say so when it competes with the user's own.
-      if (change.conflict === 'local-edit') return `Also keep ${change.name} as an alternate name`;
-      return change.nameType
-        ? `Add name: ${change.name} (${NAME_TYPES[change.nameType] ?? change.nameType})`
-        : `Add name: ${change.name}`;
+      const type = change.nameType ? ` (${NAME_TYPES[change.nameType] ?? change.nameType})` : '';
+      return change.conflict === 'local-edit'
+        ? `Also keep ${change.name}${type} as an alternate name`
+        : `Add name: ${change.name}${type}`;
+    }
     case 'fact.add':
       return `Add ${change.owner === 'family' ? 'family fact' : 'fact'}: ${factText(change.fact)}`;
     case 'fact.change':

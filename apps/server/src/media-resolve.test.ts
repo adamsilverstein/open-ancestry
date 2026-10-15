@@ -2,7 +2,7 @@ import { link, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resolveMediaPath, resolveMediaPathSync } from './routes/media';
+import { openMediaFile, resolveMediaPath, resolveMediaPathSync } from './routes/media';
 
 /*
  * Both media resolvers must agree on every case (#207): the async one serves
@@ -154,5 +154,30 @@ describe('media path resolvers', () => {
     expect(async).toBe(expected);
     expect(sync).toBe(async);
     expect(reasons).toEqual(c.reason ? [c.reason, c.reason] : []);
+  });
+});
+
+describe('openMediaFile', () => {
+  it('refuses a file whose folder is swapped for a symlink after the check', async () => {
+    await plainMedia();
+    await mkdir(join(outside, 'photos'));
+    await writeFile(join(outside, 'photos', 'a.jpg'), 'secret');
+    const reasons: string[] = [];
+    const opened = await openMediaFile(media(), 'photos/a.jpg', (r) => reasons.push(r), {
+      // Between the check and the open, photos/ becomes a link out of the tree.
+      afterResolve: async () => {
+        await rm(join(media(), 'photos'), { recursive: true });
+        await symlink(join(outside, 'photos'), join(media(), 'photos'));
+      },
+    });
+    expect(opened).toBeNull();
+    expect(reasons).toEqual(['changed']);
+  });
+
+  it('opens a file that stays put', async () => {
+    await plainMedia();
+    const opened = await openMediaFile(media(), 'photos/a.jpg');
+    expect(opened?.info.size).toBe(1);
+    await opened?.handle.close();
   });
 });

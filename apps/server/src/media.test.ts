@@ -133,17 +133,27 @@ describe('with a tree', () => {
     it('refuses a hard-linked file and logs why, once per file (#207)', async () => {
       const outside = join(await mkdtemp(join(tmpdir(), 'oa-secret-')), 'secret.jpg');
       await writeFile(outside, BYTES);
-      await link(outside, join(library.root, 'Test.oatree', 'media', 'hard.jpg'));
-      const id = addMedia({ local_path: 'hard.jpg' });
-      const warn = vi.spyOn(api.app.log, 'warn');
-      for (let i = 0; i < 2; i++) {
-        const res = await api.get(`${base}/media/${id}`);
-        expect(res.statusCode).toBe(404);
-        expect(res.rawPayload.equals(BYTES)).toBe(false);
+      // A name with an escape character: the log line must not pass it to the terminal.
+      const name = 'hard\u001b[31m.jpg';
+      await link(outside, join(library.root, 'Test.oatree', 'media', name));
+      const id = addMedia({ local_path: name });
+      // The shipped CLI runs with logger: false, so the refusal goes to stderr itself.
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        for (let i = 0; i < 2; i++) {
+          const res = await api.get(`${base}/media/${id}`);
+          expect(res.statusCode).toBe(404);
+          expect(res.rawPayload.equals(BYTES)).toBe(false);
+        }
+        const logged = warn.mock.calls
+          .map((call) => call.join(' '))
+          .filter((l) => l.includes('hard link'));
+        expect(logged).toHaveLength(1);
+        expect(logged[0]).toContain('hard\\x1b[31m.jpg');
+        expect(logged[0]).not.toContain('\u001b');
+      } finally {
+        warn.mockRestore();
       }
-      const logged = warn.mock.calls.filter((call) => JSON.stringify(call).includes('hard link'));
-      expect(logged).toHaveLength(1);
-      expect(JSON.stringify(logged[0])).toContain('hard.jpg');
     });
 
     it('accepts only the named thumbnail sizes', async () => {

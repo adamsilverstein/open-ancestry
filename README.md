@@ -27,6 +27,14 @@ node apps/cli/dist/cli.js import ~/Downloads/family.ged --name "Vale family" [--
 
 Trees are folders in your library (`~/OpenAncestry`, or `--library` / `$OA_LIBRARY`); switch, create, rename and delete them from the tree menu in the top bar. The server binds to `127.0.0.1` only.
 
+Import limits, for `serve` and `import` (flag, or environment variable):
+
+| Flag | Variable | Default | Caps |
+| --- | --- | --- | --- |
+| `--max-gedcom-mb` | `OA_MAX_GEDCOM_MB` | 64 | The GEDCOM text: a `.ged` file, or the one inside a GEDZIP once unzipped. A 100k-person Ancestry export is about 48 MB. |
+| `--max-archive-mb` | `OA_MAX_ARCHIVE_MB` | 1024 | A whole GEDZIP, photos included (each photo up to 256 MB, all of them up to 1 GB). |
+| `--import-heap-mb` | `OA_IMPORT_HEAP_MB` | 2048 | Memory for each import's worker (`serve` only). Raise it with `--max-gedcom-mb`: a 64 MB file needs about 1 GB. |
+
 ## Development
 
 ```sh

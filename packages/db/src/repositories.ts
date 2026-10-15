@@ -374,12 +374,45 @@ export const families = {
   delete(tx: Tx, id: string) {
     for (const link of familyChildren.listForFamily(tx.store, id))
       familyChildren.delete(tx, link.id);
+    families.deleteEvents(tx, id);
+    deleteOwned(tx, 'family', id);
+    return tx.delete('family', id);
+  },
+
+  /** Removes the family's events (marriage, divorce...), e.g. when the partnership ends. */
+  deleteEvents(tx: Tx, id: string) {
     for (const role of eventRoles.listForFamily(tx.store, id)) {
       tx.delete('event_role', role.id);
       deleteOrphanEvent(tx, role.event_id);
     }
-    deleteOwned(tx, 'family', id);
-    return tx.delete('family', id);
+  },
+
+  /**
+   * Deletes a family that no longer records anything: at most one partner,
+   * no children, and nothing a user attached (events, notes, media,
+   * citations, tags). Imported GEDCOM kept for round-trip (raw_record,
+   * unmapped_line) does not count: every imported family has it, it is
+   * deleted with the family, and undo restores it.
+   */
+  pruneIfEmpty(tx: Tx, id: string): boolean {
+    const family = tx.store.getRow('family', id);
+    if (!family) return false;
+    const partners = [family.partner1_id, family.partner2_id].filter(Boolean).length;
+    if (partners > 1) return false;
+    const attached = tx.store
+      .stmt(
+        `SELECT 1 WHERE
+           EXISTS (SELECT 1 FROM family_child WHERE family_id = @id)
+           OR EXISTS (SELECT 1 FROM event_role WHERE family_id = @id)
+           OR EXISTS (SELECT 1 FROM note_link WHERE owner_type = 'family' AND owner_id = @id)
+           OR EXISTS (SELECT 1 FROM media_link WHERE owner_type = 'family' AND owner_id = @id)
+           OR EXISTS (SELECT 1 FROM citation_link WHERE owner_type = 'family' AND owner_id = @id)
+           OR EXISTS (SELECT 1 FROM tag_link WHERE owner_type = 'family' AND owner_id = @id)`,
+      )
+      .get({ id });
+    if (attached) return false;
+    families.delete(tx, id);
+    return true;
   },
 };
 

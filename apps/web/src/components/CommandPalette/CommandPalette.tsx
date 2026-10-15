@@ -16,9 +16,13 @@ export interface PaletteAction {
   /** Extra words that should match, e.g. `dark light` for the theme action. */
   keywords?: string[];
   shortcut?: string;
-  onSelect: () => void;
+  /**
+   * Runs the action. Return a promise (a navigation) when the action moves focus
+   * itself, e.g. to the new page's heading; otherwise focus returns to the opener.
+   */
+  onSelect: () => void | Promise<unknown>;
   /** Runs on Shift+Enter or Alt+Enter instead of `onSelect`. */
-  onAltSelect?: () => void;
+  onAltSelect?: () => void | Promise<unknown>;
   /** Shown dimmed and skipped by the keyboard, e.g. results for an older query. */
   disabled?: boolean;
 }
@@ -50,6 +54,22 @@ export interface CommandPaletteProps {
    * with nothing selectable highlighted, runs on the first result once they arrive.
    */
   pending?: boolean;
+}
+
+/** How long results must stay the same before their count is announced. */
+const STATUS_DELAY_MS = 500;
+
+/** "3 people, 2 actions" for the groups' visible items, or "No results". */
+function describeResults(groups: PaletteGroup[], visible: PaletteAction[]): string {
+  const shown = new Set(visible);
+  const parts = groups.flatMap((group) => {
+    const n = group.items.filter((i) => shown.has(i)).length;
+    if (!n) return [];
+    const plural = group.heading.toLowerCase();
+    const singular = plural === 'people' ? 'person' : plural.replace(/s$/, '');
+    return [`${n} ${n === 1 ? singular : plural}`];
+  });
+  return parts.length ? parts.join(', ') : 'No results';
 }
 
 /** Item values are ids, so two people with the same name stay distinct. */
@@ -109,10 +129,21 @@ export function CommandPalette({
     onOpenChange(false);
   };
 
+  // Set when the chosen action moves focus itself, so closing does not send it back.
+  const focusMoved = useRef(false);
   const run = (item: PaletteAction, alt: boolean) => {
     close();
-    (alt && item.onAltSelect ? item.onAltSelect : item.onSelect)();
+    const result = (alt && item.onAltSelect ? item.onAltSelect : item.onSelect)();
+    if (result instanceof Promise) focusMoved.current = true;
   };
+
+  // The result count, said once results settle rather than on every key.
+  const status = loading || pending || !query.trim() ? '' : describeResults(groups, visibleItems);
+  const [announced, setAnnounced] = useState('');
+  useEffect(() => {
+    const id = setTimeout(() => setAnnounced(status), STATUS_DELAY_MS);
+    return () => clearTimeout(id);
+  }, [status]);
 
   // Enter pressed before the current query's results arrived.
   const queued = useRef<{ alt: boolean } | null>(null);
@@ -153,12 +184,20 @@ export function CommandPalette({
             returnFocus.current = document.activeElement as HTMLElement | null;
           }}
           onCloseAutoFocus={(event) => {
+            if (focusMoved.current) {
+              focusMoved.current = false;
+              event.preventDefault();
+              return;
+            }
             if (!returnFocus.current?.isConnected) return;
             event.preventDefault();
             returnFocus.current.focus();
           }}
         >
           <RadixDialog.Title className="oa-visually-hidden">{title}</RadixDialog.Title>
+          <div role="status" className="oa-visually-hidden">
+            {announced}
+          </div>
           <Command
             // Server results arrive pre-ranked and score 1; local actions match the
             // start of their label or a whole keyword and score lower, so they sort after.

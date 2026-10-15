@@ -8,6 +8,7 @@ import {
   type PaletteAction,
   type PaletteGroup,
 } from '../components/CommandPalette/CommandPalette';
+import { focusMainHeading } from '../lib/focusHeading';
 import { formatLifespan } from '../lib/lifespan';
 import { toPersonSummary } from '../lib/person';
 import { useTheme } from '../lib/useTheme';
@@ -36,8 +37,10 @@ export default function ShellCommandPalette({ open, onOpenChange }: ShellCommand
   const [query, setQuery] = useState('');
   const { tree, hits, stale, pending } = useSearchPeople(query);
 
+  // Opening a page moves focus to its heading, so a screen reader announces it (#200).
+  const openPage = (go: Promise<unknown>) => go.then(focusMainHeading);
   const toPerson = (personId: string) => () =>
-    void navigate({ to: '/person/$personId', params: { personId } });
+    openPage(navigate({ to: '/person/$personId', params: { personId } }));
   // From the tree, keep its view (tree, layout, generations) while re-focusing.
   const toTree = (personId: string) => () =>
     void navigate({
@@ -68,14 +71,14 @@ export default function ShellCommandPalette({ open, onOpenChange }: ShellCommand
             label: 'Open people list',
             icon: <Users size={16} aria-hidden />,
             keywords: ['people', 'list', 'everyone', 'table'],
-            onSelect: () => void navigate({ to: '/people' }),
+            onSelect: () => openPage(navigate({ to: '/people' })),
           },
           {
             id: 'checker',
             label: 'Open tree checker',
             icon: <ListChecks size={16} aria-hidden />,
             keywords: ['check', 'checker', 'problems', 'duplicates', 'errors', 'sources'],
-            onSelect: () => void navigate({ to: '/checker' }),
+            onSelect: () => openPage(navigate({ to: '/checker' })),
           },
         ]
       : []),
@@ -84,14 +87,14 @@ export default function ShellCommandPalette({ open, onOpenChange }: ShellCommand
       label: 'Go to start page',
       icon: <House size={16} aria-hidden />,
       keywords: ['home', 'start'],
-      onSelect: () => void navigate({ to: '/' }),
+      onSelect: () => openPage(navigate({ to: '/' })),
     },
     {
       id: 'design',
       label: 'Open design system',
       icon: <Palette size={16} aria-hidden />,
       keywords: ['design', 'system', 'components', 'kitchen sink'],
-      onSelect: () => void navigate({ to: '/design' }),
+      onSelect: () => openPage(navigate({ to: '/design' })),
     },
     {
       id: 'theme',

@@ -18,6 +18,10 @@ describe('re-import labels', () => {
       'Birth: abt. 1842 → 12 Mar 1842',
     );
     expect(factText(fact('03/15/1828', null))).toBe('Birth, 15 Mar 1828');
+    // Different texts for the same date: show them as written rather than "x → x".
+    expect(changeText(fact('BET 1850 AND 1860'), fact('1850-1860'))).toBe(
+      'Birth: BET 1850 AND 1860 → 1850-1860',
+    );
     expect(changeText(fact('1842', 'A'), fact('1843', 'B'))).toBe('Birth: 1842, A → 1843, B');
     expect(changeText(fact('1842', null), fact('1842', 'B'))).toBe('Birth: (none) → B');
     expect(

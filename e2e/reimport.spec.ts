@@ -102,7 +102,8 @@ async function startReimport(page: Page, seeded: Seeded, text = laterExport()) {
 }
 
 const card = (scope: Page | Locator, name: string) =>
-  scope.getByRole('region', { name, exact: true });
+  // Person cards are articles; regions are kept for the four groups.
+  scope.getByRole('article', { name, exact: true });
 
 test('import, edit, re-import, review, apply, then undo', async ({
   page,
@@ -296,15 +297,18 @@ test('the review lists what needs a decision first, filters by group, and format
   const groups = page.locator('[data-group]');
   await expect(groups.first()).toHaveAttribute('data-group', 'decide');
   const decide = page.getByRole('region', { name: /Needs your decision/ });
-  // Marked by more than colour: an icon with a text label.
-  const conflict = card(decide, 'Josiah Ashgrove').getByText('Conflict', { exact: true });
-  await expect(conflict).toBeVisible();
-  // App date format, not raw GEDCOM.
-  await expect(
-    card(decide, 'Josiah Ashgrove').getByRole('checkbox', { name: 'Death: 3 May 1939 → 1940' }),
-  ).toBeVisible();
-  // Summary counts filter the list and match the cards they describe.
-  const filters = page.getByRole('group', { name: 'Show' });
+  // Marked by more than colour: an icon and the word, announced with the checkbox.
+  const death = card(decide, 'Josiah Ashgrove').getByRole('checkbox', {
+    name: 'Death: 3 May 1939 → 1940',
+  });
+  await expect(death).toBeVisible();
+  await expect(death).toHaveAccessibleDescription(/^Conflict/);
+  // The summary is about the whole export, and says which people aren't listed.
+  await expect(page.getByRole('region', { name: 'Summary' })).toContainText(
+    /\d+ matched \(\d+ unchanged, not listed\)/,
+  );
+  // The filter counts match the cards they show; empty groups get no filter.
+  const filters = page.getByRole('group', { name: 'Filter the review' });
   for (const [label, id] of [
     ['Needs your decision', 'decide'],
     ['Changes', 'changes'],
@@ -317,7 +321,7 @@ test('the review lists what needs a decision first, filters by group, and format
     await expect(button).toHaveAttribute('aria-pressed', 'true');
     await expect(groups).toHaveCount(1);
     await expect(groups.first()).toHaveAttribute('data-group', id);
-    await expect(groups.first().locator('section[data-status]')).toHaveCount(count);
+    await expect(groups.first().locator('article[data-status]')).toHaveCount(count);
   }
   await filters.getByRole('button', { name: /^All \d+$/ }).click();
   await expect(groups).toHaveCount(4);
@@ -401,7 +405,7 @@ test('a large review is shown in pages, and bulk choices cover every page', asyn
     (_, i) => `0 @I${900 + i}@ INDI\n1 NAME Extra${i} /Newfield/\n1 BIRT\n2 DATE ${1900 + i}`,
   ).join('\n');
   await startReimport(page, seeded, laterExport().replace('0 TRLR', `${many}\n0 TRLR`));
-  const cards = page.locator('section[data-status]');
+  const cards = page.locator('article[data-status]');
   await expect(cards).toHaveCount(100);
   await expect(page.getByRole('button', { name: /Show 54 more/ })).toBeVisible();
   // Every default change counts, shown or not: 151 new people and the matched changes.
@@ -411,4 +415,17 @@ test('a large review is shown in pages, and bulk choices cover every page', asyn
   await page.getByRole('button', { name: /Show 54 more/ }).click();
   await expect(cards).toHaveCount(154);
   await expect(page.getByRole('button', { name: /Show \d+ more/ })).toHaveCount(0);
+});
+
+test('a review with nothing in a group offers no filter for it', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  // Only a new person: no decisions, changes or information.
+  const one = '0 @I90@ INDI\n1 NAME Quill /Vexbury/\n1 BIRT\n2 DATE 1950\n';
+  await startReimport(page, seeded, SAMPLE.replace('0 TRLR', `${one}0 TRLR`));
+  const filters = page.getByRole('group', { name: 'Filter the review' });
+  await expect(filters.getByRole('button')).toHaveText(['All 1', 'New people 1']);
 });

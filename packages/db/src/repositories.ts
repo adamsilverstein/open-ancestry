@@ -71,7 +71,7 @@ function deleteIfUnused(tx: Tx, kind: 'citation' | 'media' | 'note', id: string)
         ? tx.store.stmt('SELECT 1 FROM media_link WHERE media_id = ?').get(id) ||
           tx.store.stmt('SELECT 1 FROM person WHERE primary_media_id = ?').get(id)
         : tx.store.stmt('SELECT 1 FROM citation_link WHERE citation_id = ?').get(id);
-  if (used) return;
+  if (used || (kind !== 'citation' && pointedToInText(tx, kind, id))) return;
   if (kind === 'note') notes.delete(tx, id);
   else if (kind === 'media') media.delete(tx, id);
   else {
@@ -79,6 +79,18 @@ function deleteIfUnused(tx: Tx, kind: 'citation' | 'media' | 'note', id: string)
     citations.delete(tx, id);
     deleteSourceIfUnused(tx, source_id);
   }
+}
+
+/**
+ * Whether another imported record's text still points to a NOTE or OBJE
+ * record: ASSO notes and custom subtrees are kept as text, not as links.
+ */
+function pointedToInText(tx: Tx, kind: 'media' | 'note', id: string): boolean {
+  const xref = tx.store.getRow(kind, id)?.external_id;
+  if (!xref) return false;
+  return !!tx.store
+    .stmt(`SELECT 1 FROM raw_record WHERE xref IS NOT ? AND instr(raw_text, ' ' || ?) > 0 LIMIT 1`)
+    .get(xref, xref);
 }
 
 /**

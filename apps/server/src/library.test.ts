@@ -214,6 +214,22 @@ describe.skipIf(process.platform === 'win32')('library permissions', () => {
     expect(() => new Library(root, { platform: 'win32' }).list()).not.toThrow();
   });
 
+  it('refuses a library folder that belongs to another account', async () => {
+    // Under a parent others can write to (no sticky bit), another account can
+    // swap in its own 0700 folder: the mode looks private, the owner is not you.
+    const root = await temp();
+    expect(() => new Library(root, { uid: -1 }).list()).toThrow(
+      expect.objectContaining({
+        statusCode: 403,
+        message: expect.stringMatching(/belongs to another account.*--shared-library/s),
+      }),
+    );
+    expect(() => new Library(root, { uid: -1 }).open('Any')).toThrow(/another account/);
+    expect(() => new Library(root, { uid: -1, shared: true }).list()).not.toThrow();
+    expect(() => new Library(root, { uid: -1, platform: 'win32' }).list()).not.toThrow();
+    expect(() => new Library(root).list()).not.toThrow();
+  });
+
   it('leaves a shared folder that holds more than trees alone, with a warning', async () => {
     // e.g. `--library ~` or a group-shared folder: chmod would lock others out.
     const root = await temp();

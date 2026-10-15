@@ -10,6 +10,24 @@
   font: var(--oa-text-sm);
 }
 
+.stale {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oa-space-2) var(--oa-space-4);
+  padding: var(--oa-space-3) var(--oa-space-4);
+  border: 1px solid var(--oa-warning);
+  border-left-width: 4px;
+  border-radius: var(--oa-radius-md);
+  background: var(--oa-surface);
+}
+
+.stale p {
+  margin: 0;
+  flex: 1 1 20rem;
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;

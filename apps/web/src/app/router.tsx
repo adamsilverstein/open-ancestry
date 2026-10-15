@@ -5,7 +5,7 @@ import {
   lazyRouteComponent,
   notFound,
 } from '@tanstack/react-router';
-import { isNotFound } from '../api/client';
+import { isNotFound, isValidId } from '../api/client';
 import { currentTreeQuery, personQuery } from '../api/queries';
 import { PersonNotFound } from '../routes/person/PersonNotFound';
 import { PersonSkeleton } from '../routes/person/PersonSkeleton';
@@ -72,6 +72,8 @@ const personRoute = createRoute({
   loader: async ({ params }) => {
     const tree = await queryClient.ensureQueryData(currentTreeQuery);
     if (!tree) throw notFound({ data: { reason: 'no-tree' } });
+    // An id that cannot exist (from a hand-typed or mangled URL) is simply not found.
+    if (!isValidId(params.personId)) throw notFound();
     try {
       await queryClient.ensureQueryData(personQuery(tree, params.personId));
     } catch (error) {

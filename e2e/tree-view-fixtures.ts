@@ -29,12 +29,50 @@ import type { BulkData } from '@open-ancestry/db';
 
 export interface SeedInfo {
   family: { tree: string; ids: Record<string, string> };
+  /** Six generations of hard-to-fit names for the fan (see fanNamesGedcom). */
+  fanNames: { tree: string; focusId: string };
+  /** fixtures/ancestry-sample.ged, imported: ids by given name. */
+  sample: { tree: string; ids: Record<string, string> };
   perf: PerfTree;
   /** Only with OA_PERF_100K=1 (the perf job): seeding 100,000 people takes several seconds. */
   perf100k?: PerfTree;
 }
 
 export const FAMILY_TREE = 'e2e tree view family';
+export const SAMPLE_TREE = 'e2e tree view sample';
+export const FAN_NAMES_TREE = 'e2e tree view fan names';
+
+/** Names that are hard to fit in a fan segment. Every one is invented. */
+const HARD_NAMES = [
+  'Johann Maximilian Wilhelm Friedrich /von Hohenzollern-Sigmaringen/',
+  'Maria Theresia Wilhelmina Katharina /van Hoek/',
+  '山田花子',
+  '𝒜lice /Zed/',
+  'John /Smith/ Jr.',
+  'Ζωή /Παπαδοπούλου/',
+  'Bartholomew /Featherstonehaugh/',
+  'Wu',
+];
+
+/**
+ * A GEDCOM of six generations (person n's parents are 2n and 2n + 1) whose
+ * ancestors all carry hard names, for the fan's label fitting.
+ */
+export function fanNamesGedcom(): string {
+  const lines = ['0 HEAD', '1 GEDC', '2 VERS 5.5.1', '1 CHAR UTF-8'];
+  for (let n = 1; n < 64; n++) {
+    const name = n === 1 ? 'Ann /Lee/' : HARD_NAMES[(n - 2) % HARD_NAMES.length]!;
+    lines.push(`0 @I${n}@ INDI`, `1 NAME ${name}`, `1 SEX ${n % 2 === 0 ? 'M' : 'F'}`);
+    lines.push('1 BIRT', `2 DATE ${2000 - 25 * Math.floor(Math.log2(n))}`);
+    if (n < 32) lines.push(`1 FAMC @F${n}@`);
+    if (n > 1) lines.push(`1 FAMS @F${Math.floor(n / 2)}@`);
+  }
+  for (let n = 1; n < 32; n++) {
+    lines.push(`0 @F${n}@ FAM`, `1 HUSB @I${2 * n}@`, `1 WIFE @I${2 * n + 1}@`, `1 CHIL @I${n}@`);
+  }
+  lines.push('0 TRLR');
+  return lines.join('\n') + '\n';
+}
 export const PERF_TREE = 'e2e tree view 10k';
 export const PERF_TREE_100K = 'e2e tree view 100k';
 

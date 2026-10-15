@@ -38,6 +38,9 @@ describe('toPersonSummary', () => {
     expect(toPersonSummary(base, 'tree')).toEqual({
       id: 'p1',
       name: 'Ada Vale',
+      // The stored parts, which the fan fits labels from.
+      given: 'Ada',
+      surname: 'Vale',
       sex: 'F',
       birth: { year: 1911, qualifier: 'abt' },
       death: { year: 1957 },
@@ -54,6 +57,16 @@ describe('toPersonSummary', () => {
     expect(s.living).toBe(true);
     expect(s.sex).toBe('U');
     expect(s.name).toBe('Unknown');
+    expect(s.given).toBeUndefined();
+    expect(s.surname).toBeUndefined();
+  });
+
+  it('keeps a surname prefix with the surname', () => {
+    const s = toPersonSummary(
+      { ...base, given: 'Maria', surnamePrefix: 'van', surname: 'Hoek' },
+      't',
+    );
+    expect(s.surname).toBe('van Hoek');
   });
 
   it('uses the small thumbnail of a local primary photo, and nothing otherwise', () => {

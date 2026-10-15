@@ -1,5 +1,13 @@
 import { createTree } from '@open-ancestry/db';
-import { mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { importGedcom } from './import';
@@ -248,6 +256,13 @@ describe('storing media in a tree', () => {
   const hash = (b: Uint8Array) => Buffer.from(b).toString('hex');
   beforeEach(() => {
     root = makeTempDir('oa-store-');
+  });
+
+  it.skipIf(process.platform === 'win32')('writes media private to the owner (0600)', () => {
+    const enc = new TextEncoder().encode('bytes');
+    const stored = storeMediaFile(root, 'p/private.jpg', enc, hash);
+    expect(statSync(join(root, 'p', 'private.jpg')).mode & 0o777).toBe(0o600);
+    expect(stored.written).toBe(true);
   });
 
   it('never overwrites: same bytes are reused, different bytes get a suffix', () => {

@@ -24,8 +24,13 @@ export {
 } from './store';
 export { isNfcColumn, nfcRow, toNFC } from './nfc';
 export {
+  PRIVATE_DIR_MODE,
+  PRIVATE_FILE_MODE,
+  TreeAccessError,
   TREE_EXTENSION,
   createTree,
+  ensurePrivateDir,
+  restrictMode,
   openMemoryTree,
   openTree,
   treePaths,

@@ -12,7 +12,7 @@ PR numbers point to the change on GitHub.
 
 - **Import Ancestry GEDCOM and GEDZIP files** from the start page (drag and drop) or with `open-ancestry import`. Ancestry's own tags are understood: record links (`_APID`), MyTreeTags, photos and primary photos, adopted and step relationships, and military events. Nothing is dropped: every line is either mapped or kept as is, so the tree can be exported again. (#22, #30, #43, #44)
 - **Import report** with counts, warnings by line number, and the tags that could not be mapped. (#30, #43)
-- **Media from a GEDZIP or a media folder** is linked by its relative path. Missing files are reported, and existing files are never overwritten. (#45, #51)
+- **Media from a GEDZIP or a media folder** is linked by its relative path. Missing files are reported but keep their path, so an export still names them, and existing files are never overwritten. (#45, #51, #221)
 - **Re-import an updated Ancestry export** into an existing tree. People are matched, with a confidence and the reasons for each match, and a review screen lets you accept or reject each change before anything is written. (#72, #184, #192)
 - **Dates as they appear in real trees**: `ABT`, `BEF`, `AFT`, `BET … AND`, `FROM … TO`, US-style `05/28/1960`, ISO dates, decades, centuries and year ranges. Text that is not a date is kept as typed. (#21, #52, #66)
 - **GEDCOM 7** files, including calendar dates, which are validated. (#64, #142)
@@ -58,13 +58,13 @@ PR numbers point to the change on GitHub.
 - **Undo and redo everything**: Cmd/Ctrl-Z, Shift-Cmd/Ctrl-Z, and a History panel listing recent changes. Each dialog save is one undo step, and history survives app upgrades. (#48, #148)
 - **A failed save keeps the dialog open**, with what you typed and the reason, so you can try again. (#177)
 - **Edits to someone deleted elsewhere** (in another window, or by undo) get one plain message, no retry that can't work, and land on a close relative. (#240)
-- **Delete a person** and land on a close relative (or the people list), with an Undo button in the toast. Undo brings you back to the restored person. (#181)
+- **Delete a person** and their own notes, media and citations go with them, while anything still used by someone else stays. You land on a close relative (or the people list), with an Undo button in the toast. Undo brings you back to the restored person. (#181, #232)
 - **Keyboard friendly**: focus returns to whatever opened a dialog, including after a mouse click in Safari, and the History list scrolls from the keyboard. (#59, #171, #208)
 
 ### Privacy and export
 
 - **Your data stays on your computer.** Each tree is a folder (a SQLite database plus media) in your library. The app makes no third-party network requests. (#23, #29)
-- **Export GEDCOM 5.5.1** (Ancestry compatible, keeping Ancestry's custom tags), **GEDCOM 7**, **GEDZIP** with media, and **JSON** for backup and tools. Original records are re-read by their own GEDCOM version, so nothing is lost when a GEDCOM 7 import is exported as 5.5.1, and a line that should point at a record but holds text is reported, not silently dropped. (#23, #46, #223)
+- **Export GEDCOM 5.5.1** (Ancestry compatible, keeping Ancestry's custom tags), **GEDCOM 7**, **GEDZIP** with media, and **JSON** for backup and tools. Original records are re-read by their own GEDCOM version, so nothing is lost when a GEDCOM 7 import is exported as 5.5.1, and a line that should point at a record but holds text is reported, not silently dropped. GEDCOM 7 exports give each media file's format as a MIME type. (#23, #46, #221, #223)
 - **JSON exports can leave out edit history**, and do by default from the export dialog, since that history holds anything you deleted. (#220)
 - **Privatize living people**, on by default when exporting. Private and confidential records are hidden, and record ids are renumbered so nothing about a hidden person leaks. (#46, #104)
 - **Living status** is worked out from dates and can be set by hand. (#21, #48)

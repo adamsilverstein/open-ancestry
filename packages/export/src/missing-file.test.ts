@@ -157,6 +157,20 @@ describe('second review of #221: FORM of a second FILE', () => {
     }
   });
 
+  it('warns, naming the original, when a FORM has no known media type', async () => {
+    const store = await importInto(twoFiles('xyz'));
+    const out = buildGedcomExport(store, { version: '7', now: TODAY });
+    expect(gedcom7Problems(out.text)).toEqual([]);
+    expect(out.text).toContain('1 FILE scans/back.xyz\n2 FORM application/octet-stream');
+    expect(out.warnings).toContainEqual(
+      expect.stringMatching(/FORM xyz.*application\/octet-stream/),
+    );
+    // A privatized export does not quote imported lines.
+    const priv = buildGedcomExport(store, { version: '7', privatizeLiving: true, now: TODAY });
+    expect(priv.warnings).toContainEqual(expect.stringMatching(/application\/octet-stream/));
+    expect(priv.warnings.join('\n')).not.toMatch(/xyz/);
+  });
+
   it('gives a second FILE without a FORM one in GEDCOM 7', async () => {
     const store = await importInto(twoFiles('png').replace('2 FORM png\n', ''));
     const out = buildGedcomExport(store, { version: '7', now: TODAY });

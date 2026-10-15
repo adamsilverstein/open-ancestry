@@ -345,24 +345,59 @@ function decodeLayer(text: string): { decoded: string; starts: number[] } | unde
 }
 
 /**
- * Names matched inside longer text, found in one pass: each needle is filed
- * under its first `key` characters (the shortest needle's length), so a text
- * position costs one map lookup however many withheld people there are.
+ * Names matched inside longer text, found in one pass with an Aho-Corasick
+ * automaton: time is linear in the text plus the matches, however many
+ * withheld names there are or how much they overlap ("sur1", "sur10", ...).
+ * Works on UTF-16 code units, like the folded text it searches.
  */
 class NeedleIndex {
   readonly size: number;
-  private readonly key: number;
-  private readonly byPrefix = new Map<string, string[]>();
+  /** Child of a node for a code unit, keyed `node * 0x10000 + unit`. */
+  private readonly next = new Map<number, number>();
+  /** Longest proper suffix of each node that is also in the trie. */
+  private readonly fail: number[] = [0];
+  /** Length of the needle ending at each node (0: none). */
+  private readonly ends: number[] = [0];
+  /** Nearest node on the fail chain where a needle ends (-1: none). */
+  private readonly output: number[] = [-1];
 
   constructor(needles: Iterable<string>) {
     const list = [...new Set(needles)].filter((n) => n.length > 0);
     this.size = list.length;
-    this.key = list.length ? Math.min(...list.map((n) => n.length)) : 0;
+    const children: number[][] = [[]];
     for (const needle of list) {
-      const prefix = needle.slice(0, this.key);
-      const bucket = this.byPrefix.get(prefix);
-      if (bucket) bucket.push(needle);
-      else this.byPrefix.set(prefix, [needle]);
+      let node = 0;
+      for (let i = 0; i < needle.length; i++) {
+        const key = node * 0x10000 + needle.charCodeAt(i);
+        let child = this.next.get(key);
+        if (child === undefined) {
+          child = this.fail.length;
+          this.next.set(key, child);
+          this.fail.push(0);
+          this.ends.push(0);
+          this.output.push(-1);
+          children.push([]);
+          children[node]!.push(needle.charCodeAt(i));
+        }
+        node = child;
+      }
+      this.ends[node] = needle.length;
+    }
+    // Breadth first, so every node's fail target is finished before its children.
+    const queue: number[] = [];
+    for (const unit of children[0]!) queue.push(this.next.get(unit)!);
+    for (let q = 0; q < queue.length; q++) {
+      const node = queue[q]!;
+      for (const unit of children[node]!) {
+        const child = this.next.get(node * 0x10000 + unit)!;
+        let f = this.fail[node]!;
+        while (f && !this.next.has(f * 0x10000 + unit)) f = this.fail[f]!;
+        const target = this.next.get(f * 0x10000 + unit);
+        this.fail[child] = target !== undefined && target !== child ? target : 0;
+        const via = this.fail[child]!;
+        this.output[child] = this.ends[via] ? via : this.output[via]!;
+        queue.push(child);
+      }
     }
   }
 
@@ -370,11 +405,22 @@ class NeedleIndex {
   find(text: string): [number, number][] {
     const found: [number, number][] = [];
     if (!this.size) return found;
-    for (let at = 0; at + this.key <= text.length; at++) {
-      const bucket = this.byPrefix.get(text.slice(at, at + this.key));
-      if (!bucket) continue;
-      for (const needle of bucket) {
-        if (text.startsWith(needle, at)) found.push([at, needle.length]);
+    let node = 0;
+    for (let i = 0; i < text.length; i++) {
+      const unit = text.charCodeAt(i);
+      let child = this.next.get(node * 0x10000 + unit);
+      while (child === undefined && node) {
+        node = this.fail[node]!;
+        child = this.next.get(node * 0x10000 + unit);
+      }
+      node = child ?? 0;
+      for (
+        let hit = this.ends[node] ? node : this.output[node]!;
+        hit > 0;
+        hit = this.output[hit]!
+      ) {
+        const length = this.ends[hit]!;
+        found.push([i + 1 - length, length]);
       }
     }
     return found;

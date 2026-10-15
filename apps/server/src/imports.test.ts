@@ -275,6 +275,32 @@ describe('POST import', () => {
     await waitForJob(api, zip.json().jobId, 'completed');
   });
 
+  it('refuses new imports with 503 while the server drains for shutdown', async () => {
+    const fake = controllableImporter();
+    api = await testApi({ importer: fake.importer });
+    const base = await createTestTree(api);
+    expect((await upload(api, base)).statusCode).toBe(202);
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(1));
+    // Saving: shutdown waits for it, and must not take on more work meanwhile.
+    fake.calls[0]!.options.onProgress({ phase: 'commit', done: 0, total: 1 });
+    const draining = api.app.drain();
+    const other = await createTestTree(api, 'Other');
+    for (const res of [
+      await upload(api, other),
+      await api.inject({
+        method: 'POST',
+        url: '/api/import',
+        ...multipart('new.ged', '0 HEAD\n0 TRLR\n'),
+      }),
+    ]) {
+      expect(res.statusCode, res.body).toBe(503);
+      expect(res.json().error.code).toBe('service_unavailable');
+    }
+    expect(fake.calls).toHaveLength(1);
+    fake.release({});
+    await draining;
+  });
+
   it('enforces the upload size limit', async () => {
     const fake = controllableImporter();
     api = await testApi({ importer: fake.importer, uploadLimit: 1024 });

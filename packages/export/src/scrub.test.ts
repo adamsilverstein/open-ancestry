@@ -164,6 +164,37 @@ describe('NameScrubber', () => {
     expect(out).not.toContain(word(99_999 - 12));
   });
 
+  // Review-29 follow-up: matching must be linear in the text, however the names overlap.
+  it('stays linear when thousands of withheld names share a prefix', () => {
+    const shared = new NameScrubber(
+      Array.from({ length: 27_000 }, (_, i) => ({
+        given: null,
+        surname: `sur${i}`,
+        nickname: null,
+        full_text: null,
+      })),
+    );
+    let start = performance.now();
+    shared.scrub('sur1'.repeat(25_000), 'file');
+    expect(performance.now() - start).toBeLessThan(500);
+    // One short unspaced-script name next to many that start alike.
+    const mixed = new NameScrubber([
+      { given: '明', surname: '李', nickname: null, full_text: null },
+      ...Array.from({ length: 27_000 }, (_, i) => ({
+        given: null,
+        surname: `ma${i}x`,
+        nickname: null,
+        full_text: null,
+      })),
+    ]);
+    start = performance.now();
+    mixed.scrub('ma'.repeat(50_000), 'file');
+    expect(performance.now() - start).toBeLessThan(500);
+    expect(mixed.scrub('photos/ma123x and 李明.jpg', 'file')).toBe(
+      'photos/Private and Private.jpg',
+    );
+  });
+
   it('leaves text without withheld names untouched', () => {
     expect(text('Born at Rose Hill in 1850')).toBe('Born at Rose Hill in 1850');
     expect(new NameScrubber([]).scrub('Zedekiah', 'text')).toBe('Zedekiah');

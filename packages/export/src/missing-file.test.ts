@@ -108,8 +108,60 @@ describe('review of #221', () => {
     );
     const out = buildGedcomExport(store, { ...options, now: TODAY });
     expect(fileLines(out.text)).toEqual(['1 FILE scans/front.jpg', '1 FILE scans/back.png']);
-    expect(out.text).toMatch(/1 FILE scans\/back\.png\n2 FORM png/);
+    const form = options.version === '7' ? 'image/png' : 'png';
+    expect(out.text).toContain(`1 FILE scans/back.png\n2 FORM ${form}`);
     expect(out.warnings.filter((w) => /FILE/.test(w))).toEqual([]);
+  });
+});
+
+describe('second review of #221: FORM of a second FILE', () => {
+  const twoFiles = (secondForm: string) =>
+    ged(
+      '0 @I1@ INDI',
+      '1 NAME Ada /Vale/',
+      '1 DEAT',
+      '2 DATE 1950',
+      '1 OBJE @O1@',
+      '0 @O1@ OBJE',
+      '1 FILE scans/front.jpg',
+      '2 FORM jpg',
+      '1 FILE scans/back.' + secondForm,
+      '2 FORM ' + secondForm,
+      '1 TITL Letter',
+    );
+  const objeLines = (text: string) =>
+    text.split('\n').filter((l) => /^\d (FILE|FORM) /.test(l) && !/LINEAGE/.test(l));
+
+  it.each([
+    ['the same FORM', 'jpg', 'image/jpeg'],
+    ['a different FORM', 'png', 'image/png'],
+  ])('keeps %s under its own FILE, as a media type in GEDCOM 7', async (_, form, mime) => {
+    const store = await importInto(twoFiles(form));
+    for (const privatizeLiving of [false, true]) {
+      const v7 = buildGedcomExport(store, { version: '7', privatizeLiving, now: TODAY });
+      expect(gedcom7Problems(v7.text)).toEqual([]);
+      expect(objeLines(v7.text)).toEqual([
+        '1 FILE scans/front.jpg',
+        '2 FORM image/jpeg',
+        `1 FILE scans/back.${form}`,
+        `2 FORM ${mime}`,
+      ]);
+      expect(v7.warnings.filter((w) => /FORM|FILE/.test(w))).toEqual([]);
+      const v5 = buildGedcomExport(store, { version: '5.5.1', privatizeLiving, now: TODAY });
+      expect(objeLines(v5.text)).toEqual([
+        '1 FILE scans/front.jpg',
+        '2 FORM jpg',
+        `1 FILE scans/back.${form}`,
+        `2 FORM ${form}`,
+      ]);
+    }
+  });
+
+  it('gives a second FILE without a FORM one in GEDCOM 7', async () => {
+    const store = await importInto(twoFiles('png').replace('2 FORM png\n', ''));
+    const out = buildGedcomExport(store, { version: '7', now: TODAY });
+    expect(gedcom7Problems(out.text)).toEqual([]);
+    expect(out.text).toContain('1 FILE scans/back.png\n2 FORM image/png');
   });
 });
 

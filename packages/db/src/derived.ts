@@ -108,7 +108,120 @@ const eventDateSort: DerivedStep = {
   },
 };
 
-export const DERIVED_STEPS: readonly DerivedStep[] = [eventDateSort];
+/** Tables that point at a row by owner_type + owner_id. */
+const OWNER_TABLES = [
+  'citation_link',
+  'media_link',
+  'note_link',
+  'tag_link',
+  'raw_record',
+  'unmapped_line',
+] as const;
+
+/**
+ * Notes, media and citations that earlier person and family deletes left with
+ * nothing linking to them (#226). Deletes now take them along; this removes
+ * the ones already there, once per tree. Imported NOTE and OBJE records
+ * (with an xref) may stand alone and are kept, as are sources, which are
+ * shared reference data. Not change-logged: the user already deleted them.
+ */
+const orphanCleanup: DerivedStep = {
+  name: 'orphan_cleanup',
+  fingerprint: () => '1',
+  recompute(store) {
+    const queries: [table: string, sql: string][] = [
+      [
+        'citation',
+        'SELECT id FROM citation c WHERE NOT EXISTS (SELECT 1 FROM citation_link l WHERE l.citation_id = c.id)',
+      ],
+      [
+        'note',
+        `SELECT id FROM note n WHERE NOT EXISTS (SELECT 1 FROM note_link l WHERE l.note_id = n.id)
+           AND ${wasLinked('note')}`,
+      ],
+      [
+        'media',
+        `SELECT id FROM media m WHERE NOT EXISTS (SELECT 1 FROM media_link l WHERE l.media_id = m.id)
+           AND NOT EXISTS (SELECT 1 FROM person p WHERE p.primary_media_id = m.id)
+           AND ${wasLinked('media')}`,
+      ],
+    ];
+    let removed = 0;
+    // A deleted citation can orphan its notes and media in turn.
+    for (let more = true; more;) {
+      more = false;
+      for (const [table, sql] of queries) {
+        for (const id of store.db.prepare(sql).pluck().all() as string[]) {
+          for (const owned of OWNER_TABLES) {
+            store.db
+              .prepare(`DELETE FROM ${owned} WHERE owner_type = ? AND owner_id = ?`)
+              .run(table, id);
+          }
+          store.db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(id);
+          removed++;
+          more = true;
+        }
+      }
+    }
+    // Import reports stored before they dropped quoted text (example lines and warning
+    // messages name files and people that may since have been deleted).
+    const batches = store.db
+      .prepare('SELECT id, counts_json, warnings_json FROM import_batch')
+      .all() as { id: string; counts_json: string; warnings_json: string }[];
+    for (const batch of batches) {
+      const scrubbed = scrubReport(batch.counts_json, batch.warnings_json);
+      if (!scrubbed) continue;
+      store.db
+        .prepare('UPDATE import_batch SET counts_json = ?, warnings_json = ? WHERE id = ?')
+        .run(scrubbed.counts, scrubbed.warnings, batch.id);
+      removed++;
+    }
+    return removed;
+  },
+};
+
+/**
+ * SQL true for a note (`n`) or media row (`m`) that was someone's and is now
+ * no one's: an inline one, or an imported record whose link a delete removed.
+ * A pointer in any imported record's text counts as a use (an ASSO NOTE or a
+ * custom subtree is kept as text, not as a link), so such a record is kept.
+ */
+function wasLinked(table: 'note' | 'media'): string {
+  const row = table === 'note' ? 'n' : 'm';
+  return `(${row}.external_id IS NULL
+    OR (EXISTS (SELECT 1 FROM change_log c WHERE c.entity = '${table}_link' AND c.op = 'delete'
+                  AND json_extract(c.before_json, '$.${table}_id') = ${row}.id)
+        AND NOT EXISTS (SELECT 1 FROM raw_record r WHERE r.xref IS NOT ${row}.external_id
+                          AND instr(r.raw_text, ' ' || ${row}.external_id) > 0)))`;
+}
+
+/** An import report without quoted lines, or null when it has none. */
+function scrubReport(
+  countsJson: string,
+  warningsJson: string,
+): { counts: string; warnings: string } | null {
+  try {
+    const counts = JSON.parse(countsJson) as { unmapped?: Record<string, unknown>[] };
+    const warnings = JSON.parse(warningsJson) as Record<string, unknown>[];
+    const quoted =
+      counts.unmapped?.some((u) => 'example' in u) ||
+      (Array.isArray(warnings) && warnings.some((w) => 'message' in w));
+    if (!quoted) return null;
+    if (counts.unmapped) {
+      counts.unmapped = counts.unmapped.map(({ path, tag, count }) => ({ path, tag, count }));
+    }
+    return {
+      counts: JSON.stringify(counts),
+      warnings: JSON.stringify(
+        Array.isArray(warnings) ? warnings.map(({ code, line }) => ({ code, line })) : [],
+      ),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export const DERIVED_STEPS: readonly DerivedStep[] = [eventDateSort, orphanCleanup];
 
 export interface RefreshOptions {
   /** Recompute even if the fingerprint matches (JSON import does). */

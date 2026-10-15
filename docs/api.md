@@ -42,7 +42,7 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 |---|---|
 | `GET /api/health` | Liveness. |
 | `GET /api/session` | Mutation token. |
-| `GET /api/trees` | `{ trees: [{ id, name, modifiedAt }] }` |
+| `GET /api/trees` | `{ trees: [{ id, name, label, modifiedAt }] }`. `name` is the stored name; `label` adds the folder (`Smith (Smith copy)`) for every tree whose folder is not exactly its name when two trees share a name. |
 | `POST /api/trees` `{ name }` | Create a tree (201). Names cannot contain path separators or `%`, start or end with a dot, or be a Windows device name (`CON`, `NUL`, `COM1`, ...). |
 | `GET /api/trees/:tree` | Tree info with `peopleCount`, `livingCount` and `privateCount` (who a privatized export hides: people who may be living, and others marked private or confidential), `homePersonId`, `schemaVersion`. |
 | `PATCH /api/trees/:tree` `{ name }` | Rename (folder and display name). |

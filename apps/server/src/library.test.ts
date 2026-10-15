@@ -77,11 +77,20 @@ describe('Library', () => {
     // A folder copied by hand keeps the tree_name inside it.
     cpSync(join(root, 'Smith.oatree'), join(root, 'Smith copy.oatree'), { recursive: true });
     cpSync(join(root, 'Smith.oatree'), join(root, 'Backup.oatree'), { recursive: true });
-    expect(library.list().map(({ id, name }) => ({ id, name }))).toEqual([
-      { id: 'Smith', name: 'Smith' },
-      { id: 'Backup', name: 'Smith (Backup)' },
-      { id: 'Smith copy', name: 'Smith (Smith copy)' },
+    expect(library.list().map(({ id, name, label }) => ({ id, name, label }))).toEqual([
+      { id: 'Smith', name: 'Smith', label: 'Smith' },
+      { id: 'Backup', name: 'Smith', label: 'Smith (Backup)' },
+      { id: 'Smith copy', name: 'Smith', label: 'Smith (Smith copy)' },
     ]);
+    // Without a folder named exactly "Smith", every copy shows its folder: no
+    // tree takes over the plain label, so labels cannot swap.
+    library.closeAll();
+    rmSync(join(root, 'Smith.oatree'), { recursive: true, force: true });
+    expect(library.list().map((t) => t.label)).toEqual(['Smith (Backup)', 'Smith (Smith copy)']);
+    // Folder names cannot smuggle bidi or control characters into a label.
+    library.closeAll();
+    cpSync(join(root, 'Backup.oatree'), join(root, 'Evil\u202Eypoc.oatree'), { recursive: true });
+    expect(library.list().map((t) => t.label)).toContain('Smith (Evilypoc)');
     library.closeAll();
     rmSync(root, { recursive: true, force: true });
   });

@@ -30,4 +30,11 @@ test('a copied tree folder shows as a distinct entry and opens the copy', async 
   await expect(switcher).toHaveAccessibleName(`Tree: ${name} (${folder})`);
   const current = await page.evaluate(() => localStorage.getItem('oa-tree'));
   expect(current).toBe(folder);
+
+  // Rename starts from the stored name, not the label with its folder.
+  await switcher.click();
+  await page.getByRole('menuitem', { name: 'Rename tree…' }).click();
+  const rename = page.getByRole('dialog', { name: 'Rename tree' });
+  await expect(rename.getByLabel('Tree name')).toHaveValue(name);
+  await rename.getByRole('button', { name: 'Cancel' }).click();
 });

@@ -79,25 +79,30 @@ function assertTreeName(name: string): void {
 
 export interface TreeInfo {
   id: string;
+  /** The stored name (what Rename edits). */
   name: string;
+  /** What the switcher and start page show: the name, plus the folder when names repeat. */
+  label: string;
   modifiedAt: string;
 }
+
+/** Control and format characters (bidi overrides, zero-width marks) that could disguise a label. */
+const HIDDEN_CHARS = /[\p{Cc}\p{Cf}]/gu;
 
 /**
  * A tree's name lives inside its folder, so a folder copied by hand (a backup,
  * an experiment) lists under the same name as the original. When names
- * repeat, every tree but the one whose folder matches the name (else the
- * first by folder) shows its folder name too: "Smith (Smith copy)".
+ * repeat, only the tree whose folder is named exactly that keeps the plain
+ * label; every other one shows its folder too: "Smith (Smith copy)". The rule
+ * depends only on each tree's own folder, so labels never swap between trees.
  */
-function distinctNames(trees: TreeInfo[]): TreeInfo[] {
-  const byName = new Map<string, TreeInfo[]>();
-  for (const tree of trees) byName.set(tree.name, [...(byName.get(tree.name) ?? []), tree]);
+function withLabels(trees: TreeInfo[]): TreeInfo[] {
+  const counts = new Map<string, number>();
+  for (const tree of trees) counts.set(tree.name, (counts.get(tree.name) ?? 0) + 1);
   return trees.map((tree) => {
-    const same = byName.get(tree.name)!;
-    if (same.length === 1) return tree;
-    const keeper =
-      same.find((t) => t.id === t.name) ?? [...same].sort((a, b) => a.id.localeCompare(b.id))[0];
-    return tree === keeper ? tree : { ...tree, name: `${tree.name} (${tree.id})` };
+    if (counts.get(tree.name)! < 2 || tree.id === tree.name) return tree;
+    const folder = tree.id.replace(HIDDEN_CHARS, '') || 'copy';
+    return { ...tree, label: `${tree.name} (${folder})` };
   });
 }
 
@@ -132,13 +137,15 @@ export class Library {
       .map((d) => d.name.slice(0, -TREE_EXTENSION.length))
       .filter((id) => this.exists(id))
       .map((id) => this.info(id));
-    return distinctNames(trees).sort((a, b) => a.name.localeCompare(b.name));
+    return withLabels(trees).sort((a, b) => a.label.localeCompare(b.label));
   }
 
   info(id: string): TreeInfo {
+    const name = meta.get(this.open(id), 'tree_name') || id;
     return {
       id,
-      name: meta.get(this.open(id), 'tree_name') || id,
+      name,
+      label: name,
       modifiedAt: statSync(treePaths(this.dirOf(id)).database).mtime.toISOString(),
     };
   }

@@ -1,5 +1,6 @@
 import { openMemoryTree, redoLast, undoLast, type TreeStore } from '@open-ancestry/db';
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { importGedcom } from '../import';
@@ -14,6 +15,8 @@ import {
   localHistory,
   prepareReimport,
   refreshReimport,
+  reimportData,
+  reimportFromData,
   type PersonReview,
   type ReimportSession,
   type ReviewChange,
@@ -1403,6 +1406,38 @@ describe('trustworthy confidence and reasons (#159)', () => {
     } finally {
       closeReimport(s2);
       tree.close();
+    }
+  });
+});
+
+describe('a compare that can run in a worker (#161)', () => {
+  it('keeps the export in a tree on disk, reports phases, and travels as plain data', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'oa-reimport-worker-'));
+    const incomingDir = join(root, 'incoming.oatree');
+    const phases: string[] = [];
+    const prepared = await prepareReimport(
+      store,
+      { bytes: updatedSample() },
+      { today: TODAY, incomingDir, onProgress: (phase) => phases.push(phase) },
+    );
+    try {
+      expect(existsSync(join(incomingDir, 'tree.sqlite'))).toBe(true);
+      expect(phases).toContain('parse');
+      expect(phases.at(-1)).toBe('compare');
+      expect(phases).not.toContain('done');
+      // What a worker posts back: structured-clone-safe data, then reopened on the main thread.
+      const data = structuredClone(reimportData(prepared));
+      prepared.incoming.close();
+      const session = reimportFromData(data);
+      expect(session.diff).toEqual(prepared.diff);
+      expect([...session.matches]).toEqual([...prepared.matches]);
+      applyReimport(store, session, defaults(session), 'Re-import');
+      expect(pid(store, '@I1@')).toBeTruthy();
+      closeReimport(session);
+      // Closing removes the export's tree on disk.
+      expect(existsSync(incomingDir)).toBe(false);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

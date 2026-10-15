@@ -242,8 +242,12 @@ describe('re-importing media files (#75)', () => {
 describe('re-import media without holding memory or the tree lock (#243 review)', () => {
   const spills = () => readdirSync(dir).filter((name) => name.startsWith('.reimport-'));
 
-  it("keeps a GEDZIP's files in a folder under the tree, not in memory, until closed", async () => {
-    const session = await prepareReimport(store, { gedzip: laterZip() }, { today: TODAY });
+  it("keeps a GEDZIP's files in the folder it is given, not in memory, until closed", async () => {
+    const session = await prepareReimport(
+      store,
+      { gedzip: laterZip() },
+      { today: TODAY, spillDir: () => mkdtempSync(join(dir, '.reimport-')) },
+    );
     expect(spills()).toHaveLength(1);
     expect(readFileSync(join(dir, spills()[0]!, 'photos', 'new.jpg'), 'utf8')).toBe('NEW');
     applyReimport(store, session, acceptAll(session), 'Re-import');

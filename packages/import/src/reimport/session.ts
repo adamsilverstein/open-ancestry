@@ -1,7 +1,6 @@
 import { openMemoryTree, type TreeStore } from '@open-ancestry/db';
 import { importGedcom } from '../import';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { rmSync } from 'node:fs';
 import { MediaSource } from '../media';
 import type { ImportInput, ImportOptions, ImportReport } from '../types';
 import { treeRevision } from './apply';
@@ -38,20 +37,28 @@ export async function prepareReimport(
   options: Pick<
     ImportOptions,
     'onProgress' | 'signal' | 'maxBytes' | 'maxMediaBytes' | 'today' | 'mediaDir'
-  > = {},
+  > & {
+    /**
+     * Gives a folder to keep a GEDZIP's media in while the review waits, so
+     * they aren't held in memory. The caller owns it (the server tracks who
+     * made it); without one the files stay in memory.
+     */
+    spillDir?: () => string;
+  } = {},
 ): Promise<ReimportSession> {
   const started = performance.now();
   const incoming = openMemoryTree();
   let mediaDir: string | null = null;
   try {
     let media = MediaSource.none();
+    const { spillDir, ...importOptions } = options;
     const report = await importGedcom(input, incoming, {
-      ...options,
+      ...importOptions,
       onMediaSource: (source) => (media = source),
     });
-    // A review can wait an hour: keep a GEDZIP's files on disk under the tree, not in memory.
-    if (media.inMemory && store.dir) {
-      mediaDir = mkdtempSync(join(store.dir, '.reimport-'));
+    // A review can wait an hour: keep a GEDZIP's files on disk, not in memory.
+    if (media.inMemory && spillDir) {
+      mediaDir = spillDir();
       media = media.spill(mediaDir);
     }
     const imported = performance.now();

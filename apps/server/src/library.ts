@@ -10,7 +10,7 @@ import {
   type TreeStore,
 } from '@open-ancestry/db';
 import { ApiError, conflict, notFound } from './errors';
-import { sweepReimportFolders } from './reimport-folders';
+import type { ReimportFolders } from './reimport-folders';
 
 /*
  * The library is a folder of trees: `<root>/<name>.oatree/`. A tree's API id
@@ -90,6 +90,12 @@ export class Library {
   /** Trees that must not be renamed or deleted right now (e.g. importing). */
   /** Trees with an import queued or running, and how many. */
   private readonly busy = new Map<string, number>();
+
+  /**
+   * The re-import folders of the server using this library: opening a tree
+   * sweeps the leftovers whose owner is gone (see reimport-folders.ts).
+   */
+  reimportFolders: ReimportFolders | undefined;
 
   constructor(root: string) {
     this.root = resolve(root);
@@ -203,7 +209,7 @@ export class Library {
     assertTreeName(id);
     if (!this.exists(id)) throw notFound(`Tree "${id}" not found`);
     // A crash can leave a re-import's working folders (up to 256 MiB of media) behind.
-    sweepReimportFolders(this.dirOf(id));
+    this.reimportFolders?.sweep(this.dirOf(id));
     const store = openTree(this.dirOf(id));
     this.stores.set(id, store);
     return store;

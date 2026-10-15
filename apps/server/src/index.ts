@@ -18,6 +18,7 @@ import { checkRoutes } from './routes/checks';
 import { editRoutes } from './routes/edit';
 import { importRoutes, sweepStaleUploads } from './routes/imports';
 import { reimportRoutes } from './routes/reimports';
+import { ReimportFolders } from './reimport-folders';
 import { ReimportSessions } from './reimports';
 import { mediaRoutes } from './routes/media';
 import { peopleRoutes } from './routes/people';
@@ -135,13 +136,17 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   // Leftovers of imports a crash or restart interrupted: their empty trees and uploads.
   library.sweepInterruptedImports();
   void sweepStaleUploads();
+  // This server's re-import working folders; opening a tree sweeps others' leftovers.
+  const reimportFolders = new ReimportFolders();
+  library.reimportFolders = reimportFolders;
   const deps: Deps = {
     library,
     jobs,
     importer: options.importer,
     uploadLimit: options.uploadLimit ?? DEFAULT_UPLOAD_LIMIT,
     thumbnails: new ThumbnailQueue(),
-    reimports: new ReimportSessions(),
+    reimports: new ReimportSessions({ folders: reimportFolders }),
+    reimportFolders,
   };
 
   registerErrorHandling(app);
@@ -233,6 +238,7 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   });
   app.addHook('onClose', async () => {
     deps.reimports.closeAll();
+    reimportFolders.close();
     library.closeAll();
   });
 

@@ -34,7 +34,7 @@ export async function sweepStaleUploads(now = Date.now(), dir = tmpdir()): Promi
 
 /** Import uploads (multipart, streamed to a temp file) and job status over JSON and SSE. */
 export function importRoutes(app: Api, deps: Deps): void {
-  const { library, jobs, importer, uploadLimit, thumbnails, reimports } = deps;
+  const { library, jobs, importer, uploadLimit, thumbnails, reimports, reimportFolders } = deps;
 
   /** Streams the one uploaded file to a private temp folder. */
   async function receive(request: FastifyRequest) {
@@ -152,13 +152,27 @@ export function importRoutes(app: Api, deps: Deps): void {
         const job = jobs.enqueue(
           { tree, fileName: upload.fileName, kind: 'reimport' },
           async (signal, onProgress) => {
-            const session = await prepareReimport(
-              library.open(tree),
-              { path: upload.path },
-              { signal, onProgress: (phase, done, total) => onProgress({ phase, done, total }) },
-            );
-            const stored = reimports.add(tree, upload.fileName, session);
-            return { reimportId: stored.id, counts: session.diff.counts };
+            const store = library.open(tree);
+            let spilled: string | undefined;
+            try {
+              const session = await prepareReimport(
+                store,
+                { path: upload.path },
+                {
+                  signal,
+                  onProgress: (phase, done, total) => onProgress({ phase, done, total }),
+                  // Owned by this server, so another server's sweep leaves it alone.
+                  ...(store.dir && {
+                    spillDir: () => (spilled = reimportFolders.create(store.dir!, 'media')),
+                  }),
+                },
+              );
+              const stored = reimports.add(tree, upload.fileName, session);
+              return { reimportId: stored.id, counts: session.diff.counts };
+            } catch (error) {
+              reimportFolders.release(spilled);
+              throw error;
+            }
           },
           async () => {
             await upload.cleanup();

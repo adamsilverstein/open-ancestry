@@ -213,3 +213,106 @@ describe('matching at scale: undated people still match themselves', () => {
     incoming.close();
   });
 });
+
+/** `count` namesakes, each built by `lines(n)` (the person's lines after NAME). */
+function crowd(count: number, offset: number, lines: (n: number) => string[]): string[] {
+  return Array.from({ length: count }, (_, n) => [
+    `0 @I${n + offset}@ INDI`,
+    '1 NAME John /Smith/',
+    '1 SEX M',
+    ...lines(n),
+  ]).flat();
+}
+
+async function comparisons(existingLines: string[], incomingLines: string[]) {
+  const existing = await tree(ged(...existingLines));
+  const incoming = await tree(ged(...incomingLines));
+  const stats: MatchStats = { comparisons: 0 };
+  const matches = matchPeople(snapshot(existing), snapshot(incoming), undefined, stats);
+  existing.close();
+  incoming.close();
+  return { comparisons: stats.comparisons, matches };
+}
+
+// review-39: every blocking key must stay bounded against crafted input, so
+// comparisons grow at most linearly however a file's dates are arranged.
+describe('matching at scale: crafted crowds stay linear', () => {
+  const N = 5000;
+  const PER_PERSON = 80;
+
+  it('5k namesakes who all died the same year', async () => {
+    const lines = (n: number) => ['1 BIRT', `2 DATE ${1800 + (n % 60)}`, '1 DEAT', '2 DATE 1900'];
+    const { comparisons: c } = await comparisons(crowd(N, 1, lines), crowd(N, 10001, lines));
+    expect(c).toBeLessThan(N * PER_PERSON);
+  }, 60_000);
+
+  it('5k namesakes born BET 1000 AND 2000', async () => {
+    const lines = () => ['1 BIRT', '2 DATE BET 1000 AND 2000'];
+    const { comparisons: c } = await comparisons(crowd(N, 1, lines), crowd(N, 10001, lines));
+    expect(c).toBeLessThan(N * PER_PERSON);
+  }, 60_000);
+
+  it('5k namesakes born the same year', async () => {
+    const lines = () => ['1 BIRT', '2 DATE 1900'];
+    const { comparisons: c } = await comparisons(crowd(N, 1, lines), crowd(N, 10001, lines));
+    expect(c).toBeLessThan(N * PER_PERSON);
+  }, 60_000);
+
+  it('5k namesakes born in 30-year ranges that all cover one year', async () => {
+    const lines = (n: number) => ['1 BIRT', `2 DATE BET ${1880 + (n % 20)} AND ${1909 + (n % 20)}`];
+    const { comparisons: c } = await comparisons(crowd(N, 1, lines), crowd(N, 10001, lines));
+    expect(c).toBeLessThan(N * PER_PERSON);
+  }, 60_000);
+
+  it('5k namesakes without dates', async () => {
+    const { comparisons: c } = await comparisons(
+      crowd(N, 1, () => []),
+      crowd(N, 10001, () => []),
+    );
+    expect(c).toBeLessThan(N * PER_PERSON);
+  }, 60_000);
+});
+
+describe('matching at scale: open-ended birth dates and undated tree people', () => {
+  // A crowd of 40 namesakes born 1930-1954 keeps the nearest-years walk busy.
+  const others = (offset: number) =>
+    crowd(40, offset, (n) => ['1 BIRT', `2 DATE ${1930 + (n % 25)}`]);
+
+  async function found(treeDate: string | null, exportDate: string) {
+    const person = (xref: string, date: string | null) => [
+      `0 ${xref} INDI`,
+      '1 NAME John /Smith/',
+      '1 SEX M',
+      ...(date ? ['1 BIRT', `2 DATE ${date}`] : []),
+      '1 OCCU Cooper',
+    ];
+    const existing = await tree(ged(...others(1), ...person('@I900@', treeDate)));
+    const incoming = await tree(ged(...others(1001), ...person('@I1900@', exportDate)));
+    const e = snapshot(existing);
+    const i = snapshot(incoming);
+    const target = [...e.people.values()].find((p) =>
+      p.events.some((ev) => ev.row.type === 'OCCU'),
+    )!;
+    const source = [...i.people.values()].find((p) =>
+      p.events.some((ev) => ev.row.type === 'OCCU'),
+    )!;
+    const near = new Map<string, NearMiss>();
+    const matches = matchPeople(e, i, near);
+    const result = matches.get(source.row.id)?.existingId ?? near.get(source.row.id)?.existingId;
+    existing.close();
+    incoming.close();
+    return result === target.row.id;
+  }
+
+  it('compares BEF 1950 with births in the 30 years before it', async () => {
+    expect(await found('BEF 1950', '1 JAN 1925')).toBe(true);
+  });
+
+  it('compares AFT 1900 with births in the 30 years after it', async () => {
+    expect(await found('AFT 1900', '1 JAN 1925')).toBe(true);
+  });
+
+  it('compares a newly dated person with their undated namesake', async () => {
+    expect(await found(null, '1 JAN 1960')).toBe(true);
+  });
+});

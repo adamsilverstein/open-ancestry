@@ -22,24 +22,32 @@ const deletedPeople = new Map<string, string>();
 /** Only recent deletes matter for undo; older entries are dropped. */
 const MAX_REMEMBERED = 50;
 
-/** People this session just deleted, until their page has left (or an undo restores them). */
-const leaving = new Set<string>();
+/**
+ * People this session just deleted, by when: their page can still be mounted
+ * for a moment and see the 404, which must not read as a delete made elsewhere.
+ */
+const leaving = new Map<string, number>();
+/** That moment is short; after it, a 404 for the person is someone else's doing. */
+const LEAVING_MS = 5_000;
 
 /** Records that change batch `batchId` deleted person `personId`. */
 export function rememberDeletedPerson(batchId: string, personId: string): void {
   deletedPeople.set(batchId, personId);
-  leaving.add(personId);
+  leaving.set(personId, Date.now());
   if (deletedPeople.size > MAX_REMEMBERED) {
     deletedPeople.delete(deletedPeople.keys().next().value!);
   }
 }
 
 /**
- * Whether this session deleted `personId` itself (and nothing restored them),
- * so its page should not announce the delete as one made elsewhere.
+ * Whether this session just deleted `personId` itself, so its page should not
+ * announce the delete as one made elsewhere. Answers once: a later delete (say,
+ * after an undo in another tab) is announced.
  */
 export function deletedHere(personId: string): boolean {
-  return leaving.has(personId);
+  const at = leaving.get(personId);
+  leaving.delete(personId);
+  return at !== undefined && Date.now() - at < LEAVING_MS;
 }
 
 export interface UndoRedoResult {

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useQueryClient, useSuspenseQuery } from '@tanstack/react-query';
 import { getRouteApi, useRouter } from '@tanstack/react-router';
 import { isNotFound } from '../../api/client';
@@ -37,13 +37,19 @@ function useLeaveWhenGone(tree: string, detail: PersonDetail, error: unknown) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const gone = isNotFound(error);
+  const ownDelete = useRef(false);
   const personId = detail.person.id;
   const name = fullName(detail.summary);
   const nearby = nearestRelative(detail);
   useEffect(() => {
     // A delete made here already navigated and said so; its page may still be
     // mounted for a moment and see the 404 (#181's removeQueries).
-    if (!gone || deletedHere(personId)) return;
+    if (!gone) return;
+    // deletedHere answers once, so remember it if this effect runs again.
+    if (ownDelete.current || deletedHere(personId)) {
+      ownDelete.current = true;
+      return;
+    }
     const lost = takeUnsaved(tree)
       ? "Your changes couldn't be saved."
       : hasDirtyForms()

@@ -19,6 +19,8 @@ npm install
 npm run build && npm start      # http://127.0.0.1:4317
 ```
 
+`npm start` runs `open-ancestry serve`, which opens the app in your default browser at `http://127.0.0.1:4317`. Pass `--no-open` to skip that (`npm start -- --no-open`); when output is not a terminal (scripts, CI) it never opens one unless you pass `--open`. `node apps/cli/dist/cli.js --help` lists every option, and `serve --help` or `import --help` those of one command.
+
 To import, export your tree from Ancestry (below), open the app and drop the `.ged` file (or a GEDZIP `.zip`/`.gdz`) on the home page. The import report lists counts, warnings by line number and any tags that could not be mapped; nothing is dropped. Or use the command line:
 
 ```sh

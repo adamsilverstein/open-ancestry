@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { BAD_FILE_MESSAGE, hasImportExtension, importIntoNewTree } from './api';
+import { BAD_FILE_MESSAGE, hasImportExtension, importIntoNewTree, oversizeMessage } from './api';
 
 /** Validates a chosen file, starts its import into a new tree and opens the progress page. */
 export function useImportFile() {
@@ -17,6 +17,12 @@ export function useImportFile() {
     }
     setBusy(true);
     try {
+      // Refuse before uploading: the browser knows the size, the server the cap.
+      const tooLarge = await oversizeMessage(file);
+      if (tooLarge) {
+        setError(tooLarge);
+        return;
+      }
       const { jobId } = await importIntoNewTree(file);
       await navigate({ to: '/import/$jobId', params: { jobId } });
     } catch (cause) {

@@ -7,6 +7,9 @@ import {
   prepareReimport,
   type ReimportSession,
 } from '../../packages/import/src/index';
+import { diffTrees, localHistory } from '../../packages/import/src/reimport/diff';
+import { matchPeople, type NearMiss } from '../../packages/import/src/reimport/match';
+import { snapshot } from '../../packages/import/src/reimport/snapshot';
 import type { BenchCase } from '../types';
 
 // Issue #56: diffing a 10k-person tree against a modified 10k export takes under 5s.
@@ -66,6 +69,34 @@ async function freshTree() {
   return tree;
 }
 
+/**
+ * The compare step of a re-import alone (snapshots, matching, diff), with
+ * both trees imported untimed in setup. #202: it was quadratic in how common
+ * a name is (391s at 100k against 3-4s at 10k); it should stay within about
+ * 15x of the 10k case.
+ */
+const compareTrees = new Map<number, { tree: TreeStore; incoming: TreeStore }>();
+async function compareSetup(people: number) {
+  if (compareTrees.has(people)) return;
+  const text = generateGedcom({ people, seed: 1 });
+  const tree = openMemoryTree();
+  await importGedcom({ bytes: text }, tree);
+  const incoming = openMemoryTree();
+  await importGedcom({ bytes: laterExport(text) }, incoming);
+  compareTrees.set(people, { tree, incoming });
+}
+function compare(people: number) {
+  const { tree, incoming } = compareTrees.get(people)!;
+  const existingSnap = snapshot(tree);
+  const incomingSnap = snapshot(incoming);
+  const nearMisses = new Map<string, NearMiss>();
+  const matches = matchPeople(existingSnap, incomingSnap, nearMisses);
+  const diff = diffTrees(existingSnap, incomingSnap, matches, localHistory(tree), nearMisses);
+  if (diff.counts.newPeople !== 50) {
+    throw new Error(`expected 50 new people, got ${diff.counts.newPeople}`);
+  }
+}
+
 export default [
   {
     name: 'reimport: diff a 10k tree against a modified 10k export',
@@ -110,6 +141,26 @@ export default [
     budgetMs: 5000,
     metric: 'mean',
     iterations: 2,
+    time: 0,
+    warmupIterations: 0,
+  },
+  {
+    name: 'reimport: compare a 10k export against a 10k tree',
+    setup: () => compareSetup(10_000),
+    fn: () => compare(10_000),
+    budgetMs: 2000,
+    metric: 'mean',
+    iterations: 3,
+    time: 0,
+    warmupIterations: 1,
+  },
+  {
+    name: 'reimport: compare a 100k export against a 100k tree',
+    setup: () => compareSetup(100_000),
+    fn: () => compare(100_000),
+    budgetMs: 20_000,
+    metric: 'mean',
+    iterations: 1,
     time: 0,
     warmupIterations: 0,
   },

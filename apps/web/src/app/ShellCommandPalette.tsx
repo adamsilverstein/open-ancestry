@@ -42,12 +42,16 @@ export default function ShellCommandPalette({ open, onOpenChange }: ShellCommand
   const toPerson = (personId: string) => () =>
     openPage(navigate({ to: '/person/$personId', params: { personId } }));
   // From the tree, keep its view (tree, layout, generations) while re-focusing.
-  const toTree = (personId: string) => () =>
-    void navigate({
+  const toTree = (personId: string) => () => {
+    const go = navigate({
       to: '/tree/$personId',
       params: { personId },
       search: (prev: Record<string, unknown>) => (onTree ? prev : {}),
     });
+    // Arriving at the tree from another page announces it like any page; Find
+    // in tree (already on it) leaves focus to the tree's own re-focus.
+    return onTree ? void go : openPage(go);
+  };
 
   const people: PaletteAction[] = hits.map((hit) => {
     const summary = toPersonSummary(hit.person);

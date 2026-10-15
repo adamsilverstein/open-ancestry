@@ -60,7 +60,7 @@ export interface CommandPaletteProps {
 const STATUS_DELAY_MS = 500;
 
 /** "3 people, 2 actions" for the groups' visible items, or "No results". */
-function describeResults(groups: PaletteGroup[], visible: PaletteAction[]): string {
+export function describeResults(groups: PaletteGroup[], visible: PaletteAction[]): string {
   const shown = new Set(visible);
   const parts = groups.flatMap((group) => {
     const n = group.items.filter((i) => shown.has(i)).length;

@@ -63,12 +63,32 @@ test('announces the result count, and focuses the new page heading after Enter (
   await expect(page.getByRole('heading', { level: 1 })).toBeFocused();
 });
 
+test('opening the people list and the tree from the palette focuses their heading (#200)', async ({
+  page,
+}) => {
+  await open(page, '/people');
+  let dialog = await search(page, 'wren thackeray');
+  await expect(people(dialog).first()).toContainText('Wren Thackeray');
+  // Shift+Enter shows the person in the tree view.
+  await page.keyboard.press('Shift+Enter');
+  await expect(page).toHaveURL(/\/tree\//);
+  await expect(page.getByRole('heading', { level: 1 })).toBeFocused();
+
+  dialog = await search(page, 'people list');
+  await expect(dialog.getByRole('option', { name: 'Open people list' })).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/people$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'People' })).toBeFocused();
+});
+
 test('says when nothing matches, and Escape still returns focus to the opener', async ({
   page,
 }) => {
   await open(page, '/people');
   const opener = page.getByRole('banner').getByRole('button', { name: /^Find/ });
-  await opener.click();
+  // Keyboard open: WebKit does not focus a clicked button, so there is nothing to return to.
+  await opener.focus();
+  await opener.press('Enter');
   const dialog = page.getByRole('dialog', { name: 'Command palette' });
   await dialog.getByRole('combobox').fill('zzzzqqqq');
   await expect(dialog.getByRole('status')).toHaveText('No results');

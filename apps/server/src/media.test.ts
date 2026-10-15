@@ -1,7 +1,7 @@
-import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
+import { link, mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Library } from './library';
 import { MEDIA_CSP, parseRange, resolveMediaPath, sniffMediaType } from './routes/media';
 import { createTestTree, testApi, type TestApi } from './test/helpers';
@@ -128,6 +128,32 @@ describe('with a tree', () => {
       const res = await api.get(`${base}/media/${id}`);
       expect(res.statusCode).toBe(404);
       expect(res.body).not.toContain('secret');
+    });
+
+    it('refuses a hard-linked file and logs why, once per file (#207)', async () => {
+      const outside = join(await mkdtemp(join(tmpdir(), 'oa-secret-')), 'secret.jpg');
+      await writeFile(outside, BYTES);
+      // A name with an escape character: the log line must not pass it to the terminal.
+      const name = 'hard\u001b[31m.jpg';
+      await link(outside, join(library.root, 'Test.oatree', 'media', name));
+      const id = addMedia({ local_path: name });
+      // The shipped CLI runs with logger: false, so the refusal goes to stderr itself.
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        for (let i = 0; i < 2; i++) {
+          const res = await api.get(`${base}/media/${id}`);
+          expect(res.statusCode).toBe(404);
+          expect(res.rawPayload.equals(BYTES)).toBe(false);
+        }
+        const logged = warn.mock.calls
+          .map((call) => call.join(' '))
+          .filter((l) => l.includes('hard link'));
+        expect(logged).toHaveLength(1);
+        expect(logged[0]).toContain('hard\\x1b[31m.jpg');
+        expect(logged[0]).not.toContain('\u001b');
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     it('accepts only the named thumbnail sizes', async () => {

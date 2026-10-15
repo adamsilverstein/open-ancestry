@@ -229,6 +229,8 @@ Each feature below becomes a GitHub issue. A PR closes the issue only when all i
 | Path | Budget (10k-person tree, M-series laptop) |
 |---|---|
 | Import 10k-person Ancestry GEDCOM | < 3s |
+| Re-import compare (match + diff), 10k export against a 10k tree | < 2s |
+| Re-import compare, 100k export against a 100k tree (#202) | < 20s, within ~15x of 10k |
 | Server cold start to first API response | < 300ms |
 | Initial page load (LCP, localhost) | < 1s; initial JS < 150KB gz |
 | Neighborhood API p95 | < 20ms |

@@ -206,10 +206,13 @@ function baseScore(
  * shares a name sound made matching quadratic in how common a name is (#202).
  * Now a person is compared with same-name tree people by birth year, nearest
  * first: everyone within NEAR_YEARS, then outward up to YEAR_WINDOW years
- * until MAX_NEAR candidates are found. A name with at most SMALL_BLOCK tree
- * people is compared in full; in a crowded one, people without a birth year
- * are compared only with same-name people who share their death year.
- * Surname sound with the exact birth year finds a changed given name; when
+ * until MAX_NEAR candidates are found. Same-name people who share a death
+ * year are always compared, however far apart their birth years: an export
+ * that turns "BET 1920 AND 1929" into "1 JAN 1929" moves the birth year
+ * further than the nearest few reach in a crowded name. A name with at most
+ * SMALL_BLOCK tree people is compared in full, and a person without a birth
+ * year meets the same-name people without one (up to MAX_UNDATED). Surname sound with the exact
+ * birth year finds a changed given name; when
  * that key is crowded it is used only for people with no same-name tree
  * person born nearby.
  */
@@ -220,10 +223,10 @@ const MAX_NEAR = 8;
  * A name with at most this many tree people (with or without a birth year) is
  * compared in full: rare names reach any birth year, so a typo like 1857 for
  * 1875 still finds the person (or at least names them as the closest).
- * Beyond it, people without a birth year are only compared with same-name
- * people who share their death year.
  */
 const SMALL_BLOCK = 16;
+/** Most same-name tree people without a birth year that a person without one is compared with. */
+const MAX_UNDATED = 64;
 
 /** Given and surname sounds, for every name the person has, so married names meet birth names. */
 function nameKeys(p: SnapPerson): { names: string[]; surnames: string[] } {
@@ -245,23 +248,24 @@ interface NameBlock {
   undated: string[];
 }
 
-/** Tree people of a crowded name block who share `deathYear` (none when it is unknown). */
-function sameDeath(ids: string[], deaths: Map<string, number | null>, deathYear: number | null) {
-  return deathYear === null ? [] : ids.filter((id) => deaths.get(id) === deathYear);
-}
-
 /** The tree's people indexed by blocking key. */
 class Blocks {
   private readonly byName = new Map<string, NameBlock>();
   private readonly bySurnameYear = new Map<string, string[]>();
-  private readonly deaths = new Map<string, number | null>();
+  /** `name@deathYear`: same-name people who died the same year. */
+  private readonly byNameDeath = new Map<string, string[]>();
 
   constructor(people: Iterable<SnapPerson>) {
     const dated = new Map<string, { year: number; id: string }[]>();
     for (const p of people) {
-      this.deaths.set(p.row.id, p.deathYear);
       const { names, surnames } = nameKeys(p);
       for (const name of names) {
+        if (p.deathYear !== null) {
+          const key = `${name}@${p.deathYear}`;
+          const list = this.byNameDeath.get(key);
+          if (list) list.push(p.row.id);
+          else this.byNameDeath.set(key, [p.row.id]);
+        }
         let block = this.byName.get(name);
         if (!block) {
           block = { years: [], ids: [], undated: [] };
@@ -304,9 +308,12 @@ class Blocks {
         }
         continue;
       }
-      for (const id of sameDeath(block.undated, this.deaths, p.deathYear)) into.add(id);
+      if (p.deathYear !== null) {
+        for (const id of this.byNameDeath.get(`${name}@${p.deathYear}`) ?? []) into.add(id);
+      }
       if (p.birthYear === null) {
-        for (const id of sameDeath(block.ids, this.deaths, p.deathYear)) into.add(id);
+        // Without dates nothing ranks them, so a crowd of undated namesakes is left out.
+        if (block.undated.length <= MAX_UNDATED) for (const id of block.undated) into.add(id);
         continue;
       }
       nearby = nearestByYear(block, p.birthYear, into) || nearby;

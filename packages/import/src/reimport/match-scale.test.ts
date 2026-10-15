@@ -163,6 +163,39 @@ describe('matching at scale: corrected birth years in crowded names (100k bench 
   });
 });
 
+describe('matching at scale: a birth range refined to one of its years', () => {
+  // The rest of the 100k regression: living people (no death year) whose
+  // "BET 1940 AND 1949" became "1 JAN 1949". The range still covers the year.
+  it('compares a same-name person whose birth range covers the new birth year', async () => {
+    const person = (xref: string, date: string) => [
+      `0 ${xref} INDI`,
+      '1 NAME John /Smith/',
+      '1 SEX M',
+      '1 BIRT',
+      `2 DATE ${date}`,
+    ];
+    const crowd = (offset: number) =>
+      Array.from({ length: 40 }, (_, n) =>
+        person(`@I${n + offset}@`, String(1930 + (n % 25))),
+      ).flat();
+    const existing = await tree(ged(...crowd(1), ...person('@I900@', 'BET 1940 AND 1949')));
+    const incoming = await tree(ged(...crowd(1001), ...person('@I1900@', '1 JAN 1949')));
+    const e = snapshot(existing);
+    const ranged = [...e.people.values()].find((p) =>
+      p.events.some((ev) => ev.row.date_text === 'BET 1940 AND 1949'),
+    )!;
+    const near = new Map<string, NearMiss>();
+    const matches = matchPeople(e, snapshot(incoming), near);
+    const incomingId = [...snapshot(incoming).people.values()].find((p) =>
+      p.events.some((ev) => ev.row.date_text === '1 JAN 1949'),
+    )!.row.id;
+    const found = matches.get(incomingId)?.existingId ?? near.get(incomingId)?.existingId;
+    expect(found).toBe(ranged.row.id);
+    existing.close();
+    incoming.close();
+  });
+});
+
 describe('matching at scale: undated people still match themselves', () => {
   // The 100k compare bench found 124 renumbered records reported as new: people
   // with no birth or death year in a crowded name were compared with no one.

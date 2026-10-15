@@ -133,3 +133,50 @@ describe('matching at scale: rare names and undated people (review of #222)', ()
     incoming.close();
   });
 });
+
+describe('matching at scale: corrected birth years in crowded names (100k bench regression)', () => {
+  // The 100k compare bench reported 124 renumbered records as new: an export
+  // that turns "BET 1920 AND 1929" into "1 JAN 1929" moves the birth year by
+  // up to 9 years, and in a name shared by dozens of people the 8 nearest
+  // birth years never reached the real record. Its death year still matched.
+  it('compares same-name people with the same death year, however far the birth year moved', async () => {
+    const person = (xref: string, born: number, died: number) => [
+      `0 ${xref} INDI`,
+      '1 NAME John /Smith/',
+      '1 SEX M',
+      '1 BIRT',
+      `2 DATE ${born}`,
+      '1 DEAT',
+      `2 DATE ${died}`,
+    ];
+    // 40 same-name people born 1900-1939 with distinct death years, plus the one who moves.
+    const crowd = (offset: number) =>
+      Array.from({ length: 40 }, (_, n) => person(`@I${n + offset}@`, 1900 + n, 1960 + n)).flat();
+    const existing = await tree(ged(...crowd(1), ...person('@I900@', 1920, 2014)));
+    const incoming = await tree(ged(...crowd(1001), ...person('@I1900@', 1929, 2014)));
+    const e = snapshot(existing);
+    const moved = [...e.people.values()].find((p) => p.deathYear === 2014)!;
+    const matches = matchPeople(e, snapshot(incoming));
+    expect([...matches.values()].some((m) => m.existingId === moved.row.id)).toBe(true);
+    existing.close();
+    incoming.close();
+  });
+});
+
+describe('matching at scale: undated people still match themselves', () => {
+  // The 100k compare bench found 124 renumbered records reported as new: people
+  // with no birth or death year in a crowded name were compared with no one.
+  it('matches a person without dates whose name is shared by many dated people', async () => {
+    const undatedAda = (xref: string) => [`0 ${xref} INDI`, '1 NAME John /Smith/', '1 SEX M'];
+    const existing = await tree(
+      sameNames(40, 1).replace('0 TRLR', [...undatedAda('@I900@'), '0 TRLR'].join('\n')),
+    );
+    const incoming = await tree(
+      sameNames(40, 1001).replace('0 TRLR', [...undatedAda('@I1900@'), '0 TRLR'].join('\n')),
+    );
+    const matches = matchPeople(snapshot(existing), snapshot(incoming));
+    expect(matches.size).toBe(41);
+    existing.close();
+    incoming.close();
+  });
+});

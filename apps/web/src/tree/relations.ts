@@ -15,7 +15,7 @@ export interface Relations {
    * sibling group, shared by every member, so a family of k children costs k
    * rather than k² entries.
    */
-  siblings: Map<string, string[]>;
+  siblings: Map<string, readonly string[]>;
   /** Cards sharing a row, left to right. */
   rows: Map<string, LayoutNode[]>;
 }
@@ -47,7 +47,7 @@ export function buildRelations(layout: TreeLayout): Relations {
   const parents = linker();
   const children = linker();
   const partners = linker();
-  const siblings = new Map<string, string[]>();
+  const siblings = new Map<string, readonly string[]>();
   const groupParents = new Map<string, string[]>();
   const groupChildren = linker();
 
@@ -162,14 +162,14 @@ function kinshipPaths(rel: Relations, focusKey: string, stopAt?: string): Map<st
   const paths = new Map<string, string>([[focusKey, '']]);
   // Sibling lists are shared by the whole group: the first member to reach one
   // (the nearest, as the walk is breadth-first) labels all the others.
-  const walked = new Set<string[]>();
+  const walked = new Set<readonly string[]>();
   let frontier = [focusKey];
   while (frontier.length > 0 && !(stopAt && paths.has(stopAt))) {
     const next: string[] = [];
     for (const from of frontier) {
       const path = paths.get(from)!;
       if (path.length >= 4) continue;
-      const steps: [string, string[] | undefined][] = [
+      const steps: [string, readonly string[] | undefined][] = [
         ['B', rel.siblings.get(from)],
         ['U', rel.parents.get(from)],
         ['D', rel.children.get(from)],

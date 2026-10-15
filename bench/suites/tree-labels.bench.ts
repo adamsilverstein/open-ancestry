@@ -29,6 +29,8 @@ export default [
       kinshipLabels(buildRelations(fromParent), 'me', () => 'U');
       kinshipLabels(buildRelations(fromChild), 'k1500', () => 'U');
     },
-    budgetMs: 30,
+    // The mean: a p99 over a few dozen samples swings with machine load.
+    metric: 'mean',
+    budgetMs: 20,
   },
 ] satisfies BenchCase[];

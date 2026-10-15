@@ -158,3 +158,72 @@ describe('a very large family', () => {
     }
   });
 });
+
+describe('labels in a blended family', () => {
+  // Remarriage (half siblings), an adopted and a step child, and a child (eve)
+  // in two families, drawn in her preferred one. Hand-checked; a change to the
+  // walk that lets a farther sibling-group member label first breaks these.
+  const blended: Record<string, 'M' | 'F'> = {
+    dad: 'M',
+    mum: 'F',
+    mum2: 'F',
+    exh: 'M',
+    ann: 'F',
+    ben: 'M',
+    ivy: 'F',
+    cal: 'M',
+    dee: 'F',
+    eve: 'F',
+    fox: 'M',
+    gil: 'M',
+    hal: 'M',
+  };
+  const g: TreeGraph = {
+    people: Object.fromEntries(Object.entries(blended).map(([id, sex]) => [id, person(id, sex)])),
+    families: [
+      {
+        id: 'f1',
+        partners: ['dad', 'mum'],
+        children: [
+          { id: 'ann' },
+          { id: 'ben', rel1: 'adopted', rel2: 'adopted' },
+          { id: 'ivy', rel1: 'step' },
+          { id: 'eve', order: 0, preferred: true },
+        ],
+      },
+      { id: 'f2', partners: ['dad', 'mum2'], children: [{ id: 'cal' }] },
+      { id: 'f3', partners: ['exh', 'mum2'], children: [{ id: 'dee' }] },
+      { id: 'f4', partners: ['fox', null], children: [{ id: 'eve', order: 1 }, { id: 'gil' }] },
+      { id: 'f5', partners: ['hal', 'ann'], children: [] },
+    ],
+  };
+  const labels = (focus: string) => {
+    const l = layoutFamily(g, focus, {});
+    return kinshipLabels(buildRelations(l), l.focusKey!, (k) => blended[k.split('~')[0]!] ?? 'U');
+  };
+
+  it('names half, adopted and step siblings, and in-laws', () => {
+    expect(labels('ann')).toMatchObject({
+      ben: 'brother',
+      ivy: 'sister',
+      eve: 'sister',
+      cal: 'half-brother',
+      dad: 'father',
+      mum: 'mother',
+      hal: 'husband',
+    });
+    expect(labels('cal')).toMatchObject({
+      ann: 'half-sister',
+      ben: 'half-brother',
+      eve: 'half-sister',
+      dee: 'half-sister',
+      hal: 'brother-in-law',
+    });
+    expect(labels('eve')).toMatchObject({
+      ann: 'sister',
+      cal: 'half-brother',
+      hal: 'brother-in-law',
+    });
+    expect(labels('dad')).toMatchObject({ ivy: 'daughter', mum2: 'wife', hal: 'son-in-law' });
+  });
+});

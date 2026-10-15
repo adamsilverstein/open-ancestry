@@ -12,6 +12,7 @@ import { Input } from '../../../components/Input/Input';
 import { Select } from '../../../components/Select/Select';
 import { eventLabel } from '../../../lib/timeline';
 import { removeEvent } from './optimistic';
+import { useDirtyForm } from './dirty';
 import { SaveError, useSaveState } from './SaveError';
 import styles from './Edit.module.css';
 
@@ -85,6 +86,7 @@ export function EventDialog({
     (event && (VALUE_LABELS[event.type] ? event.value : event.description)) ?? '',
   );
   const [confirmDelete, setConfirmDelete] = useState(false);
+  useDirtyForm({ type, customType, date, place, detail });
   const types =
     event && !EVENT_TYPES.includes(event.type) ? [...EVENT_TYPES, event.type] : EVENT_TYPES;
   const label = eventLabel(type, customType);

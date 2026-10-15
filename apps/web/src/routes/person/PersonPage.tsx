@@ -3,12 +3,14 @@ import { useQueryClient, useSuspenseQuery } from '@tanstack/react-query';
 import { getRouteApi, useRouter } from '@tanstack/react-router';
 import { isNotFound } from '../../api/client';
 import { takeUnsaved } from '../../api/edits';
+import { deletedHere } from '../../api/history';
 import { personQuery } from '../../api/queries';
 import type { PersonDetail } from '../../api/types';
 import { useToast } from '../../components/Toast/Toast';
 import { fullName, nearestRelative } from '../../lib/person';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/Tabs/Tabs';
 import { FactsTab } from './FactsTab';
+import { hasDirtyForms } from './edit/dirty';
 import { NotesTab } from './edit/NotesTab';
 import { GalleryTab, LifeStoryTab, SourcesTab } from './OtherTabs';
 import { PersonHeader } from './PersonHeader';
@@ -39,11 +41,17 @@ function useLeaveWhenGone(tree: string, detail: PersonDetail, error: unknown) {
   const name = fullName(detail.summary);
   const nearby = nearestRelative(detail);
   useEffect(() => {
-    if (!gone) return;
-    const lost = takeUnsaved(tree);
+    // A delete made here already navigated and said so; its page may still be
+    // mounted for a moment and see the 404 (#181's removeQueries).
+    if (!gone || deletedHere(personId)) return;
+    const lost = takeUnsaved(tree)
+      ? "Your changes couldn't be saved."
+      : hasDirtyForms()
+        ? 'Your unsaved changes were discarded.'
+        : null;
     toast({
       title: `${name} was deleted (in another window or by undo)`,
-      ...(lost ? { description: "Your changes couldn't be saved." } : {}),
+      ...(lost ? { description: lost } : {}),
     });
     void (nearby
       ? router.navigate({ to: '/person/$personId', params: { personId: nearby } })

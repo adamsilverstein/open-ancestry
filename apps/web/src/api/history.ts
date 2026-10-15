@@ -22,12 +22,24 @@ const deletedPeople = new Map<string, string>();
 /** Only recent deletes matter for undo; older entries are dropped. */
 const MAX_REMEMBERED = 50;
 
+/** People this session just deleted, until their page has left (or an undo restores them). */
+const leaving = new Set<string>();
+
 /** Records that change batch `batchId` deleted person `personId`. */
 export function rememberDeletedPerson(batchId: string, personId: string): void {
   deletedPeople.set(batchId, personId);
+  leaving.add(personId);
   if (deletedPeople.size > MAX_REMEMBERED) {
     deletedPeople.delete(deletedPeople.keys().next().value!);
   }
+}
+
+/**
+ * Whether this session deleted `personId` itself (and nothing restored them),
+ * so its page should not announce the delete as one made elsewhere.
+ */
+export function deletedHere(personId: string): boolean {
+  return leaving.has(personId);
 }
 
 export interface UndoRedoResult {
@@ -64,6 +76,7 @@ export async function undoRedo(
   const batch = result.batch ?? null;
   // Undoing a delete brings the person back: the caller goes to them.
   const restored = direction === 'undo' && batch ? deletedPeople.get(batch.id) : undefined;
+  if (restored) leaving.delete(restored);
   if (restored) await onRestored?.(restored);
   return { batch, skipped: result.skipped ?? [] };
 }

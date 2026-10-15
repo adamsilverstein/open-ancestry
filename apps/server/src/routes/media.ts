@@ -1,5 +1,5 @@
-import { createReadStream, realpathSync } from 'node:fs';
-import { open, realpath, stat } from 'node:fs/promises';
+import { createReadStream, lstatSync, realpathSync, statSync } from 'node:fs';
+import { lstat, open, realpath, stat } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import { treePaths } from '@open-ancestry/db';
 import type { FastifyReply } from 'fastify';
@@ -56,32 +56,70 @@ async function readHead(file: string): Promise<Buffer> {
   }
 }
 
+/*
+ * Media paths come from untrusted GEDCOM, and since #151 a library may be
+ * shared with other accounts that can write into a tree folder. A media file
+ * is served only when:
+ * - its path stays inside the root (no `..`, no absolute path);
+ * - the root itself is a real folder, not a symlink (a symlinked media/ would
+ *   make everything it points at count as inside the tree);
+ * - after following symlinks, the file is still inside the root;
+ * - it has a single hard link (a second link could be any file of yours,
+ *   linked into the tree; which side is the original cannot be told).
+ * Both resolvers apply the same rules (media-resolve.test.ts).
+ */
+
+function inside(root: string, localPath: string): string | null {
+  const resolvedRoot = resolve(root);
+  const candidate = resolve(resolvedRoot, localPath);
+  return candidate.startsWith(resolvedRoot + sep) ? candidate : null;
+}
+
+/** The final check shared by both resolvers. */
+function accept(
+  rootIsLink: boolean,
+  realRoot: string,
+  realFile: string,
+  links: number,
+): string | null {
+  if (rootIsLink || links > 1) return null;
+  return realFile.startsWith(realRoot + sep) ? realFile : null;
+}
+
 /** `resolveMediaPath` for synchronous callers (the profile-photo check inside a transaction). */
 export function resolveMediaPathSync(mediaRoot: string, localPath: string): string | null {
-  const root = resolve(mediaRoot);
-  const candidate = resolve(root, localPath);
-  if (!candidate.startsWith(root + sep)) return null;
+  const candidate = inside(mediaRoot, localPath);
+  if (!candidate) return null;
   try {
+    const root = resolve(mediaRoot);
     // .native: the same realpath(3) the async version uses, so both agree on case.
-    const realRoot = realpathSync.native(root);
     const realFile = realpathSync.native(candidate);
-    return realFile.startsWith(realRoot + sep) ? realFile : null;
+    return accept(
+      lstatSync(root).isSymbolicLink(),
+      realpathSync.native(root),
+      realFile,
+      statSync(realFile).nlink,
+    );
   } catch {
     return null;
   }
 }
 
-/** Resolves a media.local_path inside the tree's media folder, following symlinks; null if it escapes. */
+/** Resolves a media.local_path inside the tree's media folder (see the rules above); null if refused. */
 export async function resolveMediaPath(
   mediaRoot: string,
   localPath: string,
 ): Promise<string | null> {
-  const root = resolve(mediaRoot);
-  const candidate = resolve(root, localPath);
-  if (!candidate.startsWith(root + sep)) return null;
+  const candidate = inside(mediaRoot, localPath);
+  if (!candidate) return null;
   try {
-    const [realRoot, realFile] = await Promise.all([realpath(root), realpath(candidate)]);
-    return realFile.startsWith(realRoot + sep) ? realFile : null;
+    const root = resolve(mediaRoot);
+    const [rootStat, realRoot, realFile] = await Promise.all([
+      lstat(root),
+      realpath(root),
+      realpath(candidate),
+    ]);
+    return accept(rootStat.isSymbolicLink(), realRoot, realFile, (await stat(realFile)).nlink);
   } catch {
     return null;
   }

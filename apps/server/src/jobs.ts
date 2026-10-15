@@ -13,17 +13,16 @@ export interface ImportProgress {
 }
 
 export interface ImporterOptions {
-  /** The tree's media/ folder, for files extracted from a GEDZIP. */
-  mediaDir: string;
   onProgress: (progress: ImportProgress) => void;
   signal: AbortSignal;
 }
 
 /**
  * Imports a GEDCOM or GEDZIP file at `filePath` into the empty tree `target`.
- * Wire the real importer with
- * `(path, store, options) => importGedcom({ path }, store, options)` from
- * @open-ancestry/import; it is injected so tests can fake it.
+ * The real one runs @open-ancestry/import in a worker thread
+ * (`workerImporter` in import-runner.ts); it is injected so tests can fake it.
+ * A GEDZIP brings its own media; an upload never reads media from local
+ * folders.
  */
 export type Importer = (
   filePath: string,
@@ -45,6 +44,8 @@ export interface JobView {
   /** The importer's report once completed. */
   result: unknown;
   error: string | null;
+  /** Stopped by a cancel (DELETE /api/jobs/:id or server shutdown), not by an error. */
+  cancelled: boolean;
   createdAt: string;
   finishedAt: string | null;
 }
@@ -67,10 +68,21 @@ export interface JobManagerOptions {
   keepFinished?: number;
 }
 
+/** Progress phases a cancel can no longer interrupt (importers run them to the end). */
+export const UNCANCELLABLE_PHASES: ReadonlySet<string> = new Set(['finalize', 'commit', 'done']);
+
 export class TooManyJobsError extends Error {
   constructor() {
     super('Too many imports are queued; try again when one finishes');
     this.name = 'TooManyJobsError';
+  }
+}
+
+/** The server is shutting down and takes no new jobs. */
+export class ShuttingDownError extends Error {
+  constructor() {
+    super('The server is shutting down; try again once it has restarted');
+    this.name = 'ShuttingDownError';
   }
 }
 
@@ -81,12 +93,20 @@ export class JobManager {
   private readonly maxQueued: number;
   private readonly keepFinished: number;
   private running = 0;
+  private draining = false;
 
   constructor({ concurrency = 1, maxQueued = 4, keepFinished = 50 }: JobManagerOptions = {}) {
     this.concurrency = concurrency;
     this.maxQueued = maxQueued;
     this.keepFinished = keepFinished;
     this.events.setMaxListeners(0);
+  }
+
+  /** Whether a new job could be queued now (checked before accepting an upload). */
+  hasRoom(): boolean {
+    if (this.draining) throw new ShuttingDownError();
+    const queued = [...this.jobs.values()].filter((j) => j.state === 'queued').length;
+    return queued < this.maxQueued;
   }
 
   get(id: string): JobView | undefined {
@@ -103,6 +123,7 @@ export class JobManager {
     run: (signal: AbortSignal, progress: (p: ImportProgress) => void) => Promise<unknown>,
     cleanup: () => Promise<void> = async () => {},
   ): JobView {
+    if (this.draining) throw new ShuttingDownError();
     const queued = [...this.jobs.values()].filter((j) => j.state === 'queued').length;
     if (queued >= this.maxQueued) throw new TooManyJobsError();
     const id = randomUUID();
@@ -116,6 +137,7 @@ export class JobManager {
       progress: null,
       result: null,
       error: null,
+      cancelled: false,
       createdAt: new Date().toISOString(),
       finishedAt: null,
       controller: new AbortController(),
@@ -138,11 +160,26 @@ export class JobManager {
    * cleanup), a running one is aborted through its signal and fails when the
    * work stops. Returns false for unknown or finished jobs.
    */
+  /**
+   * Whether `cancel` can still stop the job: it is queued, or running in a
+   * phase the work checks its abort signal in. An importer reports `finalize`
+   * and `commit` for the stretch it runs to the end without checking.
+   */
+  cancellable(id: string): boolean {
+    const job = this.jobs.get(id);
+    if (!job) return false;
+    if (job.state === 'queued') return true;
+    if (job.state !== 'running') return false;
+    const phase = job.progress?.phase;
+    return !(typeof phase === 'string' && UNCANCELLABLE_PHASES.has(phase));
+  }
+
   cancel(id: string): boolean {
     const job = this.jobs.get(id);
-    if (!job || (job.state !== 'queued' && job.state !== 'running')) return false;
+    if (!job || !this.cancellable(id)) return false;
     job.controller.abort();
     if (job.state === 'queued' && !job.cancelling) {
+      job.cancelled = true;
       // Never picked up by pump(): it skips jobs that are cancelling.
       job.cancelling = true;
       job.error = 'Cancelled';
@@ -156,6 +193,8 @@ export class JobManager {
 
   /** Cancels every active job and waits for them to settle (server shutdown). */
   async shutdown(): Promise<void> {
+    // From now on new work is refused (503), so the wait below can only shrink.
+    this.draining = true;
     const active = [...this.jobs.values()].filter(
       (j) => j.state === 'queued' || j.state === 'running',
     );
@@ -205,6 +244,7 @@ export class JobManager {
     let state: JobState = 'completed';
     if (job.controller.signal.aborted) {
       job.error = 'Cancelled';
+      job.cancelled = true;
       state = 'failed';
     } else {
       this.setState(job, 'running');
@@ -213,6 +253,8 @@ export class JobManager {
       } catch (error) {
         job.error = error instanceof Error ? error.message : String(error);
         state = 'failed';
+        // Only a failure after an abort is a cancel; work that finished anyway completed.
+        job.cancelled = job.controller.signal.aborted;
       }
     }
     // Clean up first, so a finished job never leaves its upload behind.
@@ -240,6 +282,7 @@ function view(job: Job): JobView {
     progress: job.progress,
     result: job.result,
     error: job.error,
+    cancelled: job.cancelled,
     createdAt: job.createdAt,
     finishedAt: job.finishedAt,
   };

@@ -578,7 +578,15 @@ export function applyReimport(
         }
         case 'media': {
           const m = get('media', id);
-          return mediaMap.get(id) ?? (m ? (existingMedia.get(mediaKey(m)) ?? null) : null);
+          // Matched as ensureMedia matches: by identity key, else by the file's bytes.
+          return (
+            mediaMap.get(id) ??
+            (m
+              ? (existingMedia.get(mediaKey(m)) ??
+                (m.sha256 ? existingMedia.get(`sha:${m.sha256}`) : undefined) ??
+                null)
+              : null)
+          );
         }
         case 'note': {
           const n = get('note', id);

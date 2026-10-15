@@ -16,7 +16,12 @@ const TITLES: Record<GroupId, string> = {
 };
 
 /** Information that asks the user to decide whether a person is someone already here. */
-const QUESTIONS = new Set(['possible-match', 'possibly-merged', 'deleted-here', 'unlinked-new']);
+export const QUESTIONS: ReadonlySet<string> = new Set([
+  'possible-match',
+  'possibly-merged',
+  'deleted-here',
+  'unlinked-new',
+]);
 
 /** Whether a card asks for a decision: a conflict, a likely duplicate, or a match to check. */
 export function needsDecision(person: PersonReview): boolean {

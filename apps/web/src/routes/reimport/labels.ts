@@ -29,8 +29,10 @@ export function changeText(before: FactView, after: FactView): string {
   const fields = (['date', 'place', 'value'] as const).filter(
     (k) => (before[k] ?? '') !== (after[k] ?? ''),
   );
+  // Dates are shown as the app formats them, unless that hides the difference.
+  const raw = shownDate(before.date) === shownDate(after.date);
   const side = (f: FactView) =>
-    fields.map((k) => (k === 'date' ? shownDate(f.date) : f[k]) || '(none)').join(', ');
+    fields.map((k) => (k === 'date' && !raw ? shownDate(f.date) : f[k]) || '(none)').join(', ');
   return `${eventLabel(after.type, after.customType)}: ${side(before)} → ${side(after)}`;
 }
 

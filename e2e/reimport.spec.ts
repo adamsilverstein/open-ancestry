@@ -298,11 +298,11 @@ test('the review lists what needs a decision first, filters by group, and format
   await expect(groups.first()).toHaveAttribute('data-group', 'decide');
   const decide = page.getByRole('region', { name: /Needs your decision/ });
   // Marked by more than colour: an icon and the word, announced with the checkbox.
-  const death = card(decide, 'Josiah Ashgrove').getByRole('checkbox', {
+  const conflict = card(decide, 'Josiah Ashgrove').getByRole('checkbox', {
     name: 'Death: 3 May 1939 → 1940',
   });
-  await expect(death).toBeVisible();
-  await expect(death).toHaveAccessibleDescription(/^Conflict/);
+  await expect(conflict).toBeVisible();
+  await expect(conflict).toHaveAccessibleDescription(/^Conflict/);
   // The summary is about the whole export, and says which people aren't listed.
   await expect(page.getByRole('region', { name: 'Summary' })).toContainText(
     /\d+ matched \(\d+ unchanged, not listed\)/,

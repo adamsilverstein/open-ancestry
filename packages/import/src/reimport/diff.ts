@@ -1,3 +1,4 @@
+import { formatDate } from '@open-ancestry/core';
 import type { FamilyRow, MediaRow, TableName, TreeStore } from '@open-ancestry/db';
 import { HIGH_CONFIDENCE, type PersonMatch } from './match';
 import {
@@ -135,11 +136,18 @@ const factOf = (e: SnapEvent): FactView => ({
 
 type FamilyChildRef = Snapshot['familyChildren'][number];
 
+/**
+ * A date as it reads, so texts that mean the same date compare equal
+ * ("3 Mar 1846" and "03 MAR 1846", "BET 1850 AND 1860" and "1850-1860").
+ */
+const dateKey = (text: string | null | undefined) => norm(text ? formatDate(text) : '');
+const sameDate = (a: string | null, b: string | null) => dateKey(a) === dateKey(b);
+
 const sameText = (a: string | null, b: string | null) => norm(a) === norm(b);
 const sameFact = (a: SnapEvent, b: SnapEvent) =>
   a.row.type === b.row.type &&
   sameText(a.row.custom_type, b.row.custom_type) &&
-  sameText(a.row.date_text, b.row.date_text) &&
+  sameDate(a.row.date_text, b.row.date_text) &&
   sameText(a.place, b.place) &&
   sameText(a.row.value, b.row.value);
 
@@ -272,7 +280,10 @@ export function localHistory(store: TreeStore): LocalHistory {
         const event = rowOf('event', d.row.event_id);
         const owner = (d.row.person_id ?? d.row.family_id) as string | null;
         if (!event || !owner) break;
-        push(facts, owner, { type: event.type as string, date: norm(event.date_text as string) });
+        push(facts, owner, {
+          type: event.type as string,
+          date: dateKey(event.date_text as string),
+        });
         if (event.type === 'BIRT' && typeof event.date_sort === 'number' && event.date_sort) {
           birthYears.set(owner, Math.floor(event.date_sort / 10000));
         }
@@ -417,7 +428,7 @@ interface Removed {
 const DELETED: Partial<ReviewChange> = { conflict: 'local-delete', defaultAccept: false };
 
 const factKey = (f: FactView) =>
-  `fact|${f.type}|${norm(f.customType)}|${norm(f.date)}|${norm(f.place)}|${norm(f.value)}`;
+  `fact|${f.type}|${norm(f.customType)}|${dateKey(f.date)}|${norm(f.place)}|${norm(f.value)}`;
 
 /** Pairs the incoming person's events with the existing person's. */
 function diffFacts(
@@ -453,7 +464,7 @@ function diffFacts(
             !used.has(ee.row.id) &&
             ee.row.type === ie.row.type &&
             sameText(ee.row.custom_type, ie.row.custom_type) &&
-            (sameText(ee.row.date_text, ie.row.date_text) ||
+            (sameDate(ee.row.date_text, ie.row.date_text) ||
               (sameText(ee.place, ie.place) && sameText(ee.row.value, ie.row.value))),
         );
     if (counterpart) {
@@ -525,7 +536,7 @@ export function diffTrees(
   const removed: Removed = {
     fact: (owner, type, date) =>
       (gone.facts.get(owner) ?? []).some(
-        (f) => f.type === type && (SINGULAR.has(type) || f.date === norm(date)),
+        (f) => f.type === type && (SINGULAR.has(type) || f.date === dateKey(date)),
       ),
     citation: (owner, c) => gone.citations.has(`${owner}|${c.sourceKey}|${norm(c.page)}`),
   };
@@ -835,11 +846,12 @@ export function diffTrees(
     if (existingFamily) {
       // Family facts (marriage, divorce) new in the export.
       const have = new Set(
-        existing.familyEvents.get(existingFamily)?.map((e) => `${e.type}|${norm(e.date_text)}`) ??
-          [],
+        existing.familyEvents
+          .get(existingFamily)
+          ?.map((e) => `${e.type}|${dateKey(e.date_text)}`) ?? [],
       );
       for (const fe of incoming.familyEvents.get(f.id) ?? []) {
-        if (have.has(`${fe.type}|${norm(fe.date_text)}`)) continue;
+        if (have.has(`${fe.type}|${dateKey(fe.date_text)}`)) continue;
         adder(reviewFor(owner), lowConfidence(partners) ? { defaultAccept: false } : {})(
           {
             kind: 'fact.add',

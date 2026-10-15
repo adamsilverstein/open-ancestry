@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { CircleHelp, TriangleAlert } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -21,7 +21,7 @@ import {
   type ReimportReview,
   type ReviewChange,
 } from './api';
-import { groupReview, type GroupId } from './group';
+import { groupReview, QUESTIONS, type GroupId } from './group';
 import { describeChange } from './labels';
 import styles from './Reimport.module.css';
 
@@ -33,14 +33,6 @@ const STATUS: Record<PersonReview['status'], string> = {
   new: 'New person',
   missing: 'Not in the new export',
 };
-
-/** Information lines that ask whether a person is someone already in the tree. */
-const QUESTION_KINDS = new Set([
-  'possible-match',
-  'possibly-merged',
-  'deleted-here',
-  'unlinked-new',
-]);
 
 /** Changes that would be applied: chosen, applicable, and with every prerequisite chosen. */
 function effective(review: ReimportReview, selected: Set<string>): Set<string> {
@@ -74,11 +66,13 @@ function PersonCard({
   active: Set<string>;
   onToggle: (change: ReviewChange, on: boolean) => void;
 }) {
+  const nameId = useId();
+  // An article per card: the four groups stay the only regions (landmarks).
   return (
-    <section aria-label={person.name} className={styles.card} data-status={person.status}>
+    <article aria-labelledby={nameId} className={styles.card} data-status={person.status}>
       <header className={styles.cardHeader}>
         <div>
-          <h3 className={styles.name}>
+          <h3 id={nameId} className={styles.name}>
             {person.name}
             {person.lifespan && <span className={styles.lifespan}> {person.lifespan}</span>}
           </h3>
@@ -98,7 +92,7 @@ function PersonCard({
           if (!change.applicable) {
             return (
               <li key={change.id} className={styles.info}>
-                {QUESTION_KINDS.has(change.kind) && (
+                {QUESTIONS.has(change.kind) && (
                   <span className={styles.flag}>
                     <CircleHelp aria-hidden size={14} /> Check
                   </span>
@@ -111,23 +105,24 @@ function PersonCard({
           const waiting = change.requires?.some((r) => !active.has(r)) ?? false;
           return (
             <li key={change.id} className={change.conflict ? styles.conflict : undefined}>
-              {change.conflict && (
-                <span className={styles.flag}>
-                  <TriangleAlert aria-hidden size={14} /> Conflict
-                </span>
-              )}
               <Checkbox
                 label={label}
                 checked={active.has(change.id)}
                 disabled={waiting}
                 description={
-                  change.conflict === 'local-edit'
-                    ? 'Edited in this tree since the last import; your edit is kept unless you tick this.'
-                    : change.conflict === 'local-delete'
-                      ? 'You deleted this in this tree; it stays deleted unless you tick this.'
-                      : waiting
-                        ? 'Needs the new person above.'
-                        : undefined
+                  change.conflict ? (
+                    // The marker is part of the description, so it is announced with the checkbox.
+                    <>
+                      <span className={styles.flag}>
+                        <TriangleAlert aria-hidden size={14} /> Conflict
+                      </span>
+                      {change.conflict === 'local-edit'
+                        ? 'Edited in this tree since the last import; your edit is kept unless you tick this.'
+                        : 'You deleted this in this tree; it stays deleted unless you tick this.'}
+                    </>
+                  ) : waiting ? (
+                    'Needs the new person above.'
+                  ) : undefined
                 }
                 onChange={(event) => onToggle(change, event.target.checked)}
               />
@@ -135,7 +130,7 @@ function PersonCard({
           );
         })}
       </ul>
-    </section>
+    </article>
   );
 }
 
@@ -154,6 +149,11 @@ function Review({ review }: { review: ReimportReview }) {
   const groups = useMemo(() => groupReview(review.diff.people), [review]);
   const visible = groups.filter((g) => g.people.length && (filter === 'all' || g.id === filter));
   const listed = visible.reduce((n, g) => n + g.people.length, 0);
+  // Matched people without a card: nothing in the export changed them.
+  const unchanged = Math.max(
+    0,
+    counts.matched - review.diff.people.filter((p) => p.status === 'matched').length,
+  );
   const active = useMemo(() => effective(review, selected), [review, selected]);
   const { counts } = review.diff;
 
@@ -219,7 +219,7 @@ function Review({ review }: { review: ReimportReview }) {
       </header>
       <section aria-label="Summary" className={styles.summary}>
         <span>
-          {counts.matched} matched ({counts.highConfidence} high confidence)
+          In the export: {counts.matched} matched ({unchanged} unchanged, not listed)
         </span>
         <span>{counts.newPeople} new</span>
         <span>{counts.missingPeople} missing</span>
@@ -238,10 +238,12 @@ function Review({ review }: { review: ReimportReview }) {
         </p>
       ) : (
         <>
-          <div role="group" aria-label="Show" className={styles.filters}>
+          <div role="group" aria-label="Filter the review" className={styles.filters}>
             {[
               { id: 'all' as const, title: 'All', count: review.diff.people.length },
-              ...groups.map((g) => ({ id: g.id, title: g.title, count: g.people.length })),
+              ...groups
+                .filter((g) => g.people.length)
+                .map((g) => ({ id: g.id, title: g.title, count: g.people.length })),
             ].map((f) => (
               <Button
                 key={f.id}

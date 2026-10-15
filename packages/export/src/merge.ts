@@ -345,8 +345,17 @@ class Merger {
     }
     if (node.tag === 'FILE' && path.endsWith('OBJE.FILE')) {
       const form = copy.children.find((c) => c.tag === 'FORM');
-      if (form?.value) form.value = formValue(form.value, this.ctx.v7);
-      else if (this.ctx.v7 && !form) {
+      if (form?.value) {
+        const original = form.value;
+        form.value = formValue(original, this.ctx.v7);
+        if (this.ctx.v7 && form.value === 'application/octet-stream' && !original.includes('/')) {
+          this.ctx.warn(
+            this.ctx.quoteLines
+              ? `${this.label}: FORM ${original} (${path}.FORM) has no known media type, written as application/octet-stream`
+              : `${this.label}: an imported FORM (${path}.FORM) has no known media type, written as application/octet-stream`,
+          );
+        }
+      } else if (this.ctx.v7 && !form) {
         // GEDCOM 7 requires a media type on every FILE.
         copy.children.unshift(n('FORM', mimeOfPath(node.value) ?? 'application/octet-stream'));
       }

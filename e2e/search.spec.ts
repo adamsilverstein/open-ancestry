@@ -86,9 +86,9 @@ test('says when nothing matches, and Escape still returns focus to the opener', 
 }) => {
   await open(page, '/people');
   const opener = page.getByRole('banner').getByRole('button', { name: /^Find/ });
-  // Keyboard open: WebKit does not focus a clicked button, so there is nothing to return to.
-  await opener.focus();
-  await opener.press('Enter');
+  // A mouse click: WebKit does not focus the clicked button, so the palette
+  // falls back to the last control pressed (lib/returnFocus).
+  await opener.click();
   const dialog = page.getByRole('dialog', { name: 'Command palette' });
   await dialog.getByRole('combobox').fill('zzzzqqqq');
   await expect(dialog.getByRole('status')).toHaveText('No results');

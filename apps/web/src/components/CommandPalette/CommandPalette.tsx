@@ -4,6 +4,7 @@ import { Command } from 'cmdk';
 import { Search } from 'lucide-react';
 import { actionFilter } from '../../lib/filter';
 import selectStyles from '../Select/Select.module.css';
+import { captureOpener, lastControlOutside, returnFocus } from '../../lib/returnFocus';
 import dialogStyles from '../Dialog/Dialog.module.css';
 import styles from './CommandPalette.module.css';
 
@@ -89,7 +90,8 @@ export function CommandPalette({
   pending = false,
 }: CommandPaletteProps) {
   // Opened by shortcut, not a Radix trigger, so remember where focus was and restore it.
-  const returnFocus = useRef<HTMLElement | null>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  const outside = useRef<HTMLElement | null>(null);
   const [query, setQuery] = useState('');
   const [value, setValue] = useState('');
 
@@ -181,7 +183,10 @@ export function CommandPalette({
           className={styles.content}
           aria-describedby={undefined}
           onOpenAutoFocus={() => {
-            returnFocus.current = document.activeElement as HTMLElement | null;
+            // The same opener rules as Dialog: a WebKit click focuses no button,
+            // so fall back to the last control pressed.
+            opener.current = captureOpener();
+            outside.current = lastControlOutside();
           }}
           onCloseAutoFocus={(event) => {
             if (focusMoved.current) {
@@ -189,9 +194,7 @@ export function CommandPalette({
               event.preventDefault();
               return;
             }
-            if (!returnFocus.current?.isConnected) return;
-            event.preventDefault();
-            returnFocus.current.focus();
+            if (returnFocus(opener.current, outside.current)) event.preventDefault();
           }}
         >
           <RadixDialog.Title className="oa-visually-hidden">{title}</RadixDialog.Title>

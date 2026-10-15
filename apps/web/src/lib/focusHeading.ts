@@ -8,7 +8,12 @@ const HEADING_WAIT_MS = 3000;
  */
 export function focusMainHeading(): void {
   const start = performance.now();
+  // If the user moves focus while the page loads, leave it where they put it.
+  const before = document.activeElement;
   const tick = () => {
+    const active = document.activeElement;
+    // Focus that merely fell to <body> (the palette closing) does not count.
+    if (active && active !== before && active !== document.body && active.isConnected) return;
     const heading = document.querySelector<HTMLElement>('main h1');
     if (heading) {
       if (!heading.hasAttribute('tabindex')) heading.tabIndex = -1;

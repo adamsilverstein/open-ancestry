@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { APIRequestContext, Page, TestInfo } from '@playwright/test';
+import type { APIRequestContext, Locator, Page, TestInfo } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from './fixtures';
 
@@ -114,7 +114,9 @@ async function startReimport(page: Page, seeded: Seeded, text = laterExport()) {
   });
 }
 
-const card = (page: Page, name: string) => page.getByRole('region', { name, exact: true });
+const card = (scope: Page | Locator, name: string) =>
+  // Person cards are articles; regions are kept for the four groups.
+  scope.getByRole('article', { name, exact: true });
 
 test('import, edit, re-import, review, apply, then undo', async ({
   page,
@@ -142,12 +144,12 @@ test('import, edit, re-import, review, apply, then undo', async ({
   await expect(summary).toContainText('1 missing');
 
   const birth = card(page, 'Thaddeus Ashgrove').getByRole('checkbox', {
-    name: /Birth: Abt\. 1842 → 12 MAR 1842/,
+    name: /Birth: abt\. 1842 → 12 Mar 1842/,
   });
   await expect(birth).toBeChecked();
   await expect(card(page, 'Thaddeus Ashgrove')).toContainText(/\d+% match/);
   const deathChange = card(page, 'Josiah Ashgrove').getByRole('checkbox', {
-    name: /Death: 3 MAY 1939 → 1940/,
+    name: /Death: 3 May 1939 → 1940/,
   });
   await expect(deathChange).not.toBeChecked();
   await expect(card(page, 'Josiah Ashgrove')).toContainText('Edited in this tree');
@@ -203,7 +205,7 @@ test('rejecting changes, overriding a local edit and bulk selection', async ({
   await page.getByRole('button', { name: 'Accept all high-confidence' }).click();
   // Bulk accept leaves local edits alone.
   await expect(
-    card(page, 'Josiah Ashgrove').getByRole('checkbox', { name: /Death: 3 MAY 1939 → 1940/ }),
+    card(page, 'Josiah Ashgrove').getByRole('checkbox', { name: /Death: 3 May 1939 → 1940/ }),
   ).not.toBeChecked();
   // The new child depends on Noah being added.
   await card(page, 'Noah Ashgrove')
@@ -216,7 +218,7 @@ test('rejecting changes, overriding a local edit and bulk selection', async ({
     .getByRole('checkbox', { name: /Birth:/ })
     .uncheck();
   await card(page, 'Josiah Ashgrove')
-    .getByRole('checkbox', { name: /Death: 3 MAY 1939 → 1940/ })
+    .getByRole('checkbox', { name: /Death: 3 May 1939 → 1940/ })
     .check();
   await apply.click();
   await expect(
@@ -321,7 +323,7 @@ test('a review the tree moved past offers Compare again, keeping the choices mad
   // The choice made before is kept; the edited death is now a local edit, unticked.
   await expect(birth).not.toBeChecked();
   await expect(
-    card(page, 'Josiah Ashgrove').getByRole('checkbox', { name: /Death: 3 MAY 1939 → 1940/ }),
+    card(page, 'Josiah Ashgrove').getByRole('checkbox', { name: /Death: 3 May 1939 → 1940/ }),
   ).not.toBeChecked();
   await page.getByRole('button', { name: /^Apply \d+ changes?$/ }).click();
   await expect(
@@ -369,7 +371,7 @@ test('an override is not carried onto a newer local value, and a refused compare
   await startReimport(page, seeded);
   // The user overrides their own edit...
   await card(page, 'Josiah Ashgrove')
-    .getByRole('checkbox', { name: /Death: 3 MAY 1939 → 1940/ })
+    .getByRole('checkbox', { name: /Death: 3 May 1939 → 1940/ })
     .check();
   // ...then the date is edited again elsewhere.
   await edit('4 MAY 1939');
@@ -398,7 +400,7 @@ test('an override is not carried onto a newer local value, and a refused compare
   await expect(banner).toBeHidden();
   // The override was for 3 May; the user hasn't seen 4 May, so it starts unticked again.
   await expect(
-    card(page, 'Josiah Ashgrove').getByRole('checkbox', { name: /Death: 4 MAY 1939 → 1940/ }),
+    card(page, 'Josiah Ashgrove').getByRole('checkbox', { name: /Death: 4 May 1939 → 1940/ }),
   ).not.toBeChecked();
 });
 
@@ -425,6 +427,54 @@ test('match percent and reasons say what differs, and why a new person is new', 
   await expect(
     card(page, 'Noah Ashgrove').getByText(/closest:|no one with a similar name/),
   ).toBeVisible();
+});
+
+test('the review lists what needs a decision first, filters by group, and formats dates', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const josiah = (await personByName(request, seeded.tree, 'Josiah'))!;
+  const death = await eventDate(request, seeded.tree, josiah, 'DEAT');
+  await request.patch(`/api/trees/${encodeURIComponent(seeded.tree)}/events/${death.id}`, {
+    headers: seeded.headers,
+    data: { date_text: '3 MAY 1939' },
+  });
+  await startReimport(page, seeded);
+  const groups = page.locator('[data-group]');
+  await expect(groups.first()).toHaveAttribute('data-group', 'decide');
+  const decide = page.getByRole('region', { name: /Needs your decision/ });
+  // Marked by more than colour: an icon and the word, announced with the checkbox.
+  const conflict = card(decide, 'Josiah Ashgrove').getByRole('checkbox', {
+    name: 'Death: 3 May 1939 → 1940',
+  });
+  await expect(conflict).toBeVisible();
+  await expect(conflict).toHaveAccessibleDescription(/^Conflict/);
+  // The summary is about the whole export, and says which people aren't listed.
+  await expect(page.getByRole('region', { name: 'Summary' })).toContainText(
+    /\d+ matched \(\d+ unchanged, not listed\)/,
+  );
+  // The filter counts match the cards they show; empty groups get no filter.
+  const filters = page.getByRole('group', { name: 'Filter the review' });
+  for (const [label, id] of [
+    ['Needs your decision', 'decide'],
+    ['Changes', 'changes'],
+    ['New people', 'new'],
+    ['For information', 'info'],
+  ] as const) {
+    const button = filters.getByRole('button', { name: new RegExp(`^${label} \\d+$`) });
+    const count = Number(/\d+$/.exec((await button.textContent())!)![0]);
+    await button.click();
+    await expect(button).toHaveAttribute('aria-pressed', 'true');
+    await expect(groups).toHaveCount(1);
+    await expect(groups.first()).toHaveAttribute('data-group', id);
+    await expect(groups.first().locator('article[data-status]')).toHaveCount(count);
+  }
+  await filters.getByRole('button', { name: /^All \d+$/ }).click();
+  await expect(groups).toHaveCount(4);
+  const results = await new AxeBuilder({ page }).analyze();
+  expect(results.violations).toEqual([]);
 });
 
 test('a second re-import follows Ancestry for a value the first one set (#185)', async ({
@@ -566,7 +616,7 @@ test('a large review is shown in pages, and bulk choices cover every page', asyn
     (_, i) => `0 @I${900 + i}@ INDI\n1 NAME Extra${i} /Newfield/\n1 BIRT\n2 DATE ${1900 + i}`,
   ).join('\n');
   await startReimport(page, seeded, laterExport().replace('0 TRLR', `${many}\n0 TRLR`));
-  const cards = page.locator('section[data-status]');
+  const cards = page.locator('article[data-status]');
   await expect(cards).toHaveCount(100);
   await expect(page.getByRole('button', { name: /Show 54 more/ })).toBeVisible();
   // Every default change counts, shown or not: 151 new people and the matched changes.
@@ -576,4 +626,17 @@ test('a large review is shown in pages, and bulk choices cover every page', asyn
   await page.getByRole('button', { name: /Show 54 more/ }).click();
   await expect(cards).toHaveCount(154);
   await expect(page.getByRole('button', { name: /Show \d+ more/ })).toHaveCount(0);
+});
+
+test('a review with nothing in a group offers no filter for it', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  // Only a new person: no decisions, changes or information.
+  const one = '0 @I90@ INDI\n1 NAME Quill /Vexbury/\n1 BIRT\n2 DATE 1950\n';
+  await startReimport(page, seeded, SAMPLE.replace('0 TRLR', `${one}0 TRLR`));
+  const filters = page.getByRole('group', { name: 'Filter the review' });
+  await expect(filters.getByRole('button')).toHaveText(['All 1', 'New people 1']);
 });

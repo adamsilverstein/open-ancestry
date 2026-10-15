@@ -115,7 +115,9 @@ export function applyReimport(
     }
     const filling = new Set(
       changes.flatMap((c) =>
-        c.kind === 'media.file' && chosen.has(c.id) ? [c.incomingMediaId] : [],
+        (c.kind === 'media.file' || c.kind === 'media.replace') && chosen.has(c.id)
+          ? [c.incomingMediaId]
+          : [],
       ),
     );
     copier.prepare(
@@ -506,7 +508,9 @@ export function applyReimport(
         case 'media.add':
           link('media_link', 'media_id', ensureMedia(c.incomingMediaId), 'person', person!);
           break;
-        case 'media.file': {
+        // The new file goes beside the old one (never over it), so undo restores the old row whole.
+        case 'media.file':
+        case 'media.replace': {
           const m = get('media', c.incomingMediaId)!;
           const file = copier.copy(m);
           (file ? copied : refused).push(c.existingMediaId);

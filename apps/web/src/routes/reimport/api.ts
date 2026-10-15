@@ -28,6 +28,7 @@ export type ReviewChange = {
   | { kind: 'tag.add'; tag: string }
   | { kind: 'media.add'; title: string | null }
   | { kind: 'media.file'; title: string | null }
+  | { kind: 'media.replace'; title: string | null }
   | { kind: 'family.add'; partnerNames: string[] }
   | { kind: 'child.add'; parentNames: string[] }
   | { kind: 'person.missing' }

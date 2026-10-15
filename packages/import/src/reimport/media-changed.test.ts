@@ -1,7 +1,7 @@
 import { openTree, undoLast, type MediaRow, type TreeStore } from '@open-ancestry/db';
 import { zipSync } from 'fflate';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -25,6 +25,9 @@ const EXPORT = ged(
   '0 @I1@ INDI',
   '1 NAME Ada /Vale/',
   '1 SEX F',
+  '1 BIRT',
+  '2 DATE 3 MAR 1851',
+  '2 PLAC Millbrook',
   '1 OBJE @O1@',
   '0 @O1@ OBJE',
   '1 FILE scans/letter.jpg',
@@ -72,6 +75,7 @@ const replaceIds = (session: ReimportSession) =>
 
 /** The user swaps the tree's letter for another scan, as attaching a file would. */
 function replaceInTree(text: string) {
+  mkdirSync(join(dir, 'media', 'scans'), { recursive: true });
   writeFileSync(join(dir, 'media', 'scans', 'mine.jpg'), text);
   const id = letter().id;
   store.transact('Replace file', (tx) =>

@@ -56,6 +56,7 @@ describe('re-import labels', () => {
       [{ ...base, kind: 'tag.add', tag: 'Research: Done' }, 'Add tag: Research: Done'],
       [{ ...base, kind: 'media.add', title: null }, 'Add media: untitled'],
       [{ ...base, kind: 'media.file', title: 'Portrait' }, 'Add the file for Portrait'],
+      [{ ...base, kind: 'media.replace', title: 'Letter' }, "Use the new export's file for Letter"],
       [
         { ...base, kind: 'family.add', partnerNames: ['Noah Ashgrove', 'Ivy Fen'] },
         'Partner: Ivy Fen',

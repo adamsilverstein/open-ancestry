@@ -76,3 +76,30 @@ describe('associations (ASSO)', () => {
     }
   });
 });
+
+describe('a GEDCOM 7 ASSO whose pointer is padded with spaces (text in 7)', () => {
+  const padded = [
+    '0 HEAD',
+    '1 GEDC',
+    '2 VERS 7.0',
+    '0 @I1@ INDI',
+    '1 NAME Odile /Fernsby/',
+    '1 ASSO  @I2@ ',
+    '2 ROLE FRIEND',
+    '0 @I2@ INDI',
+    '1 NAME Bastien /Corlew/',
+    '0 TRLR',
+    '',
+  ].join('\n');
+
+  it('is reported, not dropped silently, in a 5.5.1 export', async () => {
+    const store = await importInto(padded);
+    const out = buildGedcomExport(store, { version: '5.5.1', now: TODAY });
+    expect(recordText(out.text, '@I1@')).not.toContain('ASSO');
+    expect(out.warnings).toEqual([
+      expect.stringMatching(/^@I1@: "ASSO {2}@I2@ " \(INDI\.ASSO\) was not carried over: .*text/),
+    ]);
+    // A GEDCOM 7 export copies the untouched record as it was.
+    expect(buildGedcomExport(store, { version: '7', now: TODAY }).text).toContain('1 ASSO  @I2@ ');
+  });
+});

@@ -3,7 +3,13 @@
  * tables (with Ancestry's custom tags), keeps each record's exact text in
  * raw_record and every line it did not map in unmapped_line.
  */
-export { importFile, importGedcom } from './import';
+export {
+  IMPORT_LIMITS,
+  checkLimits,
+  importFile,
+  importGedcom,
+  resolveImportLimits,
+} from './import';
 export { dateColumns, surnameKey } from './mapper';
 export { BIRTH_SUBSTITUTES, DEATH_EVENTS, OTHER_DEATH_FACTS, morePrivate } from './tags';
 export { ImportError } from './types';

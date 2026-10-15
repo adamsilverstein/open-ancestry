@@ -58,7 +58,14 @@ export {
   undoLatest,
   touchesMergedRows,
 } from './undo';
-export { BULK_TABLE_ORDER, BulkWriter, bulkInsert, type BulkCounts, type BulkData } from './bulk';
+export {
+  BULK_TABLE_ORDER,
+  BulkWriter,
+  bulkInsert,
+  type BulkWriterOptions,
+  type BulkCounts,
+  type BulkData,
+} from './bulk';
 export {
   OA_JSON_FORMAT,
   OA_JSON_FORMAT_VERSION,

@@ -209,6 +209,51 @@ describe('matching at scale: undated people still match themselves', () => {
     );
     const matches = matchPeople(snapshot(existing), snapshot(incoming));
     expect(matches.size).toBe(41);
+
+// #234: blocking on every given name a person has (so "Joe" meets Joseph) must
+// stay bounded when many people share a short nickname.
+describe('matching with many shared nicknames', () => {
+  /** `count` people with distinct given names, all also known as "Jo", born a year apart. */
+  function nicknamed(count: number, offset: number): string {
+    const givens = ['Joseph', 'Jonas', 'Josiah', 'Johanna', 'Jolene', 'Jordan', 'Joel', 'Jocelyn'];
+    const lines: string[] = [];
+    for (let n = 0; n < count; n++) {
+      lines.push(
+        `0 @I${n + offset}@ INDI`,
+        `1 NAME ${givens[n % givens.length]} /Smith/`,
+        '1 NAME Jo /Smith/',
+        '2 TYPE aka',
+        '1 BIRT',
+        `2 DATE ${1400 + n}`,
+      );
+    }
+    return ged(...lines);
+  }
+
+  it('keeps comparisons linear, and still matches everyone', async () => {
+    const existing = await tree(nicknamed(600, 1));
+    const incoming = await tree(nicknamed(600, 1001));
+    const stats: MatchStats = { comparisons: 0 };
+    const matches = matchPeople(snapshot(existing), snapshot(incoming), undefined, stats);
+    expect(matches.size).toBe(600);
+    // Each name key walks a bounded window, so two keys per person stay well under quadratic.
+    expect(stats.comparisons).toBeLessThan(600 * 80);
+    existing.close();
+    incoming.close();
+  });
+
+  it('does not block on initials', async () => {
+    const existing = await tree(
+      ged('0 @I1@ INDI', '1 NAME Joseph /Smith/', '1 NAME J. /Smith/', '1 BIRT', '2 DATE 1900'),
+    );
+    const incoming = await tree(
+      ged('0 @I9@ INDI', '1 NAME Jane /Smith/', '1 NAME J /Smith/', '1 BIRT', '2 DATE 1990'),
+    );
+    const near = new Map<string, NearMiss>();
+    const stats: MatchStats = { comparisons: 0 };
+    matchPeople(snapshot(existing), snapshot(incoming), near, stats);
+    // Jane and Joseph share only the initial "J", which is too broad to find candidates.
+    expect(stats.comparisons).toBe(0);
     existing.close();
     incoming.close();
   });

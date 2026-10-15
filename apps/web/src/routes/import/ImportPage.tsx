@@ -93,7 +93,9 @@ export function ImportPage() {
   if (job?.state === 'failed') {
     return (
       <div className={styles.page}>
-        <h1 className={styles.title}>Import failed</h1>
+        <h1 className={styles.title} ref={focusOnMount} tabIndex={-1}>
+          Import failed
+        </h1>
         <p role="alert" className={styles.error}>
           {job.error ?? 'The import stopped with an unknown error.'}
         </p>

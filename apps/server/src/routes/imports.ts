@@ -7,6 +7,7 @@ import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { FastifyRequest } from 'fastify';
 import type { Api, Deps } from '../context';
+import { formatBytes } from '../bytes';
 import { ApiError, badRequest, conflict, notFound } from '../errors';
 import { TooManyJobsError, type JobEvent } from '../jobs';
 import { JobParams, TreeParams } from '../schemas';
@@ -75,11 +76,12 @@ export function importRoutes(app: Api, deps: Deps): void {
     // A GEDZIP carries its photos, so it may be larger; the importer caps the
     // GEDCOM inside it like a plain file.
     const limit = ARCHIVE_EXTENSIONS.has(extension) ? archiveUploadLimit : uploadLimit;
+    const kind = ARCHIVE_EXTENSIONS.has(extension) ? 'GEDZIP' : 'GEDCOM';
     const tooLarge = () =>
       new ApiError(
         413,
         'payload_too_large',
-        `Uploads of ${extension} files are limited to ${limit} bytes`,
+        `${kind} uploads are limited to ${formatBytes(limit)}`,
       );
     // Past the limit, stop writing but keep reading (up to the larger cap,
     // where the parser stops), so the request ends cleanly with a 413.
@@ -138,6 +140,12 @@ export function importRoutes(app: Api, deps: Deps): void {
       throw error;
     }
   }
+
+  // The upload caps, so the app can refuse an oversized file before sending it.
+  app.get('/api/limits', async () => ({
+    importUpload: { gedcomBytes: uploadLimit, archiveBytes: archiveUploadLimit },
+    mediaUploadBytes: deps.mediaUploadLimit,
+  }));
 
   // Import into a new tree named after the file. The server owns the tree's
   // lifecycle: the client never deletes anything when an import fails.

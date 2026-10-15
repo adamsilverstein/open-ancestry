@@ -3,6 +3,8 @@ import v001 from './v001-initial';
 import v002 from './v002-history-order';
 import * as v003 from './v003-nfc-text';
 import v004 from './v004-person-alias';
+import v005 from './v005-person-sort';
+import { rebuildSortKeys } from '../sort-keys';
 
 /** How a migration changed one table's columns, so rows written before it can be upgraded. */
 export interface ColumnChanges {
@@ -86,6 +88,8 @@ export const MIGRATIONS: readonly Migration[] = [
   },
   // A new table: no column map; importing an older backup gives it an empty list.
   { version: 4, name: 'person-alias', sql: v004 },
+  // Derived (like search_doc): never exported or logged, so no column map either.
+  { version: 5, name: 'person-sort', sql: v005, run: rebuildSortKeys },
 ];
 
 /**

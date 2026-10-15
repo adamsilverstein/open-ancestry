@@ -1,7 +1,10 @@
+import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { ArrowRight } from 'lucide-react';
 import buttonStyles from '../../components/Button/Button.module.css';
 import { cx } from '../../lib/cx';
+import { personQuery } from '../../api/queries';
+import { fullName } from '../../lib/person';
 import type { ImportJob, ImportReportView } from '../../library/api';
 import styles from './Import.module.css';
 
@@ -20,6 +23,14 @@ const STATS: [label: string, table: string][] = [
 ];
 
 const n = (value: number) => value.toLocaleString();
+/** Import time: tenths of a second, or "under 0.1 s" rather than "0.0 s". */
+const seconds = (ms: number) => (ms < 100 ? 'under 0.1 s' : `${(ms / 1000).toFixed(1)} s`);
+/** The format the importer read, with the GEDCOM version it assumed (as the CLI prints it). */
+const formatName = (format: string) =>
+  format === 'gedzip' ? 'GEDZIP' : `GEDCOM ${format.replace(/^gedcom-/, '')}`;
+
+/** Moves focus to the heading when the report appears, so the outcome is announced. */
+const focusOnMount = (element: HTMLElement | null) => element?.focus();
 
 export function ImportReport({
   job,
@@ -33,14 +44,20 @@ export function ImportReport({
 }) {
   const { lines, media, source } = report;
   const home = report.homePersonId;
+  const { data: homePerson } = useQuery({
+    ...personQuery(job.tree, home ?? ''),
+    enabled: home !== null,
+  });
   const openClass = cx(buttonStyles.button, buttonStyles.primary, buttonStyles.md);
   return (
     <div className={styles.page}>
       <header className={styles.header}>
         <div>
-          <h1 className={styles.title}>Import complete</h1>
+          <h1 className={styles.title} ref={focusOnMount} tabIndex={-1}>
+            Import complete
+          </h1>
           <p className={styles.subtitle}>
-            {job.fileName} into “{job.tree}” in {(report.timings.total / 1000).toFixed(1)} s
+            {job.fileName} into “{job.tree}” in {seconds(report.timings.total)}
           </p>
           {note && (
             <p role="status" className={styles.note}>
@@ -63,9 +80,14 @@ export function ImportReport({
 
       <section aria-label="Import report" className={styles.section}>
         <div className={styles.stats}>
-          {STATS.map(([label, table]) => (
-            <div key={table} role="group" aria-label={label} className={styles.stat}>
-              <span className={styles.statValue}>{n(report.rows[table] ?? 0)}</span>
+          {[
+            ...STATS.map(([label, table]) => [label, report.rows[table] ?? 0] as const),
+            ['Repositories', report.rows.repository ?? 0] as const,
+            // Submitters are kept whole with the header, so count the records.
+            ['Submitters', report.records.SUBM ?? 0] as const,
+          ].map(([label, count]) => (
+            <div key={label} role="group" aria-label={label} className={styles.stat}>
+              <span className={styles.statValue}>{n(count)}</span>
               <span className={styles.statLabel}>{label}</span>
             </div>
           ))}
@@ -75,8 +97,7 @@ export function ImportReport({
           <dd>{[source.system, source.version].filter(Boolean).join(' ') || 'Unknown'}</dd>
           <dt>Format</dt>
           <dd>
-            {report.format === 'gedzip' ? 'GEDZIP' : `GEDCOM ${source.gedcomVersion ?? ''}`.trim()},{' '}
-            {report.encoding}
+            {formatName(report.format)}, {report.encoding}
           </dd>
           <dt>Lines</dt>
           <dd>
@@ -84,6 +105,16 @@ export function ImportReport({
             {report.unmapped.length === 0
               ? 'Every line of the file was mapped; header lines are kept verbatim for export.'
               : 'Lines that could not be mapped are kept verbatim and listed below.'}
+          </dd>
+          <dt>Home person</dt>
+          <dd>
+            {home ? (
+              <Link to="/person/$personId" params={{ personId: home }}>
+                {homePerson ? fullName(homePerson.summary) : 'Home person'}
+              </Link>
+            ) : (
+              'None set'
+            )}
           </dd>
           <dt>Living</dt>
           <dd>

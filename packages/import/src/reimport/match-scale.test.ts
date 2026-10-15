@@ -264,6 +264,23 @@ describe('matching at scale: crafted crowds stay linear', () => {
     expect(c).toBeLessThan(N * PER_PERSON);
   }, 60_000);
 
+  it('5k people who all cite one Ancestry record', async () => {
+    // Different names, so only the shared _APID could pair them up.
+    const people = (offset: number) =>
+      Array.from({ length: N }, (_, n) => [
+        `0 @I${n + offset}@ INDI`,
+        `1 NAME Person${n} /Family${n}/`,
+        '1 SOUR @S1@',
+        '2 _APID 1,7602::4242',
+      ]).flat();
+    const source = ['0 @S1@ SOUR', '1 TITL 1900 Census'];
+    const { comparisons: c } = await comparisons(
+      [...people(1), ...source],
+      [...people(10001), ...source],
+    );
+    expect(c).toBeLessThan(N * PER_PERSON);
+  }, 60_000);
+
   it('5k namesakes without dates', async () => {
     const { comparisons: c } = await comparisons(
       crowd(N, 1, () => []),

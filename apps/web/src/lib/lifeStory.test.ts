@@ -281,3 +281,39 @@ describe('lifeStory verb agreement', () => {
     expect(text).toMatch(/, and was buried in /);
   });
 });
+
+describe('lifeStory guardians', () => {
+  const rowan = fixtureDetail('rowan');
+  const [family] = rowan.parentFamilies;
+  const nan = {
+    ...family!.partner1!,
+    id: 'nan',
+    given: 'Hester',
+    surname: 'Wynn',
+    sex: 'F' as const,
+  };
+  const raisedBy = (rel: 'guardian' | 'related') =>
+    lifeStory({
+      ...rowan,
+      parentFamilies: [
+        family!,
+        {
+          ...family!,
+          family: { ...family!.family, id: 'care', partner1_id: 'nan', partner2_id: null },
+          partner1: nan,
+          partner2: null,
+          link: { ...family!.link, partner1_rel: rel },
+          siblings: [],
+        },
+      ],
+    }).join(' ');
+
+  it.each(['guardian', 'related'] as const)(
+    'names a %s link as a guardian, not fostering',
+    (rel) => {
+      const text = raisedBy(rel);
+      expect(text).toContain('His guardian was Hester Wynn.');
+      expect(text).not.toContain('fostered');
+    },
+  );
+});

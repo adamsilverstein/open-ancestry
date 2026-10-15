@@ -10,7 +10,7 @@ import {
 } from '@open-ancestry/db';
 import { buildGedcomExport, buildGedzipExport } from '@open-ancestry/export';
 import type { Api, Deps } from '../context';
-import { edit, refuseUnsafeText } from '../edits';
+import { edit } from '../edits';
 import { ExportQuery, GedzipQuery, HistoryQuery, HomeBody, TreeBody, TreeParams } from '../schemas';
 
 function treeDetail(deps: Deps, id: string) {
@@ -78,7 +78,6 @@ export function treeRoutes(app: Api, deps: Deps): void {
   app.get('/api/trees', async () => ({ trees: library.list() }));
 
   app.post('/api/trees', { schema: { body: TreeBody } }, async (request, reply) => {
-    refuseUnsafeText('tree name', request.body.name);
     library.create(request.body.name);
     return reply.code(201).send({ tree: treeDetail(deps, request.body.name) });
   });
@@ -91,7 +90,6 @@ export function treeRoutes(app: Api, deps: Deps): void {
     '/api/trees/:tree',
     { schema: { params: TreeParams, body: TreeBody } },
     async (request) => {
-      refuseUnsafeText('tree name', request.body.name);
       library.rename(request.params.tree, request.body.name);
       return { tree: treeDetail(deps, request.body.name) };
     },

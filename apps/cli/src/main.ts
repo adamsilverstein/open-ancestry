@@ -16,7 +16,7 @@ import {
   defaultLibraryRoot,
   isLoopbackHost,
   startServer,
-  treeNameProblem,
+  newTreeNameProblem,
   type RunningServer,
 } from '@open-ancestry/server';
 import { escapeControls } from './escape';
@@ -283,7 +283,7 @@ async function importCommand(
     if (!isDir) throw new Error(`--media folder not found: ${cli.media}`);
   }
   const name = cli.name ?? basename(cli.file, extname(cli.file)).trim();
-  const problem = treeNameProblem(name);
+  const problem = newTreeNameProblem(name);
   if (problem) throw new Error(`${problem}: "${name}". Choose another with --name.`);
   mkdirSync(cli.library, { recursive: true });
   const library = new Library(cli.library);

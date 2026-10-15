@@ -1,3 +1,4 @@
+import { displayText, unsafeTextReason } from '@open-ancestry/core';
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -53,6 +54,17 @@ export function treeNameProblem(name: string): string | null {
 }
 
 /**
+ * Why `name` cannot be given to a new or renamed tree: `treeNameProblem`, or
+ * text that displays as something else, such as a direction override (#190).
+ * Every way a tree gets a name (the API, an upload, the CLI) comes through
+ * here; trees named before the check still open.
+ */
+export function newTreeNameProblem(name: string): string | null {
+  const unsafe = unsafeTextReason(name);
+  return treeNameProblem(name) ?? (unsafe ? `Tree name ${unsafe}` : null);
+}
+
+/**
  * A tree name from an uploaded file name: the base name with characters the
  * library refuses replaced, trimmed to leave room for a " 2" suffix.
  */
@@ -62,7 +74,8 @@ export function treeNameFromFile(fileName: string): string {
     .split('/')
     .pop()!
     .replace(/\.[^.]*$/, '');
-  const name = base
+  // displayText drops direction overrides and turns other controls into spaces (#190).
+  const name = displayText(base)
     // eslint-disable-next-line no-control-regex
     .replace(/[/\\:*?"<>|%\u0000-\u001f\u007f]+/g, ' ')
     .replace(/\s+/g, ' ')
@@ -74,6 +87,11 @@ export function treeNameFromFile(fileName: string): string {
 
 function assertTreeName(name: string): void {
   const problem = treeNameProblem(name);
+  if (problem) throw new ApiError(400, 'bad_request', problem);
+}
+
+function assertNewTreeName(name: string): void {
+  const problem = newTreeNameProblem(name);
   if (problem) throw new ApiError(400, 'bad_request', problem);
 }
 
@@ -126,7 +144,7 @@ export class Library {
   }
 
   create(name: string): TreeStore {
-    assertTreeName(name);
+    assertNewTreeName(name);
     this.ensureRoot();
     if (existsSync(this.dirOf(name))) throw conflict(`A tree named "${name}" already exists`);
     const store = createTree(this.dirOf(name), { name });
@@ -208,7 +226,7 @@ export class Library {
 
   rename(id: string, name: string): void {
     assertTreeName(id);
-    assertTreeName(name);
+    assertNewTreeName(name);
     if (!this.exists(id)) throw notFound(`Tree "${id}" not found`);
     if (name === id) return;
     if (existsSync(this.dirOf(name))) throw conflict(`A tree named "${name}" already exists`);

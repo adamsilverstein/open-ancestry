@@ -3,7 +3,13 @@ import { mkdtemp, readdir } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { Library, defaultLibraryRoot, treeNameFromFile, treeNameProblem } from './library';
+import {
+  Library,
+  defaultLibraryRoot,
+  newTreeNameProblem,
+  treeNameFromFile,
+  treeNameProblem,
+} from './library';
 import { testApi, type TestApi } from './test/helpers';
 
 describe('treeNameProblem', () => {
@@ -42,15 +48,17 @@ describe('treeNameProblem', () => {
     'AUX',
     'prn',
     '100%',
-    'Family\u202e',
-    'Line\u2028break',
   ])('rejects %j', (name) => {
     expect(treeNameProblem(name)).not.toBeNull();
   });
 
+  it.each(['Family\u202e', 'Line\u2028break'])('refuses %j for a new tree', (name) => {
+    expect(newTreeNameProblem(name)).not.toBeNull();
+  });
+
   it('cleans direction overrides out of a name taken from an uploaded file (#190)', () => {
     expect(treeNameFromFile('Family\u202e.ged')).toBe('Family');
-    expect(treeNameProblem(treeNameFromFile('Fam\u202eily\u2028Tree.ged'))).toBeNull();
+    expect(newTreeNameProblem(treeNameFromFile('Fam\u202eily\u2028Tree.ged'))).toBeNull();
   });
 });
 

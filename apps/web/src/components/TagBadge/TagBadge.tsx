@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import { displayText } from '@open-ancestry/core';
 import { cx } from '../../lib/cx';
 import type { TagColor } from '../../lib/person';
 import styles from './TagBadge.module.css';
@@ -11,7 +12,9 @@ export interface TagBadgeProps {
   className?: string;
 }
 
-export function TagBadge({ label, color, variant = 'badge', className }: TagBadgeProps) {
+export function TagBadge({ label: raw, color, variant = 'badge', className }: TagBadgeProps) {
+  // Tag names come from imported files too: clean out direction overrides (#190).
+  const label = displayText(raw);
   const style = { '--oa-tag-color': `var(--oa-tag-${color})` } as CSSProperties;
   if (variant === 'dot') {
     return (
@@ -27,7 +30,7 @@ export function TagBadge({ label, color, variant = 'badge', className }: TagBadg
   return (
     <span className={cx(styles.badge, className)} style={style}>
       <span className={styles.dot} aria-hidden />
-      {label}
+      <bdi>{label}</bdi>
     </span>
   );
 }

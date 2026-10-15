@@ -1,12 +1,12 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { CircleAlert } from 'lucide-react';
 import { apiSend, seg } from '../api/client';
-import { fieldError, friendlyMessage, useEdit, type FieldError } from '../api/edits';
+import { useEdit } from '../api/edits';
 import type { ApiPersonSummary } from '../api/types';
 import { Button } from '../components/Button/Button';
 import { Dialog, DialogClose } from '../components/Dialog/Dialog';
 import { NewPersonFields, useNewPerson } from '../routes/person/edit/NewPersonFields';
+import { SaveError, useSaveState } from '../routes/person/edit/SaveError';
 import editStyles from '../routes/person/edit/Edit.module.css';
 
 interface AddPersonDialogProps {
@@ -30,28 +30,28 @@ export default function AddPersonDialog({
   const navigate = useNavigate();
   const edit = useEdit(tree);
   const draft = useNewPerson();
-  const [error, setError] = useState<string | null>(null);
-  const [field, setField] = useState<FieldError | null>(null);
   const saved = useRef(false);
+  // The dialog stays mounted after Cancel, so a save that lands later must not
+  // open the person (or close a dialog reopened since).
+  const isOpen = useRef(open);
+  useEffect(() => {
+    isOpen.current = open;
+  }, [open]);
+  // Stays open until the save succeeds, so a failure keeps what was typed.
+  const saveState = useSaveState<{ person: ApiPersonSummary }>(({ person }) => {
+    if (!isOpen.current) return;
+    saved.current = true;
+    onOpenChange(false);
+    void navigate({ to: '/person/$personId', params: { personId: person.id } });
+  });
 
   function save() {
     if (!draft.ready || edit.isPending) return;
-    setError(null);
-    setField(null);
     edit.mutate({
       label: 'Add person',
       send: () =>
         apiSend<{ person: ApiPersonSummary }>('POST', `/trees/${seg(tree)}/people`, draft.body()),
-      onDone: ({ person }) => {
-        saved.current = true;
-        onOpenChange(false);
-        void navigate({ to: '/person/$personId', params: { personId: person.id } });
-      },
-      // Keep the dialog and what was typed, so saving again is one click.
-      onError: (cause) => {
-        setField(fieldError(cause));
-        setError(friendlyMessage(cause));
-      },
+      ...saveState.handlers(),
     });
   }
 
@@ -76,8 +76,8 @@ export default function AddPersonDialog({
           <DialogClose asChild>
             <Button variant="ghost">Cancel</Button>
           </DialogClose>
-          <Button variant="primary" onClick={save} disabled={!draft.ready || edit.isPending}>
-            Add person
+          <Button variant="primary" onClick={save} disabled={!draft.ready} loading={edit.isPending}>
+            {saveState.submitLabel('Add person')}
           </Button>
         </>
       }
@@ -89,13 +89,11 @@ export default function AddPersonDialog({
           save();
         }}
       >
-        <NewPersonFields draft={draft} errors={field ? { [field.field]: field.message } : {}} />
-        {error && (
-          <p role="alert" className={editStyles.error}>
-            <CircleAlert size={14} aria-hidden />
-            Could not add this person: {error}
-          </p>
-        )}
+        <NewPersonFields
+          draft={draft}
+          errors={saveState.field ? { [saveState.field.field]: saveState.field.message } : {}}
+        />
+        <SaveError error={saveState.error} />
         <button type="submit" hidden />
       </form>
     </Dialog>

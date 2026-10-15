@@ -25,7 +25,9 @@ import {
  * - `D`: down to a child; `rel` is that child's link to this parent.
  * - `S`: to a partner.
  * - `B`: to a sibling. Give their `kind`, or `shared` ([mine, theirs] links to
- *   each adult joining them) and `apart` as for core `siblingKind`.
+ *   each adult joining them) and `apart` as for core `siblingKind`. A run
+ *   that goes up and then down needs this step: without it the path only
+ *   shows one shared ancestor, so the term is undefined.
  */
 export type CardStep =
   | { step: 'U' | 'D'; rel?: ChildRelation; sex?: Sex }
@@ -50,6 +52,9 @@ function bloodTerm(run: BloodStep[], sex: Sex | undefined, style: NameStyle): st
   // Up, then at most one sibling step, then down: the shapes kinship names describe.
   const order = run.map((s) => s.step).join('');
   if (!/^U*B?D*$/.test(order)) return undefined;
+  // Up then down with no sibling step only proves one shared ancestor, so it
+  // cannot tell a brother from a half-brother: name siblings only through B.
+  if (/U/.test(order) && /D/.test(order) && !order.includes('B')) return undefined;
   const ups = run.filter(isLine('U'));
   const downs = run.filter(isLine('D'));
   const sibling = run.find((s) => s.step === 'B') as Extract<BloodStep, { step: 'B' }> | undefined;

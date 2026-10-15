@@ -210,7 +210,7 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
           {format === 'json' && (
             <Checkbox
               label="Include edit history"
-              description="Undo history, including anything you have deleted. Leave it out when you share the file."
+              description="Undo history, including anything you have deleted. Leaving it out removes most deleted text, not yet all of it, so check the file before you share it."
               checked={history}
               onChange={(event) => setHistory(event.target.checked)}
             />

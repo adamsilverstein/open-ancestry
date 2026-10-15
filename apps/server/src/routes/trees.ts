@@ -8,7 +8,7 @@ import {
   undoLatest,
   type TreeStore,
 } from '@open-ancestry/db';
-import { buildGedcomExport, buildGedzipExport } from '@open-ancestry/export';
+import { buildGedcomExport, buildGedzipExport, changedSinceImport } from '@open-ancestry/export';
 import type { Api, Deps } from '../context';
 import { edit } from '../edits';
 import {
@@ -167,8 +167,12 @@ export function treeRoutes(app: Api, deps: Deps): void {
       const { tree } = request.params;
       // A full backup keeps the edit history (undo, and the text of deleted rows) unless asked not to.
       const { history } = request.query;
-      const json = exportJsonString(library.open(tree), {
-        history: history !== '0' && history !== 'false',
+      const store = library.open(tree);
+      const keep = history !== '0' && history !== 'false';
+      // Without the history, deleted and edited-away text must not survive elsewhere either.
+      const json = exportJsonString(store, {
+        history: keep,
+        ...(!keep && { omitImportedText: changedSinceImport(store) }),
       });
       return reply
         .type('application/json; charset=utf-8')

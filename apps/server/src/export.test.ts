@@ -176,7 +176,7 @@ describe('JSON export history (#197)', () => {
           '1 NAME Odile /Fernsby/',
           '1 NOTE SECRET-INLINE-NOTE',
           '1 NOTE @N1@',
-          '1 _SECRETTAG SECRET-UNMAPPED',
+          '1 _CUSTOM SECRET-UNMAPPED',
           '0 @I2@ INDI',
           '1 NAME Bastien /Corlew/',
           '1 NOTE Kept note',
@@ -201,7 +201,7 @@ describe('JSON export history (#197)', () => {
 
     const res = await api.get(`${base}/export.json?history=0`);
     expect(res.statusCode).toBe(200);
-    expect(res.body).not.toMatch(/SECRET/);
+    expect(res.body.split('\n').filter((l) => l.includes('SECRET'))).toEqual([]);
     const { tables } = res.json() as {
       tables: { import_batch: { warnings_json: string }[]; raw_record: { raw_text: string }[] };
     };

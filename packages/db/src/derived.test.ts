@@ -155,6 +155,41 @@ describe('derived column refresh', () => {
     store.close();
   });
 
+  it('keeps an edit made between rebuild chunks', () => {
+    const dir = join(root, 'edit-between.oatree');
+    let store = createTree(dir);
+    const ids = store
+      .transact('add', (tx) =>
+        ['Aksoy', 'Yılmaz', 'Kaya'].map(
+          (surname) => persons.create(tx, { names: [{ given: 'Ada', surname }] }).id,
+        ),
+      )
+      .result.sort();
+    store.db.prepare("DELETE FROM derived_state WHERE name = 'search_index'").run();
+    store.close();
+
+    store = openTree(dir, { deferSearch: true, log: () => {} });
+    const chunks = rebuildSearchIndexInChunks(store, 1);
+    expect(chunks.next().value).toBe(1);
+    // Rename someone whose chunk has not run yet, and someone whose chunk has.
+    store.transact('rename', (tx) => {
+      for (const [id, surname] of [
+        [ids[2]!, 'Öztürk'],
+        [ids[0]!, 'Şahin'],
+      ] as const) {
+        const name = tx.store.stmt('SELECT id FROM person_name WHERE person_id = ?').get(id) as {
+          id: string;
+        };
+        tx.update('person_name', name.id, { surname });
+      }
+    });
+    for (const done of chunks) void done;
+    expect(searchIndexStale(store)).toBe(false);
+    expect(searchPeople(store, 'ozturk').map((r) => r.person.id)).toEqual([ids[2]]);
+    expect(searchPeople(store, 'sahin').map((r) => r.person.id)).toEqual([ids[0]]);
+    store.close();
+  });
+
   it('keeps undo working across a recompute, restoring fresh sort keys', () => {
     const store = openMemoryTree();
     seedStale(store);

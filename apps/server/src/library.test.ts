@@ -673,4 +673,30 @@ describe('search index rebuild (#199)', () => {
     library.closeAll();
     await rm(root, { recursive: true, force: true });
   });
+
+  it('stops a background rebuild when the tree closes, and finishes it after reopening', async () => {
+    const { persons, searchIndexStale, searchPeople } = await import('@open-ancestry/db');
+    const root = await mkdtemp(join(tmpdir(), 'oa-library-search-'));
+    const first = new Library(root);
+    const store = first.create('Fold');
+    const id = store.transact('add', (tx) =>
+      persons.create(tx, { names: [{ given: 'Ada', surname: 'Straße' }] }),
+    ).result.id;
+    store.db.prepare("DELETE FROM derived_state WHERE name = 'search_index'").run();
+    first.closeAll();
+
+    const interrupted = new Library(root);
+    interrupted.open('Fold');
+    // Closed before the first chunk runs: the rebuild stops without touching a closed database.
+    interrupted.closeAll();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const library = new Library(root);
+    const reopened = library.open('Fold');
+    expect(searchIndexStale(reopened)).toBe(true);
+    await expect.poll(() => searchIndexStale(reopened), { interval: 5, timeout: 5000 }).toBe(false);
+    expect(searchPeople(reopened, 'strasse').map((r) => r.person.id)).toEqual([id]);
+    library.closeAll();
+    await rm(root, { recursive: true, force: true });
+  });
 });

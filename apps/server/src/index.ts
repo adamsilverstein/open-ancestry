@@ -160,6 +160,9 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     maxQueued: options.maxQueuedImports,
   });
   // Leftovers of imports a crash or restart interrupted: their empty trees and uploads.
+  // Once, at startup: warn if others can see an existing library folder
+  // (a missing one is created, private, on first use).
+  if (existsSync(library.root)) library.ensureRoot();
   library.sweepInterruptedImports();
   void sweepStaleUploads();
   const importLimits = resolveImportLimits(options.importLimits);

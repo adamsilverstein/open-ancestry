@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { basename, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -430,8 +430,8 @@ async function importCommand(
   const name = cli.name ?? basename(cli.file, extname(cli.file)).trim();
   const problem = treeNameProblem(name);
   if (problem) throw new Error(`${problem}: "${name}". Choose another with --name.`);
-  mkdirSync(cli.library, { recursive: true });
   const library = new Library(cli.library);
+  library.ensureRoot();
   const dir = library.dirOf(name);
   if (existsSync(dir)) {
     throw new Error(

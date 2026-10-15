@@ -1,6 +1,6 @@
 # open-ancestry data model
 
-Current schema version: **4**
+Current schema version: **5**
 
 This is the reference for the local data format: the SQLite schema inside every tree, the rules the code keeps on top of it, and the JSON interchange format. It is owned by `packages/db`. `packages/db/src/data-model-doc.test.ts` fails if a table or column exists in the live database but not here (or the other way round), or if an enum value is missing, so this document cannot drift from the DDL.
 
@@ -477,6 +477,20 @@ Derived: maps each person to their full-text row. Not exported; rebuilt on impor
 | `doc_id` | INTEGER | no | Rowid of the person's `person_search` row. |
 | `person_id` | TEXT | no | `person.id` (unique). |
 
+### `person_sort`
+
+Derived (schema v5, #114): each person's people-list sort keys and filters, refreshed with the search documents whenever a person, their names or their events change, so the first page of any order reads an index instead of sorting the tree. Every key has an ascending index and one with `person_id DESC`, so a descending order scanned backwards still breaks ties by ascending id. Not exported, not change-logged; rebuilt on import.
+
+| Column | Type | Null | Meaning |
+|---|---|---|---|
+| `person_id` | TEXT | no | `person.id` (primary key). |
+| `surname` | TEXT | yes | Primary name's surname (sorted `COLLATE NOCASE`). |
+| `given` | TEXT | yes | Primary name's given names (sorted `COLLATE NOCASE`). |
+| `birth_key` | INTEGER | yes | Earliest `date_sort` of the person's principal `BIRT`, `CHR` or `BAPM` events. |
+| `death_key` | INTEGER | yes | Earliest `date_sort` of the person's principal `DEAT`, `BURI` or `CREM` events. |
+| `sex` | TEXT | no | `person.sex`, for the sex filter. |
+| `living` | TEXT | no | `person.living`, for the living filter. |
+
 ### `person_search`
 
 Derived FTS5 table (`unicode61 remove_diacritics 2`, prefix indexes for 2 and 3 characters), one row per person. Not exported.
@@ -556,7 +570,7 @@ The importer is `packages/import` (`importGedcom`); see its README for the API a
 - **Child relationships.** Per partner, the first of `INDI.FAMC._FREL`/`_MREL`, `INDI.FAMC.PEDI`, `FAM.CHIL._FREL`/`_MREL`, `FAM.CHIL.PEDI`, then `ADOP.FAMC.ADOP`, else `biological`. So a `PEDI` on the child's `FAMC` beats `_MREL` on the family's `CHIL`.
 - **Places** are deduplicated by their normalized text exactly as written (case-sensitive), so `boston, ...` and `Boston, ...` are separate places until a merge tool exists.
 - **Custom events.** Known Ancestry/FTM fact tags (`_MILT`, `_DNA`, `_FUN`, ...) and any other underscore tag with a `DATE`, `PLAC`, `TYPE` or `AGE` child become events with that tag as `type`.
-- **Media.** `FILE` URLs go to `remote_url` (never fetched). Local paths are normalized to forward slashes; paths with `..` are refused (`media-unsafe-path`). `local_path` is set only for files actually copied into the tree; unresolved, refused, too-large or failed files leave it null and their `FILE` line in `unmapped_line`. With a GEDZIP or a media folder the file is found by relative path, case-insensitively, or by a unique file name (for absolute paths from the exporting computer), copied into the tree's `media/` folder and hashed; files that are not found are listed in the report. Copies never overwrite: a file already at the path with the same bytes is reused, different bytes get a `-2`, `-3`, ... suffix, and identical content from several source files is stored once.
+- **Media.** `FILE` URLs go to `remote_url` (never fetched). Local paths are normalized to forward slashes; paths with `..` are refused (`media-unsafe-path`). `local_path` is set only for files actually copied into the tree; unresolved, refused, too-large or failed files leave it null and their `FILE` line in `unmapped_line`, owned by the media row (also for an inline `OBJE`, whose other lines stay with the record). Generated exports (GEDCOM 7, GEDZIP, privatized) write that original path as the media's `FILE`, percent-encoded for GEDCOM 7, so the reference survives; media with no file and no imported path are left out with a warning rather than written with an empty `FILE`. With a GEDZIP or a media folder the file is found by relative path, case-insensitively, or by a unique file name (for absolute paths from the exporting computer), copied into the tree's `media/` folder and hashed; files that are not found are listed in the report. Copies never overwrite: a file already at the path with the same bytes is reused, different bytes get a `-2`, `-3`, ... suffix, and identical content from several source files is stored once.
 - **GEDCOM 7 phrases.** A `PHRASE` under `DATE` (events, citation `DATA.DATE`), `AGE` or `NAME.TYPE OTHER` is the value as written: it becomes `date_text` (parsed when it can be, else sorted by the `DATE` value beside it), `age` or the name type. Exports put Ancestry's free-form dates there (`DATE ABT 1842` / `PHRASE Abt. 1842`), so a GEDCOM 7 round trip keeps them. GEDCOM 7 `FILE` paths are percent-decoded before matching.
 - **Home person.** A `_HOME`, `_ROOT`, `_HOMEPERSON` or `_HME` pointer under `HEAD` (or `HEAD.SOUR._TREE`) when present, else the first individual. Stored in `meta.home_person_id`.
 
@@ -660,3 +674,4 @@ Human text is stored in Unicode NFC, so the same name, place or tag written comp
   2. run `npm run dump-schema -w @open-ancestry/db` and `npm run freeze-history-fixture -w @open-ancestry/db` to freeze `schema-vN.sql` and `oa-vN.json`;
   3. regenerate the JSON Schema (`npm run generate:json-schema -w @open-ancestry/db`);
   4. update this document (the doc test lists what is missing), and bump `formatVersion` only if the JSON envelope itself changes.
+  5. if the migration adds a derived table, or changes anything a derived table is computed from (names, events, event roles, the birth and death event types, Unicode forms), give it a `run` step that rebuilds the derived tables it affects: `rebuildSearchDocs` for `search_doc` and `person_search`, `rebuildSortKeys` for `person_sort`. A new derived table also goes in `DERIVED_TABLES` (`json.ts`) and `VERBATIM_TABLES` (`nfc.ts`), is refreshed beside the search documents (`refreshSearch`), and is dropped by the tests that fake an older tree (`nfc.test.ts`, `export/src/edits.test.ts`).

@@ -1,10 +1,11 @@
-import { useEffect, useId, useRef, type ComponentProps } from 'react';
+import { useEffect, useId, useRef, type ComponentProps, type ReactNode } from 'react';
 import { cx } from '../../lib/cx';
 import styles from './Checkbox.module.css';
 
 export interface CheckboxProps extends Omit<ComponentProps<'input'>, 'type' | 'id'> {
   label: string;
-  description?: string;
+  /** Shown under the label and announced with the checkbox (aria-describedby). */
+  description?: ReactNode;
   indeterminate?: boolean;
 }
 

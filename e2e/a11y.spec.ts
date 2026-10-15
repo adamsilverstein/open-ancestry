@@ -1,4 +1,6 @@
+import { join } from 'node:path';
 import AxeBuilder from '@axe-core/playwright';
+import { createTree, families, persons } from '@open-ancestry/db';
 import { FIXTURE_PEOPLE } from './tree-fixture';
 import { openSeeded, seedTree } from './edit-seed';
 import { expect, test } from './fixtures';
@@ -17,6 +19,41 @@ const routes = [
   { path: '/no-such-page', heading: 'Page not found' },
 ];
 
+/**
+ * A small invented family whose focus person, Ava, has every sibling group:
+ * her mother Cora's second husband Dex brings a half-brother (Eli, Cora's
+ * son), a stepbrother (Finn, Dex's son) and a foster brother (Gus).
+ */
+function siblingTree(name: string): string {
+  const store = createTree(join(process.env.OA_E2E_LIBRARY!, `${name}.oatree`), { name });
+  const ava = store.transact('seed', (tx) => {
+    const person = (sex: 'M' | 'F', given: string) =>
+      persons.create(tx, { sex, names: [{ given, surname: 'Quill' }] }).id;
+    const [bram, cora, dex, ava, eli, finn, gus] = [
+      person('M', 'Bram'),
+      person('F', 'Cora'),
+      person('M', 'Dex'),
+      person('F', 'Ava'),
+      person('M', 'Eli'),
+      person('M', 'Finn'),
+      person('M', 'Gus'),
+    ];
+    families.create(tx, { partner1_id: bram, partner2_id: cora, children: [{ child_id: ava }] });
+    families.create(tx, {
+      partner1_id: dex,
+      partner2_id: cora,
+      children: [
+        { child_id: eli },
+        { child_id: finn, partner1_rel: 'biological', partner2_rel: 'step' },
+        { child_id: gus, partner1_rel: 'foster', partner2_rel: 'foster' },
+      ],
+    });
+    return ava;
+  }).result;
+  store.close();
+  return ava;
+}
+
 for (const colorScheme of ['light', 'dark'] as const) {
   test.describe(`axe in ${colorScheme} theme`, () => {
     test.use({ colorScheme });
@@ -30,6 +67,19 @@ for (const colorScheme of ['light', 'dark'] as const) {
         expect(results.violations).toEqual([]);
       });
     }
+
+    test('half, step and foster sibling groups have no violations', async ({ page }, info) => {
+      const name = `a11y siblings ${colorScheme} ${info.project.name} ${Date.now() % 1e6}`;
+      const ava = siblingTree(name);
+      await page.addInitScript((tree) => localStorage.setItem('oa-tree', tree), name);
+      await page.goto(`/person/${ava}`);
+      const family = page.getByRole('region', { name: 'Relationships', exact: true });
+      for (const group of ['Half-siblings (1)', 'Step-siblings (1)', 'Foster siblings (1)']) {
+        await expect(family.getByRole('button', { name: group })).toBeVisible();
+      }
+      await page.evaluate(() => document.fonts.ready);
+      expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    });
 
     test('the drop zone offers one control for choosing a file (issue #118)', async ({ page }) => {
       await page.goto('/');

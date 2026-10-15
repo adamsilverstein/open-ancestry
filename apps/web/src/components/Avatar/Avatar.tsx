@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Mars, UserRound, Venus } from 'lucide-react';
+import { UserRound } from 'lucide-react';
 import { cx } from '../../lib/cx';
 import { initials, sexLabel, type Sex } from '../../lib/person';
 import styles from './Avatar.module.css';
@@ -19,8 +19,6 @@ export interface AvatarProps {
   className?: string;
   'data-testid'?: string;
 }
-
-const sexIcon = { M: Mars, F: Venus, U: UserRound } as const;
 
 export function Avatar({
   name,
@@ -54,7 +52,6 @@ export function Avatar({
     );
   }
 
-  const Icon = sexIcon[sex];
   const label = `${name}, ${sexLabel[sex]}`;
   return (
     <span
@@ -71,7 +68,8 @@ export function Avatar({
           {initials(name)}
         </span>
       ) : (
-        <Icon size={Math.round(size * 0.55)} strokeWidth={size > 40 ? 1.5 : 2} aria-hidden />
+        // A head-and-shoulders silhouette, tinted by sex (as on Ancestry).
+        <UserRound size={Math.round(size * 0.55)} strokeWidth={size > 40 ? 1.5 : 2} aria-hidden />
       )}
     </span>
   );

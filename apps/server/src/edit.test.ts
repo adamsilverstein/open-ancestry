@@ -530,9 +530,10 @@ describe('notes and tags', () => {
   it('manages tags and person tag links', async () => {
     const tag = (await api.post(`${s.base}/tags`, { name: 'DNA match' })).json().tag;
     expect(tag.category).toBe('');
-    expect((await api.post(`${s.base}/tags`, { name: 'DNA match' })).json().error.code).toBe(
-      'conflict',
-    );
+    expect((await api.post(`${s.base}/tags`, { name: 'DNA match' })).json().error).toEqual({
+      code: 'conflict',
+      message: 'A tag with that name already exists',
+    });
     expect((await api.post(`${s.base}/tags`, { name: 'x', color: 'red;}' })).statusCode).toBe(400);
     expect(
       (await api.patch(`${s.base}/tags/${tag.id}`, { color: '#00aa00' })).json().tag.color,
@@ -541,12 +542,16 @@ describe('notes and tags', () => {
     expect((await api.post(`${s.base}/people/${s.ada}/tags`, { tagId: tag.id })).statusCode).toBe(
       201,
     );
-    expect((await api.post(`${s.base}/people/${s.ada}/tags`, { tagId: tag.id })).statusCode).toBe(
-      409,
-    );
+    // Tagging again or untagging twice changes nothing, so a retried request is harmless.
+    const again = await api.post(`${s.base}/people/${s.ada}/tags`, { tagId: tag.id });
+    expect(again.statusCode).toBe(201);
+    expect(again.json().batchId).toBeNull();
     expect((await detail(s.ada)).tags.map((t: { name: string }) => t.name)).toEqual(['DNA match']);
     expect((await api.del(`${s.base}/people/${s.ada}/tags/${tag.id}`)).statusCode).toBe(200);
-    expect((await api.del(`${s.base}/people/${s.ada}/tags/${tag.id}`)).statusCode).toBe(404);
+    const twice = await api.del(`${s.base}/people/${s.ada}/tags/${tag.id}`);
+    expect(twice.statusCode).toBe(200);
+    expect(twice.json().batchId).toBeNull();
+    expect((await api.del(`${s.base}/people/01NOPE/tags/${tag.id}`)).statusCode).toBe(404);
     expect((await api.post(`${s.base}/people/${s.ada}/tags`, { tagId: '01NOPE' })).statusCode).toBe(
       404,
     );

@@ -7,6 +7,7 @@
  * `formal` uses "great-aunt", "great-nephew" and "once removed".
  */
 import type { PartnerRelationship, Sex } from '../layout/types';
+import { qualify } from '../kin';
 
 /** A non-biological link on the path that changes the name. */
 /** `adopted` when A was adopted on the way, `adoptive` when B's side was. */
@@ -97,15 +98,10 @@ export function bloodName(
     word = `${ordinal(Math.min(up, down) - 1)} cousin`;
     if (gap) word += ` ${removed(gap, style)} removed`;
   }
-  if (modifier === 'step') {
-    // stepfather, stepson, stepbrother; step-grandmother, step-aunt.
-    const simple = (isAncestor(shape) && down === 1) || (isDescendant(shape) && up === 1);
-    return simple || isSibling(shape) ? `step${word}` : `step-${word}`;
-  }
-  if (modifier === 'adopted' || modifier === 'adoptive') return `${modifier} ${word}`;
-  if (modifier === 'foster') return `foster ${word}`;
-  if (half) return style === 'ancestry' || isCousin(shape) ? `half ${word}` : `half-${word}`;
-  return word;
+  // A sibling through adoption is an "adopted brother" from either side.
+  const qualifier = modifier === 'adoptive' && isSibling(shape) ? 'adopted' : modifier;
+  // stepfather, step-aunt, adopted son, foster sister, half-sister, half 1st cousin.
+  return qualify(word, qualifier ?? (half ? 'half' : undefined));
 }
 
 export function spouseWord(sex: Sex | undefined, relationship?: PartnerRelationship): string {
@@ -120,8 +116,10 @@ export function spouseOfRelative(
   sex: Sex | undefined,
   relationship: PartnerRelationship | undefined,
   style: NameStyle,
+  /** False when the marriage never overlapped B's life: "husband of mother", not stepfather. */
+  step = true,
 ): string {
-  if (isAncestor(shape)) {
+  if (isAncestor(shape) && (step || shape.down > 1)) {
     return shape.down === 1
       ? `step${ancestorWord(1, sex)}`
       : `step-${ancestorWord(shape.down, sex)}`;
@@ -142,9 +140,11 @@ export function relativeOfSpouse(
   sex: Sex | undefined,
   spouse: string,
   style: NameStyle,
+  /** False when the marriage never overlapped A's life: "daughter of wife", not stepdaughter. */
+  step = true,
 ): string {
   if (isAncestor(shape)) return `${ancestorWord(shape.down, sex)}-in-law`;
-  if (isDescendant(shape)) {
+  if (isDescendant(shape) && (step || shape.up > 1)) {
     return shape.up === 1
       ? `step${descendantWord(1, sex)}`
       : `step-${descendantWord(shape.up, sex)}`;

@@ -53,10 +53,11 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 | `GET /api/trees/:tree/families/:id` | Family with partners, children and events. |
 | `GET /api/trees/:tree/neighborhood?focus&up&down&siblingsDepth` | Graph slice for the tree views (focus defaults to the home person; up/down 0-10). `siblingsDepth` 0-10 adds siblings of the focus person (1, the default), parents (2, aunts and uncles) and so on up to `up`; siblings with unfetched children are in `moreDown`. `siblings=false` equals `siblingsDepth=0`. |
 | `GET /api/trees/:tree/search?q&limit` | Ranked search `{ items: [{ person, match, score }] }`: exact words, then prefixes (years within two), then surnames by sound (`match` says which). Every word is required (`or`/`and` are ordinary words); input is NFC-normalized, only its first 100 characters and 8 distinct words are used, and a one-character word matches only as a whole word (an initial). Responses carry `Server-Timing: app;dur=<ms>`. |
-| `GET`, `PUT /api/trees/:tree/home` `{ personId }` | Home person. |
+| `GET`, `PUT /api/trees/:tree/home` `{ personId }` | Home person. `PUT` is an undoable edit. |
+| `GET /api/trees/:tree/relationship?from&to` | What `from` is to `to` (default: the home person) across the whole tree: the core `RelationshipResult` (`name`, `relationships` with their `paths`, `complete`) plus `people`, a `PersonSummary` for everyone on a returned path. Blood, spouse, in-law, step (checked against marriage and death dates) and marriage-chain names. 404 for an unknown person. |
 | `GET /api/trees/:tree/tags` | Tags with person counts. |
 | `GET /api/trees/:tree/history?limit` | Change batches, newest first in commit order (`seq`, not the ULID, so clock changes cannot reorder them), `canUndo`, `canRedo`. |
-| `POST /api/trees/:tree/undo`, `/redo` | Undo or redo the latest batch; `{ batch }` (null if none). |
+| `POST /api/trees/:tree/undo`, `/redo` | Undo or redo the latest batch; `{ batch, skipped }`. `batch` is null if there was none. `skipped` lists newer batches undo stepped over because the NFC upgrade made them impossible to undo (always empty for redo). |
 | `GET /api/trees/:tree/export.json` | Full open-ancestry JSON download. |
 | `GET /api/trees/:tree/export.ged?version&privatize` | GEDCOM download (`text/vnd.familysearch.gedcom`); `version` is `5.5.1` (default, Ancestry-compatible) or `7`; `privatize=true` writes living people, and anyone marked private or confidential, as "Private" with only their family links, and names the download `private-tree.ged` instead of after the tree. |
 | `GET /api/trees/:tree/export.gdz?privatize` | GEDZIP download (GEDCOM 7 plus the tree's media files). |
@@ -81,8 +82,8 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 | `POST /api/trees/:tree/people/:id/spouses` `{ personId \| person, relationship_type? }` | New partner family. |
 | `POST /api/trees/:tree/people/:id/children` `{ personId \| person, familyId?, partner1_rel?, partner2_rel? }` | Add a child to `familyId` or a new single-parent family. |
 | `POST /api/trees/:tree/people/:id/siblings` `{ personId \| person }` | Add to the preferred parent family (created without parents if needed). |
-| `PATCH`, `DELETE /api/trees/:tree/families/:id` | Relationship type, partners; delete family. |
-| `PATCH`, `DELETE /api/trees/:tree/family-children/:id` | Child relationship (`partner1_rel`, `partner2_rel`, `sort_order`, `is_preferred: true`); remove the child from the family. |
+| `PATCH`, `DELETE /api/trees/:tree/families/:id` | Relationship type, partners (null removes one: the partnership's events go with it, and a family left with one partner and no children is deleted); delete the family and its events. History names the change ("Edit relationship type", "Remove partner", "Remove relationship"). |
+| `PATCH`, `DELETE /api/trees/:tree/family-children/:id` | Child relationship (`partner1_rel`, `partner2_rel`, `sort_order`, `is_preferred: true`); remove the child from the family (a family left with one partner and no children is deleted). |
 | `POST /api/trees/:tree/notes` `{ text, owner_type, owner_id }`; `PATCH`, `DELETE /api/trees/:tree/notes/:id` | Notes. |
 | `POST /api/trees/:tree/tags`; `PATCH`, `DELETE /api/trees/:tree/tags/:id` | Tags. |
 | `POST /api/trees/:tree/people/:id/tags` `{ tagId }`; `DELETE /api/trees/:tree/people/:id/tags/:tagId` | Tag or untag a person. |

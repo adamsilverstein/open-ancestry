@@ -183,6 +183,8 @@ export function treeRoutes(app: Api, deps: Deps): void {
     { schema: { params: TreeParams } },
     async (request, reply) => {
       const { tree } = request.params;
+      // Mid-import the tree is not the user's yet: export it once the import ends (#186).
+      library.assertIdle(tree);
       const json = exportJsonString(library.open(tree));
       return reply
         .type('application/json; charset=utf-8')
@@ -196,6 +198,8 @@ export function treeRoutes(app: Api, deps: Deps): void {
     { schema: { params: TreeParams, querystring: ExportQuery } },
     async (request, reply) => {
       const { tree } = request.params;
+      // Mid-import the tree is not the user's yet: export it once the import ends (#186).
+      library.assertIdle(tree);
       const { text, warnings } = buildGedcomExport(library.open(tree), {
         version: request.query.version ?? '5.5.1',
         privatizeLiving: request.query.privatize ?? false,
@@ -216,6 +220,8 @@ export function treeRoutes(app: Api, deps: Deps): void {
     { schema: { params: TreeParams, querystring: GedzipQuery } },
     async (request, reply) => {
       const { tree } = request.params;
+      // Mid-import the tree is not the user's yet: export it once the import ends (#186).
+      library.assertIdle(tree);
       const { bytes, warnings } = buildGedzipExport(library.open(tree), {
         privatizeLiving: request.query.privatize ?? false,
       });

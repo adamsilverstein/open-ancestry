@@ -100,6 +100,8 @@ describe('NameScrubber', () => {
       'a.'.repeat(100_000),
       'x@'.repeat(100_000),
       `${'a.'.repeat(50_000)}/zedekiah`,
+      `${'.'.repeat(200_000)}x`,
+      `a.${'b'.repeat(200_000)}`,
     ];
     for (const note of notes) {
       const start = performance.now();

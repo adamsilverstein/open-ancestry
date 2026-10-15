@@ -24,8 +24,43 @@ export type ScrubMode = 'text' | 'file';
 
 /** A word: letters (with combining marks) and digits. */
 const WORD = /[\p{L}\p{M}\p{N}]+/gu;
-/** Inside a word: before an upper-case letter after a lower-case one, and between letters and digits. */
-const SUB_WORD = /(?<=\p{Ll}\p{M}*)(?=\p{Lu})|(?<=[\p{L}\p{M}])(?=\p{N})|(?<=\p{N})(?=\p{L})/gu;
+const LOWER = /\p{Ll}/u;
+const UPPER = /\p{Lu}/u;
+const MARK = /\p{M}/u;
+const DIGIT = /\p{N}/u;
+
+/**
+ * Where a word splits inside (offsets into `word`): before an upper-case
+ * letter that follows a lower-case one (marks between them don't count), and
+ * between letters and digits. One pass over the word: a lookbehind over any
+ * number of marks was quadratic on a word made of thousands of them.
+ */
+function subWordCuts(word: string): number[] {
+  const cuts: number[] = [];
+  let last: 'lower' | 'upper' | 'letter' | 'digit' | undefined;
+  let i = 0;
+  for (const c of word) {
+    if (!MARK.test(c)) {
+      const kind = DIGIT.test(c)
+        ? 'digit'
+        : LOWER.test(c)
+          ? 'lower'
+          : UPPER.test(c)
+            ? 'upper'
+            : 'letter';
+      const letter = kind !== 'digit';
+      if (
+        last !== undefined &&
+        ((kind === 'upper' && last === 'lower') || letter !== (last !== 'digit'))
+      ) {
+        cuts.push(i);
+      }
+      last = kind;
+    }
+    i += c.length;
+  }
+  return cuts;
+}
 /** Scripts written without spaces between words, where names are matched inside longer text. */
 const UNSPACED =
   /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u;
@@ -38,14 +73,27 @@ const MAIL = /@[\p{L}\p{N}-]+\./u;
 
 /**
  * Whether a chunk of prose is a link or e-mail address: a scheme or `www.`,
- * `name@domain`, or a domain followed by a path. Each test is anchored or
+ * `name@domain`, a domain followed by a path, or a bare domain. Each test is anchored or
  * scans the chunk once, so a long note stays linear (no backtracking over
  * the whole text, as a single unanchored pattern did).
  */
 function isLink(chunk: string): boolean {
   if (SCHEME.test(chunk) || MAIL.test(chunk)) return true;
   const slash = chunk.indexOf('/');
-  return slash > 0 && DOMAIN.test(chunk.slice(0, slash));
+  if (slash > 0) return DOMAIN.test(chunk.slice(0, slash));
+  // A bare domain ("zedekiahlivingson.com."), not an abbreviation ("e.g.", "J.R.R."):
+  // its last label is a word of two or more letters.
+  const bare = trimPunctuation(chunk);
+  return DOMAIN.test(bare) && /\.\p{L}{2,}$/u.test(bare);
+}
+
+/** A chunk without the brackets and punctuation of the sentence around it (no regex: linear). */
+function trimPunctuation(chunk: string): string {
+  let start = 0;
+  let end = chunk.length;
+  while (start < end && '(['.includes(chunk[start]!)) start++;
+  while (end > start && '.,;:!?)]'.includes(chunk[end - 1]!)) end--;
+  return chunk.slice(start, end);
 }
 
 /** How many layers of percent-encoding are undone (`%255A` is `%5A` is `Z`). */
@@ -87,7 +135,7 @@ function tokens(text: string): { start: number; end: number; parts: [number, num
   return [...text.matchAll(WORD)].map((m) => {
     const start = m.index;
     const word = m[0];
-    const cuts = [0, ...[...word.matchAll(SUB_WORD)].map((c) => c.index), word.length];
+    const cuts = [0, ...subWordCuts(word), word.length];
     const parts: [number, number][] = [];
     for (let k = 0; k + 1 < cuts.length; k++) {
       if (cuts[k + 1]! > cuts[k]!) parts.push([start + cuts[k]!, start + cuts[k + 1]!]);
@@ -144,6 +192,20 @@ export class NameScrubber {
     }
   }
 
+  private readonly indexes = new Map<ScrubMode, NeedleIndex>();
+
+  /** The names matched inside longer text in this mode, indexed for one pass over a text. */
+  private needles(mode: ScrubMode): NeedleIndex {
+    let index = this.indexes.get(mode);
+    if (!index) {
+      index = new NeedleIndex(
+        mode === 'file' ? [...this.unspaced, ...this.fileSubstrings] : this.unspaced,
+      );
+      this.indexes.set(mode, index);
+    }
+    return index;
+  }
+
   get empty(): boolean {
     return !this.words.size && !this.phrases.size && !this.unspaced.size;
   }
@@ -152,15 +214,22 @@ export class NameScrubber {
   scrub(input: string, mode: ScrubMode): string {
     if (this.empty || !input) return input;
     const text = input.normalize('NFC');
-    const ranges = mode === 'file' ? this.encodedRanges(text) : this.ranges(text, 'text');
+    // Matched as a reader sees it: without invisible format characters (soft hyphen,
+    // zero-width space or joiner) and with HTML entities decoded (Zo&euml;). Matches
+    // map back to the original, which is what gets replaced.
+    const view = readableLayer(text);
+    const seen = view?.decoded ?? text;
+    const back = ([a, b]: [number, number]): [number, number] =>
+      view ? [view.starts[a]!, view.starts[b]!] : [a, b];
+    const ranges = mode === 'file' ? this.encodedRanges(seen) : this.ranges(seen, 'text');
     if (mode === 'text') {
       // Links and e-mail addresses inside prose follow the file-name rules.
-      for (const m of text.matchAll(CHUNK)) {
+      for (const m of seen.matchAll(CHUNK)) {
         if (!isLink(m[0])) continue;
         for (const [a, b] of this.encodedRanges(m[0])) ranges.push([m.index + a, m.index + b]);
       }
     }
-    return ranges.length ? replace(text, ranges) : text === input ? input : text;
+    return ranges.length ? replace(text, ranges.map(back)) : text === input ? input : text;
   }
 
   /**
@@ -201,14 +270,11 @@ export class NameScrubber {
       }
     }
     // Names inside longer text: unspaced scripts always, long names in file names and URLs.
-    const inside =
-      mode === 'file' ? [...this.unspaced, ...this.fileSubstrings] : [...this.unspaced];
-    if (inside.length) {
+    const inside = this.needles(mode);
+    if (inside.size) {
       const { folded, map } = foldWithMap(text);
-      for (const needle of inside) {
-        for (let at = folded.indexOf(needle); at >= 0; at = folded.indexOf(needle, at + 1)) {
-          ranges.push([map[at]!, map[at + needle.length]!]);
-        }
+      for (const [at, length] of inside.find(folded)) {
+        ranges.push([map[at]!, map[at + length]!]);
       }
     }
     return ranges;
@@ -273,6 +339,116 @@ function decodeLayer(text: string): { decoded: string; starts: number[] } | unde
       decoded += text[i];
       i++;
     }
+  }
+  starts.push(text.length);
+  return decoded === text ? undefined : { decoded, starts };
+}
+
+/**
+ * Names matched inside longer text, found in one pass: each needle is filed
+ * under its first `key` characters (the shortest needle's length), so a text
+ * position costs one map lookup however many withheld people there are.
+ */
+class NeedleIndex {
+  readonly size: number;
+  private readonly key: number;
+  private readonly byPrefix = new Map<string, string[]>();
+
+  constructor(needles: Iterable<string>) {
+    const list = [...new Set(needles)].filter((n) => n.length > 0);
+    this.size = list.length;
+    this.key = list.length ? Math.min(...list.map((n) => n.length)) : 0;
+    for (const needle of list) {
+      const prefix = needle.slice(0, this.key);
+      const bucket = this.byPrefix.get(prefix);
+      if (bucket) bucket.push(needle);
+      else this.byPrefix.set(prefix, [needle]);
+    }
+  }
+
+  /** Every occurrence in `text`, as [offset, length]. */
+  find(text: string): [number, number][] {
+    const found: [number, number][] = [];
+    if (!this.size) return found;
+    for (let at = 0; at + this.key <= text.length; at++) {
+      const bucket = this.byPrefix.get(text.slice(at, at + this.key));
+      if (!bucket) continue;
+      for (const needle of bucket) {
+        if (text.startsWith(needle, at)) found.push([at, needle.length]);
+      }
+    }
+    return found;
+  }
+}
+
+/** Format characters a reader never sees: soft hyphen, zero-width space and joiners. */
+const INVISIBLE = /\p{Cf}/u;
+/** An HTML character reference starting at `lastIndex`. */
+const ENTITY = /&(?:#(\d{1,7})|#[xX]([0-9A-Fa-f]{1,6})|([A-Za-z][A-Za-z0-9]{1,31}));/y;
+
+/** Named references for Latin letters (HTML's Latin-1 set and a few more) and markup. */
+const NAMED_ENTITIES: Record<string, string> = (() => {
+  const latin1 =
+    'Agrave Aacute Acirc Atilde Auml Aring AElig Ccedil Egrave Eacute Ecirc Euml Igrave Iacute Icirc Iuml ETH Ntilde Ograve Oacute Ocirc Otilde Ouml times Oslash Ugrave Uacute Ucirc Uuml Yacute THORN szlig agrave aacute acirc atilde auml aring aelig ccedil egrave eacute ecirc euml igrave iacute icirc iuml eth ntilde ograve oacute ocirc otilde ouml divide oslash ugrave uacute ucirc uuml yacute thorn yuml'.split(
+      ' ',
+    );
+  const table: Record<string, string> = {
+    amp: '&',
+    lt: '<',
+    gt: '>',
+    quot: '"',
+    apos: "'",
+    nbsp: '\u00a0',
+    shy: '\u00ad',
+    OElig: 'Œ',
+    oelig: 'œ',
+    Scaron: 'Š',
+    scaron: 'š',
+    Yuml: 'Ÿ',
+  };
+  latin1.forEach((name, i) => (table[name] = String.fromCodePoint(0xc0 + i)));
+  return table;
+})();
+
+/**
+ * `text` as a reader sees it, with the index in `text` where each of its
+ * UTF-16 units came from (and `text.length` at the end): format characters
+ * dropped and HTML character references decoded. Undefined when it is the same.
+ */
+function readableLayer(text: string): { decoded: string; starts: number[] } | undefined {
+  if (!/&|\p{Cf}/u.test(text)) return undefined;
+  let decoded = '';
+  const starts: number[] = [];
+  for (let i = 0; i < text.length;) {
+    const c = String.fromCodePoint(text.codePointAt(i)!);
+    if (INVISIBLE.test(c)) {
+      i += c.length;
+      continue;
+    }
+    if (c === '&') {
+      ENTITY.lastIndex = i;
+      const m = ENTITY.exec(text);
+      const point = m?.[1] ? Number(m[1]) : m?.[2] ? parseInt(m[2], 16) : undefined;
+      const value =
+        point !== undefined
+          ? point > 0 && point <= 0x10ffff
+            ? String.fromCodePoint(point)
+            : undefined
+          : m?.[3]
+            ? NAMED_ENTITIES[m[3]]
+            : undefined;
+      if (m && value !== undefined) {
+        if (!INVISIBLE.test(value)) {
+          for (let u = 0; u < value.length; u++) starts.push(i);
+          decoded += value;
+        }
+        i += m[0].length;
+        continue;
+      }
+    }
+    for (let u = 0; u < c.length; u++) starts.push(i + u);
+    decoded += c;
+    i += c.length;
   }
   starts.push(text.length);
   return decoded === text ? undefined : { decoded, starts };

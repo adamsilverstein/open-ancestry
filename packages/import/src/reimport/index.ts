@@ -15,5 +15,9 @@ export {
   isReimportStale,
   prepareReimport,
   refreshReimport,
+  reimportData,
+  reimportFromData,
+  type ReimportData,
+  type ReimportPhase,
   type ReimportSession,
 } from './session';

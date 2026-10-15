@@ -16,11 +16,8 @@ test.beforeEach(async ({ request, baseURL }, testInfo) => {
 });
 
 const h1 = (page: Page) => page.getByRole('heading', { level: 1 });
-const staleToast = (page: Page) =>
-  page
-    .getByRole('region', { name: /Notifications/ })
-    .getByRole('listitem')
-    .filter({ hasText: /changed in another window \(or by undo\) after you opened it/ });
+/** The page heading behind an open dialog, which hides it from role queries. */
+const behind = (page: Page) => page.locator('main h1');
 
 async function rename(page: Page, given: string) {
   await page.getByRole('button', { name: 'Edit person' }).click();
@@ -70,9 +67,11 @@ test('a save made from stale data is refused, not mixed in', async ({ page, requ
   });
 
   await dialog.getByRole('button', { name: 'Save' }).click();
-  await expect(staleToast(page)).toBeVisible();
+  // The form stays open (#177) and says why; the toast is behind the modal, so
+  // the dialog's own alert is what a user (and a screen reader) gets.
+  await expect(dialog.getByRole('alert')).toContainText('changed in another window (or by undo)');
   // The page shows what the server has, never "Rowan Ashby" or "Roland Ashby".
-  await expect(h1(page)).toHaveText('Roland Ashdown');
+  await expect(behind(page)).toHaveText('Roland Ashdown');
   const after = await (await request.get(`${base}/people/${seeded.rowan}`)).json();
   expect(after.names[0]).toMatchObject({ given: 'Roland', surname: 'Ashdown' });
 
@@ -119,8 +118,8 @@ test('an open form does not save over an undo from another tab', async ({ page }
   await expect(h1(b)).toHaveText('Rowan Ashdown');
 
   await dialog.getByRole('button', { name: 'Save' }).click();
-  await expect(staleToast(a)).toBeVisible();
-  await expect(h1(a)).toHaveText('Rowan Ashdown');
+  await expect(dialog.getByRole('alert')).toContainText('changed in another window (or by undo)');
+  await expect(behind(a)).toHaveText('Rowan Ashdown');
   await expect(h1(b)).toHaveText('Rowan Ashdown');
   // Still open, with "Ashby" typed in; reloading shows the undone given name.
   await dialog.getByRole('button', { name: 'Reload form' }).click();

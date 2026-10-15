@@ -221,3 +221,52 @@ describe('JSON export history (#197)', () => {
     expect((await api.get(`${s.base}/export.json?history=nope`)).statusCode).toBe(400);
   });
 });
+
+describe('deleting a person whose only pointers were imported text (#245)', () => {
+  it('leaves none of their NOTE, OBJE or SOUR records in any export', async () => {
+    const base = await createTestTree(api, 'Pointers');
+    const store = openTree(join(api.root, 'Pointers.oatree'));
+    await importGedcom(
+      {
+        bytes: [
+          '0 HEAD',
+          '1 GEDC',
+          '2 VERS 5.5.1',
+          '0 @I1@ INDI',
+          '1 NAME Ozias /Canarydeleted/',
+          '1 ASSO @I2@',
+          '2 NOTE @N5@',
+          '1 _CUSTOM',
+          '2 OBJE @O7@',
+          '2 SOUR @S9@',
+          '0 @I2@ INDI',
+          '1 NAME Petra /Keeper/',
+          '0 @N5@ NOTE Canarynote',
+          '0 @O7@ OBJE',
+          '1 FILE photos/canaryphoto.jpg',
+          '2 FORM jpg',
+          '0 @S9@ SOUR',
+          '1 TITL Canarysource',
+          '0 TRLR',
+          '',
+        ].join('\n'),
+      },
+      store,
+    );
+    const ozias = store.db
+      .prepare("SELECT person_id FROM person_name WHERE given = 'Ozias'")
+      .pluck()
+      .get() as string;
+    store.close();
+    expect((await api.del(`${base}/people/${ozias}`)).statusCode).toBe(200);
+    for (const url of [
+      `${base}/export.ged`,
+      `${base}/export.ged?version=7`,
+      `${base}/export.json?history=0`,
+    ]) {
+      const res = await api.get(url);
+      expect(res.statusCode, url).toBe(200);
+      expect(res.body.match(/canary\w*/gi) ?? [], url).toEqual([]);
+    }
+  });
+});

@@ -5,7 +5,7 @@ import {
   serializeNode,
   type GedcomNode,
 } from '@open-ancestry/gedcom';
-import { canonicalize, n, setLevels } from './canonical';
+import { canonicalize, formValue, mimeOfPath, n, setLevels } from './canonical';
 
 /** What merging needs from the export. */
 export interface MergeContext {
@@ -151,14 +151,39 @@ export function mergeUnmapped(
   // Each imported record says where its own lines belong (a merged person has several).
   for (const source of sources) {
     const text = serializeNode(source).split('\n');
-    const isUnmapped = (node: GedcomNode, path: string) => {
+    const take = (node: GedcomNode, path: string) => {
       const key = `${path}\u0000${text[node.line - source.line] ?? ''}`;
       const n = pending.get(key);
       if (!n) return false;
       pending.set(key, n - 1);
       return true;
     };
-    new Merger(ctx, label, isUnmapped).walk(source, record, source.tag);
+    // Shallowest lines first, and an unmapped line takes its whole subtree, so a
+    // mapped line never claims a nested unmapped line with the same text (the
+    // first FILE's `2 FORM jpg` taking the second FILE's).
+    const unmapped = new Set<GedcomNode>();
+    const claim = (node: GedcomNode, path: string) => {
+      for (const c of node.children) {
+        const childPath = `${path}.${c.tag}`;
+        take(c, childPath);
+        claim(c, childPath);
+      }
+    };
+    let level: [GedcomNode, string][] = [[source, source.tag]];
+    while (level.length) {
+      const next: [GedcomNode, string][] = [];
+      for (const [node, path] of level) {
+        for (const c of node.children) {
+          const childPath = `${path}.${c.tag}`;
+          if (take(c, childPath)) {
+            unmapped.add(c);
+            claim(c, childPath);
+          } else next.push([c, childPath]);
+        }
+      }
+      level = next;
+    }
+    new Merger(ctx, label, (node) => unmapped.has(node)).walk(source, record, source.tag);
   }
   setLevels(record);
 }
@@ -290,6 +315,14 @@ class Merger {
     for (const c of node.children) {
       const child = this.prepare(c, `${path}.${c.tag}`);
       if (child) copy.children.push(child);
+    }
+    if (node.tag === 'FILE' && path.endsWith('OBJE.FILE')) {
+      const form = copy.children.find((c) => c.tag === 'FORM');
+      if (form?.value) form.value = formValue(form.value, this.ctx.v7);
+      else if (this.ctx.v7 && !form) {
+        // GEDCOM 7 requires a media type on every FILE.
+        copy.children.unshift(n('FORM', mimeOfPath(node.value) ?? 'application/octet-stream'));
+      }
     }
     // GEDCOM 7 requires a ROLE on every association.
     if (node.tag === 'ASSO' && this.ctx.v7 && !copy.children.some((c) => c.tag === 'ROLE')) {

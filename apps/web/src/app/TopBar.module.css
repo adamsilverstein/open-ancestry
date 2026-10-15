@@ -93,8 +93,13 @@
     max-width: none;
   }
 
-  /* Icon-only now: square and the same size as History and the theme switch. */
-  .find {
+  /*
+   * Icon-only now: square and the same size as History and the theme switch.
+   * Doubled class to win over the button's own size (its sheet may load after
+   * this one), and no shrinking in the crowded bar.
+   */
+  .find.find {
+    flex: none;
     justify-content: center;
     width: 36px;
     height: 36px;

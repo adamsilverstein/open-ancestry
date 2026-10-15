@@ -94,6 +94,29 @@ describe('deleting a person (#226)', () => {
     store.close();
   });
 
+  it("keeps a NOTE record another person's imported text still points to", () => {
+    const store = memoryTree();
+    const w = new BulkWriter(store);
+    const batch = w.insert('import_batch', { file_name: 'tree.ged' });
+    w.insert('raw_record', {
+      import_batch_id: batch,
+      seq: 1,
+      gedcom_tag: 'INDI',
+      xref: '@I1@',
+      raw_text: '0 @I1@ INDI\n1 ASSO @I2@\n2 NOTE @N3@\n',
+    });
+    w.commit();
+    const { pat, note } = store.transact('Add', (tx) => {
+      const pat = persons.create(tx, { names: [{ given: 'Pat' }] });
+      const note = tx.insert('note', { text: 'shared note', external_id: '@N3@' });
+      noteLinks.create(tx, { note_id: note.id, owner_type: 'person', owner_id: pat.id });
+      return { pat, note };
+    }).result;
+    store.transact('Delete Pat', (tx) => persons.delete(tx, pat.id));
+    expect(store.getRow('note', note.id)).toBeDefined();
+    store.close();
+  });
+
   it('keeps a source that has other citations', () => {
     const store = memoryTree();
     const pat = personWithItems(store, 'Pat');

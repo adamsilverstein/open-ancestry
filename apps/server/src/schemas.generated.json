@@ -2252,6 +2252,91 @@
       }
     }
   },
+  "MergeBody": {
+    "type": "object",
+    "required": ["otherId"],
+    "properties": {
+      "otherId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      },
+      "choices": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "keep"
+              },
+              {
+                "type": "string",
+                "const": "other"
+              }
+            ]
+          },
+          "sex": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "keep"
+              },
+              {
+                "type": "string",
+                "const": "other"
+              }
+            ]
+          },
+          "living": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "keep"
+              },
+              {
+                "type": "string",
+                "const": "other"
+              }
+            ]
+          },
+          "privacy": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "keep"
+              },
+              {
+                "type": "string",
+                "const": "other"
+              }
+            ]
+          },
+          "preferred": {
+            "type": "object",
+            "patternProperties": {
+              "^[A-Z_][A-Z0-9_]{0,31}$": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "keep"
+                  },
+                  {
+                    "type": "string",
+                    "const": "other"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "additionalProperties": false
+  },
   "NameBody": {
     "type": "object",
     "properties": {
@@ -2749,6 +2834,24 @@
       }
     },
     "additionalProperties": false
+  },
+  "RelationshipQuery": {
+    "type": "object",
+    "required": ["from"],
+    "properties": {
+      "from": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      },
+      "to": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
+      }
+    }
   },
   "RelationshipType": {
     "enum": ["married", "civil_union", "partners", "unknown"]

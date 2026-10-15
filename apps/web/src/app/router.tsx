@@ -9,6 +9,7 @@ import { isNotFound } from '../api/client';
 import { currentTreeQuery, personQuery } from '../api/queries';
 import { PersonNotFound } from '../routes/person/PersonNotFound';
 import { PersonSkeleton } from '../routes/person/PersonSkeleton';
+import { validateMergeSearch } from '../routes/merge/search';
 import { validatePersonSearch } from '../routes/person/search';
 import { queryClient } from './queryClient';
 import { AppShell } from './AppShell';
@@ -103,6 +104,13 @@ const checkerRoute = createRoute({
   component: lazyRouteComponent(() => import('../routes/checker/CheckerPage'), 'CheckerPage'),
 });
 
+const mergeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/merge',
+  validateSearch: validateMergeSearch,
+  component: lazyRouteComponent(() => import('../routes/merge/MergePage'), 'MergePage'),
+});
+
 const importRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/import/$jobId',
@@ -124,6 +132,7 @@ const routeTree = rootRoute.addChildren([
   importRoute,
   reimportRoute,
   checkerRoute,
+  mergeRoute,
 ]);
 
 export const router = createRouter({

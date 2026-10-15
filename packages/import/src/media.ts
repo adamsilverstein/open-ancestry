@@ -1,4 +1,4 @@
-import type { MediaKind } from '@open-ancestry/db';
+import { toNFC, type MediaKind } from '@open-ancestry/db';
 import { safeEntryPath } from '@open-ancestry/gedcom';
 import {
   lstatSync,
@@ -99,7 +99,8 @@ const MAX_DEPTH = 32;
  * The media files available to an import: a GEDZIP's entries or a folder on
  * disk. Folders are walked without following symlinks, so a link cannot pull
  * in files from elsewhere. Lookups try the exact relative path, then a
- * case-insensitive match, then a unique file name.
+ * case-insensitive match, then a unique file name, all in Unicode NFC so a
+ * decomposed name (as macOS writes them) matches its composed spelling.
  */
 export class MediaSource {
   private readonly byPath = new Map<string, SourceFile>();
@@ -110,9 +111,10 @@ export class MediaSource {
   private constructor(files: SourceFile[], available: boolean) {
     this.available = available;
     for (const file of files) {
-      this.byPath.set(file.path, file);
-      this.byLowerPath.set(file.path.toLowerCase(), file);
-      const name = file.path.split('/').pop()!.toLowerCase();
+      const path = toNFC(file.path);
+      this.byPath.set(path, file);
+      this.byLowerPath.set(path.toLowerCase(), file);
+      const name = path.split('/').pop()!.toLowerCase();
       const list = this.byName.get(name);
       if (list) list.push(file);
       else this.byName.set(name, [file]);
@@ -167,7 +169,8 @@ export class MediaSource {
 
   find(ref: FileRef): SourceFile | undefined {
     if (ref.type === 'local') {
-      const exact = this.byPath.get(ref.path) ?? this.byLowerPath.get(ref.path.toLowerCase());
+      const path = toNFC(ref.path);
+      const exact = this.byPath.get(path) ?? this.byLowerPath.get(path.toLowerCase());
       if (exact) return exact;
     }
     const name =
@@ -176,7 +179,7 @@ export class MediaSource {
         : ref.type === 'absolute'
           ? ref.name
           : undefined;
-    const matches = name ? this.byName.get(name.toLowerCase()) : undefined;
+    const matches = name ? this.byName.get(toNFC(name).toLowerCase()) : undefined;
     return matches?.length === 1 ? matches[0] : undefined;
   }
 }

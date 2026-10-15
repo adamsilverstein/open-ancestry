@@ -14,6 +14,7 @@ import { Textarea } from '../../../components/Textarea/Textarea';
 import { eventLabel } from '../../../lib/timeline';
 import pageStyles from '../PersonPage.module.css';
 import { removeNote, setNoteText } from './optimistic';
+import { SaveError, useSaveState } from './SaveError';
 import styles from './Edit.module.css';
 
 function NoteForm({
@@ -21,11 +22,16 @@ function NoteForm({
   initial,
   onSave,
   onCancel,
+  pending,
+  error,
 }: {
   label: string;
   initial: string;
   onSave: (text: string) => void;
   onCancel: () => void;
+  pending: boolean;
+  /** Why the last save failed; the form stays open with the text. */
+  error: string | null;
 }) {
   const [text, setText] = useState(initial);
   const field = useRef<HTMLTextAreaElement>(null);
@@ -36,7 +42,7 @@ function NoteForm({
       className={styles.noteForm}
       onSubmit={(e) => {
         e.preventDefault();
-        if (text.trim()) onSave(text);
+        if (text.trim() && !pending) onSave(text);
       }}
     >
       <Textarea
@@ -45,9 +51,10 @@ function NoteForm({
         ref={field}
         onChange={(e) => setText(e.currentTarget.value)}
       />
+      <SaveError error={error} />
       <div className={styles.row}>
-        <Button type="submit" size="sm" variant="primary" disabled={!text.trim()}>
-          Save note
+        <Button type="submit" size="sm" variant="primary" disabled={!text.trim()} loading={pending}>
+          {error ? 'Try again' : 'Save note'}
         </Button>
         <Button size="sm" variant="ghost" onClick={onCancel}>
           Cancel
@@ -65,6 +72,11 @@ export function NotesTab({ tree, detail }: { tree: string; detail: PersonDetail 
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<NoteRow | null>(null);
+  // A note form closes only once its save succeeds, so a failure keeps the text.
+  const saveState = useSaveState(() => {
+    setAdding(false);
+    setEditing(null);
+  });
   const notes = [
     ...detail.notes.map((note) => ({ note, about: null as string | null })),
     ...detail.events.flatMap(({ event, notes: eventNotes }) =>
@@ -73,11 +85,11 @@ export function NotesTab({ tree, detail }: { tree: string; detail: PersonDetail 
   ];
 
   const save = (note: NoteRow, text: string) => {
-    setEditing(null);
     edit.mutate({
       label: 'Edit note',
       optimistic: { personId: id, update: (d) => setNoteText(d, note.id, text) },
       send: () => apiSend('PATCH', `${base}/notes/${note.id}`, { text }),
+      ...saveState.handlers(),
     });
   };
 
@@ -88,12 +100,14 @@ export function NotesTab({ tree, detail }: { tree: string; detail: PersonDetail 
           label="New note"
           initial=""
           onCancel={() => setAdding(false)}
+          pending={edit.isPending}
+          error={saveState.error}
           onSave={(text) => {
-            setAdding(false);
             edit.mutate({
               label: 'Add note',
               send: () =>
                 apiSend('POST', `${base}/notes`, { text, owner_type: 'person', owner_id: id }),
+              ...saveState.handlers(),
             });
           }}
         />
@@ -102,7 +116,10 @@ export function NotesTab({ tree, detail }: { tree: string; detail: PersonDetail 
           <Button
             size="sm"
             iconStart={<Plus size={14} aria-hidden />}
-            onClick={() => setAdding(true)}
+            onClick={() => {
+              saveState.reset();
+              setAdding(true);
+            }}
           >
             Add note
           </Button>
@@ -123,7 +140,10 @@ export function NotesTab({ tree, detail }: { tree: string; detail: PersonDetail 
                   label="Edit note"
                   size="sm"
                   icon={<Pencil size={14} aria-hidden />}
-                  onClick={() => setEditing(note.id)}
+                  onClick={() => {
+                    saveState.reset();
+                    setEditing(note.id);
+                  }}
                 />
                 <IconButton
                   label="Delete note"
@@ -140,6 +160,8 @@ export function NotesTab({ tree, detail }: { tree: string; detail: PersonDetail 
               label="Note"
               initial={note.text}
               onCancel={() => setEditing(null)}
+              pending={edit.isPending}
+              error={saveState.error}
               onSave={(text) => save(note, text)}
             />
           ) : (

@@ -28,6 +28,7 @@ export const {
   ExportQuery,
   GedzipQuery,
   NeighborhoodQuery,
+  RelationshipQuery,
   SearchQuery,
   HistoryQuery,
   HomeBody,
@@ -53,6 +54,7 @@ export const {
   BatchBody,
   CheckKey,
   DismissBody,
+  MergeBody,
 } = schemas;
 
 export type NameBody = Source.NameBody;

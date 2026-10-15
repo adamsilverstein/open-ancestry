@@ -2,9 +2,11 @@ import { useEffect } from 'react';
 import { useQueryClient, useSuspenseQuery } from '@tanstack/react-query';
 import { getRouteApi, useRouter } from '@tanstack/react-router';
 import { isNotFound } from '../../api/client';
+import { takeUnsaved } from '../../api/edits';
 import { personQuery } from '../../api/queries';
+import type { PersonDetail } from '../../api/types';
 import { useToast } from '../../components/Toast/Toast';
-import { fullName } from '../../lib/person';
+import { fullName, nearestRelative } from '../../lib/person';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/Tabs/Tabs';
 import { FactsTab } from './FactsTab';
 import { NotesTab } from './edit/NotesTab';
@@ -24,21 +26,30 @@ const TAB_LABELS: Record<PersonTab, string> = {
 };
 
 /**
- * Leaves the page when the person stops existing while it is open, e.g. after
- * undoing their creation: back where the user came from, else home.
+ * Leaves the page when the person stops existing while it is open (deleted in
+ * another window, or by undoing their creation): to the nearest relative, else
+ * the people list, with one message that also says when an edit was lost.
  */
-function useLeaveWhenGone(tree: string, personId: string, name: string, error: unknown) {
+function useLeaveWhenGone(tree: string, detail: PersonDetail, error: unknown) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const toast = useToast();
   const gone = isNotFound(error);
+  const personId = detail.person.id;
+  const name = fullName(detail.summary);
+  const nearby = nearestRelative(detail);
   useEffect(() => {
     if (!gone) return;
-    toast({ title: `${name} is no longer in the tree` });
-    if (router.history.canGoBack()) router.history.back();
-    else void router.navigate({ to: '/' });
+    const lost = takeUnsaved(tree);
+    toast({
+      title: `${name} was deleted (in another window or by undo)`,
+      ...(lost ? { description: "Your changes couldn't be saved." } : {}),
+    });
+    void (nearby
+      ? router.navigate({ to: '/person/$personId', params: { personId: nearby } })
+      : router.navigate({ to: '/people' }));
     queryClient.removeQueries({ queryKey: personQuery(tree, personId).queryKey });
-  }, [gone, name, personId, queryClient, router, toast, tree]);
+  }, [gone, name, nearby, personId, queryClient, router, toast, tree]);
 }
 
 /** Ancestry-style person page: header band, then Facts, Gallery, Notes, LifeStory, Sources. */
@@ -49,7 +60,7 @@ export function PersonPage() {
   const navigate = route.useNavigate();
   // The loader already fetched it, so this never suspends on navigation.
   const { data: detail, error } = useSuspenseQuery(personQuery(tree, personId));
-  useLeaveWhenGone(tree, personId, fullName(detail.summary), error);
+  useLeaveWhenGone(tree, detail, error);
 
   return (
     // Keyed so per-person UI state (filters, collapsed groups) resets on navigation.

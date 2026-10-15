@@ -154,6 +154,15 @@ describe('tree routes', () => {
       expect(res.statusCode).toBe(400);
       expect(res.json().error.code).toBe('bad_request');
     }
+    // Blank names get a plain message, not a schema error (issue #123).
+    for (const name of ['', '   ']) {
+      const res = await api.post('/api/trees', { name });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toEqual({ code: 'bad_request', message: 'Enter a tree name' });
+    }
+    expect((await api.patch('/api/trees/A', { name: ' ' })).json().error.message).toBe(
+      'Enter a tree name',
+    );
     expect((await api.post('/api/trees', {})).json().error.code).toBe('validation_failed');
     expect((await api.post('/api/trees', { name: 'A', extra: 1 })).statusCode).toBe(400);
   });

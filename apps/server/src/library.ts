@@ -47,7 +47,7 @@ const WINDOWS_DEVICE = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$
 
 /** Why `name` cannot be a tree folder name, or null when it can. */
 export function treeNameProblem(name: string): string | null {
-  if (name.length === 0) return 'Tree name is empty';
+  if (name.trim().length === 0) return 'Enter a tree name';
   if (name.length > MAX_TREE_NAME_LENGTH)
     return `Tree name is longer than ${MAX_TREE_NAME_LENGTH} characters`;
   if (name !== name.trim()) return 'Tree name has leading or trailing spaces';

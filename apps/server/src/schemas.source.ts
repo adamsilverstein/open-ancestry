@@ -41,7 +41,8 @@ export const ReimportStatusQuery = Type.Object(
 );
 
 export const TreeBody = Type.Object(
-  { name: Type.String({ minLength: 1, maxLength: 100 }) },
+  // No minLength: a blank name gets treeNameProblem's plain message, not a schema error.
+  { name: Type.String({ maxLength: 100 }) },
   strict,
 );
 

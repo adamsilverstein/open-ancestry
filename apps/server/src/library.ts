@@ -10,6 +10,7 @@ import {
   type TreeStore,
 } from '@open-ancestry/db';
 import { ApiError, conflict, notFound } from './errors';
+import { sweepReimportFolders } from './reimport-folders';
 
 /*
  * The library is a folder of trees: `<root>/<name>.oatree/`. A tree's API id
@@ -234,22 +235,15 @@ export class Library {
   }
 
   /**
-   * Removes `.reimport-*` folders inside tree folders: an export being
-   * compared, or a GEDZIP's media waiting for a review. Reviews live in
-   * memory, so at startup any such folder is a crash's leftover.
+   * Removes crash leftovers among the trees' `.reimport-*` folders (an export
+   * being compared, or a GEDZIP's media waiting for a review), with the same
+   * rule as the sweep when a tree opens (see reimport-folders.ts): only those
+   * untouched for longer than a review lives, so another server process's
+   * live review is never removed.
    */
   sweepReimportLeftovers(): string[] {
-    const removed: string[] = [];
-    if (!existsSync(this.root)) return removed;
-    for (const { id } of this.list()) {
-      const dir = this.dirOf(id);
-      for (const name of readdirSync(dir)) {
-        if (!name.startsWith('.reimport-')) continue;
-        rmSync(join(dir, name), { recursive: true, force: true });
-        removed.push(join(dir, name));
-      }
-    }
-    return removed;
+    if (!existsSync(this.root)) return [];
+    return this.list().flatMap(({ id }) => sweepReimportFolders(this.dirOf(id)));
   }
 
   private isPendingImport(id: string, marker: string): boolean {

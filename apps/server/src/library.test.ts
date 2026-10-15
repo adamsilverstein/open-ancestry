@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readdir } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -76,8 +76,14 @@ describe('Library', () => {
     const leftover = join(library.dirOf('One'), '.reimport-abc.oatree');
     mkdirSync(leftover);
     writeFileSync(join(leftover, 'tree.sqlite'), 'x');
+    const twoHoursAgo = (Date.now() - 2 * 60 * 60 * 1000) / 1000;
+    utimesSync(leftover, twoHoursAgo, twoHoursAgo);
+    // A folder in use (touched within a review's lifetime) is left alone: same rule as #243.
+    const live = join(library.dirOf('One'), '.reimport-live.oatree');
+    mkdirSync(live);
     expect(library.sweepReimportLeftovers()).toEqual([leftover]);
     expect(existsSync(leftover)).toBe(false);
+    expect(existsSync(live)).toBe(true);
     expect(library.list().map((t) => t.id)).toEqual(['One']);
     library.closeAll();
   });

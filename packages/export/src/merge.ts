@@ -45,10 +45,11 @@ const GENERATED_TAGS = new Set([
 
 /**
  * Standard tags a structure holds at most once. Repeatable ones (ASSO, NOTE,
- * SOUR, and EMAIL, PHON, FAX, WWW, which 5.5.1 allows three of) may be added.
+ * SOUR, FILE, which an OBJE may hold several of in both versions, and EMAIL,
+ * PHON, FAX, WWW, which 5.5.1 allows three of) may be added.
  */
 const SINGLE_VALUED = new Set(
-  `ABBR ADDR AGE AUTH CALN CAUS DATA DATE FILE FORM GIVN LATI LONG MAP NICK NPFX NSFX PAGE
+  `ABBR ADDR AGE AUTH CALN CAUS DATA DATE FORM GIVN LATI LONG MAP NICK NPFX NSFX PAGE
   PEDI PLAC PUBL QUAY RESN ROLE SEX SPFX SURN TEXT TIME TITL TYPE VERS`.split(/\s+/),
 );
 

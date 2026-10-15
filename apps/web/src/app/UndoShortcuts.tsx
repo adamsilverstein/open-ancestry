@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useToast } from '../components/Toast/Toast';
+import { useDismissToasts, useToast } from '../components/Toast/Toast';
 
 /** Text fields keep their own Cmd/Ctrl-Z. */
 function isEditable(target: EventTarget | null): boolean {
@@ -43,6 +43,7 @@ export function historyShortcut(event: KeyboardEvent): 'undo' | 'redo' | null {
 export function UndoShortcuts() {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const dismiss = useDismissToasts();
   useEffect(() => {
     let busy = false;
     async function onKeyDown(event: KeyboardEvent) {
@@ -57,6 +58,8 @@ export function UndoShortcuts() {
         const { undoRedo, undoRedoMessage } = await import('../api/history');
         const result = await undoRedo(queryClient, action);
         const message = undoRedoMessage(action, result);
+        // Whatever announced that change (e.g. "Applied 8 changes") is now out of date.
+        if (action === 'undo' && result.batch) dismiss(`batch:${result.batch.id}`);
         toast({ ...message, duration: message.description ? 6000 : 3000 });
       } catch (error) {
         toast({
@@ -70,6 +73,6 @@ export function UndoShortcuts() {
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [queryClient, toast]);
+  }, [queryClient, toast, dismiss]);
   return null;
 }

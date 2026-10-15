@@ -3,7 +3,7 @@ import type { PersonReview, ReviewChange } from './api';
 import { summarizeApply } from './summary';
 
 const change = (id: string, extra: Partial<ReviewChange> & { kind: ReviewChange['kind'] }) =>
-  ({ id, key: id, defaultAccept: true, applicable: true, ...extra }) as ReviewChange;
+  ({ id, defaultAccept: true, applicable: true, ...extra }) as unknown as ReviewChange;
 const person = (
   name: string,
   status: PersonReview['status'],

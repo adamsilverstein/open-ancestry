@@ -21,6 +21,7 @@ import {
   type ReviewChange,
 } from './api';
 import { describeChange } from './labels';
+import { summarizeApply, type ApplySummary, type SummaryPerson } from './summary';
 import styles from './Reimport.module.css';
 
 /** People shown per page of the review. */
@@ -128,6 +129,9 @@ function Review({ review }: { review: ReimportReview }) {
     () => new Set(all.filter((c) => c.applicable && c.defaultAccept).map((c) => c.id)),
   );
   const [pending, setPending] = useState(false);
+  const [done, setDone] = useState<{ summary: ApplySummary; homePersonId: string | null } | null>(
+    null,
+  );
   // A large export can change thousands of people: render cards in pages.
   const [shown, setShown] = useState(PAGE);
   const active = useMemo(() => effective(review, selected), [review, selected]);
@@ -167,11 +171,19 @@ function Review({ review }: { review: ReimportReview }) {
       toast({
         title: `Applied ${result.applied} change${result.applied === 1 ? '' : 's'}`,
         description: 'Undo with Cmd/Ctrl-Z or from History.',
+        // Undoing the re-import closes this toast (#158).
+        tag: `batch:${result.batchId}`,
       });
+      const blocked = new Set(result.blocked);
       const tree = await queryClient.fetchQuery(treeQuery(review.tree));
-      await (tree.homePersonId
-        ? navigate({ to: '/tree/$personId', params: { personId: tree.homePersonId } })
-        : navigate({ to: '/' }));
+      setDone({
+        summary: summarizeApply(
+          review.diff.people,
+          new Set([...active].filter((id) => !blocked.has(id))),
+          result.newPeople,
+        ),
+        homePersonId: tree.homePersonId ?? null,
+      });
     } catch (error) {
       toast({
         title: 'Could not apply the re-import',
@@ -186,6 +198,8 @@ function Review({ review }: { review: ReimportReview }) {
     await discardReimport(review.id).catch(() => {});
     await navigate({ to: '/' });
   }
+
+  if (done) return <Applied {...done} fileName={review.fileName} />;
 
   return (
     <div className={cx(importStyles.page, styles.page)}>
@@ -243,6 +257,82 @@ function Review({ review }: { review: ReimportReview }) {
         </Button>
       </div>
     </div>
+  );
+}
+
+function SummaryList({ people }: { people: SummaryPerson[] }) {
+  return (
+    <ul className={styles.summaryList}>
+      {people.map((p) => (
+        <li key={`${p.personId ?? ''}|${p.name}`}>
+          {p.personId ? (
+            <Link to="/person/$personId" params={{ personId: p.personId }} className={styles.name}>
+              {p.name}
+            </Link>
+          ) : (
+            <span className={styles.name}>{p.name}</span>
+          )}
+          <ul className={styles.changes}>
+            {p.changes.map((c, i) => (
+              <li key={i} className={styles.info}>
+                {c}
+              </li>
+            ))}
+          </ul>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** After Apply: what was applied, to whom (with links), and what was left out (#158). */
+function Applied({
+  summary,
+  homePersonId,
+  fileName,
+}: {
+  summary: ApplySummary;
+  homePersonId: string | null;
+  fileName: string;
+}) {
+  const plural = (n: number) => `${n} change${n === 1 ? '' : 's'}`;
+  return (
+    <section aria-labelledby="reimport-applied" className={cx(importStyles.page, styles.page)}>
+      <header className={importStyles.header}>
+        <div>
+          <h1 id="reimport-applied" className={importStyles.title}>
+            Re-import applied
+          </h1>
+          <p className={importStyles.subtitle}>
+            Applied {plural(summary.appliedCount)} from {fileName} to {summary.applied.length}{' '}
+            {summary.applied.length === 1 ? 'person' : 'people'}. Undo all of it with Cmd/Ctrl-Z or
+            from History.
+          </p>
+        </div>
+      </header>
+      <SummaryList people={summary.applied} />
+      {summary.skippedCount > 0 && (
+        <details className={styles.skipped}>
+          <summary>Skipped {plural(summary.skippedCount)}</summary>
+          <SummaryList people={summary.skipped} />
+        </details>
+      )}
+      <div className={styles.footer}>
+        {homePersonId ? (
+          <Link
+            to="/tree/$personId"
+            params={{ personId: homePersonId }}
+            className={cx(buttonStyles.button, buttonStyles.primary, buttonStyles.md)}
+          >
+            Go to the tree
+          </Link>
+        ) : (
+          <Link to="/" className={cx(buttonStyles.button, buttonStyles.primary, buttonStyles.md)}>
+            Go to the tree
+          </Link>
+        )}
+      </div>
+    </section>
   );
 }
 

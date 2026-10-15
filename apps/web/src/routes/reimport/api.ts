@@ -82,10 +82,13 @@ export const getReimport = (id: string, signal?: AbortSignal) =>
   apiGet<ReimportReview>(`/reimports/${seg(id)}`, signal);
 
 export const applyReimport = (id: string, accept: string[]) =>
-  apiSend<{ batchId: string; applied: number; skipped: number; blocked: string[] }>(
-    'POST',
-    `/reimports/${seg(id)}/apply`,
-    { accept },
-  );
+  apiSend<{
+    batchId: string;
+    applied: number;
+    skipped: number;
+    blocked: string[];
+    /** Added people's incoming ids to their ids in the tree. */
+    newPeople: Record<string, string>;
+  }>('POST', `/reimports/${seg(id)}/apply`, { accept });
 
 export const discardReimport = (id: string) => apiSend<void>('DELETE', `/reimports/${seg(id)}`);

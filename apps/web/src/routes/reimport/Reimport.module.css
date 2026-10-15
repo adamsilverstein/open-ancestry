@@ -79,3 +79,17 @@
   border-top: 1px solid var(--oa-border);
   background: var(--oa-bg);
 }
+
+.summaryList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.skipped summary {
+  cursor: pointer;
+  font-weight: var(--oa-weight-semibold);
+}

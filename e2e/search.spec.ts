@@ -50,6 +50,32 @@ test('finds a person by name and opens the person page with Enter', async ({ pag
   await expect(dialog).toBeHidden();
 });
 
+test('announces the result count, and focuses the new page heading after Enter (#200)', async ({
+  page,
+}) => {
+  await open(page, '/people');
+  const dialog = await search(page, 'wren thackeray');
+  await expect(people(dialog).first()).toContainText('Wren Thackeray');
+  // A polite status inside the palette says how many results there are once they settle.
+  await expect(dialog.getByRole('status')).toHaveText(/^\d+ (person|people)/);
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/person\//);
+  await expect(page.getByRole('heading', { level: 1 })).toBeFocused();
+});
+
+test('says when nothing matches, and Escape still returns focus to the opener', async ({
+  page,
+}) => {
+  await open(page, '/people');
+  const opener = page.getByRole('banner').getByRole('button', { name: /^Find/ });
+  await opener.click();
+  const dialog = page.getByRole('dialog', { name: 'Command palette' });
+  await dialog.getByRole('combobox').fill('zzzzqqqq');
+  await expect(dialog.getByRole('status')).toHaveText('No results');
+  await page.keyboard.press('Escape');
+  await expect(opener).toBeFocused();
+});
+
 test('arrow keys move through results and Shift+Enter or Alt+Enter focus the tree', async ({
   page,
   request,

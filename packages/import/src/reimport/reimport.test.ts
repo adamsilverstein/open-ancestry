@@ -1543,7 +1543,8 @@ describe('three-way re-import, review findings (#224)', () => {
     );
     try {
       const [change] = changesOf(s2, '@I3@').filter((c) => c.kind === 'sex');
-      expect(change).toMatchObject({ kind: 'sex', defaultAccept: true });
+      // A different sex lowers the match's confidence, but the change is no local-edit conflict.
+      expect(change).toMatchObject({ kind: 'sex', after: 'F' });
       expect(change!.conflict).toBeUndefined();
     } finally {
       closeReimport(s2);

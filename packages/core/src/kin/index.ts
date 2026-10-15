@@ -87,6 +87,20 @@ export function siblingKind(shared: readonly SharedAdult[], apart = false): Sibl
 /** A qualifier on a relationship word, from the links along its path. */
 export type KinQualifier = 'half' | 'step' | 'adopted' | 'adoptive' | 'foster';
 
+const ORDINALS = [
+  '',
+  'first',
+  'second',
+  'third',
+  'fourth',
+  'fifth',
+  'sixth',
+  'seventh',
+  'eighth',
+  'ninth',
+  'tenth',
+];
+
 const SIMPLE = new Set([
   'father',
   'mother',
@@ -107,7 +121,9 @@ const SIMPLE = new Set([
 export function qualify(word: string, qualifier: KinQualifier | undefined): string {
   switch (qualifier) {
     case 'step':
-      return SIMPLE.has(word) ? `step${word}` : `step-${word}`;
+      if (SIMPLE.has(word)) return `step${word}`;
+      // "step-first cousin" reads better than "step-1st cousin".
+      return `step-${word.replace(/^(\d+)(?:st|nd|rd|th)(?= cousin)/, (n, d: string) => ORDINALS[Number(d)] ?? n)}`;
     case 'half':
       return /cousin/.test(word) ? `half ${word}` : `half-${word}`;
     case 'adopted':

@@ -7,11 +7,11 @@
  * `formal` uses "great-aunt", "great-nephew" and "once removed".
  */
 import type { PartnerRelationship, Sex } from '../layout/types';
-import { qualify } from '../kin';
+import { childWord, parentWord, qualify } from '../kin';
 
 /** A non-biological link on the path that changes the name. */
 /** `adopted` when A was adopted on the way, `adoptive` when B's side was. */
-export type Modifier = 'step' | 'adopted' | 'adoptive' | 'foster' | undefined;
+export type Modifier = 'step' | 'adopted' | 'adoptive' | 'foster' | 'guardian' | undefined;
 
 /**
  * A chain of relationships read outward from B, as a phrase: formal is
@@ -97,6 +97,12 @@ export function bloodName(
     const gap = Math.abs(up - down);
     word = `${ordinal(Math.min(up, down) - 1)} cousin`;
     if (gap) word += ` ${removed(gap, style)} removed`;
+  }
+  if (modifier === 'guardian') {
+    // The same words as the person page: core kin's parentWord and childWord.
+    if (isAncestor(shape) && down === 1) return parentWord(sex, 'guardian');
+    if (isDescendant(shape) && up === 1) return childWord(sex, 'guardian');
+    return qualify(word, 'foster');
   }
   // A sibling through adoption is an "adopted brother" from either side.
   const qualifier = modifier === 'adoptive' && isSibling(shape) ? 'adopted' : modifier;

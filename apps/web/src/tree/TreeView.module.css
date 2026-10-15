@@ -124,16 +124,17 @@
 
 /*
  * Touch: a larger invisible target around the small chevrons and switcher,
- * 44px or more on screen at any zoom (--oa-tree-scale is set on touch
- * screens). It grows away from the card, never more than 8px into it, so a
- * tap on a zoomed-out card opens the card rather than its chevron.
+ * 48px on screen at any zoom, so 44px with room for rounding (--oa-tree-scale
+ * is set on touch screens). It grows away from the card, never more than 8px
+ * on screen into it, so a tap on a zoomed-out card opens the card rather than
+ * its chevron.
  */
 @media (pointer: coarse) {
   .chevron,
   .switcher {
-    --out: max(18px, 44px / var(--oa-tree-scale, 1) - 32px);
-    --side: max(18px, 22px / var(--oa-tree-scale, 1) - 12px);
-    --in: -8px;
+    --out: max(18px, 48px / var(--oa-tree-scale, 1) - 32px);
+    --side: max(18px, 24px / var(--oa-tree-scale, 1) - 12px);
+    --in: calc(-8px / min(1, var(--oa-tree-scale, 1)));
   }
 
   .chevron::before,
@@ -152,9 +153,13 @@
     inset: calc(-1 * var(--side)) var(--in) calc(-1 * var(--side)) calc(-1 * var(--out));
   }
 
-  /* Off the card's corner, so its target does not overlap the up chevron's. */
+  /*
+   * Off the card's corner, so its target does not overlap the up chevron's.
+   * Both targets grow as the view zooms out, so the offset grows with them:
+   * the switcher's target starts where the chevron's 44px reach ends.
+   */
   .switcher {
-    translate: 22px 0;
+    translate: max(22px, 48px / var(--oa-tree-scale, 1) - 40px) 0;
   }
 }
 

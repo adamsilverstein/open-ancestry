@@ -461,9 +461,14 @@ export async function importGedcom(
           lines: report.lines,
           media: { ...report.media, missing: report.media.missing.length },
           living: report.living,
-          unmapped: report.unmapped.slice(0, 200),
+          // Stored without example lines or warning text: they quote the file, and this row
+          // outlives the people and records they are about (deleting someone must not leave
+          // their words here). The live report returned to the caller keeps them.
+          unmapped: report.unmapped
+            .slice(0, 200)
+            .map(({ path, tag, count }) => ({ path, tag, count })),
         }),
-        JSON.stringify(report.warnings),
+        JSON.stringify(report.warnings.map(({ code, line }) => ({ code, line }))),
         store.clock(),
         batchId,
       );

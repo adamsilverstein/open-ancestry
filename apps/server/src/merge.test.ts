@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { openMemoryTree, openTree, ulid, type TreeStore } from '@open-ancestry/db';
+import { importJson, openMemoryTree, openTree, ulid, type TreeStore } from '@open-ancestry/db';
 import { parseGedcom } from '@open-ancestry/gedcom';
 import { importGedcom } from '@open-ancestry/import';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -349,6 +349,9 @@ const DUPLICATES = `0 HEAD
 1 FAMC @F9@
 1 NOTE From the second record
 1 _XYZ kept with the record
+1 SOUR @S1@
+2 PAGE census
+2 _APID 1,7602::2771226
 0 @I3@ INDI
 1 NAME Mabel /Stone/
 1 SEX F
@@ -422,6 +425,59 @@ describe('merging imported duplicates', () => {
         .all(keep),
     );
     expect(marriages).toEqual([{ id: expect.any(String), citations: 2 }]);
+  });
+
+  it('records an alias for the merged-away record that undo removes', async () => {
+    const aliases = () =>
+      withStore((store) => store.db.prepare('SELECT * FROM person_alias').all());
+    expect(await aliases()).toEqual([
+      {
+        id: expect.any(String),
+        person_id: keep,
+        merged_person_id: other,
+        merged_xref: '@I2@',
+        import_batch_id: expect.any(String),
+        apids_json: '["1,7602::2771226"]',
+        merged_at: expect.any(String),
+      },
+    ]);
+    // It travels with the JSON interchange.
+    const doc = JSON.parse((await api.get(`${base}/export.json`)).body) as {
+      tables: { person_alias: { merged_xref: string }[] };
+    };
+    expect(doc.tables.person_alias.map((a) => a.merged_xref)).toEqual(['@I2@']);
+    const copy = openMemoryTree();
+    importJson(copy, doc);
+    expect(copy.db.prepare('SELECT person_id FROM person_alias').pluck().all()).toEqual([keep]);
+    copy.close();
+
+    await api.post(`${base}/undo`);
+    expect(await aliases()).toEqual([]);
+    await api.post(`${base}/redo`);
+    expect(await aliases()).toHaveLength(1);
+  });
+
+  it('moves aliases along when the kept person is merged again, and drops them on delete', async () => {
+    const third = (
+      await api.post(`${base}/people`, { names: [{ given: 'Tobias', surname: 'Wren' }] })
+    ).json().person.id as string;
+    expect((await api.post(`${base}/people/${third}/merge`, { otherId: keep })).statusCode).toBe(
+      200,
+    );
+    const rows = () =>
+      withStore((store) =>
+        store.db
+          .prepare('SELECT person_id, merged_person_id FROM person_alias ORDER BY merged_at, id')
+          .all(),
+      );
+    expect(await rows()).toEqual([
+      { person_id: third, merged_person_id: other },
+      { person_id: third, merged_person_id: keep },
+    ]);
+    expect((await api.del(`${base}/people/${third}`)).statusCode).toBe(200);
+    expect(await rows()).toEqual([]);
+    await api.post(`${base}/undo`);
+    expect(await rows()).toHaveLength(2);
   });
 
   for (const version of ['5.5.1', '7'] as const) {

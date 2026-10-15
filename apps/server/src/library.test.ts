@@ -651,3 +651,25 @@ describe.skipIf(process.platform === 'win32')('library permissions', () => {
     library.closeAll();
   });
 });
+
+describe('search index rebuild (#199)', () => {
+  it('opens a tree with a stale index at once and rebuilds it in the background', async () => {
+    const { persons, searchIndexStale, searchPeople } = await import('@open-ancestry/db');
+    const root = await mkdtemp(join(tmpdir(), 'oa-library-search-'));
+    const first = new Library(root);
+    const store = first.create('Fold');
+    const id = store.transact('add', (tx) =>
+      persons.create(tx, { names: [{ given: 'Emre', surname: 'Yılmaz' }] }),
+    ).result.id;
+    store.db.prepare("DELETE FROM derived_state WHERE name = 'search_index'").run();
+    first.closeAll();
+
+    const library = new Library(root);
+    const opened = library.open('Fold');
+    // Opening did not rebuild: the request that opened it is not held up.
+    expect(searchIndexStale(opened)).toBe(true);
+    await expect.poll(() => searchIndexStale(opened), { interval: 5, timeout: 5000 }).toBe(false);
+    expect(searchPeople(opened, 'yilmaz').map((r) => r.person.id)).toEqual([id]);
+    library.closeAll();
+  });
+});

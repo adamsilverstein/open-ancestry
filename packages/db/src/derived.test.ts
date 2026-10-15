@@ -10,7 +10,9 @@ import {
   openTree,
   persons,
   redoLast,
+  rebuildSearchIndexInChunks,
   refreshDerivedColumns,
+  searchIndexStale,
   searchPeople,
   undoLast,
   type TreeStore,
@@ -126,6 +128,31 @@ describe('derived column refresh', () => {
     messages.length = 0;
     openTree(dir, { log: (m) => messages.push(m) }).close();
     expect(messages).toEqual([]);
+  });
+
+  it('can leave a stale search index for a chunked rebuild off the open path', () => {
+    const dir = join(root, 'deferred.oatree');
+    let store = createTree(dir);
+    const ids = store.transact('add', (tx) =>
+      ['Yılmaz', 'Straße', 'Kaya'].map(
+        (surname) => persons.create(tx, { names: [{ given: 'Ada', surname }] }).id,
+      ),
+    ).result;
+    store.db.prepare("DELETE FROM derived_state WHERE name = 'search_index'").run();
+    store.close();
+
+    const messages: string[] = [];
+    store = openTree(dir, { log: (m) => messages.push(m), deferSearch: true });
+    expect(messages).toEqual([]);
+    expect(searchIndexStale(store)).toBe(true);
+    // Each step refreshes one chunk; search keeps working between them.
+    const steps = [...rebuildSearchIndexInChunks(store, 2)];
+    expect(steps).toEqual([2, 3]);
+    expect(searchIndexStale(store)).toBe(false);
+    expect(searchPeople(store, 'yilmaz').map((r) => r.person.id)).toEqual([ids[0]]);
+    expect(searchPeople(store, 'strasse').map((r) => r.person.id)).toEqual([ids[1]]);
+    expect(messages).toEqual(['Recomputed search_index for 3 rows (search fold changed)']);
+    store.close();
   });
 
   it('keeps undo working across a recompute, restoring fresh sort keys', () => {

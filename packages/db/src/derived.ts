@@ -1,5 +1,5 @@
 import { parseDate } from '@open-ancestry/core';
-import { foldForSearch } from '@open-ancestry/core';
+import { foldForIndex } from '@open-ancestry/core';
 import { rebuildSearchIndex, refreshSearch } from './search';
 import { SEARCH_DOC_VERSION } from './search-docs';
 import type { TreeStore } from './store';
@@ -234,7 +234,7 @@ const FOLD_PROBES = ['Yılmaz', 'Straße', 'כֹּהֵן', 'عَلِيّ', "O'Br
 const searchIndex: DerivedStep = {
   name: 'search_index',
   reason: 'search fold changed',
-  fingerprint: () => JSON.stringify([SEARCH_DOC_VERSION, FOLD_PROBES.map(foldForSearch)]),
+  fingerprint: () => JSON.stringify([SEARCH_DOC_VERSION, FOLD_PROBES.map(foldForIndex)]),
   recompute(store) {
     rebuildSearchIndex(store);
     return store.db.prepare('SELECT COUNT(*) FROM search_doc').pluck().get() as number;
@@ -243,9 +243,51 @@ const searchIndex: DerivedStep = {
 
 export const DERIVED_STEPS: readonly DerivedStep[] = [eventDateSort, orphanCleanup, searchIndex];
 
+const storedFingerprint = (store: TreeStore, name: string) =>
+  (
+    store.db.prepare('SELECT fingerprint FROM derived_state WHERE name = ?').get(name) as
+      { fingerprint: string } | undefined
+  )?.fingerprint;
+
+const saveFingerprint = (store: TreeStore, name: string, fingerprint: string) =>
+  store.db
+    .prepare(
+      'INSERT INTO derived_state (name, fingerprint) VALUES (?, ?) ON CONFLICT (name) DO UPDATE SET fingerprint = excluded.fingerprint',
+    )
+    .run(name, fingerprint);
+
+/** Whether the search index was built with another fold or document shape. */
+export function searchIndexStale(store: TreeStore): boolean {
+  return storedFingerprint(store, searchIndex.name) !== searchIndex.fingerprint();
+}
+
+/**
+ * Rebuilds a stale search index a chunk of people at a time, in id order,
+ * yielding how many are done after each chunk (each its own transaction), so
+ * a server can run it between requests. Old documents answer searches until
+ * their chunk is replaced. The fingerprint is saved after the last chunk.
+ */
+export function* rebuildSearchIndexInChunks(store: TreeStore, size = 2000): Generator<number> {
+  const ids = store.db.prepare('SELECT id FROM person ORDER BY id').pluck().all() as string[];
+  const fingerprint = searchIndex.fingerprint();
+  for (let start = 0; start < ids.length; start += size) {
+    store.db.transaction(() => refreshSearch(store, ids.slice(start, start + size)))();
+    yield Math.min(start + size, ids.length);
+  }
+  saveFingerprint(store, searchIndex.name, fingerprint);
+  if (ids.length > 0) {
+    store.log(`Recomputed ${searchIndex.name} for ${ids.length} rows (${searchIndex.reason})`);
+  }
+}
+
 export interface RefreshOptions {
   /** Recompute even if the fingerprint matches (JSON import does). */
   force?: boolean;
+  /**
+   * Leave a stale search index for `rebuildSearchIndexInChunks` (the server
+   * does, so opening a big tree is not held up by a full rebuild).
+   */
+  deferSearch?: boolean;
   /** Why, for the log line. */
   reason?: string;
 }
@@ -257,22 +299,16 @@ export interface RefreshOptions {
  */
 export function refreshDerivedColumns(
   store: TreeStore,
-  { force = false, reason }: RefreshOptions = {},
+  { force = false, reason, deferSearch = false }: RefreshOptions = {},
 ): Record<string, number> {
   const results: Record<string, number> = {};
   store.db.transaction(() => {
     for (const step of DERIVED_STEPS) {
+      if (deferSearch && step === searchIndex) continue;
       const fingerprint = step.fingerprint();
-      const stored = store.db
-        .prepare('SELECT fingerprint FROM derived_state WHERE name = ?')
-        .get(step.name) as { fingerprint: string } | undefined;
-      if (!force && stored?.fingerprint === fingerprint) continue;
+      if (!force && storedFingerprint(store, step.name) === fingerprint) continue;
       const changed = step.recompute(store);
-      store.db
-        .prepare(
-          'INSERT INTO derived_state (name, fingerprint) VALUES (?, ?) ON CONFLICT (name) DO UPDATE SET fingerprint = excluded.fingerprint',
-        )
-        .run(step.name, fingerprint);
+      saveFingerprint(store, step.name, fingerprint);
       results[step.name] = changed;
       const why = reason ?? (force ? 'refresh requested' : step.reason);
       if (changed > 0) store.log(`Recomputed ${step.name} for ${changed} rows (${why})`);

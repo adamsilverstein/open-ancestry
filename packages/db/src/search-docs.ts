@@ -1,19 +1,23 @@
 import type { Database } from 'better-sqlite3';
-import { foldForSearch } from '@open-ancestry/core';
+import { foldForIndex } from '@open-ancestry/core';
 
 /**
- * SQL function applying core's foldForSearch to the indexed names and places;
- * queries fold the same way (#199). Registered on every connection that writes
+ * SQL function applying core's foldForIndex to the indexed names and places;
+ * queries go through foldForSearch, the same fold without the split forms (#199). Registered on every connection that writes
  * search documents: TreeStore, and the migrations that rebuild them.
  */
 export const SEARCH_FOLD = 'oa_search_fold';
 
 /** Bump when DOC_COLUMNS changes what is indexed, so trees rebuild their index on open. */
-export const SEARCH_DOC_VERSION = 2;
+export const SEARCH_DOC_VERSION = 3;
+
+/** Printable ASCII without an apostrophe: the fold leaves it as it is. */
+const PLAIN = /^[\x20-\x26\x28-\x7e]*$/;
 
 export function registerSearchFold(db: Database): void {
   db.function(SEARCH_FOLD, { deterministic: true }, (text: unknown) =>
-    typeof text === 'string' ? foldForSearch(text) : text,
+    // Most names are plain ASCII with nothing to fold: skip the regex passes for them.
+    typeof text === 'string' && !PLAIN.test(text) ? foldForIndex(text) : text,
   );
 }
 

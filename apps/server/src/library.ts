@@ -21,6 +21,8 @@ import {
   meta,
   openTree,
   readTreeName,
+  rebuildSearchIndexInChunks,
+  searchIndexStale,
   treePaths,
   type TreeStore,
 } from '@open-ancestry/db';
@@ -221,6 +223,20 @@ function withLabels(trees: TreeInfo[]): TreeInfo[] {
     const folder = tree.id.replace(HIDDEN_CHARS, '') || 'copy';
     return { ...tree, label: `${tree.name} (${folder})` };
   });
+}
+
+/** Drives `rebuildSearchIndexInChunks`, one chunk per turn of the event loop, until done or closed. */
+function rebuildInBackground(store: TreeStore): void {
+  const chunks = rebuildSearchIndexInChunks(store);
+  const step = () => {
+    if (!store.db.open) return;
+    try {
+      if (!chunks.next().done) setImmediate(step);
+    } catch (error) {
+      store.log(`Search index rebuild stopped: ${String(error)}`);
+    }
+  };
+  setImmediate(step);
 }
 
 export class Library {
@@ -589,7 +605,12 @@ export class Library {
     if (existing) return existing;
     let store: TreeStore;
     try {
-      store = openTree(this.dirOf(canonical), { busyTimeoutMs: LIBRARY_BUSY_TIMEOUT_MS });
+      store = openTree(this.dirOf(canonical), {
+        busyTimeoutMs: LIBRARY_BUSY_TIMEOUT_MS,
+        // A stale search index (after a search fold change, #199) is rebuilt in
+        // chunks between requests, so the request that opened the tree is not held up.
+        deferSearch: true,
+      });
     } catch (error) {
       // A planted link or another account's file: say why, not a bare 500.
       if (error instanceof TreeAccessError) throw new ApiError(403, 'forbidden', error.message);
@@ -599,6 +620,7 @@ export class Library {
     // behind. Swept once the tree folder has passed openTree's access checks.
     this.reimportFolders?.sweep(this.dirOf(canonical));
     this.stores.set(canonical, store);
+    if (searchIndexStale(store)) rebuildInBackground(store);
     return store;
   }
 

@@ -165,8 +165,16 @@ export function createTree(dir: string, { name, ...options }: CreateTreeOptions 
   return store;
 }
 
+export interface OpenTreeOptions extends StoreOptions {
+  /** Leave a stale search index for `rebuildSearchIndexInChunks` instead of rebuilding it here. */
+  deferSearch?: boolean;
+}
+
 /** Opens an existing tree folder, applying any pending migrations. */
-export function openTree(dir: string, options: StoreOptions = {}): TreeStore {
+export function openTree(
+  dir: string,
+  { deferSearch = false, ...options }: OpenTreeOptions = {},
+): TreeStore {
   assertTreeDir(dir);
   const paths = treePaths(dir);
   if (!existsSync(paths.database)) throw new Error(`Tree not found at ${dir}`);
@@ -175,7 +183,7 @@ export function openTree(dir: string, options: StoreOptions = {}): TreeStore {
   const db = new Database(paths.database, { fileMustExist: true });
   try {
     const store = new TreeStore(db, dir, options);
-    refreshDerivedColumns(store);
+    refreshDerivedColumns(store, { deferSearch });
     return store;
   } catch (error) {
     db.close();

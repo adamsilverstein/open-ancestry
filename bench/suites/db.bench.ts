@@ -4,6 +4,7 @@ import {
   getNeighborhood,
   getPersonDetail,
   openMemoryTree,
+  rebuildSearchIndexInChunks,
   searchPeople,
   type SyntheticTree,
   type TreeStore,
@@ -92,5 +93,31 @@ export default [
     fn: () =>
       searchPeople(big!, ['ash', 'bel', 'cor', 'dun', 'ell'][i++ % 5] as string, { limit: 8 }),
     budgetMs: 50,
+  },
+  {
+    // The server rebuilds a stale search index (#199) one chunk per event-loop
+    // turn; this is the longest a request can wait behind one chunk.
+    name: 'db: search index rebuild, one 2000-person chunk (100k tree)',
+    setup: loadedBig,
+    fn: () => {
+      const chunks = rebuildSearchIndexInChunks(big!, 2000);
+      chunks.next();
+      void chunks.return(undefined);
+    },
+    budgetMs: 100,
+    metric: 'p99',
+    iterations: 20,
+  },
+  {
+    name: 'db: full search index rebuild in chunks (100k tree)',
+    setup: loadedBig,
+    fn: () => {
+      for (const done of rebuildSearchIndexInChunks(big!, 2000)) void done;
+    },
+    budgetMs: 5000,
+    metric: 'mean',
+    iterations: 2,
+    time: 0,
+    warmupIterations: 0,
   },
 ] satisfies BenchCase[];

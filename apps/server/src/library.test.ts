@@ -12,8 +12,8 @@ import {
   utimesSync,
   writeFileSync,
 } from 'node:fs';
-import { readdir } from 'node:fs/promises';
-import { homedir, hostname } from 'node:os';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { homedir, hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { getSchemaVersion, migrate } from '@open-ancestry/db';
@@ -671,5 +671,6 @@ describe('search index rebuild (#199)', () => {
     await expect.poll(() => searchIndexStale(opened), { interval: 5, timeout: 5000 }).toBe(false);
     expect(searchPeople(opened, 'yilmaz').map((r) => r.person.id)).toEqual([id]);
     library.closeAll();
+    await rm(root, { recursive: true, force: true });
   });
 });

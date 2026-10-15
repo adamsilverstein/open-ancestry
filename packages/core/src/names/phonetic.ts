@@ -24,14 +24,33 @@ const VOWEL_MARKS = /[\u0591-\u05bd\u05bf\u05c1\u05c2\u05c4\u05c5\u05c7\u064b-\u
  * word (#190). Case and Latin diacritics are left to the FTS tokenizer.
  */
 export function foldForSearch(text: string): string {
-  return text
+  return (
+    text
+      .normalize('NFC')
+      .replace(/\p{Cf}/gu, '')
+      .replace(VOWEL_MARKS, '')
+      // Turkish: dotless ı and dotted İ (whose lower case gains a combining dot) are plain i.
+      .replace(/ı/g, 'i')
+      .replace(/İ/g, 'I')
+      .replace(/ß/g, 'ss')
+      .replace(/ẞ/g, 'SS')
+      .replace(/(?<=[\p{L}\p{N}])['’ʼ](?=[\p{L}\p{N}])/gu, '')
+  );
+}
+
+/** A word with an apostrophe inside it, such as O'Brien or D’Angelo. */
+const APOSTROPHE_WORD = /[\p{L}\p{N}]+(?:['’ʼ][\p{L}\p{N}]+)+/gu;
+
+/**
+ * The fold for indexed text: as `foldForSearch`, but a word with an apostrophe
+ * is kept both joined and split ("OBrien O Brien"), so O'Brien is found by
+ * OBrien, O'Brien and Brien alike.
+ */
+export function foldForIndex(text: string): string {
+  const expanded = text
     .normalize('NFC')
-    .replace(/\p{Cf}/gu, '')
-    .replace(VOWEL_MARKS, '')
-    .replace(/ı/g, 'i')
-    .replace(/ß/g, 'ss')
-    .replace(/ẞ/g, 'SS')
-    .replace(/(?<=[\p{L}\p{N}])['’ʼ](?=[\p{L}\p{N}])/gu, '');
+    .replace(APOSTROPHE_WORD, (word) => `${word} ${word.replace(/['’ʼ]/g, ' ')}`);
+  return foldForSearch(expanded);
 }
 
 /** Lower-case, accent-free, punctuation-free text for search: `Émile O'Brien` -> `emile obrien`. */

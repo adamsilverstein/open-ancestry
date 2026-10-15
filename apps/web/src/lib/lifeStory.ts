@@ -187,7 +187,9 @@ export function lifeStory(detail: PersonDetail, options: LifeStoryOptions = {}):
   const birthParents = ofRel(isBirthLink);
   const adoptive = ofRel((rel) => rel === 'adopted');
   const step = ofRel((rel) => rel === 'step');
-  const foster = ofRel((rel) => parentLink(rel) === 'foster' || parentLink(rel) === 'guardian');
+  const foster = ofRel((rel) => parentLink(rel) === 'foster');
+  // Guardians, including relatives raising the child, are named as guardians, not foster parents.
+  const guardians = ofRel((rel) => parentLink(rel) === 'guardian');
 
   const birthParts: string[] = [];
   const birth = firstOwn(events, ['BIRT', 'CHR', 'BAPM']);
@@ -218,6 +220,13 @@ export function lifeStory(detail: PersonDetail, options: LifeStoryOptions = {}):
   if (foster.length > 0) {
     birthParts.push(
       `${capitalize(me.subject)} ${agree('was fostered')} by ${list(foster.map(fullName))}.`,
+    );
+  }
+  if (guardians.length > 0) {
+    birthParts.push(
+      guardians.length === 1
+        ? `${possessive} guardian was ${fullName(guardians[0]!)}.`
+        : `${possessive} guardians were ${list(guardians.map(fullName))}.`,
     );
   }
   const siblings = closest([

@@ -518,10 +518,24 @@ function inLaws(
   // "stepson", "adopted son" and "son" are one tie, named once.
   const base = (name: string) => name.replace(/^(?:step-?|adopted |adoptive |foster |half-)/, '');
   const taken = new Set(known.map((r) => base(r.name)));
+  // Non-birth links that already name the tie directly (a guardian, an
+  // adoptive or foster parent). A couple sharing that link are both the
+  // child's guardians, not step-parents; a guardian married to the child's
+  // birth parent is still a stepfather as well.
+  const direct = new Set(
+    known.flatMap((r) =>
+      r.paths
+        .filter((p) => p.steps.length === 1 && p.steps[0]!.kind !== 'spouse')
+        .map((p) => p.steps[0]!.rel)
+        .filter((rel) => parentLink(rel) !== 'birth'),
+    ),
+  );
+  const sharesDirectLink = (path: RelationshipPath) =>
+    path.steps.some((s) => s.kind !== 'spouse' && direct.has(s.rel));
   const add = (path: RelationshipPath) => {
     const plain = { ids: path.ids, steps: path.steps };
     const name = marriageName(g, plain, style);
-    if (taken.has(base(name))) return;
+    if (taken.has(base(name)) || sharesDirectLink(plain)) return;
     taken.add(base(name));
     out.push({ name, kind: 'marriage', paths: [plain], pathCount: 1 });
   };

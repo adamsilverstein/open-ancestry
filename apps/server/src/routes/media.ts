@@ -1,6 +1,7 @@
 import { constants, lstatSync, realpathSync, statSync, type Stats } from 'node:fs';
 import { lstat, open, realpath, stat, type FileHandle } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
+import { escapeControls } from '@open-ancestry/core';
 import { treePaths } from '@open-ancestry/db';
 import type { FastifyReply } from 'fastify';
 import type { Api, Deps } from '../context';
@@ -68,7 +69,12 @@ async function readHead(handle: FileHandle): Promise<Buffer> {
  */
 
 export type MediaRefusal =
-  'outside the media folder' | 'missing' | 'symlinked media folder' | 'hard link';
+  | 'outside the media folder'
+  | 'missing'
+  | 'symlinked media folder'
+  | 'hard link'
+  /** The file at the checked path changed between the check and the open (a swapped folder). */
+  | 'changed';
 
 type OnRefuse = ((reason: MediaRefusal) => void) | undefined;
 
@@ -125,12 +131,12 @@ export function resolveMediaPathSync(
   }
 }
 
-/** Resolves a media.local_path inside the tree's media folder (see the rules above); null if refused. */
-export async function resolveMediaPath(
+/** `resolveMediaPath`, also returning the stat of the file it checked. */
+async function resolveChecked(
   mediaRoot: string,
   localPath: string,
-  onRefuse?: (reason: MediaRefusal) => void,
-): Promise<string | null> {
+  onRefuse: OnRefuse,
+): Promise<{ path: string; info: Stats } | null> {
   const candidate = inside(mediaRoot, localPath);
   if (!candidate) {
     onRefuse?.('outside the media folder');
@@ -149,8 +155,18 @@ export async function resolveMediaPath(
     onRefuse?.('missing');
     return null;
   }
-  const [rootStat, realRoot, realFile, fileStat] = checked;
-  return accept(rootStat.isSymbolicLink(), realRoot, realFile, fileStat.nlink, onRefuse);
+  const [rootStat, realRoot, realFile, info] = checked;
+  const path = accept(rootStat.isSymbolicLink(), realRoot, realFile, info.nlink, onRefuse);
+  return path ? { path, info } : null;
+}
+
+/** Resolves a media.local_path inside the tree's media folder (see the rules above); null if refused. */
+export async function resolveMediaPath(
+  mediaRoot: string,
+  localPath: string,
+  onRefuse?: (reason: MediaRefusal) => void,
+): Promise<string | null> {
+  return (await resolveChecked(mediaRoot, localPath, onRefuse))?.path ?? null;
 }
 
 /**
@@ -163,19 +179,23 @@ export async function openMediaFile(
   mediaRoot: string,
   localPath: string,
   onRefuse?: (reason: MediaRefusal) => void,
+  /** Test seam: runs between the check and the open. */
+  hooks: { afterResolve?: () => Promise<void> } = {},
 ): Promise<{ handle: FileHandle; info: Stats } | null> {
-  const file = await resolveMediaPath(mediaRoot, localPath, onRefuse);
-  if (!file) return null;
+  const checked = await resolveChecked(mediaRoot, localPath, onRefuse);
+  if (!checked) return null;
+  await hooks.afterResolve?.();
   let handle: FileHandle | undefined;
   try {
-    const before = await stat(file);
-    handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+    handle = await open(checked.path, constants.O_RDONLY | constants.O_NOFOLLOW);
     const info = await handle.stat();
-    const same = info.isFile() && info.dev === before.dev && info.ino === before.ino;
+    // The same inode the checks passed, not a second look up of the path: an
+    // intermediate folder swapped for a symlink since then yields another file.
+    const same = info.isFile() && info.dev === checked.info.dev && info.ino === checked.info.ino;
     if (same && info.nlink === 1) return { handle, info };
-    onRefuse?.(same ? 'hard link' : 'missing');
+    onRefuse?.(same ? 'hard link' : 'changed');
   } catch {
-    onRefuse?.('missing');
+    onRefuse?.('changed');
   }
   await handle?.close();
   return null;
@@ -186,6 +206,7 @@ const LOGGED_REASONS = new Set<MediaRefusal>([
   'symlinked media folder',
   'hard link',
   'outside the media folder',
+  'changed',
 ]);
 const logged = new Set<string>();
 
@@ -240,9 +261,10 @@ export function mediaRoutes(app: Api, { library }: Deps): void {
           if (!LOGGED_REASONS.has(reason) || logged.has(key)) return;
           if (logged.size > 10_000) logged.clear();
           logged.add(key);
-          app.log.warn(
-            { tree, mediaId: id, path: media.local_path, reason },
-            `Media file not served: ${reason}`,
+          // console.warn, not app.log: the shipped CLI runs with logger: false. Values come
+          // from the tree, so control characters are escaped before reaching a terminal.
+          console.warn(
+            `open-ancestry: media file not served (${reason}): ${escapeControls(tree)} / ${escapeControls(media.local_path!)}`,
           );
         },
       );

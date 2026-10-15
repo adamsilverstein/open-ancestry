@@ -14,7 +14,7 @@ export default function ToastStack({
 }) {
   return (
     <RadixToast.Provider swipeDirection="right" label="Notifications">
-      {toasts.map(({ id, title, description, variant = 'info', duration = 5000 }) => (
+      {toasts.map(({ id, title, description, variant = 'info', duration = 5000, action }) => (
         <RadixToast.Root
           key={id}
           duration={duration}
@@ -34,6 +34,13 @@ export default function ToastStack({
               </RadixToast.Description>
             )}
           </div>
+          {action && (
+            <RadixToast.Action asChild altText={`${action.label}: ${title}`}>
+              <button type="button" className={styles.action} onClick={action.onClick}>
+                {action.label}
+              </button>
+            </RadixToast.Action>
+          )}
           <RadixToast.Close className={styles.close} aria-label="Dismiss">
             <X size={16} aria-hidden />
           </RadixToast.Close>

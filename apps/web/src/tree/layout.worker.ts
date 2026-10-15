@@ -42,7 +42,7 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
       // Card labels ("father of ..."): one walk here instead of one per card on the main thread.
       const nodes = new Map(layout.nodes.map((n) => [n.key, n.personId]));
       kin = kinshipLabels(
-        buildRelations(layout),
+        buildRelations(layout, graph),
         layout.focusKey,
         (key) => graph.person(nodes.get(key)!)?.sex ?? 'U',
       );

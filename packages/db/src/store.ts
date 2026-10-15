@@ -44,6 +44,8 @@ export interface StoreOptions {
   /** ISO-8601 timestamp source; injectable for deterministic tests. */
   clock?: () => string;
   newId?: () => string;
+  /** How long to wait for another connection's lock before SQLITE_BUSY (default 5000ms). */
+  busyTimeoutMs?: number;
   /**
    * The migration chain to apply (default MIGRATIONS). Tests pass a longer
    * chain to simulate a future schema version.
@@ -88,7 +90,7 @@ export class TreeStore {
     db.pragma('synchronous = NORMAL');
     db.pragma('temp_store = MEMORY');
     db.pragma('cache_size = -65536');
-    db.pragma('busy_timeout = 5000');
+    db.pragma(`busy_timeout = ${Math.max(0, Math.floor(options.busyTimeoutMs ?? 5000))}`);
     this.log = options.log ?? ((message) => console.info(message));
     this.migrations = options.migrations ?? MIGRATIONS;
     this.schemaVersion = this.migrations.length;

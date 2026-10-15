@@ -14,6 +14,16 @@ export class ApiError extends Error {
 export const isNotFound = (error: unknown): boolean =>
   error instanceof ApiError && error.status === 404;
 
+/** The shape of every record id the server accepts (`Id` in the server schemas). */
+export const isValidId = (id: string): boolean => /^[0-9A-Za-z_-]{1,64}$/.test(id);
+
+/**
+ * Whether loading person `id` failed because there is no such person: a 404,
+ * or an id that cannot exist, which the server refuses with a 400.
+ */
+export const isMissingPerson = (error: unknown, id: string): boolean =>
+  isNotFound(error) || (!isValidId(id) && error instanceof ApiError && error.status === 400);
+
 async function errorFrom(response: Response): Promise<ApiError> {
   const body = (await response.json().catch(() => null)) as {
     error?: { code?: string; message?: string };

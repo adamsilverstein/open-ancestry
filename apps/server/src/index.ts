@@ -173,6 +173,7 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   });
   // Leftovers of imports a crash or restart interrupted: their empty trees and uploads.
   library.sweepInterruptedImports();
+  library.sweepReimportLeftovers();
   void sweepStaleUploads();
   const importLimits = resolveImportLimits(options.importLimits);
   const deps: Deps = {

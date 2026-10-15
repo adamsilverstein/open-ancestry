@@ -233,6 +233,25 @@ export class Library {
     return removed;
   }
 
+  /**
+   * Removes `.reimport-*` folders inside tree folders: an export being
+   * compared, or a GEDZIP's media waiting for a review. Reviews live in
+   * memory, so at startup any such folder is a crash's leftover.
+   */
+  sweepReimportLeftovers(): string[] {
+    const removed: string[] = [];
+    if (!existsSync(this.root)) return removed;
+    for (const { id } of this.list()) {
+      const dir = this.dirOf(id);
+      for (const name of readdirSync(dir)) {
+        if (!name.startsWith('.reimport-')) continue;
+        rmSync(join(dir, name), { recursive: true, force: true });
+        removed.push(join(dir, name));
+      }
+    }
+    return removed;
+  }
+
   private isPendingImport(id: string, marker: string): boolean {
     const store = this.open(id);
     if (meta.get(store, IMPORT_PENDING_KEY) !== marker) return false;

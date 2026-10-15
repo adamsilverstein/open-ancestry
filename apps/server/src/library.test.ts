@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { mkdtemp, readdir } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -66,6 +66,19 @@ describe('Library', () => {
     const reopened = library.open('One');
     expect(reopened).not.toBe(created);
     expect(library.open('One')).toBe(reopened);
+    library.closeAll();
+  });
+
+  it('sweeps re-import leftovers a crash or restart left in tree folders', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'oa-lib-'));
+    const library = new Library(root);
+    library.create('One');
+    const leftover = join(library.dirOf('One'), '.reimport-abc.oatree');
+    mkdirSync(leftover);
+    writeFileSync(join(leftover, 'tree.sqlite'), 'x');
+    expect(library.sweepReimportLeftovers()).toEqual([leftover]);
+    expect(existsSync(leftover)).toBe(false);
+    expect(library.list().map((t) => t.id)).toEqual(['One']);
     library.closeAll();
   });
 

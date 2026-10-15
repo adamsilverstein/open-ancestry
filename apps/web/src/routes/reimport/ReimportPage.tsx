@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ApiError } from '../../api/client';
 import { invalidateTree } from '../../api/edits';
 import { treeQuery } from '../../api/queries';
 import { Button } from '../../components/Button/Button';
@@ -16,6 +17,8 @@ import {
   applyReimport,
   discardReimport,
   getReimport,
+  getReimportStatus,
+  refreshReimport,
   type PersonReview,
   type ReimportReview,
   type ReviewChange,
@@ -31,6 +34,15 @@ const STATUS: Record<PersonReview['status'], string> = {
   new: 'New person',
   missing: 'Not in the new export',
 };
+
+/** What a change says, without its per-comparison ids: equal only if nothing about it changed. */
+function contentOf(change: ReviewChange): string {
+  const { id: _id, requires: _requires, defaultAccept: _default, ...rest } = change;
+  void _id;
+  void _requires;
+  void _default;
+  return JSON.stringify(rest);
+}
 
 /** Changes that would be applied: chosen, applicable, and with every prerequisite chosen. */
 function effective(review: ReimportReview, selected: Set<string>): Set<string> {
@@ -128,10 +140,72 @@ function Review({ review }: { review: ReimportReview }) {
     () => new Set(all.filter((c) => c.applicable && c.defaultAccept).map((c) => c.id)),
   );
   const [pending, setPending] = useState(false);
+  const [stale, setStale] = useState(review.stale);
+  const [comparing, setComparing] = useState(false);
   // A large export can change thousands of people: render cards in pages.
   const [shown, setShown] = useState(PAGE);
   const active = useMemo(() => effective(review, selected), [review, selected]);
   const { counts } = review.diff;
+
+  // Edits elsewhere (another tab) make the review stale: check whenever the page is back in view.
+  useEffect(() => {
+    let current = true;
+    let last = 0;
+    const check = () => {
+      // Focus and visibilitychange usually fire together: ask once.
+      if (document.visibilityState === 'hidden' || Date.now() - last < 250) return;
+      last = Date.now();
+      getReimportStatus(review.id, review.comparison)
+        .then((status) => current && setStale(status.stale))
+        .catch(() => {});
+    };
+    window.addEventListener('focus', check);
+    document.addEventListener('visibilitychange', check);
+    return () => {
+      current = false;
+      window.removeEventListener('focus', check);
+      document.removeEventListener('visibilitychange', check);
+    };
+  }, [review.id, review.comparison]);
+
+  /**
+   * Compares the export again and keeps every choice the user made: a change
+   * that still says exactly the same thing keeps a tick that differs from its
+   * old default; anything else takes its new default, so a choice never
+   * carries over onto a value the user hasn't seen.
+   */
+  async function compareAgain() {
+    setComparing(true);
+    try {
+      const fresh = await refreshReimport(review.id);
+      const chosen = new Map(
+        all
+          .filter((c) => c.applicable && selected.has(c.id) !== c.defaultAccept)
+          .map((c) => [c.key, { on: selected.has(c.id), content: contentOf(c) }]),
+      );
+      const keep = (c: ReviewChange) => {
+        const before = chosen.get(c.key);
+        return before && before.content === contentOf(c) ? before.on : c.defaultAccept;
+      };
+      const next = new Set(
+        fresh.diff.people
+          .flatMap((p) => p.changes)
+          .filter((c) => c.applicable && keep(c))
+          .map((c) => c.id),
+      );
+      queryClient.setQueryData(['reimport', review.id], fresh);
+      setSelected(next);
+      setStale(fresh.stale);
+    } catch (error) {
+      toast({
+        title: 'Could not compare again',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'error',
+      });
+    } finally {
+      setComparing(false);
+    }
+  }
 
   function toggle(change: ReviewChange, on: boolean) {
     setSelected((current) => {
@@ -162,7 +236,7 @@ function Review({ review }: { review: ReimportReview }) {
   async function apply() {
     setPending(true);
     try {
-      const result = await applyReimport(review.id, [...active]);
+      const result = await applyReimport(review.id, review.comparison, [...active]);
       await invalidateTree(queryClient, review.tree);
       toast({
         title: `Applied ${result.applied} change${result.applied === 1 ? '' : 's'}`,
@@ -173,6 +247,12 @@ function Review({ review }: { review: ReimportReview }) {
         ? navigate({ to: '/tree/$personId', params: { personId: tree.homePersonId } })
         : navigate({ to: '/' }));
     } catch (error) {
+      setPending(false);
+      // The tree moved since the comparison: offer to compare again instead.
+      if (error instanceof ApiError && error.status === 409) {
+        setStale(true);
+        return;
+      }
       toast({
         title: 'Could not apply the re-import',
         description: error instanceof Error ? error.message : String(error),
@@ -197,6 +277,17 @@ function Review({ review }: { review: ReimportReview }) {
           </p>
         </div>
       </header>
+      {stale && (
+        <div role="alert" className={styles.stale}>
+          <p>
+            Your tree changed since this comparison, so it can't be applied as it is. Compare again
+            to see what the export would change now; the choices you made are kept.
+          </p>
+          <Button size="sm" disabled={comparing} onClick={() => void compareAgain()}>
+            {comparing ? 'Comparing…' : 'Compare again'}
+          </Button>
+        </div>
+      )}
       <section aria-label="Summary" className={styles.summary}>
         <span>
           {counts.matched} matched ({counts.highConfidence} high confidence)
@@ -236,7 +327,7 @@ function Review({ review }: { review: ReimportReview }) {
         </Button>
         <Button
           variant="primary"
-          disabled={pending || active.size === 0}
+          disabled={pending || stale || active.size === 0}
           onClick={() => void apply()}
         >
           Apply {active.size} change{active.size === 1 ? '' : 's'}

@@ -8,6 +8,7 @@ import type {
   TreeStore,
 } from '@open-ancestry/db';
 import { normalizeForSearch } from '@open-ancestry/core';
+import { tokenizeLine } from '@open-ancestry/gedcom';
 
 /*
  * A person-centric, in-memory view of a tree, read with a handful of bulk
@@ -71,17 +72,41 @@ export const norm = (text: string | null | undefined) => normalizeForSearch(text
 export const sourceKey = (title: string, apid: string | null) =>
   apid ? `apid:${apid}` : `title:${norm(title)}`;
 
-/** A media identity that survives re-export. */
-export const mediaKey = (
-  m: Pick<MediaRow, 'ancestry_oid' | 'remote_url' | 'sha256' | 'local_path' | 'title'>,
-) =>
+type KeyedMedia = Pick<
+  MediaRow,
+  'id' | 'ancestry_oid' | 'remote_url' | 'sha256' | 'local_path' | 'title'
+>;
+
+/**
+ * A media identity that survives re-export. Media whose file was missing at
+ * import have no path of their own, so their imported FILE value stands in:
+ * without it, two untitled missing photos would share one key.
+ */
+export const mediaKey = (m: KeyedMedia, file?: string) =>
   m.ancestry_oid
     ? `oid:${m.ancestry_oid}`
     : m.remote_url
       ? `url:${m.remote_url}`
       : m.sha256
         ? `sha:${m.sha256}`
-        : `path:${m.local_path ?? ''}:${norm(m.title)}`;
+        : `path:${m.local_path ?? file ?? ''}:${norm(m.title)}`;
+
+/** `mediaKey` for a tree's media, reading each one's imported FILE line once. */
+export function mediaKeys(store: TreeStore): (m: KeyedMedia) => string {
+  const files = new Map<string, string>();
+  const rows = store.db
+    .prepare(
+      `SELECT owner_id, line FROM unmapped_line
+        WHERE owner_type = 'media' AND (path = 'FILE' OR path LIKE '%.FILE')
+        ORDER BY line_no`,
+    )
+    .all() as { owner_id: string; line: string }[];
+  for (const row of rows) {
+    const value = tokenizeLine(row.line)?.value?.trim();
+    if (value && !files.has(row.owner_id)) files.set(row.owner_id, value);
+  }
+  return (m) => mediaKey(m, files.get(m.id));
+}
 
 /** Ancestry record ids only: the database-level `1,7602::0` ids are shared by everyone. */
 const isRecordApid = (apid: string | null): apid is string => !!apid && !/::0$/.test(apid);
@@ -91,6 +116,7 @@ function all<T>(store: TreeStore, sql: string): T[] {
 }
 
 export function snapshot(store: TreeStore): Snapshot {
+  const keyOf = mediaKeys(store);
   const people = new Map<string, SnapPerson>();
   for (const row of all<PersonRow>(store, 'SELECT * FROM person')) {
     people.set(row.id, {
@@ -220,7 +246,7 @@ export function snapshot(store: TreeStore): Snapshot {
      WHERE l.owner_type = 'person' ORDER BY l.sort_order, l.id`,
   )) {
     const { owner_id, ...row } = m;
-    people.get(owner_id)?.media.push({ row: row as MediaRow, key: mediaKey(row) });
+    people.get(owner_id)?.media.push({ row: row as MediaRow, key: keyOf(row as MediaRow) });
   }
 
   const familyEvents = new Map<string, EventRow[]>();

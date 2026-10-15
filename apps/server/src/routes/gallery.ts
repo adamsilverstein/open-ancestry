@@ -16,6 +16,7 @@ import {
 } from '@open-ancestry/db';
 import type { Api, Deps } from '../context';
 import { edit, requireRow } from '../edits';
+import { formatBytes } from '../bytes';
 import { ApiError, badRequest, notFound } from '../errors';
 import { MediaThumbParams, TreeIdParams, TreeParams } from '../schemas';
 import { THUMB_SIZES, insideTree, isThumbSize, loadSharp, readHead } from '../thumbnails';
@@ -264,7 +265,7 @@ export function galleryRoutes(
             throw new ApiError(
               413,
               'payload_too_large',
-              `Uploads are limited to ${uploadLimit} bytes`,
+              `Uploads are limited to ${formatBytes(uploadLimit)}`,
             );
           }
           upload = { path, name: part.filename, ...received };

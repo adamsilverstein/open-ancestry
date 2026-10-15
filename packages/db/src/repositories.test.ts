@@ -242,11 +242,14 @@ describe('persons and names', () => {
       f.sister,
     ]);
     expect(count(store, 'event')).toBe(9); // 9 births + census - mine
-    // Links owned by me are gone, the shared note/tag/media survive.
+    // Links owned by me are gone, and so are the note and photo only I had (#226);
+    // the tag is shared vocabulary and stays.
     expect(noteLinks.listFor(store, 'person', f.me)).toEqual([]);
     expect(tagLinks.listFor(store, 'person', f.me)).toEqual([]);
     expect(mediaLinks.listFor(store, 'person', f.me)).toEqual([]);
-    expect(notes.get(store, extra.note.id)).toBeDefined();
+    expect(notes.get(store, extra.note.id)).toBeUndefined();
+    expect(media.get(store, extra.pic.id)).toBeUndefined();
+    expect(tags.get(store, extra.tag.id)).toBeDefined();
     // My family keeps my spouse and child, my parents' family drops me as a child.
     expect(families.get(store, f.myFamily)).toMatchObject({
       partner1_id: null,

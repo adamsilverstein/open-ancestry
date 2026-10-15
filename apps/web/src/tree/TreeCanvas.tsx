@@ -108,6 +108,8 @@ interface Visible {
   edges: number[];
   lod: boolean;
   light: boolean;
+  /** The cells key these were mounted for (`lastCells`). */
+  cells: string;
 }
 
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -353,6 +355,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     edges: [],
     lod: false,
     light: false,
+    cells: '',
   });
 
   const source = layout ?? fan;
@@ -507,6 +510,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         edges: lod ? [] : indexed.edges.query(rect),
         lod,
         light,
+        cells: key,
       });
       return true;
     },
@@ -564,14 +568,24 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
    * threshold swaps their elements) and only then say it has settled, so
    * nothing that waits for it finds a card about to be replaced.
    */
+  /** The cells key of the last committed render. */
+  const renderedCells = useRef('');
   const finishAnimation = () => {
     cancelAnimationFrame(animation.current);
     animationTarget.current = null;
-    if (updateVisibleRef.current()) settling.current = true;
-    else if (worldRef.current) delete worldRef.current.dataset.animating;
+    // This does the work of the frame apply() queued; skip that repeat.
+    cancelAnimationFrame(frame.current);
+    frame.current = 0;
+    updateVisibleRef.current();
+    // Settled only once the cells mounted are the ones the view now needs: an
+    // earlier frame's render may still be pending even when this one changed nothing.
+    if (renderedCells.current === lastCells.current) {
+      if (worldRef.current) delete worldRef.current.dataset.animating;
+    } else settling.current = true;
   };
   useLayoutEffect(() => {
-    if (!settling.current) return;
+    renderedCells.current = visible.cells;
+    if (!settling.current || visible.cells !== lastCells.current) return;
     settling.current = false;
     if (worldRef.current) delete worldRef.current.dataset.animating;
   }, [visible]);

@@ -19,6 +19,12 @@ export interface PartnerEdge extends KinEdge {
   relationship?: PartnerRelationship;
 }
 
+/** A stretch of time as `ParsedDate.sortKey` values; a missing end is unknown. */
+export interface Span {
+  start?: number;
+  end?: number;
+}
+
 export interface KinshipGraph {
   /** Undefined for an unknown id. */
   sex(id: string): Sex | undefined;
@@ -26,6 +32,14 @@ export interface KinshipGraph {
   /** `rel` is the child's relation to `id`. */
   children(id: string): readonly ParentEdge[];
   partners(id: string): readonly PartnerEdge[];
+  /**
+   * Optional dates. A parent's spouse is only a step-parent (and their
+   * children step-siblings) when the union overlapped the child's life;
+   * without dates every union counts.
+   */
+  lifespan?(id: string): Span | undefined;
+  /** From the marriage to its end (divorce or a partner's death). */
+  union?(familyId: string): Span | undefined;
 }
 
 export interface PathStep {
@@ -93,7 +107,7 @@ export interface RelationshipOptions {
   maxRelationships?: number;
   /**
    * `ancestry` (default) matches Ancestry.com: "granduncle", "grandniece",
-   * "1st cousin 1x removed", "half sister". `formal`: "great-uncle",
+   * "1st cousin 1x removed", "half-sister". `formal`: "great-uncle",
    * "great-niece", "1st cousin once removed", "half-sister".
    */
   style?: 'ancestry' | 'formal';

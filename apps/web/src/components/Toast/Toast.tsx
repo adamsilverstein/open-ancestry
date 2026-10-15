@@ -20,6 +20,8 @@ export interface ToastOptions {
   variant?: ToastVariant;
   /** Milliseconds before auto-dismiss. */
   duration?: number;
+  /** One button in the toast, e.g. Undo; keep the same action reachable elsewhere (a shortcut). */
+  action?: { label: string; onClick: () => void };
 }
 
 export interface ToastItem extends ToastOptions {

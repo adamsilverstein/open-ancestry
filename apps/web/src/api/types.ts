@@ -11,5 +11,6 @@ export type {
   PartnerFamily,
   PersonDetail,
   PersonSummary as ApiPersonSummary,
+  RelationshipView,
   RelativeLink,
 } from '@open-ancestry/db';

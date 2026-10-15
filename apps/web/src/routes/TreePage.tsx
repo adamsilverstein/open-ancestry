@@ -64,7 +64,7 @@ export function TreePage() {
           <EmptyState
             level={2}
             title="No home person"
-            description="This tree has no home person to start from. Pick anyone from the people list to open the tree at them."
+            description="Open someone's profile and choose More actions, then Set as home person, to open the tree there."
             action={
               <Link to="/people" className={styles.emptyLink}>
                 Open the people list

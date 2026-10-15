@@ -1,4 +1,4 @@
-import { createReadStream } from 'node:fs';
+import { createReadStream, realpathSync } from 'node:fs';
 import { open, realpath, stat } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import { treePaths } from '@open-ancestry/db';
@@ -53,6 +53,21 @@ async function readHead(file: string): Promise<Buffer> {
     return buffer.subarray(0, bytesRead);
   } finally {
     await handle.close();
+  }
+}
+
+/** `resolveMediaPath` for synchronous callers (the profile-photo check inside a transaction). */
+export function resolveMediaPathSync(mediaRoot: string, localPath: string): string | null {
+  const root = resolve(mediaRoot);
+  const candidate = resolve(root, localPath);
+  if (!candidate.startsWith(root + sep)) return null;
+  try {
+    // .native: the same realpath(3) the async version uses, so both agree on case.
+    const realRoot = realpathSync.native(root);
+    const realFile = realpathSync.native(candidate);
+    return realFile.startsWith(realRoot + sep) ? realFile : null;
+  } catch {
+    return null;
   }
 }
 

@@ -255,6 +255,8 @@ const MAX_RANGE_HITS = 12;
 const SMALL_BLOCK = 16;
 const MAX_UNDATED = 64;
 const MAX_SURNAME_YEAR = 64;
+/** An Ancestry record id held by more tree people than this is not a blocking key. */
+const MAX_APID_HOLDERS = 32;
 
 /** Given and surname sounds, for every name the person has, so married names meet birth names. */
 function nameKeys(p: SnapPerson): { names: string[]; surnames: string[] } {
@@ -502,7 +504,9 @@ function assign(
     (x, y) =>
       y.score - x.score ||
       y.corroboration - x.corroboration ||
-      (x.i < y.i ? -1 : x.i > y.i ? 1 : 0),
+      (x.i < y.i ? -1 : x.i > y.i ? 1 : 0) ||
+      // Same incoming record: by tree id, so the result never depends on insertion order.
+      (x.e < y.e ? -1 : x.e > y.e ? 1 : 0),
   )) {
     const used = taken.get(c.e) ?? 0;
     if (c.score < MATCH_THRESHOLD || byIncoming.has(c.i) || used >= capacity(c.e)) continue;
@@ -533,6 +537,10 @@ export function matchPeople(
       else byApid.set(apid, [e.row.id]);
     }
   }
+  // A record cited by many tree people (a census household, a book page, or a
+  // crafted file) says little about any one of them, and pairing everyone who
+  // cites it would be quadratic: such ids are not used for blocking.
+  for (const [apid, ids] of byApid) if (ids.length > MAX_APID_HOLDERS) byApid.delete(apid);
   const capacity = new Map<string, number>();
   for (const owner of existing.importXrefs.values())
     capacity.set(owner, (capacity.get(owner) ?? 0) + 1);

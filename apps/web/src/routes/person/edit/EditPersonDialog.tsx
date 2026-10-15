@@ -17,6 +17,7 @@ import { Select } from '../../../components/Select/Select';
 import { useToast } from '../../../components/Toast/Toast';
 import { fullName, isLivingStatus } from '../../../lib/person';
 import { applyNames, applyPerson, nameChanges, toDraft, type NameDraft } from './optimistic';
+import { rebaseNames, rebaseValue } from './rebase';
 import { SaveError, useSaveState } from './SaveError';
 import styles from './Edit.module.css';
 
@@ -102,7 +103,7 @@ export function EditPersonDialog({
 }: EditPersonDialogProps) {
   // The person as the form opened: a save is a diff against it and carries it as
   // `expect`, so a change from another tab meanwhile is refused, not overwritten.
-  const [detail] = useState(opened);
+  const [detail, setDetail] = useState(opened);
   const id = detail.person.id;
   const base = `/trees/${seg(tree)}`;
   const edit = useEdit(tree);
@@ -183,6 +184,27 @@ export function EditPersonDialog({
       send: () => apiSend('POST', `${base}/batch`, { label, operations }),
       ...saveState.handlers(),
     });
+  }
+
+  /** After a stale refusal: the latest data, with what the user changed kept (rebase.ts). */
+  async function reload() {
+    const latest = await queryClient.fetchQuery({ ...personQuery(tree, id), staleTime: 0 });
+    setNames(rebaseNames(names, detail.names, latest.names));
+    setSex(rebaseValue(sex, detail.person.sex, latest.person.sex));
+    setLiving(
+      rebaseValue(living, livingChoice(detail.person.living), livingChoice(latest.person.living)),
+    );
+    const opened = parentLinks(detail);
+    setLinks(
+      parentLinks(latest).map((link) => {
+        const was = opened.find((l) => l.linkId === link.linkId && l.slot === link.slot);
+        const mine = links.find((l) => l.linkId === link.linkId && l.slot === link.slot);
+        return was && mine ? { ...link, rel: rebaseValue(mine.rel, was.rel, link.rel) } : link;
+      }),
+    );
+    setDetail(latest);
+    saveState.reset();
+    firstGiven.current?.focus();
   }
 
   function deletePerson() {
@@ -351,7 +373,12 @@ export function EditPersonDialog({
             </fieldset>
           )}
           {/* Lets Enter in a field submit the form. */}
-          <SaveError error={saveState.error} />
+          <SaveError
+            error={saveState.error}
+            stale={saveState.stale}
+            // A person deleted meanwhile cannot load; the page leaves on its own.
+            onReload={() => void reload().catch(() => undefined)}
+          />
           <button type="submit" hidden />
         </form>
       </Dialog>

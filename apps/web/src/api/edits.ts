@@ -78,7 +78,7 @@ export function useEdit(tree: string) {
         isStale(error)
           ? {
               title: 'Not saved',
-              description: `${edit.label}: this changed in another window (or by undo) after you opened it, so nothing was saved. Open it again to start from the latest.`,
+              description: `${edit.label}: this changed in another window (or by undo) after you opened it, so nothing was saved.`,
               variant: 'error',
             }
           : {

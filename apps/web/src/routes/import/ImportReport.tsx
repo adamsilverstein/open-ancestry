@@ -21,7 +21,16 @@ const STATS: [label: string, table: string][] = [
 
 const n = (value: number) => value.toLocaleString();
 
-export function ImportReport({ job, report }: { job: ImportJob; report: ImportReportView }) {
+export function ImportReport({
+  job,
+  report,
+  note,
+}: {
+  job: ImportJob;
+  report: ImportReportView;
+  /** Shown under the title, announced politely (e.g. a cancel that came too late). */
+  note?: string | undefined;
+}) {
   const { lines, media, source } = report;
   const home = report.homePersonId;
   const openClass = cx(buttonStyles.button, buttonStyles.primary, buttonStyles.md);
@@ -33,6 +42,11 @@ export function ImportReport({ job, report }: { job: ImportJob; report: ImportRe
           <p className={styles.subtitle}>
             {job.fileName} into “{job.tree}” in {(report.timings.total / 1000).toFixed(1)} s
           </p>
+          {note && (
+            <p role="status" className={styles.note}>
+              {note}
+            </p>
+          )}
         </div>
         {home ? (
           <Link to="/tree/$personId" params={{ personId: home }} className={openClass}>

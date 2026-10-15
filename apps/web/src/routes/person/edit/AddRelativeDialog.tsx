@@ -153,7 +153,10 @@ export function AddRelativeDialog({
         </fieldset>
 
         {mode === 'new' ? (
-          <NewPersonFields draft={draft} />
+          <NewPersonFields
+            draft={draft}
+            errors={saveState.field ? { [saveState.field.field]: saveState.field.message } : {}}
+          />
         ) : (
           <Combobox
             label="Person"

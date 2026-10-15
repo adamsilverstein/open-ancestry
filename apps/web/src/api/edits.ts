@@ -59,7 +59,7 @@ export interface FieldError {
  */
 export function fieldError(error: unknown): FieldError | null {
   if (!(error instanceof ApiError) || error.status !== 400) return null;
-  const match = /body\/(?:[\w]+\/\d+\/)?(\w+) must NOT have more than (\d+) characters/.exec(
+  const match = /body\/(?:\w+\/)*?(\w+) must NOT have more than (\d+) characters/.exec(
     error.message,
   );
   if (!match) return null;

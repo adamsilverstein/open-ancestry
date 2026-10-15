@@ -1,9 +1,11 @@
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
   TREE_EXTENSION,
+  TreeAccessError,
   createTree,
+  ensurePrivateDir,
   meta,
   openTree,
   treePaths,
@@ -130,8 +132,34 @@ export class Library {
     this.root = resolve(root);
   }
 
-  private ensureRoot(): void {
-    mkdirSync(this.root, { recursive: true });
+  private rootChecked = false;
+
+  /**
+   * The library folder, private to the owner. One the app creates is made
+   * 0700, as is an existing one holding nothing but trees. Any other folder
+   * (`--library ~`, a group-shared folder) keeps its mode, since tightening
+   * it would lock others out of their own files: say so once instead.
+   */
+  ensureRoot(): void {
+    if (!existsSync(this.root)) {
+      ensurePrivateDir(this.root);
+      this.rootChecked = true;
+      return;
+    }
+    if (this.rootChecked) return;
+    this.rootChecked = true;
+    if (process.platform === 'win32' || (statSync(this.root).mode & 0o077) === 0) return;
+    const ours = (name: string) =>
+      name.endsWith(TREE_EXTENSION) || name === TRASH_DIR || name === '.DS_Store';
+    const entries = readdirSync(this.root);
+    if (entries.length > 0 && entries.every(ours)) {
+      ensurePrivateDir(this.root);
+    } else {
+      console.warn(
+        `Warning: other accounts can see the library folder ${this.root}; ` +
+          'its trees are private, but consider a folder only you can open.',
+      );
+    }
   }
 
   /**
@@ -294,9 +322,17 @@ export class Library {
     const canonical = this.canonical(id);
     const existing = this.stores.get(canonical);
     if (existing) return existing;
-    // A crash can leave a re-import's working folders (up to 256 MiB of media) behind.
+    let store: TreeStore;
+    try {
+      store = openTree(this.dirOf(canonical), { busyTimeoutMs: LIBRARY_BUSY_TIMEOUT_MS });
+    } catch (error) {
+      // A planted link or another account's file: say why, not a bare 500.
+      if (error instanceof TreeAccessError) throw new ApiError(403, 'forbidden', error.message);
+      throw error;
+    }
+    // A crash can leave a re-import's working folders (up to 256 MiB of media)
+    // behind. Swept once the tree folder has passed openTree's access checks.
     this.reimportFolders?.sweep(this.dirOf(canonical));
-    const store = openTree(this.dirOf(canonical), { busyTimeoutMs: LIBRARY_BUSY_TIMEOUT_MS });
     this.stores.set(canonical, store);
     return store;
   }
@@ -321,7 +357,7 @@ export class Library {
     this.assertIdle(id);
     this.close(id);
     const trash = join(this.root, TRASH_DIR);
-    mkdirSync(trash, { recursive: true });
+    ensurePrivateDir(trash);
     const stamp = new Date().toISOString().replaceAll(':', '-');
     renameSync(this.dirOf(id), join(trash, `${id} ${stamp}${TREE_EXTENSION}`));
   }

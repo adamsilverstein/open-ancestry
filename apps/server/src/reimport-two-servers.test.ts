@@ -143,3 +143,12 @@ it("a second server starting up keeps the first server's worker-compare export (
   ).toBe(200);
   expect(reimportFolders(treeDir)).toEqual([]);
 }, 60_000);
+
+it("refuses to rename or delete a tree while another server's review of it is open", async () => {
+  const { base, treeDir } = await openReview();
+  // A second server has no review of its own, but sees the first's live folders.
+  b = await testApi({ library: a.root, importer: importFile });
+  expect((await b.patch(base, { name: 'Other' })).statusCode).toBe(409);
+  expect((await b.del(base)).statusCode).toBe(409);
+  expect(existsSync(treeDir)).toBe(true);
+});

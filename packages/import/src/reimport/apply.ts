@@ -228,9 +228,12 @@ export function applyReimport(
       if (match && !claimed.has(match)) id = match;
       else {
         const file = copier.copy(m);
-        id = insert('media', { ...plain(m), local_path: file?.local_path ?? null });
+        // A second copy of bytes the tree already has gets a row of its own (the
+        // claimed rule) but shares the tree's file: nothing was copied for it.
+        const shared = match ? (tx.store.getRow('media', match)?.local_path ?? null) : null;
+        id = insert('media', { ...plain(m), local_path: file?.local_path ?? shared });
         if (file) copied.push(id);
-        else if (m.local_path) refused.push(id);
+        else if (m.local_path && !shared) refused.push(id);
       }
       claimed.add(id);
       existingMedia.set(key, id);

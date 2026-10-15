@@ -9,7 +9,13 @@ import {
   undoLatest,
   type TreeStore,
 } from '@open-ancestry/db';
-import { buildGedcomExport, buildGedzipExport, changedSinceImport } from '@open-ancestry/export';
+import {
+  GedzipTooLargeError,
+  buildGedcomExport,
+  changedSinceImport,
+  planGedzipExport,
+  streamGedzip,
+} from '@open-ancestry/export';
 import type { Api, Deps } from '../context';
 import { edit } from '../edits';
 import {
@@ -95,7 +101,8 @@ export function treeRoutes(app: Api, deps: Deps): void {
 
   /** A re-import review holds files in the tree's folder and applies to it by name. */
   const assertNoReview = (tree: string) => {
-    if (deps.reimports.hasTree(tree)) {
+    // This server's reviews, or any live server's working folders in the tree (#246 review).
+    if (deps.reimports.hasTree(tree) || deps.reimportFolders.inUse(library.dirOf(tree))) {
       throw conflict(`Tree "${tree}" has a re-import review open; apply or discard it first`);
     }
   };
@@ -240,9 +247,19 @@ export function treeRoutes(app: Api, deps: Deps): void {
       const { tree } = request.params;
       // Mid-import the tree is not the user's yet: export it once the import ends (#186).
       library.assertIdle(tree);
-      const { bytes, warnings } = buildGedzipExport(library.open(tree), {
-        privatizeLiving: request.query.privatize ?? false,
-      });
+      // The GEDCOM text and media list are taken now, in one snapshot; the
+      // media bytes are streamed one file at a time, so memory stays bounded
+      // and other requests keep being served (#198).
+      let plan;
+      try {
+        plan = planGedzipExport(library.open(tree), {
+          privatizeLiving: request.query.privatize ?? false,
+        });
+      } catch (error) {
+        if (error instanceof GedzipTooLargeError) throw conflict(error.message);
+        throw error;
+      }
+      const { warnings } = plan;
       return reply
         .type('application/vnd.familysearch.gedcom+zip')
         .header(
@@ -250,7 +267,7 @@ export function treeRoutes(app: Api, deps: Deps): void {
           attachment(downloadName(tree, request.query.privatize), 'gdz'),
         )
         .headers(warningHeaders(warnings))
-        .send(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+        .send(streamGedzip(plan));
     },
   );
 }

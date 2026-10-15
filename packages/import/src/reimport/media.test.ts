@@ -279,3 +279,44 @@ describe('re-import media without holding memory or the tree lock (#243 review)'
     expect(existsSync(join(dir, 'media', 'photos', 'new.jpg'))).toBe(false);
   });
 });
+
+describe('a second copy of bytes the tree has (#246 review)', () => {
+  it('gives the extra media row the existing file, not a refused copy', async () => {
+    const later = ged(
+      '0 @I51@ INDI',
+      '1 NAME Ada /Vale/',
+      '1 SEX F',
+      '0 @I52@ INDI',
+      '1 NAME Bo /Vale/',
+      '1 SEX M',
+      '1 OBJE @O61@',
+      '1 OBJE @O62@',
+      '0 @O61@ OBJE',
+      '1 FILE again/one.jpg',
+      '2 TITL First copy',
+      '1 _OID 601',
+      '0 @O62@ OBJE',
+      '1 FILE again/two.jpg',
+      '2 TITL Second copy',
+      '1 _OID 602',
+    );
+    const zip = zipSync({
+      'gedcom.ged': enc(later),
+      'again/one.jpg': enc('OLD'),
+      'again/two.jpg': enc('OLD'),
+    });
+    const session = await prepareReimport(store, { gedzip: zip }, { today: TODAY });
+    const result = applyReimport(store, session, acceptAll(session), 'Re-import');
+    closeReimport(session);
+    expect(result.media.refused).toEqual([]);
+    const paths = store.db
+      .prepare(
+        "SELECT local_path FROM media WHERE title IN ('Old scan', 'First copy', 'Second copy')",
+      )
+      .pluck()
+      .all();
+    // Both copies point at the file the tree already has; no row is left without it.
+    expect(paths.every((p) => p === 'scans/old.jpg')).toBe(true);
+    expect(existsSync(join(dir, 'media', 'again'))).toBe(false);
+  });
+});

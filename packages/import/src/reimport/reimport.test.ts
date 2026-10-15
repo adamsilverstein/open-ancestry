@@ -15,8 +15,8 @@ import {
   localHistory,
   prepareReimport,
   refreshReimport,
-  reimportData,
   reimportFromData,
+  reimportData,
   type PersonReview,
   type ReimportSession,
   type ReviewChange,
@@ -1466,6 +1466,23 @@ describe('review of #221: media whose files were missing at import', () => {
     );
     expect(lines.every((l) => l.n <= 1)).toBe(true);
     tree.close();
+  });
+});
+
+describe('dates compared by meaning (#194)', () => {
+  it('offers no change when a date is only written differently', async () => {
+    const text = renumber(
+      SAMPLE.replace('2 DATE 3 Mar 1846', '2 DATE 03 MAR 1846').replace(
+        '2 DATE 12 JUN 1868',
+        '2 DATE 12 June 1868',
+      ),
+    );
+    const s2 = await prepareReimport(store, { bytes: text }, { today: TODAY });
+    try {
+      expect(s2.diff.people.flatMap((p) => p.changes)).toEqual([]);
+    } finally {
+      closeReimport(s2);
+    }
   });
 });
 

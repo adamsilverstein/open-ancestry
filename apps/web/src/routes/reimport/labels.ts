@@ -1,3 +1,4 @@
+import { formatDate } from '@open-ancestry/core';
 import { eventLabel } from '../../lib/timeline';
 import type { ImportProgress } from '../../library/api';
 import type { FactView, ReviewChange } from './api';
@@ -14,7 +15,10 @@ const NAME_TYPES: Record<string, string> = {
   other: 'other name',
 };
 
-const parts = (f: FactView) => [f.date, f.place, f.value].filter(Boolean) as string[];
+/** A fact's date as the app shows dates ("12 Mar 1842", "abt. 1842"), not raw GEDCOM. */
+const shownDate = (date: string | null) => (date ? formatDate(date) : null);
+
+const parts = (f: FactView) => [shownDate(f.date), f.place, f.value].filter(Boolean) as string[];
 
 /** "Residence, 1900, Millbrook" */
 export function factText(f: FactView): string {
@@ -26,7 +30,10 @@ export function changeText(before: FactView, after: FactView): string {
   const fields = (['date', 'place', 'value'] as const).filter(
     (k) => (before[k] ?? '') !== (after[k] ?? ''),
   );
-  const side = (f: FactView) => fields.map((k) => f[k] || '(none)').join(', ');
+  // Dates are shown as the app formats them, unless that hides the difference.
+  const raw = shownDate(before.date) === shownDate(after.date);
+  const side = (f: FactView) =>
+    fields.map((k) => (k === 'date' && !raw ? shownDate(f.date) : f[k]) || '(none)').join(', ');
   return `${eventLabel(after.type, after.customType)}: ${side(before)} → ${side(after)}`;
 }
 

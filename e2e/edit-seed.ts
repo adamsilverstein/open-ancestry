@@ -77,13 +77,6 @@ export async function createEmptyTree(
   return tree;
 }
 
-/** Opens `path` with `tree` as the current tree. */
-export async function openTree(page: Page, tree: string, path: string) {
-  await page.addInitScript((name) => localStorage.setItem('oa-tree', name), tree);
-  await page.goto(path);
-  await page.locator('html[data-shell-ready]').waitFor({ state: 'attached' });
-}
-
 export async function seedTree(
   request: APIRequestContext,
   baseURL: string,

@@ -12,7 +12,7 @@ import {
 } from '@open-ancestry/db';
 import { MediaCopier } from './media';
 import type { ReimportSession } from './session';
-import { mediaKey, norm, sourceKey } from './snapshot';
+import { mediaKeys, norm, sourceKey } from './snapshot';
 
 /*
  * Applies the changes a user accepted as one unit of work, so a single undo
@@ -107,8 +107,10 @@ export function applyReimport(
   // new media (not already in the tree by key or bytes), and files for placeholders.
   {
     const have = new Set<string>();
+    const treeKey = mediaKeys(store);
+    const exportKey = mediaKeys(inc);
     for (const m of store.db.prepare('SELECT * FROM media').all() as MediaRow[]) {
-      have.add(mediaKey(m));
+      have.add(treeKey(m));
       if (m.sha256 && m.local_path) have.add(`sha:${m.sha256}`);
     }
     const filling = new Set(
@@ -120,7 +122,7 @@ export function applyReimport(
       incAll<MediaRow>('SELECT * FROM media WHERE local_path IS NOT NULL').filter(
         (m) =>
           filling.has(m.id) ||
-          !(have.has(mediaKey(m)) || (m.sha256 && have.has(`sha:${m.sha256}`))),
+          !(have.has(exportKey(m)) || (m.sha256 && have.has(`sha:${m.sha256}`))),
       ),
     );
   }
@@ -206,23 +208,31 @@ export function applyReimport(
 
     const mediaMap = new Map<string, string>();
     const existingMedia = new Map<string, string>();
+    const existingKey = mediaKeys(tx.store);
+    const incomingKey = mediaKeys(inc);
     for (const m of tx.store.db.prepare('SELECT * FROM media').all() as MediaRow[]) {
-      existingMedia.set(mediaKey(m), m.id);
+      existingMedia.set(existingKey(m), m.id);
       if (m.sha256 && m.local_path) existingMedia.set(`sha:${m.sha256}`, m.id);
     }
+    /** Existing media already matched to an incoming row. */
+    const claimed = new Set<string>();
     const ensureMedia = (incomingId: string): string => {
       if (mediaMap.has(incomingId)) return mediaMap.get(incomingId)!;
       const m = get('media', incomingId)!;
-      const key = mediaKey(m);
+      const key = incomingKey(m);
       // The same scan under another _OID or name is the same media: reuse it by its bytes.
-      let id =
+      // Two incoming media never share one row: the second one's lines would replace the first's.
+      const match =
         existingMedia.get(key) ?? (m.sha256 ? existingMedia.get(`sha:${m.sha256}`) : undefined);
-      if (!id) {
+      let id: string;
+      if (match && !claimed.has(match)) id = match;
+      else {
         const file = copier.copy(m);
         id = insert('media', { ...plain(m), local_path: file?.local_path ?? null });
         if (file) copied.push(id);
         else if (m.local_path) refused.push(id);
       }
+      claimed.add(id);
       existingMedia.set(key, id);
       if (m.sha256) existingMedia.set(`sha:${m.sha256}`, id);
       mediaMap.set(incomingId, id);
@@ -582,7 +592,7 @@ export function applyReimport(
           return (
             mediaMap.get(id) ??
             (m
-              ? (existingMedia.get(mediaKey(m)) ??
+              ? (existingMedia.get(incomingKey(m)) ??
                 (m.sha256 ? existingMedia.get(`sha:${m.sha256}`) : undefined) ??
                 null)
               : null)

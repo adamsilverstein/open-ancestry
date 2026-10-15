@@ -100,12 +100,35 @@ it('refuses writes from queueing the compare, and refuses applying a review whil
   });
   expect((await api.post(`${base}/people`, { sex: 'U', names: [] })).statusCode).toBe(409);
   await vi.waitFor(() => expect(held.started).toBe(true));
-  expect((await api.post(`/api/reimports/${reimportId}/apply`, { accept: [] })).statusCode).toBe(
-    409,
-  );
+  expect(
+    (await api.post(`/api/reimports/${reimportId}/apply`, { accept: [], comparison: 1 }))
+      .statusCode,
+  ).toBe(409);
   held.release();
   expect((await finished(second.json().jobId)).state).toBe('completed');
-  expect((await api.post(`/api/reimports/${reimportId}/apply`, { accept: [] })).statusCode).toBe(
-    200,
-  );
+  expect(
+    (await api.post(`/api/reimports/${reimportId}/apply`, { accept: [], comparison: 1 }))
+      .statusCode,
+  ).toBe(200);
+});
+
+it('refuses to compare a review again while the tree is busy', async () => {
+  const imported = await api.inject({ method: 'POST', url: '/api/import', ...multipart(SAMPLE) });
+  const base = `/api/trees/${encodeURIComponent((await finished(imported.json().jobId)).tree)}`;
+  held.hold = false;
+  const first = await api.inject({ method: 'POST', url: `${base}/reimport`, ...multipart(SAMPLE) });
+  const { reimportId } = (await finished(first.json().jobId)).result as { reimportId: string };
+  held.hold = true;
+  const second = await api.inject({
+    method: 'POST',
+    url: `${base}/reimport`,
+    ...multipart(SAMPLE),
+  });
+  await vi.waitFor(() => expect(held.started).toBe(true));
+  const refused = await api.post(`/api/reimports/${reimportId}/refresh`);
+  expect(refused.statusCode).toBe(409);
+  expect(refused.json().error.message).toMatch(/busy/);
+  held.release();
+  expect((await finished(second.json().jobId)).state).toBe('completed');
+  expect((await api.post(`/api/reimports/${reimportId}/refresh`)).statusCode).toBe(200);
 });

@@ -103,7 +103,10 @@ it("a second server opening the tree leaves the first server's open review alone
     (p: { changes: { id: string; applicable: boolean }[] }) =>
       p.changes.filter((c) => c.applicable).map((c) => c.id),
   );
-  expect((await a.post(`/api/reimports/${reimportId}/apply`, { accept })).statusCode).toBe(200);
+  expect(
+    (await a.post(`/api/reimports/${reimportId}/apply`, { accept, comparison: review.comparison }))
+      .statusCode,
+  ).toBe(200);
   expect(readFileSync(join(treeDir, 'media', 'photos', 'ada.jpg'), 'utf8')).toBe('ADA');
   // Applying released the review's folders.
   expect(reimportFolders(treeDir)).toEqual([]);

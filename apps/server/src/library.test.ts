@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { cpSync, existsSync, rmSync } from 'node:fs';
 import { mkdtemp, readdir } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -69,6 +69,32 @@ describe('Library', () => {
     library.closeAll();
   });
 
+  it('tells copied tree folders apart by folder name (#193)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'oa-lib-'));
+    const library = new Library(root);
+    library.create('Smith');
+    library.closeAll();
+    // A folder copied by hand keeps the tree_name inside it.
+    cpSync(join(root, 'Smith.oatree'), join(root, 'Smith copy.oatree'), { recursive: true });
+    cpSync(join(root, 'Smith.oatree'), join(root, 'Backup.oatree'), { recursive: true });
+    expect(library.list().map(({ id, name, label }) => ({ id, name, label }))).toEqual([
+      { id: 'Smith', name: 'Smith', label: 'Smith' },
+      { id: 'Backup', name: 'Smith', label: 'Smith (Backup)' },
+      { id: 'Smith copy', name: 'Smith', label: 'Smith (Smith copy)' },
+    ]);
+    // Without a folder named exactly "Smith", every copy shows its folder: no
+    // tree takes over the plain label, so labels cannot swap.
+    library.closeAll();
+    rmSync(join(root, 'Smith.oatree'), { recursive: true, force: true });
+    expect(library.list().map((t) => t.label)).toEqual(['Smith (Backup)', 'Smith (Smith copy)']);
+    // Folder names cannot smuggle bidi or control characters into a label.
+    library.closeAll();
+    cpSync(join(root, 'Backup.oatree'), join(root, 'Evil\u202Eypoc.oatree'), { recursive: true });
+    expect(library.list().map((t) => t.label)).toContain('Smith (Evilypoc)');
+    library.closeAll();
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it('refuses to rename or delete a busy tree', async () => {
     const library = new Library(await mkdtemp(join(tmpdir(), 'oa-lib-')));
     library.create('Busy');
@@ -80,6 +106,23 @@ describe('Library', () => {
     await running;
     library.rename('Busy', 'Other');
     expect(library.list().map((t) => t.id)).toEqual(['Other']);
+    library.closeAll();
+  });
+
+  it('resolves an id to its folder as spelled on disk, without folding case', async () => {
+    const library = new Library(await mkdtemp(join(tmpdir(), 'oa-lib-')));
+    const created = library.create('Caf\u00e9');
+    // NFD and NFC spellings are one tree: one connection, one busy state.
+    expect(library.open('Cafe\u0301')).toBe(created);
+    expect(library.canonical('Cafe\u0301')).toBe('Caf\u00e9');
+    const release = library.markBusy('Cafe\u0301');
+    expect(library.isBusy('Caf\u00e9')).toBe(true);
+    release();
+    expect(library.isBusy('Caf\u00e9')).toBe(false);
+    // A case variant is a different (missing) tree on every file system.
+    expect(library.exists('CAF\u00c9')).toBe(false);
+    expect(() => library.open('caf\u00e9')).toThrow(/not found/);
+    expect(library.list().map((t) => t.id)).toEqual(['Caf\u00e9']);
     library.closeAll();
   });
 });
@@ -137,6 +180,15 @@ describe('tree routes', () => {
       expect(res.statusCode).toBe(400);
       expect(res.json().error.code).toBe('bad_request');
     }
+    // Blank names get a plain message, not a schema error (issue #123).
+    for (const name of ['', '   ']) {
+      const res = await api.post('/api/trees', { name });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toEqual({ code: 'bad_request', message: 'Enter a tree name' });
+    }
+    expect((await api.patch('/api/trees/A', { name: ' ' })).json().error.message).toBe(
+      'Enter a tree name',
+    );
     expect((await api.post('/api/trees', {})).json().error.code).toBe('validation_failed');
     expect((await api.post('/api/trees', { name: 'A', extra: 1 })).statusCode).toBe(400);
   });

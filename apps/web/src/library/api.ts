@@ -4,6 +4,7 @@
  */
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
 import { ApiError, apiGet, apiSend, seg } from '../api/client';
+import { formatBytes } from '../lib/bytes';
 import {
   CURRENT_TREE_KEY,
   currentTreeQuery,
@@ -28,10 +29,23 @@ export const getTree = (id: string, signal?: AbortSignal) =>
 export const getJob = (id: string, signal?: AbortSignal) =>
   apiGet<ImportJob>(`/jobs/${seg(id)}`, signal);
 
-/** Stops a queued or running job; 409 once it has finished. */
-export const cancelJob = (id: string) => apiSend<{ job: ImportJob }>('DELETE', `/jobs/${seg(id)}`);
-
 export const jobEventsUrl = (id: string) => `/api/jobs/${seg(id)}/events`;
+
+/**
+ * Cancels a queued or running job (any kind: import, reimport). The server
+ * aborts it and cleans up its upload and any empty tree it created; the job's
+ * event stream then reports it failed with `cancelled: true`. Resolves false
+ * when the job had already finished (409), so its own final state stands.
+ */
+export async function cancelJob(id: string): Promise<boolean> {
+  try {
+    await apiSend<{ job: ImportJob }>('DELETE', `/jobs/${seg(id)}`);
+    return true;
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 409) return false;
+    throw error;
+  }
+}
 
 /** The import report (packages/import ImportReport), as much as the UI shows. */
 export interface ImportReportView {
@@ -74,6 +88,8 @@ export interface ImportJob {
   /** The import report, or for a re-import `{ reimportId, counts }`. */
   result: ImportReportView | null;
   error: string | null;
+  /** Stopped by a cancel rather than an error. */
+  cancelled: boolean;
 }
 
 // ---------------------------------------------------------------- current tree
@@ -107,6 +123,32 @@ export const BAD_FILE_MESSAGE = 'Choose a .ged, .gedcom, .zip or .gdz file';
 export function hasImportExtension(fileName: string): boolean {
   const lower = fileName.toLowerCase();
   return IMPORT_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+/** The server's upload caps (`GET /api/limits`), in bytes. */
+export interface UploadLimits {
+  importUpload: { gedcomBytes: number; archiveBytes: number };
+}
+
+let uploadLimits: Promise<UploadLimits | null> | undefined;
+
+/** The server's upload caps, fetched once; null when they cannot be read (the server still checks). */
+export function getUploadLimits(): Promise<UploadLimits | null> {
+  uploadLimits ??= apiGet<UploadLimits>('/limits').catch(() => {
+    uploadLimits = undefined;
+    return null;
+  });
+  return uploadLimits;
+}
+
+/** Why `file` is too large to upload, or null when it fits (or the limits are unknown). */
+export async function oversizeMessage(file: File): Promise<string | null> {
+  const limits = await getUploadLimits();
+  if (!limits) return null;
+  const archive = /\.(zip|gdz)$/i.test(file.name);
+  const limit = archive ? limits.importUpload.archiveBytes : limits.importUpload.gedcomBytes;
+  if (file.size <= limit) return null;
+  return `This file is ${formatBytes(file.size)}. ${archive ? 'GEDZIP' : 'GEDCOM'} files can be up to ${formatBytes(limit)}.`;
 }
 
 /**

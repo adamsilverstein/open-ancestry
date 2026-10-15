@@ -5,18 +5,54 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { generateGedcom } from '../../../fixtures/generate';
-import { exposureWarning, parseCliArgs, progressReporter, run } from './main';
+import { openMemoryTree } from '@open-ancestry/db';
+import { importGedcom } from '@open-ancestry/import';
+import {
+  exposureWarning,
+  formatReport,
+  main,
+  parseCliArgs,
+  progressReporter,
+  run,
+  stopOnSignals,
+} from './main';
 
 describe('parseCliArgs', () => {
   it('parses serve with defaults', () => {
-    expect(parseCliArgs(['serve'], {})).toEqual({
+    expect(parseCliArgs(['serve'], {}, { tty: false })).toEqual({
       command: 'serve',
       host: '127.0.0.1',
       port: 4317,
       library: join(homedir(), 'OpenAncestry'),
       open: false,
       staticDir: undefined,
+      importLimits: {},
+      importHeapMb: undefined,
     });
+  });
+
+  it('reads import size and heap limits from flags, then OA_ variables', () => {
+    const MiB = 1024 * 1024;
+    expect(
+      parseCliArgs(
+        ['serve', '--max-gedcom-mb', '128', '--max-archive-mb', '4096', '--import-heap-mb', '3072'],
+        {},
+      ),
+    ).toMatchObject({
+      importLimits: { maxBytes: 128 * MiB, maxArchiveBytes: 4096 * MiB },
+      importHeapMb: 3072,
+    });
+    const env = { OA_MAX_GEDCOM_MB: '100', OA_MAX_ARCHIVE_MB: '2048', OA_IMPORT_HEAP_MB: '4096' };
+    expect(parseCliArgs(['serve'], env)).toMatchObject({
+      importLimits: { maxBytes: 100 * MiB, maxArchiveBytes: 2048 * MiB },
+      importHeapMb: 4096,
+    });
+    // A flag wins over the variable.
+    expect(parseCliArgs(['import', 'a.ged', '--max-gedcom-mb', '10'], env)).toMatchObject({
+      importLimits: { maxBytes: 10 * MiB, maxArchiveBytes: 2048 * MiB },
+    });
+    expect(() => parseCliArgs(['serve', '--max-gedcom-mb', 'lots'], {})).toThrow(/--max-gedcom-mb/);
+    expect(() => parseCliArgs(['serve'], { OA_IMPORT_HEAP_MB: '0' })).toThrow(/OA_IMPORT_HEAP_MB/);
   });
 
   it('parses serve options', () => {
@@ -36,6 +72,21 @@ describe('parseCliArgs', () => {
 
   it('rejects an invalid port', () => {
     expect(() => parseCliArgs(['serve', '--port', 'abc'])).toThrow(/port/);
+  });
+
+  it('opens the browser by default on a terminal, unless --no-open (issue #122)', () => {
+    expect(parseCliArgs(['serve'], {}, { tty: true })).toMatchObject({ open: true });
+    // Piped or scripted output (CI, e2e) gets no browser unless asked.
+    expect(parseCliArgs(['serve'], {}, { tty: false })).toMatchObject({ open: false });
+    expect(parseCliArgs(['serve', '--no-open'], {}, { tty: true })).toMatchObject({ open: false });
+    expect(parseCliArgs(['serve', '--open'], {}, { tty: false })).toMatchObject({ open: true });
+  });
+
+  it('reads -h and --help, for the CLI and for each command (issue #119)', () => {
+    expect(parseCliArgs(['--help'])).toEqual({ command: 'help' });
+    expect(parseCliArgs(['-h'])).toEqual({ command: 'help' });
+    expect(parseCliArgs(['serve', '--help'])).toEqual({ command: 'help', topic: 'serve' });
+    expect(parseCliArgs(['import', '-h'])).toEqual({ command: 'help', topic: 'import' });
   });
 
   it('returns help for no command', () => {
@@ -93,6 +144,41 @@ describe('run', () => {
     expect(exposureWarning('0.0.0.0')).toMatch(/WARNING: listening on 0\.0\.0\.0/);
   });
 
+  it('exits 0 with usage for --help, per command too', async () => {
+    const logs: string[] = [];
+    expect(await main(['--help'], { log: (line) => logs.push(line) })).toBe(0);
+    expect(logs.join('\n')).toMatch(/^Usage: open-ancestry <command>/);
+    logs.length = 0;
+    expect(await main(['serve', '--help'], { log: (line) => logs.push(line) })).toBe(0);
+    expect(logs.join('\n')).toMatch(/^Usage: open-ancestry serve/);
+    expect(logs.join('\n')).toContain('--no-open');
+    expect(logs.join('\n')).not.toContain('--media');
+    logs.length = 0;
+    expect(await main(['import', '--help'], { log: (line) => logs.push(line) })).toBe(0);
+    expect(logs.join('\n')).toMatch(/^Usage: open-ancestry import <file>/);
+    expect(logs.join('\n')).not.toContain('--port');
+  });
+
+  it('exits 2 with a one-line message and usage for unknown commands and options', async () => {
+    for (const [argv, message] of [
+      [['bogus'], 'Unknown command: bogus'],
+      [['serve', '--bogus'], 'Unknown option: --bogus'],
+      [['import', 'a.ged', '-x'], 'Unknown option: -x'],
+    ] as const) {
+      const errors: string[] = [];
+      const logs: string[] = [];
+      const code = await main([...argv], {
+        error: (line) => errors.push(line),
+        log: (line) => logs.push(line),
+      });
+      expect(code).toBe(2);
+      const [first, ...rest] = errors.join('\n').split('\n');
+      expect(first).toBe(message);
+      expect(rest.join('\n')).toContain('Usage: open-ancestry');
+      expect(logs).toEqual([]);
+    }
+  });
+
   it('prints usage for help', async () => {
     const logs: string[] = [];
     expect(await run(['help'], { log: (line) => logs.push(line) })).toBeUndefined();
@@ -117,7 +203,14 @@ describe('import', () => {
   it('parses import options', () => {
     expect(
       parseCliArgs(['import', 'a.ged', '--media', 'pics', '--name', 'Vale', '--library', '/l'], {}),
-    ).toEqual({ command: 'import', file: 'a.ged', media: 'pics', name: 'Vale', library: '/l' });
+    ).toEqual({
+      command: 'import',
+      file: 'a.ged',
+      media: 'pics',
+      name: 'Vale',
+      library: '/l',
+      importLimits: {},
+    });
     expect(() => parseCliArgs(['import'], {})).toThrow(/file/);
   });
 
@@ -172,6 +265,13 @@ describe('import', () => {
     await expect(
       run(['import', fixture, '--name', 'a/b', '--library', library], { log: () => {} }),
     ).rejects.toThrow(/path separator/);
+  });
+
+  it('applies --max-gedcom-mb to the import', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'oa-cli-big-'));
+    const big = join(dir, 'big.ged');
+    await writeFile(big, `0 HEAD\n0 @I1@ INDI\n1 NOTE ${'x'.repeat(1024)}\n`.repeat(1100));
+    await expect(importCli([big, '--max-gedcom-mb', '1'])).rejects.toThrow(/over 1048576 bytes/);
   });
 
   it('refuses a --media folder that does not exist', async () => {
@@ -322,5 +422,58 @@ describe('serve on SIGINT/SIGTERM', () => {
     expect(exits).toEqual([1]);
     await vi.waitFor(() => expect(exits).toEqual([1, 0]));
     await server?.close();
+  });
+
+  it('says why stopping failed before exiting 1', async () => {
+    const signals = new EventEmitter();
+    const exits: number[] = [];
+    const logs: string[] = [];
+    stopOnSignals(
+      {
+        url: 'http://127.0.0.1:1',
+        app: {} as never,
+        close: () => Promise.reject(new Error('Plugin did not start in time: preClose')),
+      },
+      signals as unknown as Pick<NodeJS.Process, 'on' | 'off'>,
+      (code) => exits.push(code),
+      (line) => logs.push(line),
+    );
+    signals.emit('SIGINT', 'SIGINT');
+    await vi.waitFor(() => expect(exits).toEqual([1]));
+    expect(logs.at(-1)).toBe('Could not stop cleanly: Plugin did not start in time: preClose');
+  });
+});
+
+describe('formatReport layout (issue #121)', () => {
+  async function report(lines: string[]) {
+    return importGedcom(
+      { bytes: ['0 HEAD', '1 GEDC', '2 VERS 5.5.1', ...lines, '0 TRLR', ''].join('\n') },
+      openMemoryTree(),
+      { today: new Date('2026-10-14T12:00:00Z') },
+    );
+  }
+  const tree = { name: 'T', dir: '/lib/T.oatree', homePerson: null };
+
+  it('keeps a space between columns and shortens long examples', async () => {
+    const r = await report([
+      '0 @I1@ INDI',
+      '1 NOTE start',
+      '1 CONC stray continuation',
+      `1 _LONG ${'x'.repeat(500)}`,
+    ]);
+    const out = formatReport(r, tree).split('\n');
+    const warning = out.find((l) => l.includes('misplaced-continuation'))!;
+    expect(warning).toMatch(/misplaced-continuation +\S/);
+    const long = out.find((l) => l.includes('INDI._LONG'))!;
+    expect(long.length).toBeLessThanOrEqual(130);
+    expect(long.endsWith('…')).toBe(true);
+  });
+
+  it('reads short imports as under 0.1s, not 0.0s', async () => {
+    const r = await report(['0 @I1@ INDI']);
+    r.timings.total = 12;
+    expect(formatReport(r, tree).split('\n')[0]).toMatch(/ in under 0\.1s$/);
+    r.timings.total = 1234;
+    expect(formatReport(r, tree).split('\n')[0]).toMatch(/ in 1\.2s$/);
   });
 });

@@ -1,7 +1,7 @@
 import type { FamilyRow, MediaRow, TableName, TreeStore } from '@open-ancestry/db';
 import { HIGH_CONFIDENCE, POSSIBLE_MATCH, type NearMiss, type PersonMatch } from './match';
 import {
-  mediaKey,
+  mediaKeys,
   norm,
   sourceKey,
   type SnapCitation,
@@ -96,6 +96,12 @@ export type ReimportChange =
 
 export type ReviewChange = ReimportChange & {
   id: string;
+  /**
+   * The same in every comparison of the same export while the change says
+   * the same thing, so choices can carry over when the review is compared
+   * again (#163). `id` is only unique within one comparison.
+   */
+  key: string;
   /** Applied unless the user unticks it. */
   defaultAccept: boolean;
   /** False for information only (missing people and facts): never applied. */
@@ -246,6 +252,7 @@ export function localHistory(store: TreeStore): LocalHistory {
     typeof id === 'string'
       ? (gone.get(`${entity}|${id}`) ?? (store.getRow(entity, id) as Image | undefined))
       : undefined;
+  const mediaKeyOf = mediaKeys(store);
   const push = <K, V>(map: Map<K, V[]>, key: K, value: V) => {
     const list = map.get(key);
     if (list) list.push(value);
@@ -308,7 +315,7 @@ export function localHistory(store: TreeStore): LocalHistory {
       case 'media_link': {
         if (d.row.owner_type !== 'person') break;
         const m = rowOf('media', d.row.media_id);
-        if (m) media.add(`${d.row.owner_id as string}|${mediaKey(m as unknown as MediaRow)}`);
+        if (m) media.add(`${d.row.owner_id as string}|${mediaKeyOf(m as unknown as MediaRow)}`);
         break;
       }
       case 'family_child': {
@@ -445,6 +452,15 @@ function mediaChanges(
     changes.push({ kind: 'media.add', incomingMediaId: x.row.id, title: x.row.title });
   }
   return changes;
+}
+
+/** The person, the kind and every row id a change refers to (see `ReviewChange.key`). */
+function changeKey(personKey: string, change: ReimportChange): string {
+  const ids = Object.entries(change)
+    .filter(([k, v]) => (k.endsWith('Id') || k === 'familyKey') && typeof v === 'string')
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([k, v]) => `${k}=${v as string}`);
+  return [personKey, change.kind, ...ids].join('|');
 }
 
 /** Whether the user removed something like this here: such changes are offered unticked. */
@@ -590,6 +606,7 @@ export function diffTrees(
       const item = {
         ...change,
         id: `c${++seq}`,
+        key: changeKey(r.key, change),
         defaultAccept: true,
         applicable: true,
         ...defaults,

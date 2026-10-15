@@ -10,4 +10,10 @@ export {
   type NearMiss,
   type PersonMatch,
 } from './match';
-export { closeReimport, prepareReimport, type ReimportSession } from './session';
+export {
+  closeReimport,
+  isReimportStale,
+  prepareReimport,
+  refreshReimport,
+  type ReimportSession,
+} from './session';

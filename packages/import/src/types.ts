@@ -12,6 +12,24 @@ export type ImportTarget = TreeStore | { dir: string; name?: string };
 
 export type ImportPhase = 'read' | 'parse' | 'map' | 'finalize' | 'commit' | 'done';
 
+/** What one import may contain; see IMPORT_LIMITS for the defaults. */
+export interface ImportLimits {
+  /** Largest GEDCOM text, in bytes: a plain file, or the GEDCOM inside a GEDZIP once inflated. */
+  maxBytes: number;
+  /** Largest GEDZIP archive as a whole, in bytes (photos included). */
+  maxArchiveBytes: number;
+  /** Largest single media file, in bytes. */
+  maxMediaBytes: number;
+  /** Most media bytes a GEDZIP may inflate to, in total. */
+  maxMediaTotalBytes: number;
+  /** Longest physical line, in bytes (UTF-8). */
+  maxLineLength: number;
+  /** Most level-0 records. */
+  maxRecords: number;
+  /** Most CONT/CONC lines in one record. */
+  maxContinuations: number;
+}
+
 export interface ImportOptions {
   /** Folder holding the media files a plain GEDCOM refers to. */
   mediaDir?: string;
@@ -19,9 +37,11 @@ export interface ImportOptions {
   onProgress?: (phase: ImportPhase, done: number, total: number) => void;
   /** Aborting rolls the import back (and removes a tree folder it created). */
   signal?: AbortSignal;
-  /** Largest GEDCOM or GEDZIP accepted, in bytes (default 256 MiB). */
+  /** Size and shape caps (default IMPORT_LIMITS); any left out keep their default. */
+  limits?: Partial<ImportLimits>;
+  /** Shorthand for `limits.maxBytes`. */
   maxBytes?: number;
-  /** Largest media file copied into the tree, in bytes (default 256 MiB). */
+  /** Shorthand for `limits.maxMediaBytes`. */
   maxMediaBytes?: number;
   /** Most warnings kept in the report (default 1000); `warningCount` has the total. */
   maxWarnings?: number;

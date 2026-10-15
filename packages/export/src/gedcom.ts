@@ -5,12 +5,14 @@ import {
   type NoteRow,
   type RawRecordRow,
   type TreeStore,
+  type UnmappedLineRow,
 } from '@open-ancestry/db';
 import {
   analyzeHeader,
   parseGedcom,
   resnRestrictions,
   serializeNode,
+  tokenizeLine,
   type GedcomNode,
 } from '@open-ancestry/gedcom';
 import {
@@ -131,6 +133,10 @@ class GedcomWriter implements WriterContext, MergeContext {
   private readonly living = new Set<string>();
   private readonly privateFamilies = new Set<string>();
   private readonly withheld = new Set<string>();
+  /** Imported FILE lines `filePath` wrote for media whose file was missing. */
+  private readonly usedFileLines = new Set<UnmappedLineRow>();
+  /** FILE lines of trees imported before they were kept with their media, by media id. */
+  private readonly legacyFiles = new Map<string, UnmappedLineRow>();
   private readonly hiddenEvents = new Set<string>();
   private nameStates: Map<string, NameTextState> | undefined;
   private readonly xrefs = new Map<string, string>();
@@ -152,6 +158,8 @@ class GedcomWriter implements WriterContext, MergeContext {
   private readonly writer: RecordWriter;
   private head: RawRecordRow | undefined;
   private verbatim = false;
+  /** GEDCOM major version of the imported file, once read. */
+  private major: number | undefined;
 
   constructor(store: TreeStore, options: InternalOptions) {
     this.store = store;
@@ -182,6 +190,7 @@ class GedcomWriter implements WriterContext, MergeContext {
       }
       this.findWithheld();
     }
+    this.findMediaWithoutFile();
     this.writer = new RecordWriter(this);
   }
 
@@ -350,13 +359,78 @@ class GedcomWriter implements WriterContext, MergeContext {
   }
 
   filePath(media: MediaRow): string | undefined {
-    if (this.options.filePath) return this.options.filePath(media);
+    const path = this.options.filePath ? this.options.filePath(media) : this.storedPath(media);
+    if (path !== undefined) return path;
+    // A file missing at import: its FILE line as written, so the reference is kept.
+    const original = this.originalFile(media);
+    if (!original) return undefined;
+    this.usedFileLines.add(original.row);
+    return this.fileValue(original.value);
+  }
+
+  private storedPath(media: MediaRow): string | undefined {
     if (media.remote_url) return media.remote_url;
     if (!media.local_path) return undefined;
     // GEDCOM 7 FILE values are URI references.
     return this.v7
       ? media.local_path.split('/').map(encodeURIComponent).join('/')
       : media.local_path;
+  }
+
+  /** The imported FILE line of media whose file was not found, kept in unmapped_line. */
+  private originalFile(media: MediaRow): { row: UnmappedLineRow; value: string } | undefined {
+    const rows = this.data.unmapped.get(ownerKey('media', media.id)) ?? [];
+    const legacy = this.legacyFiles.get(media.id);
+    for (const row of legacy ? [...rows, legacy] : rows) {
+      if (!/(^|\.)FILE$/.test(row.path)) continue;
+      const value = tokenizeLine(row.line)?.value?.trim();
+      if (value) return { row, value };
+    }
+    return undefined;
+  }
+
+  /**
+   * Trees imported before the FILE line was kept with its media have it among
+   * the owner's lines instead. Each owner's pathless inline media pair with its
+   * unmapped OBJE.FILE lines in order, but only when the counts agree, so a
+   * photo never gets someone else's path.
+   */
+  private findLegacyFiles(): void {
+    const d = this.data;
+    for (const [key, links] of d.mediaLinks) {
+      const lines = (d.unmapped.get(key) ?? []).filter((r) => /(^|\.)OBJE\.FILE$/.test(r.path));
+      if (lines.length === 0) continue;
+      const pathless = links
+        .map((l) => d.media.get(l.media_id))
+        .filter(
+          (m): m is MediaRow =>
+            !!m &&
+            !m.external_id &&
+            !m.local_path &&
+            !m.remote_url &&
+            d.mediaLinksByMedia.get(m.id)?.length === 1 &&
+            !this.originalFile(m),
+        );
+      if (pathless.length !== lines.length) continue;
+      const ordered = [...lines].sort((a, b) => a.line_no - b.line_no);
+      pathless.forEach((m, i) => this.legacyFiles.set(m.id, ordered[i]!));
+    }
+  }
+
+  /**
+   * Media with no file and no imported path to name one (trees imported before
+   * the FILE line was kept with its media) are left out of generated records:
+   * an empty FILE is invalid in both GEDCOM versions.
+   */
+  private findMediaWithoutFile(): void {
+    this.findLegacyFiles();
+    for (const m of this.data.mediaRows) {
+      if (this.withheld.has(m.id) || m.local_path || m.remote_url || this.originalFile(m)) continue;
+      this.withheld.add(m.id);
+      // A privatized export does not quote what it leaves out.
+      const what = this.quoteLines && m.title ? `"${m.title}"` : 'A media item';
+      this.warn(`${what} has no file path and was left out`);
+    }
   }
 
   // ------------------------------------------------------------ export
@@ -432,9 +506,16 @@ class GedcomWriter implements WriterContext, MergeContext {
   }
 
   private sourceMajor(): number {
+    if (this.major !== undefined) return this.major;
     const head = this.data.rawRecords.find((r) => r.gedcom_tag === 'HEAD');
-    if (!head) return 5;
-    return analyzeHeader(parseGedcom(head.raw_text).records[0]).majorVersion ?? 5;
+    this.major = head
+      ? (analyzeHeader(parseGedcom(head.raw_text).records[0]).majorVersion ?? 5)
+      : 5;
+    return this.major;
+  }
+
+  get sourceVersion(): number {
+    return this.sourceMajor();
   }
 
   /** One slot per raw record, in file order, so exported records keep the original order. */
@@ -565,7 +646,9 @@ class GedcomWriter implements WriterContext, MergeContext {
     for (const person of this.data.persons) plan('person', person.id, true);
     for (const family of this.data.families) plan('family', family.id, true);
     for (const slot of this.slots) if (slot.kind) plan(slot.kind, slot.id!, false);
-    // Records nothing refers to are written too, so no data is lost.
+    // Records nothing refers to are written too, so no data is lost. A privatized export
+    // leaves out notes and media nobody refers to: there is no one left to judge them by,
+    // and they may be what a deleted person left behind.
     const d = this.data;
     for (const s of d.sources) {
       const used = d.citationsBySource.get(s.id)?.some((c) => d.citationLinksByCitation.has(c.id));
@@ -573,12 +656,14 @@ class GedcomWriter implements WriterContext, MergeContext {
     }
     for (const r of d.repositories)
       if (!d.sourcesByRepository.has(r.id)) plan('repository', r.id, true);
-    if (this.includeMedia) {
+    if (this.includeMedia && !this.privatize) {
       for (const m of d.mediaRows) {
         if (!d.mediaLinksByMedia.has(m.id) && !d.primaryOf.has(m.id)) plan('media', m.id, true);
       }
     }
-    for (const note of d.notes) if (!d.noteLinksByNote.has(note.id)) plan('note', note.id, true);
+    if (!this.privatize) {
+      for (const note of d.notes) if (!d.noteLinksByNote.has(note.id)) plan('note', note.id, true);
+    }
     for (const tag of d.tags) if (!d.tagLinksByTag.has(tag.id)) plan('tag', tag.id, true);
   }
 
@@ -621,7 +706,9 @@ class GedcomWriter implements WriterContext, MergeContext {
       else {
         const slot = this.slotByKey.get(key);
         const raws = slot ? [slot.raw, ...(slot.also ?? [])] : [];
-        mergeUnmapped(this, node, raws, this.data.unmapped.get(key), xref);
+        // A FILE line already written from its imported text is not merged a second time.
+        const rows = this.data.unmapped.get(key)?.filter((r) => !this.usedFileLines.has(r));
+        mergeUnmapped(this, node, raws, rows, xref);
       }
       if (this.privatize && this.scrubXrefs(node)) {
         this.warn(`${xref}: an imported record id in its text was removed`);

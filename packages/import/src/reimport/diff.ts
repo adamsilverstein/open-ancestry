@@ -94,6 +94,12 @@ export type ReimportChange =
 
 export type ReviewChange = ReimportChange & {
   id: string;
+  /**
+   * The same in every comparison of the same export while the change says
+   * the same thing, so choices can carry over when the review is compared
+   * again (#163). `id` is only unique within one comparison.
+   */
+  key: string;
   /** Applied unless the user unticks it. */
   defaultAccept: boolean;
   /** False for information only (missing people and facts): never applied. */
@@ -416,6 +422,15 @@ function foldMerged(
   }
 }
 
+/** The person, the kind and every row id a change refers to (see `ReviewChange.key`). */
+function changeKey(personKey: string, change: ReimportChange): string {
+  const ids = Object.entries(change)
+    .filter(([k, v]) => (k.endsWith('Id') || k === 'familyKey') && typeof v === 'string')
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([k, v]) => `${k}=${v as string}`);
+  return [personKey, change.kind, ...ids].join('|');
+}
+
 /** Whether the user removed something like this here: such changes are offered unticked. */
 interface Removed {
   fact(ownerId: string, type: string, date: string | null): boolean;
@@ -559,6 +574,7 @@ export function diffTrees(
       const item = {
         ...change,
         id: `c${++seq}`,
+        key: changeKey(r.key, change),
         defaultAccept: true,
         applicable: true,
         ...defaults,

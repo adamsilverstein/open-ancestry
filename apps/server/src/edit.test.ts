@@ -1,5 +1,8 @@
+import { join } from 'node:path';
+import { openTree } from '@open-ancestry/db';
+import { importGedcom } from '@open-ancestry/import';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { seed, testApi, type Seeded, type TestApi } from './test/helpers';
+import { createTestTree, seed, testApi, type Seeded, type TestApi } from './test/helpers';
 
 let api: TestApi;
 let s: Seeded;
@@ -39,6 +42,33 @@ describe('people', () => {
     expect(birth.place.full_name).toBe('Harlow, Essex, England');
     const death = d.events.find((e: { event: { type: string } }) => e.event.type === 'DEAT');
     expect(death.event).toMatchObject({ date_qualifier: 'text', date_sort: null });
+  });
+
+  it('makes the first person in an empty tree the home person, undoably', async () => {
+    const base = await createTestTree(api, 'Empty');
+    const res = await api.post(`${base}/people`, { names: [{ given: 'Wren', surname: 'Ashby' }] });
+    const { person } = res.json();
+    expect((await api.get(`${base}/home`)).json().personId).toBe(person.id);
+
+    // Later people leave the home person alone.
+    const second = (await api.post(`${base}/people`, { names: [{ given: 'Ivo' }] })).json();
+    expect(second.person.id).not.toBe(person.id);
+    expect((await api.get(`${base}/home`)).json().personId).toBe(person.id);
+
+    // Undoing the second add keeps the home; undoing the first clears it with the person.
+    await api.post(`${base}/undo`);
+    expect((await api.get(`${base}/home`)).json().personId).toBe(person.id);
+    await api.post(`${base}/undo`);
+    expect((await api.get(`${base}/home`)).json().personId).toBeNull();
+    expect((await api.get(`${base}/people/${person.id}`)).statusCode).toBe(404);
+    await api.post(`${base}/redo`);
+    expect((await api.get(`${base}/home`)).json().personId).toBe(person.id);
+  });
+
+  it('does not change the home person of a tree that already has people', async () => {
+    const before = (await api.get(`${s.base}/home`)).json().personId;
+    await api.post(`${s.base}/people`, { names: [{ given: 'Ivo' }] });
+    expect((await api.get(`${s.base}/home`)).json().personId).toBe(before);
   });
 
   it('validates the body', async () => {
@@ -144,6 +174,142 @@ describe('events', () => {
     expect((await api.post(`${s.base}/people/01NOPE/events`, { type: 'BIRT' })).statusCode).toBe(
       404,
     );
+  });
+});
+
+describe('ending relationships', () => {
+  const familyOf = async (personId: string) =>
+    (await api.get(`${s.base}/people/${personId}`)).json();
+
+  it('drops partnership events when a partner with children is removed, undoably', async () => {
+    await api.post(`${s.base}/families/${s.marriage}/events`, { type: 'MARR', date_text: '1960' });
+    const fam = (await api.get(`${s.base}/families/${s.marriage}`)).json();
+    const slot = fam.family.partner1_id === s.dan ? 'partner1_id' : 'partner2_id';
+    const res = await api.patch(`${s.base}/families/${s.marriage}`, { [slot]: null });
+    expect(res.statusCode).toBe(200);
+    const ada = await familyOf(s.ada);
+    const left = ada.partnerFamilies.find(
+      (f: { family: { id: string } }) => f.family.id === s.marriage,
+    );
+    expect(left.partner).toBeNull();
+    expect(left.children).toHaveLength(1);
+    expect(left.events).toEqual([]);
+
+    await api.post(`${s.base}/undo`);
+    const restored = (await familyOf(s.ada)).partnerFamilies.find(
+      (f: { family: { id: string } }) => f.family.id === s.marriage,
+    );
+    expect(restored.partner.id).toBe(s.dan);
+    expect(restored.events).toHaveLength(1);
+  });
+
+  it('deletes a one-parent family when its last child link is removed', async () => {
+    const fam = (await api.get(`${s.base}/families/${s.marriage}`)).json();
+    const slot = fam.family.partner1_id === s.dan ? 'partner1_id' : 'partner2_id';
+    await api.patch(`${s.base}/families/${s.marriage}`, { [slot]: null });
+    const link = (await familyOf(s.eve)).parentFamilies[0].link.id;
+    await api.del(`${s.base}/family-children/${link}`);
+    expect((await api.get(`${s.base}/families/${s.marriage}`)).statusCode).toBe(404);
+    expect((await familyOf(s.ada)).partnerFamilies).toEqual([]);
+
+    await api.post(`${s.base}/undo`);
+    expect((await api.get(`${s.base}/families/${s.marriage}`)).statusCode).toBe(200);
+  });
+
+  it('moving a partner to the other slot is not a removal', async () => {
+    const fam = (await api.get(`${s.base}/families/${s.marriage}`)).json().family;
+    const [danSlot, adaSlot] =
+      fam.partner1_id === s.dan ? ['partner1_id', 'partner2_id'] : ['partner2_id', 'partner1_id'];
+    await api.patch(`${s.base}/families/${s.marriage}`, { [danSlot]: null });
+    await api.post(`${s.base}/families/${s.marriage}/events`, { type: 'RESI', date_text: '1970' });
+    // Ada moves from her slot to the empty one: same partnership, same events.
+    const res = await api.patch(`${s.base}/families/${s.marriage}`, {
+      [adaSlot]: null,
+      [danSlot]: s.ada,
+    });
+    expect(res.statusCode).toBe(200);
+    const label = (await api.get(`${s.base}/history?limit=1`)).json().items[0].label;
+    expect(label).toMatch(/^Edit relationship: /);
+    expect((await api.get(`${s.base}/families/${s.marriage}`)).json().events).toHaveLength(1);
+  });
+
+  it('keeps a one-partner family whose last child leaves while it still has events', async () => {
+    await api.post(`${s.base}/families/${s.marriage}/events`, { type: 'RESI', date_text: '1970' });
+    const fam = (await api.get(`${s.base}/families/${s.marriage}`)).json().family;
+    const slot = fam.partner1_id === s.dan ? 'partner1_id' : 'partner2_id';
+    // Removing Dan ends the partnership and drops its events…
+    await api.patch(`${s.base}/families/${s.marriage}`, { [slot]: null });
+    // …then a note on the family keeps it after its last child leaves.
+    await api.post(`${s.base}/notes`, { text: 'Kept', owner_type: 'family', owner_id: s.marriage });
+    const link = (await (await api.get(`${s.base}/people/${s.eve}`)).json()).parentFamilies[0].link
+      .id;
+    await api.del(`${s.base}/family-children/${link}`);
+    expect((await api.get(`${s.base}/families/${s.marriage}`)).statusCode).toBe(200);
+  });
+
+  it('removes an imported one-parent family when its last child leaves, and undo restores it', async () => {
+    const base = await createTestTree(api, 'Imported');
+    const store = openTree(join(api.root, 'Imported.oatree'));
+    let family: string;
+    let child: string;
+    try {
+      await importGedcom(
+        {
+          bytes: Buffer.from(
+            '0 HEAD\n1 GEDC\n2 VERS 5.5.1\n0 @I1@ INDI\n1 NAME Ada /Vale/\n0 @I2@ INDI\n1 NAME Eve /Vale/\n0 @F1@ FAM\n1 WIFE @I1@\n1 CHIL @I2@\n0 TRLR\n',
+          ),
+        },
+        store,
+      );
+      const owner = (type: string, xref: string) =>
+        store.db
+          .prepare('SELECT owner_id FROM raw_record WHERE owner_type = ? AND xref = ?')
+          .pluck()
+          .get(type, xref) as string;
+      family = owner('family', '@F1@');
+      child = owner('person', '@I2@');
+    } finally {
+      store.close();
+    }
+    // Every imported family has a raw record; that alone must not keep it.
+    const link = (await api.get(`${base}/people/${child}`)).json().parentFamilies[0].link.id;
+    await api.del(`${base}/family-children/${link}`);
+    expect((await api.get(`${base}/families/${family}`)).statusCode).toBe(404);
+    await api.post(`${base}/undo`);
+    expect((await api.get(`${base}/families/${family}`)).statusCode).toBe(200);
+  });
+
+  it('keeps a family that still has two partners when a child leaves', async () => {
+    const link = (await familyOf(s.eve)).parentFamilies[0].link.id;
+    await api.del(`${s.base}/family-children/${link}`);
+    expect((await api.get(`${s.base}/families/${s.marriage}`)).statusCode).toBe(200);
+  });
+});
+
+describe('relationship history labels', () => {
+  const latest = async () =>
+    (await api.get(`${s.base}/history?limit=1`)).json().items[0].label as string;
+
+  it('names what a family edit did', async () => {
+    await api.patch(`${s.base}/families/${s.marriage}`, { relationship_type: 'partners' });
+    expect(await latest()).toBe('Edit relationship type: Ada Vale and Dan Reed');
+
+    await api.patch(`${s.base}/families/${s.marriage}`, { partner2_id: null });
+    expect(await latest()).toMatch(
+      /^Remove partner: (Dan Reed from Ada Vale|Ada Vale from Dan Reed)$/,
+    );
+  });
+
+  it('names a removed partnership', async () => {
+    await api.del(`${s.base}/families/${s.marriage}`);
+    expect(await latest()).toBe('Remove relationship: Ada Vale and Dan Reed');
+  });
+
+  it('names a removed child link with the family it left', async () => {
+    const d = (await api.get(`${s.base}/people/${s.eve}`)).json();
+    const link = d.parentFamilies[0].link.id;
+    await api.del(`${s.base}/family-children/${link}`);
+    expect(await latest()).toBe('Remove child link: Eve Reed from Ada Vale and Dan Reed');
   });
 });
 
@@ -391,9 +557,10 @@ describe('notes and tags', () => {
   it('manages tags and person tag links', async () => {
     const tag = (await api.post(`${s.base}/tags`, { name: 'DNA match' })).json().tag;
     expect(tag.category).toBe('');
-    expect((await api.post(`${s.base}/tags`, { name: 'DNA match' })).json().error.code).toBe(
-      'conflict',
-    );
+    expect((await api.post(`${s.base}/tags`, { name: 'DNA match' })).json().error).toEqual({
+      code: 'conflict',
+      message: 'A tag with that name already exists',
+    });
     expect((await api.post(`${s.base}/tags`, { name: 'x', color: 'red;}' })).statusCode).toBe(400);
     expect(
       (await api.patch(`${s.base}/tags/${tag.id}`, { color: '#00aa00' })).json().tag.color,
@@ -402,12 +569,16 @@ describe('notes and tags', () => {
     expect((await api.post(`${s.base}/people/${s.ada}/tags`, { tagId: tag.id })).statusCode).toBe(
       201,
     );
-    expect((await api.post(`${s.base}/people/${s.ada}/tags`, { tagId: tag.id })).statusCode).toBe(
-      409,
-    );
+    // Tagging again or untagging twice changes nothing, so a retried request is harmless.
+    const again = await api.post(`${s.base}/people/${s.ada}/tags`, { tagId: tag.id });
+    expect(again.statusCode).toBe(201);
+    expect(again.json().batchId).toBeNull();
     expect((await detail(s.ada)).tags.map((t: { name: string }) => t.name)).toEqual(['DNA match']);
     expect((await api.del(`${s.base}/people/${s.ada}/tags/${tag.id}`)).statusCode).toBe(200);
-    expect((await api.del(`${s.base}/people/${s.ada}/tags/${tag.id}`)).statusCode).toBe(404);
+    const twice = await api.del(`${s.base}/people/${s.ada}/tags/${tag.id}`);
+    expect(twice.statusCode).toBe(200);
+    expect(twice.json().batchId).toBeNull();
+    expect((await api.del(`${s.base}/people/01NOPE/tags/${tag.id}`)).statusCode).toBe(404);
     expect((await api.post(`${s.base}/people/${s.ada}/tags`, { tagId: '01NOPE' })).statusCode).toBe(
       404,
     );

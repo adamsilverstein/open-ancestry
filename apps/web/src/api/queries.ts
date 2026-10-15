@@ -1,10 +1,13 @@
 import { queryOptions } from '@tanstack/react-query';
 import { apiGet, seg } from './client';
-import type { Neighborhood, PersonDetail } from './types';
+import type { PersonDetail, RelationshipView } from './types';
 
 export interface TreeListItem {
   id: string;
+  /** The stored name, as Rename edits it. */
   name: string;
+  /** What to show: the name, plus the folder when two trees share a name. */
+  label: string;
   modifiedAt: string;
 }
 
@@ -57,12 +60,13 @@ export const personQuery = (tree: string, id: string) =>
   });
 
 /** Every recorded ancestor (up to the API's 10 generations), for relationship naming. */
-export const ancestorsQuery = (tree: string, id: string) =>
+/** What `from` is to `to` (the home person when omitted), across the whole tree. */
+export const relationshipQuery = (tree: string, from: string, to?: string) =>
   queryOptions({
-    queryKey: ['ancestors', tree, id],
+    queryKey: ['relationship', tree, from, to ?? 'home'],
     queryFn: ({ signal }) =>
-      apiGet<Neighborhood>(
-        `/trees/${seg(tree)}/neighborhood?focus=${seg(id)}&up=10&down=0&siblings=false`,
+      apiGet<RelationshipView>(
+        `/trees/${seg(tree)}/relationship?from=${seg(from)}${to ? `&to=${seg(to)}` : ''}`,
         signal,
       ),
   });

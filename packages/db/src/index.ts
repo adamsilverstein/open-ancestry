@@ -24,8 +24,13 @@ export {
 } from './store';
 export { isNfcColumn, nfcRow, toNFC } from './nfc';
 export {
+  PRIVATE_DIR_MODE,
+  PRIVATE_FILE_MODE,
+  TreeAccessError,
   TREE_EXTENSION,
   createTree,
+  ensurePrivateDir,
+  restrictMode,
   openMemoryTree,
   openTree,
   treePaths,
@@ -58,7 +63,14 @@ export {
   undoLatest,
   touchesMergedRows,
 } from './undo';
-export { BULK_TABLE_ORDER, BulkWriter, bulkInsert, type BulkCounts, type BulkData } from './bulk';
+export {
+  BULK_TABLE_ORDER,
+  BulkWriter,
+  bulkInsert,
+  type BulkWriterOptions,
+  type BulkCounts,
+  type BulkData,
+} from './bulk';
 export {
   OA_JSON_FORMAT,
   OA_JSON_FORMAT_VERSION,
@@ -81,3 +93,12 @@ export {
   refreshDerivedColumns,
   type RefreshOptions,
 } from './derived';
+export { getRelationship, type RelationshipView } from './kinship';
+export {
+  checkMediaPathSync,
+  openMediaFile,
+  openMediaFileSync,
+  resolveMediaPath,
+  resolveMediaPathSync,
+  type MediaRefusal,
+} from './media-path';

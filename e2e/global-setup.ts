@@ -12,6 +12,6 @@ export default async function globalSetup() {
   rmSync(join(library, `${FIXTURE_TREE}.oatree`), { recursive: true, force: true });
   rmSync(join(library, MANIFEST), { force: true });
   buildFixtureLibrary(library);
-  seedTreeViewTrees(library);
+  await seedTreeViewTrees(library);
   await buildMediaTree(library);
 }

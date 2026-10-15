@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { ApiPersonSummary } from '../api/types';
 import { fixtureDetail } from './fixtureDetail.test-utils';
-import { fullName, initials, isLivingStatus, lifeDate, toPersonSummary } from './person';
+import {
+  fullName,
+  initials,
+  isLivingStatus,
+  lifeDate,
+  nearestRelative,
+  toPersonSummary,
+} from './person';
 
 describe('initials', () => {
   it('uses the first and last name', () => {
@@ -79,5 +86,53 @@ describe('API person adapters', () => {
     expect(isLivingStatus('unknown')).toBe(true);
     expect(isLivingStatus('dead')).toBe(false);
     expect(isLivingStatus('inferred_dead')).toBe(false);
+  });
+});
+
+describe('nearestRelative', () => {
+  it('prefers a parent, then a partner, then nobody', () => {
+    const rowan = fixtureDetail('rowan');
+    const parent = rowan.parentFamilies[0]!;
+    expect(nearestRelative(rowan)).toBe((parent.partner1 ?? parent.partner2)!.id);
+
+    const noParents = { ...rowan, parentFamilies: [] };
+    const partner = rowan.partnerFamilies.find((f) => f.partner)!.partner!;
+    expect(nearestRelative(noParents)).toBe(partner.id);
+
+    const childless = { ...noParents, partnerFamilies: [] };
+    expect(nearestRelative(childless)).toBeUndefined();
+  });
+
+  const rowan = fixtureDetail('rowan');
+  const someone = (id: string) => ({ ...rowan.summary, id });
+
+  it('uses a single parent when the other is unknown', () => {
+    const family = { ...rowan.parentFamilies[0]!, partner1: null, partner2: someone('mum') };
+    expect(nearestRelative({ ...rowan, parentFamilies: [family] })).toBe('mum');
+  });
+
+  it('falls back to a child when there are no parents or partners', () => {
+    const own = rowan.partnerFamilies[0]!;
+    const family = {
+      ...own,
+      partner: null,
+      children: [{ ...own.children[0]!, person: someone('kid') }],
+    };
+    expect(nearestRelative({ ...rowan, parentFamilies: [], partnerFamilies: [family] })).toBe(
+      'kid',
+    );
+  });
+
+  it('falls back to a sibling when the parents are unknown', () => {
+    const parents = rowan.parentFamilies[0]!;
+    const family = {
+      ...parents,
+      partner1: null,
+      partner2: null,
+      siblings: [{ ...parents.siblings[0]!, person: someone('sib') }],
+    };
+    expect(nearestRelative({ ...rowan, parentFamilies: [family], partnerFamilies: [] })).toBe(
+      'sib',
+    );
   });
 });

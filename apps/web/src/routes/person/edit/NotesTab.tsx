@@ -15,6 +15,7 @@ import { eventLabel } from '../../../lib/timeline';
 import pageStyles from '../PersonPage.module.css';
 import { removeNote, setNoteText } from './optimistic';
 import { SaveError, useSaveState } from './SaveError';
+import { useDirtyForm } from './dirty';
 import styles from './Edit.module.css';
 
 function NoteForm({
@@ -34,6 +35,7 @@ function NoteForm({
   error: string | null;
 }) {
   const [text, setText] = useState(initial);
+  useDirtyForm(text);
   const field = useRef<HTMLTextAreaElement>(null);
   // Focus the field the user just asked to write in.
   useEffect(() => field.current?.focus(), []);

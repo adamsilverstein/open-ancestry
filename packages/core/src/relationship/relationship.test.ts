@@ -48,10 +48,10 @@ describe('relationship names (A is B’s ...)', () => {
     ['bro', 'me', 'brother'],
     ['sis', 'me', 'sister'],
     ['me', 'bro', 'sister'],
-    ['halfbro', 'me', 'half brother', 'half-brother'],
-    ['me', 'halfbro', 'half sister', 'half-sister'],
-    ['halfsis', 'me', 'half sister', 'half-sister'],
-    ['dadStep', 'me', 'half brother', 'half-brother'],
+    ['halfbro', 'me', 'half-brother'],
+    ['me', 'halfbro', 'half-sister'],
+    ['halfsis', 'me', 'half-sister'],
+    ['dadStep', 'me', 'half-brother'],
     // Aunts, uncles, nieces, nephews
     ['uncle', 'me', 'uncle'],
     ['aunt', 'me', 'aunt'],
@@ -64,7 +64,7 @@ describe('relationship names (A is B’s ...)', () => {
     ['niece', 'me', 'niece'],
     ['gnephew', 'me', 'grandniece', 'great-niece'],
     ['me', 'gnephew', 'grandaunt', 'great-aunt'],
-    ['halfnephew', 'me', 'half nephew', 'half-nephew'],
+    ['halfnephew', 'me', 'half-nephew'],
     ['kidU', 'me', 'niece or nephew'],
     ['me', 'kidU', 'aunt'],
     // Cousins
@@ -87,7 +87,7 @@ describe('relationship names (A is B’s ...)', () => {
     ['adoptee', 'me', 'adopted son'],
     ['me', 'adoptee', 'adoptive mother'],
     ['adoptee', 'son', 'adopted brother'],
-    ['son', 'adoptee', 'adoptive brother'],
+    ['son', 'adoptee', 'adopted brother'],
     ['adoptee', 'dad', 'adopted grandson'],
     ['fosterkid', 'uncle', 'foster daughter'],
     ['uncle', 'fosterkid', 'foster father'],
@@ -122,7 +122,7 @@ describe('relationship names (A is B’s ...)', () => {
     ['gson', 'hus', 'grandson'],
     ['dadStep', 'gf', 'step-grandson'],
     ['fosterkid', 'cousin1', 'foster sister'],
-    ['halfnephew', 'nephew', 'half 1st cousin'],
+    ['halfnephew', 'nephew', 'half first cousin'],
     ['gaunt', 'son', 'great-grandaunt'],
     ['ggUncle', 'son', '2nd great-granduncle'],
     ['son', 'gaunt', 'great-grandnephew'],
@@ -310,7 +310,7 @@ describe('relationshipName and neighborhood input', () => {
   it('names a shape directly for callers with their own walk', () => {
     expect(relationshipName({ up: 2, down: 3 }, 'M')).toBe('1st cousin 1x removed');
     expect(relationshipName({ up: 0, down: 5 }, 'F')).toBe('3rd great-grandmother');
-    expect(relationshipName({ up: 1, down: 1 }, 'F', true)).toBe('half sister');
+    expect(relationshipName({ up: 1, down: 1 }, 'F', true)).toBe('half-sister');
     expect(relationshipName({ up: 1, down: 3 }, 'M')).toBe('granduncle');
     const formal = (up: number, down: number, half = false) =>
       relationshipName({ up, down }, 'F', half, undefined, 'formal');

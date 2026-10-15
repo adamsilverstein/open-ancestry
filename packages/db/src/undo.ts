@@ -48,6 +48,27 @@ export function touchesMergedRows(
 }
 
 /**
+ * Whether a batch removed links to notes, media or citations that no longer
+ * exist: an upgrade cleaned up what earlier deletes left unlinked (#226).
+ */
+function touchesCleanedUpRows(store: TreeStore, batchId: string): boolean {
+  return (
+    store.db
+      .prepare(
+        `SELECT 1 FROM change_log c WHERE c.batch_id = ? AND c.op = 'delete'
+           AND ((c.entity = 'note_link' AND NOT EXISTS
+                  (SELECT 1 FROM note WHERE id = json_extract(c.before_json, '$.note_id')))
+             OR (c.entity = 'media_link' AND NOT EXISTS
+                  (SELECT 1 FROM media WHERE id = json_extract(c.before_json, '$.media_id')))
+             OR (c.entity = 'citation_link' AND NOT EXISTS
+                  (SELECT 1 FROM citation WHERE id = json_extract(c.before_json, '$.citation_id'))))
+         LIMIT 1`,
+      )
+      .get(batchId) !== undefined
+  );
+}
+
+/**
  * Tables that point at a row by `owner_type` + `owner_id`. SQLite cannot
  * enforce these references, so undo checks them before removing a row.
  */
@@ -237,6 +258,11 @@ function replay(
     if (conflict && touchesMergedRows(store, batch.id)) {
       throw new UndoConflictError(
         `Cannot ${direction} "${batch.label}": this change touched a place or tag that was merged during an upgrade, so it can't be ${direction === 'undo' ? 'undone' : 'redone'}. Older changes stay in History.`,
+      );
+    }
+    if (conflict && touchesCleanedUpRows(store, batch.id)) {
+      throw new UndoConflictError(
+        `Cannot ${direction} "${batch.label}": the notes, photos or citations it unlinked were cleaned up afterwards, so it can't be ${direction === 'undo' ? 'undone' : 'redone'}. Older changes stay in History.`,
       );
     }
     // Rows created by this batch are still referenced by later edits (or rows

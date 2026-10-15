@@ -21,7 +21,29 @@ export interface MergeContext {
    * someone withheld.
    */
   readonly quoteLines: boolean;
+  /** GEDCOM major version of the imported file: 7 escapes `@` and reads padded pointers differently. */
+  readonly sourceVersion: number;
 }
+
+/** An imported record's raw text parsed by the rules of the file it came from. */
+function parseRecord(text: string, version: number): GedcomNode | undefined {
+  if (version < 7) return parseGedcom(text).records[0];
+  return parseGedcom(`0 HEAD\n1 GEDC\n2 VERS 7.0\n${text}`).records[1];
+}
+
+/** Tags whose value must be a pointer; text there is a malformed line, not data. */
+const POINTER_TAGS = new Set([
+  'ASSO',
+  'FAMC',
+  'FAMS',
+  'HUSB',
+  'WIFE',
+  'CHIL',
+  'ALIA',
+  'ANCI',
+  'DESI',
+  'SUBM',
+]);
 
 /** Tags the writer produces from domain columns: an unmapped copy would contradict the edited value. */
 const GENERATED_TAGS = new Set([
@@ -136,7 +158,7 @@ export function mergeUnmapped(
   }
   const lines = rows.filter((r) => !r.path.includes('('));
   if (!lines.length) return;
-  const sources = raws.flatMap((raw) => parseGedcom(raw.raw_text).records.slice(0, 1));
+  const sources = raws.flatMap((raw) => parseRecord(raw.raw_text, ctx.sourceVersion) ?? []);
   if (!sources.length) {
     // No imported text to say where nested lines belong; only top-level extension lines can be placed.
     fallback(ctx, record, lines, label);
@@ -150,7 +172,7 @@ export function mergeUnmapped(
   }
   // Each imported record says where its own lines belong (a merged person has several).
   for (const source of sources) {
-    const text = serializeNode(source).split('\n');
+    const text = serializeNode(source, { version: ctx.sourceVersion >= 7 ? 7 : 5 }).split('\n');
     const take = (node: GedcomNode, path: string) => {
       const key = `${path}\u0000${text[node.line - source.line] ?? ''}`;
       const n = pending.get(key);
@@ -291,6 +313,11 @@ class Merger {
     if (path.endsWith('ASSO.ROLE') && !this.ctx.v7) return roleToRela(node);
     if (this.ctx.v7 && !node.tag.startsWith('_') && !GEDCOM7_TAGS.has(node.tag)) {
       this.lost(node, path, `${node.tag} is not a GEDCOM 7 tag`);
+      return undefined;
+    }
+    if (POINTER_TAGS.has(node.tag) && node.pointer === undefined) {
+      // e.g. `1 ASSO  @I2@ ` in GEDCOM 7, where a padded pointer is text.
+      this.lost(node, path, `${node.tag} should point at a record but holds text`);
       return undefined;
     }
     let pointer: string | undefined;

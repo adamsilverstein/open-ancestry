@@ -12,8 +12,24 @@ const FOCUSABLE = 'button, a[href], input, select, textarea, [tabindex]';
 let lastOutside: HTMLElement | null = null;
 let installed = false;
 
+const CONTROL = 'button, a[href], input, select, textarea, summary, [role="button"]';
+
+/**
+ * A landmark or container that only takes focus programmatically (tabindex=-1),
+ * such as <main>: WebKit focuses it when a click lands on a button it will not
+ * focus, so it is never what the user meant to return to.
+ */
+function isContainer(element: HTMLElement): boolean {
+  return element.getAttribute('tabindex') === '-1' && !element.matches(CONTROL);
+}
+
 function remember(target: EventTarget | null) {
-  if (target instanceof HTMLElement && target !== document.body && !target.closest(OVERLAY)) {
+  if (
+    target instanceof HTMLElement &&
+    target !== document.body &&
+    !isContainer(target) &&
+    !target.closest(OVERLAY)
+  ) {
     lastOutside = target;
   }
 }
@@ -42,7 +58,7 @@ export const mainLandmark = () => document.getElementById('main');
 export function captureOpener(): HTMLElement | null {
   const active = document.activeElement;
   // Menu items and list options disappear with their menu; use what opened the menu.
-  if (active instanceof HTMLElement && active !== document.body) {
+  if (active instanceof HTMLElement && active !== document.body && !isContainer(active)) {
     const overlay = active.closest(OVERLAY);
     if (!overlay || overlay.matches('[role="dialog"], [role="alertdialog"]')) return active;
   }

@@ -158,6 +158,8 @@ class GedcomWriter implements WriterContext, MergeContext {
   private readonly writer: RecordWriter;
   private head: RawRecordRow | undefined;
   private verbatim = false;
+  /** GEDCOM major version of the imported file, once read. */
+  private major: number | undefined;
 
   constructor(store: TreeStore, options: InternalOptions) {
     this.store = store;
@@ -504,9 +506,16 @@ class GedcomWriter implements WriterContext, MergeContext {
   }
 
   private sourceMajor(): number {
+    if (this.major !== undefined) return this.major;
     const head = this.data.rawRecords.find((r) => r.gedcom_tag === 'HEAD');
-    if (!head) return 5;
-    return analyzeHeader(parseGedcom(head.raw_text).records[0]).majorVersion ?? 5;
+    this.major = head
+      ? (analyzeHeader(parseGedcom(head.raw_text).records[0]).majorVersion ?? 5)
+      : 5;
+    return this.major;
+  }
+
+  get sourceVersion(): number {
+    return this.sourceMajor();
   }
 
   /** One slot per raw record, in file order, so exported records keep the original order. */

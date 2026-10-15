@@ -98,3 +98,13 @@
 .newTag > :first-child {
   flex: 1;
 }
+
+/* A save that failed, shown in the dialog so the typed values can be saved again. */
+.error {
+  display: flex;
+  align-items: center;
+  gap: var(--oa-space-1);
+  margin: 0;
+  color: var(--oa-danger);
+  font: var(--oa-text-sm);
+}

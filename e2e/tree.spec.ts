@@ -1175,18 +1175,26 @@ test.describe('phone width (#139)', () => {
   const overlaps = (a: Box, b: Box) =>
     a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 
-  /** True when a tap `reach` px from the element's center, each way, still lands on it. */
-  async function reachable(page: Page, locator: Locator, reach = 22) {
-    return locator.evaluate((el, r) => {
+  /**
+   * True when the element takes taps across a target at least `size` px wide
+   * and tall around its center (the target may reach further one way than
+   * the other, away from its card).
+   */
+  async function reachable(page: Page, locator: Locator, size = 44) {
+    return locator.evaluate((el, min) => {
       const box = el.getBoundingClientRect();
       const [cx, cy] = [box.x + box.width / 2, box.y + box.height / 2];
-      return [
-        [cx - r, cy],
-        [cx + r, cy],
-        [cx, cy - r],
-        [cx, cy + r],
-      ].every(([x, y]) => el.contains(document.elementFromPoint(x!, y!)));
-    }, reach);
+      const reach = (dx: number, dy: number) => {
+        let n = 0;
+        while (
+          n < 120 &&
+          el.contains(document.elementFromPoint(cx + dx * (n + 1), cy + dy * (n + 1)))
+        )
+          n++;
+        return n;
+      };
+      return reach(-1, 0) + reach(1, 0) + 1 >= min && reach(0, -1) + reach(0, 1) + 1 >= min;
+    }, size);
   }
 
   test('starts without the minimap, which the toolbar still shows', async ({ page }) => {

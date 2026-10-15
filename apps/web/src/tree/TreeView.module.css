@@ -123,17 +123,33 @@
 }
 
 /*
- * Touch: a larger invisible target around the small chevrons and switcher.
- * They are drawn in the zoomed world (--oa-tree-scale, set on touch
- * screens), so the target grows as the view zooms out: always 44px or more
- * on screen, and never less than 60px in the world.
+ * Touch: a larger invisible target around the small chevrons and switcher,
+ * 44px or more on screen at any zoom (--oa-tree-scale is set on touch
+ * screens). It grows away from the card, never more than 8px into it, so a
+ * tap on a zoomed-out card opens the card rather than its chevron.
  */
 @media (pointer: coarse) {
+  .chevron,
+  .switcher {
+    --out: max(18px, 44px / var(--oa-tree-scale, 1) - 32px);
+    --side: max(18px, 22px / var(--oa-tree-scale, 1) - 12px);
+    --in: -8px;
+  }
+
   .chevron::before,
   .switcher::before {
     position: absolute;
-    inset: calc(-1 * max(18px, 24px / var(--oa-tree-scale, 1) - 12px));
+    inset: calc(-1 * var(--out)) calc(-1 * var(--side)) var(--in);
     content: '';
+  }
+
+  .chevron[data-chevron='down']::before {
+    inset: var(--in) calc(-1 * var(--side)) calc(-1 * var(--out));
+  }
+
+  /* On the card's left edge: out to the left. */
+  .chevron[data-chevron='siblings']::before {
+    inset: calc(-1 * var(--side)) var(--in) calc(-1 * var(--side)) calc(-1 * var(--out));
   }
 
   /* Off the card's corner, so its target does not overlap the up chevron's. */

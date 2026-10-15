@@ -82,10 +82,10 @@ function deleteIfUnused(tx: Tx, kind: 'citation' | 'media' | 'note', id: string)
 }
 
 /**
- * Whether another imported record's text still points to a NOTE or OBJE
- * record: ASSO notes and custom subtrees are kept as text, not as links.
+ * Whether another imported record's text still points to a NOTE, OBJE or SOUR
+ * record: ASSO and custom subtrees are kept as text, not as links.
  */
-function pointedToInText(tx: Tx, kind: 'media' | 'note', id: string): boolean {
+function pointedToInText(tx: Tx, kind: 'media' | 'note' | 'source', id: string): boolean {
   const xref = tx.store.getRow(kind, id)?.external_id;
   if (!xref) return false;
   return !!tx.store
@@ -107,7 +107,7 @@ function deleteSourceIfUnused(tx: Tx, id: string): void {
         "SELECT 1 FROM note_link WHERE owner_type = 'source' AND owner_id = ? UNION ALL SELECT 1 FROM media_link WHERE owner_type = 'source' AND owner_id = ?",
       )
       .get(id, id);
-  if (!used) sources.delete(tx, id);
+  if (!used && !pointedToInText(tx, 'source', id)) sources.delete(tx, id);
 }
 
 /** Deletes events that no longer have any role. */

@@ -6,3 +6,4 @@
 export * from './types';
 export { buildGedcomExport, exportGedcom } from './gedcom';
 export { buildGedzipExport, exportGedzip } from './gedzip';
+export { changedSinceImport } from './dirty';

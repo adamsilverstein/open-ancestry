@@ -4,7 +4,10 @@ import type { PersonDetail, RelationshipView } from './types';
 
 export interface TreeListItem {
   id: string;
+  /** The stored name, as Rename edits it. */
   name: string;
+  /** What to show: the name, plus the folder when two trees share a name. */
+  label: string;
   modifiedAt: string;
 }
 

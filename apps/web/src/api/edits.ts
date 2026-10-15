@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useToast } from '../components/Toast/Toast';
-import { ApiError, isNotFound } from './client';
+import { ApiError, isNotFound, isStale } from './client';
 import { personQuery } from './queries';
 import type { PersonDetail } from './types';
 
@@ -78,10 +78,31 @@ export function friendlyMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Refetches every query of the tree (keys are `[kind, tree, ...]`) and notifies `onTreeChanged`. */
-export function invalidateTree(queryClient: QueryClient, tree: string) {
+/** Other tabs of the app on this origin; edits, undo and redo are tree-wide on the server. */
+const otherTabs = typeof BroadcastChannel === 'function' ? new BroadcastChannel('oa-tree') : null;
+
+/**
+ * Refetches every query of the tree (keys are `[kind, tree, ...]`), notifies
+ * `onTreeChanged`, and tells other tabs to do the same unless the change came from one.
+ */
+export function invalidateTree(
+  queryClient: QueryClient,
+  tree: string,
+  { fromOtherTab = false } = {},
+) {
   for (const listener of changeListeners) listener(tree);
+  if (!fromOtherTab) otherTabs?.postMessage({ tree });
   return queryClient.invalidateQueries({ predicate: (q) => q.queryKey[1] === tree });
+}
+
+/** Refreshes this tab's copy of a tree whenever another tab changes it; returns a stop function. */
+export function syncTreesAcrossTabs(queryClient: QueryClient): () => void {
+  const onMessage = (event: MessageEvent<unknown>) => {
+    const { tree } = (event.data ?? {}) as { tree?: unknown };
+    if (typeof tree === 'string') void invalidateTree(queryClient, tree, { fromOtherTab: true });
+  };
+  otherTabs?.addEventListener('message', onMessage);
+  return () => otherTabs?.removeEventListener('message', onMessage);
 }
 
 /** Every edit to `tree` shares this key, so they can be counted and awaited. */
@@ -131,11 +152,19 @@ export function useEdit(tree: string) {
         edit.onError?.(error);
         return;
       }
-      toast({
-        title: 'Could not save',
-        description: `${edit.label}: ${friendlyMessage(error)}`,
-        variant: 'error',
-      });
+      toast(
+        isStale(error)
+          ? {
+              title: 'Not saved',
+              description: `${edit.label}: this changed in another window (or by undo) after you opened it, so nothing was saved.`,
+              variant: 'error',
+            }
+          : {
+              title: 'Could not save',
+              description: `${edit.label}: ${friendlyMessage(error)}`,
+              variant: 'error',
+            },
+      );
       edit.onError?.(error);
     },
     onSuccess: (result, { edit }) => edit.onDone?.(result),

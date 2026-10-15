@@ -30,6 +30,13 @@ const SUB_WORD = /(?<=\p{Ll}\p{M}*)(?=\p{Lu})|(?<=[\p{L}\p{M}])(?=\p{N})|(?<=\p{
 const UNSPACED =
   /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}]/u;
 
+/**
+ * A link or e-mail address inside prose: a scheme or `www.`, a domain followed
+ * by a path, or `name@domain`.
+ */
+const LINK =
+  /(?:[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s<>"]+|[^\s@<>"()]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+|(?<![\p{L}\p{N}@.])[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+\/[^\s<>"]*/giu;
+
 /** Words shorter than this are too common on their own ("al", "li", "le"). */
 const MIN_WORD = 3;
 /** File names and URLs also match names of at least this many letters inside longer words. */
@@ -123,20 +130,58 @@ export class NameScrubber {
   /** `text` with every recognized withheld name replaced by "Private". */
   scrub(input: string, mode: ScrubMode): string {
     if (this.empty || !input) return input;
-    if (mode === 'file' && /%[0-9A-Fa-f]{2}/.test(input)) {
-      // Names hide behind %20 and friends: scrub the decoded text, then encode again.
-      let decoded: string | undefined;
-      try {
-        decoded = decodeURIComponent(input);
-      } catch {
-        decoded = undefined;
-      }
-      if (decoded !== undefined && decoded !== input) {
-        const scrubbed = this.scrub(decoded, mode);
-        return scrubbed === decoded ? input : encodeURI(scrubbed);
+    const text = input.normalize('NFC');
+    const ranges = mode === 'file' ? this.encodedRanges(text) : this.ranges(text, 'text');
+    if (mode === 'text') {
+      // Links and e-mail addresses inside prose follow the file-name rules.
+      for (const m of text.matchAll(LINK)) {
+        for (const [a, b] of this.encodedRanges(m[0])) ranges.push([m.index + a, m.index + b]);
       }
     }
-    const text = input.normalize('NFC');
+    return ranges.length ? replace(text, ranges) : text === input ? input : text;
+  }
+
+  /**
+   * Matches in a file name or link, which may be percent-encoded (`%20Livingson`):
+   * found in the decoded text and mapped back, so only the name's own bytes are
+   * replaced and the rest (`%26`, `%2F`) stays exactly as it was.
+   */
+  private encodedRanges(text: string): [number, number][] {
+    if (!/%[0-9A-Fa-f]{2}/.test(text)) return this.ranges(text, 'file');
+    let decoded = '';
+    const starts: number[] = [];
+    for (let i = 0; i < text.length;) {
+      const run = /^(?:%[0-9A-Fa-f]{2})+/.exec(text.slice(i))?.[0];
+      let chars: string | undefined;
+      if (run) {
+        try {
+          chars = decodeURIComponent(run);
+        } catch {
+          chars = undefined;
+        }
+      }
+      if (run && chars !== undefined) {
+        // Each decoded character stands for its share of the run's bytes.
+        const bytes = [...chars].map((c) => new TextEncoder().encode(c).length * 3);
+        let at = i;
+        [...chars].forEach((c, k) => {
+          for (let u = 0; u < c.length; u++) starts.push(at);
+          decoded += c;
+          at += bytes[k]!;
+        });
+        i += run.length;
+      } else {
+        starts.push(i);
+        decoded += text[i];
+        i++;
+      }
+    }
+    starts.push(text.length);
+    return this.ranges(decoded, 'file').map(([a, b]) => [starts[a]!, starts[b]!]);
+  }
+
+  /** Where withheld names occur in `text` (already NFC). */
+  private ranges(text: string, mode: ScrubMode): [number, number][] {
     const ranges: [number, number][] = [];
     const list = tokens(text);
     // Whole words and the pieces of glued words.
@@ -168,24 +213,26 @@ export class NameScrubber {
         }
       }
     }
-    if (!ranges.length) return text === input ? input : text;
-    // Overlapping matches become one "Private"; separate ones stay separate.
-    ranges.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
-    let out = '';
-    let at = 0;
-    let open: [number, number] | undefined;
-    for (const range of ranges) {
-      if (open && range[0] < open[1]) {
-        open[1] = Math.max(open[1], range[1]);
-        continue;
-      }
-      if (open) {
-        out += text.slice(at, open[0]) + 'Private';
-        at = open[1];
-      }
-      open = [...range];
-    }
-    out += text.slice(at, open![0]) + 'Private' + text.slice(open![1]);
-    return out;
+    return ranges;
   }
+}
+
+/** Replaces each range with "Private"; overlapping ranges become one. */
+function replace(text: string, ranges: [number, number][]): string {
+  ranges.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+  let out = '';
+  let at = 0;
+  let open: [number, number] | undefined;
+  for (const range of ranges) {
+    if (open && range[0] < open[1]) {
+      open[1] = Math.max(open[1], range[1]);
+      continue;
+    }
+    if (open) {
+      out += text.slice(at, open[0]) + 'Private';
+      at = open[1];
+    }
+    open = [...range];
+  }
+  return out + text.slice(at, open![0]) + 'Private' + text.slice(open![1]);
 }

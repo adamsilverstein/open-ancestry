@@ -880,6 +880,20 @@ test.describe('pedigree, descendant and fan views', () => {
   });
 });
 
+test.describe('hand-edited layouts (#146)', () => {
+  for (const layout of ['bogus', 'descendant', 'toString', '__proto__']) {
+    test(`layout=${layout} opens the family view`, async ({ page }) => {
+      await open(page, 'ada', `&layout=${layout}`);
+      await expect(page.getByRole('heading', { name: 'Something went wrong' })).toHaveCount(0);
+      await expect(page.getByText('Could not load the tree')).toHaveCount(0);
+      await expect(card(page, 'Ada Vale')).toBeAttached();
+      await expect(
+        page.getByRole('toolbar', { name: 'Tree tools' }).getByRole('button', { name: /Layout/ }),
+      ).toHaveAccessibleName('Layout: Family view');
+    });
+  }
+});
+
 test.describe('generation depth in the URL', () => {
   /** The `up` and `down` of every neighborhood request the page makes. */
   function depths(page: Page) {

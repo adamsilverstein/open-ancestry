@@ -565,7 +565,9 @@ class GedcomWriter implements WriterContext, MergeContext {
     for (const person of this.data.persons) plan('person', person.id, true);
     for (const family of this.data.families) plan('family', family.id, true);
     for (const slot of this.slots) if (slot.kind) plan(slot.kind, slot.id!, false);
-    // Records nothing refers to are written too, so no data is lost.
+    // Records nothing refers to are written too, so no data is lost. A privatized export
+    // leaves out notes and media nobody refers to: there is no one left to judge them by,
+    // and they may be what a deleted person left behind.
     const d = this.data;
     for (const s of d.sources) {
       const used = d.citationsBySource.get(s.id)?.some((c) => d.citationLinksByCitation.has(c.id));
@@ -573,12 +575,14 @@ class GedcomWriter implements WriterContext, MergeContext {
     }
     for (const r of d.repositories)
       if (!d.sourcesByRepository.has(r.id)) plan('repository', r.id, true);
-    if (this.includeMedia) {
+    if (this.includeMedia && !this.privatize) {
       for (const m of d.mediaRows) {
         if (!d.mediaLinksByMedia.has(m.id) && !d.primaryOf.has(m.id)) plan('media', m.id, true);
       }
     }
-    for (const note of d.notes) if (!d.noteLinksByNote.has(note.id)) plan('note', note.id, true);
+    if (!this.privatize) {
+      for (const note of d.notes) if (!d.noteLinksByNote.has(note.id)) plan('note', note.id, true);
+    }
     for (const tag of d.tags) if (!d.tagLinksByTag.has(tag.id)) plan('tag', tag.id, true);
   }
 

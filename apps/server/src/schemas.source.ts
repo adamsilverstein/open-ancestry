@@ -70,6 +70,12 @@ export const ExportQuery = Type.Object(
   strict,
 );
 
+/** `history=0` (or `false`) leaves the edit history, and the deleted text it keeps, out. */
+export const JsonExportQuery = Type.Object(
+  { history: Type.Optional(Type.Enum(['0', '1', 'false', 'true'])) },
+  strict,
+);
+
 export const GedzipQuery = Type.Object({ privatize: Type.Optional(Type.Boolean()) }, strict);
 
 export const NeighborhoodQuery = Type.Object({

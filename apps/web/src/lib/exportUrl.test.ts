@@ -15,6 +15,15 @@ describe('exportUrl', () => {
     );
   });
 
+  it('leaves the edit history out of JSON unless asked for', () => {
+    expect(exportUrl('Vale', 'json', false, false)).toBe('/api/trees/Vale/export.json?history=0');
+    expect(exportUrl('Vale', 'json', false, true)).toBe('/api/trees/Vale/export.json');
+    // GEDCOM has no history to leave out.
+    expect(exportUrl('Vale', 'gedcom-7', false, false)).toBe(
+      '/api/trees/Vale/export.ged?version=7',
+    );
+  });
+
   it('never privatizes JSON, which is a full backup', () => {
     expect(canPrivatize('json')).toBe(false);
     expect(exportUrl('Vale', 'json', true)).toBe('/api/trees/Vale/export.json');

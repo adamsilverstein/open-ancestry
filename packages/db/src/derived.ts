@@ -108,7 +108,65 @@ const eventDateSort: DerivedStep = {
   },
 };
 
-export const DERIVED_STEPS: readonly DerivedStep[] = [eventDateSort];
+/** Tables that point at a row by owner_type + owner_id. */
+const OWNER_TABLES = [
+  'citation_link',
+  'media_link',
+  'note_link',
+  'tag_link',
+  'raw_record',
+  'unmapped_line',
+] as const;
+
+/**
+ * Notes, media and citations that earlier person and family deletes left with
+ * nothing linking to them (#226). Deletes now take them along; this removes
+ * the ones already there, once per tree. Imported NOTE and OBJE records
+ * (with an xref) may stand alone and are kept, as are sources, which are
+ * shared reference data. Not change-logged: the user already deleted them.
+ */
+const orphanCleanup: DerivedStep = {
+  name: 'orphan_cleanup',
+  fingerprint: () => '1',
+  recompute(store) {
+    const queries: [table: string, sql: string][] = [
+      [
+        'citation',
+        'SELECT id FROM citation c WHERE NOT EXISTS (SELECT 1 FROM citation_link l WHERE l.citation_id = c.id)',
+      ],
+      [
+        'note',
+        'SELECT id FROM note n WHERE external_id IS NULL AND NOT EXISTS (SELECT 1 FROM note_link l WHERE l.note_id = n.id)',
+      ],
+      [
+        'media',
+        `SELECT id FROM media m WHERE external_id IS NULL
+           AND NOT EXISTS (SELECT 1 FROM media_link l WHERE l.media_id = m.id)
+           AND NOT EXISTS (SELECT 1 FROM person p WHERE p.primary_media_id = m.id)`,
+      ],
+    ];
+    let removed = 0;
+    // A deleted citation can orphan its notes and media in turn.
+    for (let more = true; more;) {
+      more = false;
+      for (const [table, sql] of queries) {
+        for (const id of store.db.prepare(sql).pluck().all() as string[]) {
+          for (const owned of OWNER_TABLES) {
+            store.db
+              .prepare(`DELETE FROM ${owned} WHERE owner_type = ? AND owner_id = ?`)
+              .run(table, id);
+          }
+          store.db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(id);
+          removed++;
+          more = true;
+        }
+      }
+    }
+    return removed;
+  },
+};
+
+export const DERIVED_STEPS: readonly DerivedStep[] = [eventDateSort, orphanCleanup];
 
 export interface RefreshOptions {
   /** Recompute even if the fingerprint matches (JSON import does). */

@@ -20,21 +20,28 @@ export interface PeopleSearch {
   sex?: PeopleSex;
   living?: PeopleLiving;
   tag?: string;
+  /** Never from the URL: the list pages itself. Set so a raw `limit` is dropped. */
+  limit?: undefined;
 }
 
+/**
+ * Every key is set, undefined when invalid or the default: TanStack Router
+ * merges a route's validated search over the raw one, so an unset key lets
+ * the raw value through. `limit` is not ours to take from the URL at all.
+ */
 export function validatePeopleSearch(search: Record<string, unknown>): PeopleSearch {
-  const result: PeopleSearch = {};
   const sort = oneOf(PEOPLE_SORTS, search.sort);
-  if (sort && sort !== 'surname') result.sort = sort;
-  if (search.dir === 'desc') result.dir = 'desc';
-  const sex = oneOf(PEOPLE_SEXES, search.sex);
-  if (sex) result.sex = sex;
-  const living = oneOf(PEOPLE_LIVING, search.living);
-  if (living) result.living = living;
-  if (typeof search.tag === 'string' && /^[0-9A-Za-z_-]{1,64}$/.test(search.tag)) {
-    result.tag = search.tag;
-  }
-  return result;
+  return {
+    sort: sort && sort !== 'surname' ? sort : undefined,
+    dir: search.dir === 'desc' ? 'desc' : undefined,
+    sex: oneOf(PEOPLE_SEXES, search.sex),
+    living: oneOf(PEOPLE_LIVING, search.living),
+    tag:
+      typeof search.tag === 'string' && /^[0-9A-Za-z_-]{1,64}$/.test(search.tag)
+        ? search.tag
+        : undefined,
+    limit: undefined,
+  };
 }
 
 export function toPeopleParams(search: PeopleSearch): PeopleParams {

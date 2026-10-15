@@ -27,7 +27,16 @@ export const TreeIdParams = Type.Object({ tree: TreeParams.properties.tree, id: 
 export const JobParams = Type.Object({ id: Type.String({ format: 'uuid' }) });
 /** The change ids from a re-import review the user accepted. */
 export const ReimportApplyBody = Type.Object(
-  { accept: Type.Array(Type.String({ maxLength: 32 }), { maxItems: 1_000_000 }) },
+  {
+    accept: Type.Array(Type.String({ maxLength: 32 }), { maxItems: 1_000_000 }),
+    /** The comparison the ids come from (see the review's `comparison`). */
+    comparison: Type.Integer({ minimum: 1 }),
+  },
+  strict,
+);
+/** The comparison the client holds; status reports stale when it isn't the latest. */
+export const ReimportStatusQuery = Type.Object(
+  { comparison: Type.Optional(Type.Integer({ minimum: 1 })) },
   strict,
 );
 
@@ -86,6 +95,9 @@ export const SearchQuery = Type.Object({
 export const HistoryQuery = Type.Object({
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })),
 });
+
+/** `expect`: undo only if this batch is still the newest applied one (a toast's Undo). */
+export const UndoQuery = Type.Object({ expect: Type.Optional(Id) });
 
 export const HomeBody = Type.Object({ personId: Type.Union([Id, Type.Null()]) }, strict);
 

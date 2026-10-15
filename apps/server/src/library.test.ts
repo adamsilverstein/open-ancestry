@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { cpSync, existsSync, rmSync } from 'node:fs';
 import { mkdtemp, readdir } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -67,6 +67,23 @@ describe('Library', () => {
     expect(reopened).not.toBe(created);
     expect(library.open('One')).toBe(reopened);
     library.closeAll();
+  });
+
+  it('tells copied tree folders apart by folder name (#193)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'oa-lib-'));
+    const library = new Library(root);
+    library.create('Smith');
+    library.closeAll();
+    // A folder copied by hand keeps the tree_name inside it.
+    cpSync(join(root, 'Smith.oatree'), join(root, 'Smith copy.oatree'), { recursive: true });
+    cpSync(join(root, 'Smith.oatree'), join(root, 'Backup.oatree'), { recursive: true });
+    expect(library.list().map(({ id, name }) => ({ id, name }))).toEqual([
+      { id: 'Smith', name: 'Smith' },
+      { id: 'Backup', name: 'Smith (Backup)' },
+      { id: 'Smith copy', name: 'Smith (Smith copy)' },
+    ]);
+    library.closeAll();
+    rmSync(root, { recursive: true, force: true });
   });
 
   it('refuses to rename or delete a busy tree', async () => {

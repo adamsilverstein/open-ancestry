@@ -83,6 +83,24 @@ export interface TreeInfo {
   modifiedAt: string;
 }
 
+/**
+ * A tree's name lives inside its folder, so a folder copied by hand (a backup,
+ * an experiment) lists under the same name as the original. When names
+ * repeat, every tree but the one whose folder matches the name (else the
+ * first by folder) shows its folder name too: "Smith (Smith copy)".
+ */
+function distinctNames(trees: TreeInfo[]): TreeInfo[] {
+  const byName = new Map<string, TreeInfo[]>();
+  for (const tree of trees) byName.set(tree.name, [...(byName.get(tree.name) ?? []), tree]);
+  return trees.map((tree) => {
+    const same = byName.get(tree.name)!;
+    if (same.length === 1) return tree;
+    const keeper =
+      same.find((t) => t.id === t.name) ?? [...same].sort((a, b) => a.id.localeCompare(b.id))[0];
+    return tree === keeper ? tree : { ...tree, name: `${tree.name} (${tree.id})` };
+  });
+}
+
 export class Library {
   readonly root: string;
   private readonly stores = new Map<string, TreeStore>();
@@ -109,12 +127,12 @@ export class Library {
 
   list(): TreeInfo[] {
     this.ensureRoot();
-    return readdirSync(this.root, { withFileTypes: true })
+    const trees = readdirSync(this.root, { withFileTypes: true })
       .filter((d) => d.isDirectory() && d.name.endsWith(TREE_EXTENSION) && !d.name.startsWith('.'))
       .map((d) => d.name.slice(0, -TREE_EXTENSION.length))
       .filter((id) => this.exists(id))
-      .map((id) => this.info(id))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .map((id) => this.info(id));
+    return distinctNames(trees).sort((a, b) => a.name.localeCompare(b.name));
   }
 
   info(id: string): TreeInfo {

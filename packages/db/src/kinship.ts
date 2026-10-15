@@ -60,6 +60,15 @@ interface Person {
   asPartner: string[];
 }
 
+/** Columns whose updates can change a relationship or a step check. */
+const WATCHED: Record<string, string[]> = {
+  person: ['sex'],
+  family: ['partner1_id', 'partner2_id', 'relationship_type'],
+  family_child: ['family_id', 'child_id', 'partner1_rel', 'partner2_rel', 'sort_order'],
+  event: ['type', 'date_sort'],
+  event_role: ['event_id', 'person_id', 'family_id', 'role'],
+};
+
 /** Full resets and per-row drops so far, for tests. Not exported from the package. */
 export const kinshipStats = { resets: 0, touches: 0 };
 
@@ -138,12 +147,13 @@ class TreeKinship {
       ['upd', 'UPDATE', ['OLD', 'NEW']],
     ] as const;
     for (const [op, event, rows] of ops) {
-      const on = (table: string, columns = '') => `AFTER ${event}${columns} ON main.${table}`;
-      trigger(
-        `person_${op}`,
-        on('person', op === 'upd' ? ' OF sex' : ''),
-        touch('p', ...rows.map((r) => `${r}.id`)),
-      );
+      // Updates only fire when a column the graph reads changed. (The edit layer
+      // writes whole rows, so an OF column list would fire on every update.)
+      const on = (table: string) => {
+        const changed = WATCHED[table]!.map((c) => `OLD.${c} IS NOT NEW.${c}`).join(' OR ');
+        return `AFTER ${event} ON main.${table}${op === 'upd' ? ` WHEN ${changed}` : ''}`;
+      };
+      trigger(`person_${op}`, on('person'), touch('p', ...rows.map((r) => `${r}.id`)));
       trigger(
         `family_${op}`,
         on('family'),

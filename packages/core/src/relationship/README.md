@@ -94,7 +94,7 @@ both. `relationshipName({ up, down }, sex, half?, modifier?, style?)` names a sh
    and cousins (`min(u, d) - 1`, removed `|u - d|`), in the chosen style. Words are gendered by A's sex with neutral
    fallbacks (`parent`, `sibling`, `niece or nephew`). Step, adopted and foster links on the path
    give `stepfather`, `adoptive mother`, `adopted son`, `foster daughter` unless a biological path
-   exists. Half relatives are hyphenated (`half-sister`, `half-uncle`) except cousins (`half 1st
+   exists. Half relatives are hyphenated (`half-sister`, `half-uncle`) except cousins (`half first
    cousin`).
 3. **Marriage.** Partners are named directly (`husband`, `wife`, `partner`) and listed alongside
    any blood relationship, as are in-laws through A's or B's own partner (`niece and also

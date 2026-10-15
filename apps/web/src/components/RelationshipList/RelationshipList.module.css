@@ -13,15 +13,22 @@
 .header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: var(--oa-space-1);
 }
 
 .title {
+  flex: 1;
   color: var(--oa-text-muted);
   font: var(--oa-text-xs);
   font-weight: var(--oa-weight-semibold);
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--oa-text-muted);
+  font: var(--oa-text-xs);
 }
 
 .list {

@@ -7,13 +7,14 @@ import type { BenchCase } from '../types';
 // it is budgeted next to the 50ms layout of the same family.
 let fromParent: TreeLayout;
 let fromChild: TreeLayout;
+let graph: TreeGraph;
 
 export default [
   {
     name: 'tree labels: relations and kinship, one couple with 3,000 children',
     setup: () => {
       const kids = Array.from({ length: 3000 }, (_, i) => `k${i}`);
-      const graph: TreeGraph = {
+      graph = {
         people: Object.fromEntries(
           ['me', 'sp', ...kids].map((id) => [
             id,
@@ -26,8 +27,8 @@ export default [
       fromChild = layoutFamily(graph, 'k1500');
     },
     fn: () => {
-      kinshipLabels(buildRelations(fromParent), 'me', () => 'U');
-      kinshipLabels(buildRelations(fromChild), 'k1500', () => 'U');
+      kinshipLabels(buildRelations(fromParent, graph), 'me', () => 'U');
+      kinshipLabels(buildRelations(fromChild, graph), 'k1500', () => 'U');
     },
     // The mean: a p99 over a few dozen samples swings with machine load.
     metric: 'mean',

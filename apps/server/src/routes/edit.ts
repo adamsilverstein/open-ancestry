@@ -125,6 +125,38 @@ function addParent(tx: Tx, childId: string, body: AddParentBody) {
   return { family, parentId };
 }
 
+/** History label for a family patch: a removed partner or a type change, named as such. */
+type PartnerPatch = { partner1_id?: string | null; partner2_id?: string | null };
+
+/**
+ * The partner a family patch takes out of the partnership, or null. Moving
+ * a partner between slots, or replacing one, is not a removal.
+ */
+function removedPartner(family: FamilyRow, body: PartnerPatch): string | null {
+  const before = [family.partner1_id, family.partner2_id].filter((p): p is string => !!p);
+  const after = [
+    body.partner1_id === undefined ? family.partner1_id : body.partner1_id,
+    body.partner2_id === undefined ? family.partner2_id : body.partner2_id,
+  ].filter((p): p is string => !!p);
+  if (after.length >= before.length) return null;
+  return before.find((p) => !after.includes(p)) ?? null;
+}
+
+/** History label for a family patch: a removed partner or a type change, named as such. */
+function familyPatchLabel(store: TreeStore, family: FamilyRow, body: PartnerPatch): string {
+  const removed = removedPartner(family, body);
+  if (removed) {
+    const other = [family.partner1_id, family.partner2_id].find((p) => p && p !== removed);
+    const from = other ? ` from ${personLabel(store, other)}` : '';
+    return `Remove partner: ${personLabel(store, removed)}${from}`;
+  }
+  const keys = Object.keys(body);
+  if (keys.length === 1 && keys[0] === 'relationship_type') {
+    return `Edit relationship type: ${familyLabel(store, family.id)}`;
+  }
+  return `Edit relationship: ${familyLabel(store, family.id)}`;
+}
+
 function ownerExists(store: TreeStore, table: string, id: string): void {
   if (!store.getRow(table as TableName, id)) throw notFound(`${table} ${id} not found`);
 }
@@ -398,7 +430,7 @@ export function editRoutes(app: Api, { library }: Deps): void {
       if (partner1_id && partner1_id === partner2_id) throw badRequest('Partners must differ');
       const { batchId, result } = edit(
         store,
-        `Edit relationship: ${familyLabel(store, id)}`,
+        familyPatchLabel(store, family, request.body),
         (tx) => {
           const before = familyMembers(tx.store, id);
           const added = [partner1_id, partner2_id].filter(
@@ -407,8 +439,15 @@ export function editRoutes(app: Api, { library }: Deps): void {
           const children = familyChildren.listForFamily(tx.store, id).map((l) => l.child_id);
           refuseCycles(tx.store, added, children, 'parent');
           const updated = families.update(tx, id, request.body);
-          refreshLiving(tx, [...before, ...familyMembers(tx.store, id)], { relatives: false });
-          return updated;
+          let result: typeof updated | null = updated;
+          if (removedPartner(family, request.body)) {
+            // The partnership has ended: its marriage and other events go with it,
+            // and a family left with one partner and no children goes too.
+            families.deleteEvents(tx, id);
+            if (families.pruneIfEmpty(tx, id)) result = null;
+          }
+          refreshLiving(tx, before, { relatives: false });
+          return result;
         },
       );
       return { batchId, family: result };
@@ -418,7 +457,7 @@ export function editRoutes(app: Api, { library }: Deps): void {
   app.delete('/api/trees/:tree/families/:id', ids, async (request) => {
     const store = open(request.params.tree);
     const { id } = request.params;
-    const { batchId } = edit(store, `Delete family: ${familyLabel(store, id)}`, (tx) => {
+    const { batchId } = edit(store, `Remove relationship: ${familyLabel(store, id)}`, (tx) => {
       const members = familyMembers(tx.store, id);
       families.delete(tx, id);
       refreshLiving(tx, members, { relatives: false });
@@ -445,11 +484,13 @@ export function editRoutes(app: Api, { library }: Deps): void {
     const store = open(request.params.tree);
     const link = store.getRow('family_child', request.params.id);
     const label = link
-      ? `Remove from family: ${personLabel(store, link.child_id)}`
-      : 'Remove child';
+      ? `Remove child link: ${personLabel(store, link.child_id)} from ${familyLabel(store, link.family_id)}`
+      : 'Remove child link';
     const { batchId } = edit(store, label, (tx) => {
       const members = link ? familyMembers(tx.store, link.family_id) : [];
       familyChildren.delete(tx, request.params.id);
+      // A one-parent family whose last child left records nothing any more.
+      if (link) families.pruneIfEmpty(tx, link.family_id);
       refreshLiving(tx, members, { relatives: false });
     });
     return { batchId };

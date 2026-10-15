@@ -70,7 +70,8 @@ export interface ImportReportView {
 }
 
 export interface ImportProgress {
-  phase: 'read' | 'parse' | 'map' | 'finalize' | 'commit' | 'done';
+  /** A re-import adds `compare` after the import's phases. */
+  phase: 'read' | 'parse' | 'map' | 'finalize' | 'commit' | 'done' | 'compare';
   done: number;
   total: number;
 }

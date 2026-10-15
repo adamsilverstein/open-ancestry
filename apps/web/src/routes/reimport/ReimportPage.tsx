@@ -23,7 +23,7 @@ import {
   type ReimportReview,
   type ReviewChange,
 } from './api';
-import { describeChange } from './labels';
+import { compareProgress, describeChange } from './labels';
 import styles from './Reimport.module.css';
 
 /** People shown per page of the review. */
@@ -398,7 +398,17 @@ export function ReimportPage() {
       <h1 className={importStyles.title}>
         {job ? `Comparing ${job.fileName} with your tree` : 'Starting the comparison'}
       </h1>
-      <progress className={importStyles.progress} aria-label="Comparison progress" />
+      <progress
+        className={importStyles.progress}
+        aria-label="Comparison progress"
+        {...(job?.progress?.phase === 'map' &&
+          job.progress.total > 0 && { value: job.progress.done / job.progress.total, max: 1 })}
+      />
+      <p className={importStyles.note} aria-live="polite">
+        {job?.state === 'queued'
+          ? 'Waiting for another import to finish'
+          : compareProgress(job?.progress)}
+      </p>
       <div>
         <Button variant="secondary" disabled={cancelling} onClick={() => void cancel()}>
           Cancel

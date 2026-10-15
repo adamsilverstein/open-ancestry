@@ -1,7 +1,7 @@
 import type { FamilyRow, MediaRow, TableName, TreeStore } from '@open-ancestry/db';
 import { HIGH_CONFIDENCE, POSSIBLE_MATCH, type NearMiss, type PersonMatch } from './match';
 import {
-  mediaKey,
+  mediaKeys,
   norm,
   sourceKey,
   type SnapCitation,
@@ -250,6 +250,7 @@ export function localHistory(store: TreeStore): LocalHistory {
     typeof id === 'string'
       ? (gone.get(`${entity}|${id}`) ?? (store.getRow(entity, id) as Image | undefined))
       : undefined;
+  const mediaKeyOf = mediaKeys(store);
   const push = <K, V>(map: Map<K, V[]>, key: K, value: V) => {
     const list = map.get(key);
     if (list) list.push(value);
@@ -312,7 +313,7 @@ export function localHistory(store: TreeStore): LocalHistory {
       case 'media_link': {
         if (d.row.owner_type !== 'person') break;
         const m = rowOf('media', d.row.media_id);
-        if (m) media.add(`${d.row.owner_id as string}|${mediaKey(m as unknown as MediaRow)}`);
+        if (m) media.add(`${d.row.owner_id as string}|${mediaKeyOf(m as unknown as MediaRow)}`);
         break;
       }
       case 'family_child': {

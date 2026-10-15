@@ -6,6 +6,8 @@ export {
   MATCH_THRESHOLD,
   jaroWinkler,
   matchPeople,
+  POSSIBLE_MATCH,
+  type NearMiss,
   type PersonMatch,
 } from './match';
 export { closeReimport, prepareReimport, type ReimportSession } from './session';

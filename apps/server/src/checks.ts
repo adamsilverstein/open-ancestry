@@ -483,6 +483,16 @@ export function setDismissed(tx: Tx, keys: string[], dismissed: boolean): number
   return changed;
 }
 
+/** Removes dismissals of issues that name `id` (a person merged away, say), which no check can raise again. */
+export function dropDismissalsFor(tx: Tx, id: string): void {
+  const rows = tx.store
+    .stmt('SELECT key FROM meta WHERE key >= ? AND key < ?')
+    .all(DISMISSED, `${DISMISSED}\uffff`) as { key: string }[];
+  for (const { key } of rows) {
+    if (key.slice(DISMISSED.length).split(/[:+]/).includes(id)) meta.delete(tx, key);
+  }
+}
+
 /** `Dismiss check: No sources for Ada Vale`, or `Dismiss 3 checks`. */
 export function dismissLabel(store: TreeStore, keys: string[], dismissed: boolean): string {
   const verb = dismissed ? 'Dismiss' : 'Restore';

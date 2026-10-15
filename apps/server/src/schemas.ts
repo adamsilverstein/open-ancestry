@@ -54,6 +54,7 @@ export const {
   BatchBody,
   CheckKey,
   DismissBody,
+  MergeBody,
 } = schemas;
 
 export type NameBody = Source.NameBody;

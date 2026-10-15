@@ -8,3 +8,5 @@ export * from './names';
 export * from './living';
 export * from './layout';
 export * from './relationship';
+export * from './kin';
+export * from './escape';

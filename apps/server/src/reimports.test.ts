@@ -107,7 +107,7 @@ describe('re-import', () => {
       (p: { changes: { id: string; defaultAccept: boolean }[] }) =>
         p.changes.filter((c) => c.defaultAccept).map((c) => c.id),
     );
-    const applied = await api.post(`/api/reimports/${reimportId}/apply`, { accept });
+    const applied = await api.post(`/api/reimports/${reimportId}/apply`, { accept, comparison: 1 });
     expect(applied.statusCode).toBe(200);
     expect(applied.json()).toMatchObject({ applied: accept.length, blocked: [] });
     expect((await api.get(base)).json().tree.peopleCount).toBe(27);
@@ -122,18 +122,89 @@ describe('re-import', () => {
     const base = await importedTree();
     const { reimportId } = await startReimport(base);
     expect(
-      (await api.post(`/api/reimports/${reimportId}/apply`, { accept: [], everything: true }))
-        .statusCode,
+      (
+        await api.post(`/api/reimports/${reimportId}/apply`, {
+          accept: [],
+          comparison: 1,
+          everything: true,
+        })
+      ).statusCode,
     ).toBe(400);
     const people = (await api.get(`${base}/people?limit=1`)).json();
     await api.patch(`${base}/people/${people.items[0].id}`, { sex: 'X' });
-    const stale = await api.post(`/api/reimports/${reimportId}/apply`, { accept: [] });
+    const stale = await api.post(`/api/reimports/${reimportId}/apply`, {
+      accept: [],
+      comparison: 1,
+    });
     expect(stale.statusCode).toBe(409);
     expect(stale.json().error.code).toBe('conflict');
     expect(
-      (await api.post(`/api/reimports/00000000-0000-4000-8000-000000000000/apply`, { accept: [] }))
-        .statusCode,
+      (
+        await api.post(`/api/reimports/00000000-0000-4000-8000-000000000000/apply`, {
+          accept: [],
+          comparison: 1,
+        })
+      ).statusCode,
     ).toBe(404);
+  });
+
+  it('reports a stale review and compares it again (#163)', async () => {
+    const base = await importedTree();
+    const { reimportId } = await startReimport(base);
+    expect((await api.get(`/api/reimports/${reimportId}/status`)).json()).toEqual({ stale: false });
+    const people = (await api.get(`${base}/people?limit=1`)).json();
+    await api.patch(`${base}/people/${people.items[0].id}`, { sex: 'X' });
+    expect((await api.get(`/api/reimports/${reimportId}/status`)).json()).toEqual({ stale: true });
+    expect((await api.get(`/api/reimports/${reimportId}`)).json().stale).toBe(true);
+    const again = await api.post(`/api/reimports/${reimportId}/refresh`);
+    expect(again.statusCode).toBe(200);
+    expect(again.json()).toMatchObject({ id: reimportId, stale: false, comparison: 2 });
+    expect(again.json().diff.people.length).toBeGreaterThan(0);
+    expect(
+      (await api.post(`/api/reimports/${reimportId}/apply`, { accept: [], comparison: 2 }))
+        .statusCode,
+    ).toBe(200);
+    expect((await api.post(`/api/reimports/${reimportId}/refresh`)).statusCode).toBe(404);
+  });
+
+  it('refuses a review another client compared again (#184)', async () => {
+    const base = await importedTree();
+    const { reimportId } = await startReimport(base);
+    // Both clients load comparison 1.
+    const first = (await api.get(`/api/reimports/${reimportId}`)).json();
+    expect(first.comparison).toBe(1);
+    const people = (await api.get(`${base}/people?limit=1`)).json();
+    await api.patch(`${base}/people/${people.items[0].id}`, { sex: 'X' });
+    // Client B compares again; client A still holds comparison 1.
+    expect((await api.post(`/api/reimports/${reimportId}/refresh`)).json().comparison).toBe(2);
+    const status = (comparison: number) =>
+      api.get(`/api/reimports/${reimportId}/status?comparison=${comparison}`);
+    expect((await status(1)).json()).toEqual({ stale: true });
+    expect((await status(2)).json()).toEqual({ stale: false });
+    const late = await api.post(`/api/reimports/${reimportId}/apply`, {
+      accept: first.diff.people.flatMap((p: { changes: { id: string }[] }) =>
+        p.changes.map((c) => c.id),
+      ),
+      comparison: 1,
+    });
+    expect(late.statusCode).toBe(409);
+    expect((await api.get(`${base}/history`)).json().items ?? []).toHaveLength(1);
+  });
+
+  it('keeps a review in use alive past its first hour', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const base = await importedTree();
+      const { reimportId } = await startReimport(base);
+      vi.setSystemTime(Date.now() + 50 * 60 * 1000);
+      expect((await api.get(`/api/reimports/${reimportId}/status?comparison=1`)).statusCode).toBe(
+        200,
+      );
+      vi.setSystemTime(Date.now() + 50 * 60 * 1000);
+      expect((await api.get(`/api/reimports/${reimportId}`)).statusCode).toBe(200);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('can be discarded, and fails cleanly on a bad file', async () => {

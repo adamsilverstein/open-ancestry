@@ -9,9 +9,10 @@ import type {
   Sex,
   TableName,
 } from '@open-ancestry/db';
-import { CITATION_OWNERS, MEDIA_OWNERS, NOTE_OWNERS, TAG_OWNERS } from '@open-ancestry/db';
+import { CITATION_OWNERS, MEDIA_OWNERS, NOTE_OWNERS, TAG_OWNERS, toNFC } from '@open-ancestry/db';
 import { serializeNode, type GedcomNode, type ParseResult } from '@open-ancestry/gedcom';
 import { createHash } from 'node:crypto';
+import { imageSize } from './image-size';
 import { classifyFile, kindFromType, mediaType, storeMediaFile, type MediaSource } from './media';
 import { Places, coordinate, placeParts } from './places';
 import {
@@ -151,6 +152,12 @@ export class Mapper {
   linkedMedia = 0;
   remoteMedia = 0;
   rejectedMedia = 0;
+  /**
+   * FILE lines of media that were not linked (missing, unsafe, too large, not
+   * copied). They stay in unmapped_line for export, but the report lists them
+   * under media and warnings rather than as unmapped tags.
+   */
+  private readonly unlinkedFileLines = new Set<number>();
   readonly recordCounts: Record<string, number> = {};
   homePersonId: string | null = null;
   homePersonSource: 'header' | 'first-person' | null = null;
@@ -181,6 +188,10 @@ export class Mapper {
   private readonly major: number;
 
   private readonly doc: ParseResult;
+  /** Each record's original text, captured before its values are normalized. */
+  private readonly rawText: string[];
+  /** FILE lines of inline OBJE structures, by the media row they became. */
+  private readonly inlineFiles = new Map<GedcomNode, string>();
   private readonly sink: Sink;
   private readonly options: MapperOptions;
 
@@ -192,6 +203,13 @@ export class Mapper {
     this.places = new Places(options.newId);
     this.major = doc.header.majorVersion ?? 5;
     this.recordIds = new Array(doc.records.length);
+    // raw_record keeps each record exactly as written; every value mapped from it is NFC.
+    // Records read each other's values, so all are normalized before any is mapped.
+    this.rawText = doc.records.map((record) => {
+      const raw = serializeNode(record, { version: this.major });
+      normalizeValues(record);
+      return raw;
+    });
     this.assignIds();
   }
 
@@ -210,7 +228,9 @@ export class Mapper {
       let id = this.options.newId();
       if (record.tag === '_MTTAG') {
         // Tags are unique by category and name; repeated tag records share one row.
-        const key = `${text(this.child(record, '_MTCAT')) ?? ''}\u0000${text(this.child(record, 'NAME')) ?? ''}`;
+        const key = toNFC(
+          `${text(this.child(record, '_MTCAT')) ?? ''}\u0000${text(this.child(record, 'NAME')) ?? ''}`,
+        );
         const existing = tags.get(key);
         if (existing) id = existing;
         else tags.set(key, id);
@@ -330,6 +350,7 @@ export class Mapper {
 
   mapRecord(index: number): void {
     const record = this.doc.records[index]!;
+    const raw = this.rawText[index]!;
     this.recordCounts[record.tag] = (this.recordCounts[record.tag] ?? 0) + 1;
     // Duplicate xrefs are warned about by the parser; pointers go to the first record.
     const id = this.recordIds[index];
@@ -365,7 +386,6 @@ export class Mapper {
         ownerType = 'tag';
         break;
     }
-    const raw = serializeNode(record, { version: this.major });
     this.sink.insert('raw_record', {
       import_batch_id: this.options.batchId,
       seq: index,
@@ -941,9 +961,13 @@ export class Mapper {
       mediaId = this.resolve(node, 'OBJE');
       if (!mediaId) return undefined;
     } else {
-      if (!this.child(node, 'FILE')) return undefined;
+      const file = this.child(node, 'FILE');
+      if (!file) return undefined;
       mediaId = this.options.newId();
       this.mapMedia(node, mediaId, undefined);
+      // An unresolved FILE line is kept with its media, not the record it sits in, so an
+      // export that writes the media as its own record still has the original path.
+      this.inlineFiles.set(file, mediaId);
     }
     this.use(node);
     this.link('media_link', 'media_id', mediaId, owner);
@@ -1053,12 +1077,14 @@ export class Mapper {
   }
 
   private mapFile(node: GedcomNode, row: InsertRow<'media'>, xref: string | undefined): void {
+    this.unlinkedFileLines.add(node.line);
+    for (const c of node.continuations ?? []) this.unlinkedFileLines.add(c.line);
     let value = node.value!.trim();
     let ref = classifyFile(value);
     if (this.major >= 7 && ref.type !== 'remote') {
       // GEDCOM 7 FILE values are URI references, so local paths are percent-encoded. An
       // encoded scheme (`http%3A%2F%2F...`) stays a local name rather than becoming a URL.
-      const decoded = decodeUri(value);
+      const decoded = toNFC(decodeUri(value));
       const decodedRef = classifyFile(decoded);
       if (decodedRef.type !== 'remote') {
         value = decoded;
@@ -1068,6 +1094,7 @@ export class Mapper {
     if (ref.type === 'remote') {
       row.remote_url = ref.url;
       this.remoteMedia++;
+      this.unlinkedFileLines.delete(node.line);
       this.use(node);
       return;
     }
@@ -1101,10 +1128,15 @@ export class Mapper {
     try {
       const bytes = file.read();
       const hash = sha256(bytes);
-      row.local_path = this.storeMedia(file.path, bytes, hash);
+      // Stored under its NFC name: the same file whichever form the archive or folder used.
+      row.local_path = this.storeMedia(toNFC(file.path), bytes, hash);
       row.byte_size = bytes.length;
       row.sha256 = hash;
+      // The real size, so clients can pick thumbnails without probing (and before _WDTH).
+      const dimensions = imageSize(bytes);
+      if (dimensions) Object.assign(row, dimensions);
       this.linkedMedia++;
+      this.unlinkedFileLines.delete(node.line);
       this.use(node);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -1735,6 +1767,7 @@ export class Mapper {
       lineText: string,
     ) => {
       preserved++;
+      const listed = !this.unlinkedFileLines.has(line);
       this.sink.insert('unmapped_line', {
         import_batch_id: this.options.batchId,
         owner_type: owner?.type ?? null,
@@ -1743,6 +1776,7 @@ export class Mapper {
         line_no: line,
         line: lineText,
       });
+      if (!listed) return;
       const entry = this.unmappedByPath.get(path);
       if (entry) entry.count++;
       else
@@ -1760,14 +1794,16 @@ export class Mapper {
       const owner = ownerType ? { type: ownerType, id: this.recordIds[i]! } : null;
       let lines: string[] | undefined;
       const lineText = (n: number) => {
-        lines ??= serializeNode(record, { version: this.major }).split('\n');
+        lines ??= this.rawText[i]!.split('\n');
         return lines[n - record.line] ?? '';
       };
       const visit = (node: GedcomNode, path: string) => {
         if (!this.mapped[node.line]) {
-          add(owner, path, node.tag, node.line, lineText(node.line));
+          const media = this.inlineFiles.get(node);
+          const lineOwner = media ? { type: 'media', id: media } : owner;
+          add(lineOwner, path, node.tag, node.line, lineText(node.line));
           for (const c of node.continuations ?? []) {
-            add(owner, `${path}.${c.tag}`, c.tag, c.line, lineText(c.line));
+            add(lineOwner, `${path}.${c.tag}`, c.tag, c.line, lineText(c.line));
           }
         }
         for (const e of node.extra ?? []) {
@@ -1800,6 +1836,12 @@ export class Mapper {
     );
     return { total, mapped, preserved, unmapped };
   }
+}
+
+/** NFC-normalizes the values of a record subtree in place (pointers and raw text untouched). */
+function normalizeValues(node: GedcomNode): void {
+  if (node.value !== undefined) node.value = toNFC(node.value);
+  for (const child of node.children) normalizeValues(child);
 }
 
 function countLines(node: GedcomNode): number {

@@ -3,11 +3,19 @@
 Exports a tree as GEDCOM 5.5.1 (what Ancestry reads), GEDCOM 7, or GEDZIP (GEDCOM 7 plus media files). The JSON backup lives in `@open-ancestry/db` (`exportJson`).
 
 ```ts
-import { exportGedcom, exportGedzip, buildGedcomExport } from '@open-ancestry/export';
+import {
+  buildGedcomExport,
+  exportGedcom,
+  exportGedzip,
+  planGedzipExport,
+  streamGedzip,
+} from '@open-ancestry/export';
 
 const ged = exportGedcom(store); // GEDCOM 5.5.1, Ancestry-compatible (CHAR UTF-8)
 const ged7 = exportGedcom(store, { version: '7', privatizeLiving: true });
 const zip = exportGedzip(store); // Uint8Array: gedcom.ged + media/
+// Large trees: plan (one snapshot), then stream one file at a time.
+streamGedzip(planGedzipExport(store)).pipe(response);
 const { text, xrefs, stats } = buildGedcomExport(store, { version: '7' });
 ```
 

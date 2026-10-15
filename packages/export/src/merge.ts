@@ -5,7 +5,7 @@ import {
   serializeNode,
   type GedcomNode,
 } from '@open-ancestry/gedcom';
-import { canonicalize, n, setLevels } from './canonical';
+import { canonicalize, formValue, mimeOfPath, n, setLevels } from './canonical';
 
 /** What merging needs from the export. */
 export interface MergeContext {
@@ -26,7 +26,29 @@ export interface MergeContext {
    * nobody vetted what they say (#195).
    */
   readonly keepCustomTags: boolean;
+  /** GEDCOM major version of the imported file: 7 escapes `@` and reads padded pointers differently. */
+  readonly sourceVersion: number;
 }
+
+/** An imported record's raw text parsed by the rules of the file it came from. */
+function parseRecord(text: string, version: number): GedcomNode | undefined {
+  if (version < 7) return parseGedcom(text).records[0];
+  return parseGedcom(`0 HEAD\n1 GEDC\n2 VERS 7.0\n${text}`).records[1];
+}
+
+/** Tags whose value must be a pointer; text there is a malformed line, not data. */
+const POINTER_TAGS = new Set([
+  'ASSO',
+  'FAMC',
+  'FAMS',
+  'HUSB',
+  'WIFE',
+  'CHIL',
+  'ALIA',
+  'ANCI',
+  'DESI',
+  'SUBM',
+]);
 
 /** Tags the writer produces from domain columns: an unmapped copy would contradict the edited value. */
 const GENERATED_TAGS = new Set([
@@ -50,10 +72,11 @@ const GENERATED_TAGS = new Set([
 
 /**
  * Standard tags a structure holds at most once. Repeatable ones (ASSO, NOTE,
- * SOUR, and EMAIL, PHON, FAX, WWW, which 5.5.1 allows three of) may be added.
+ * SOUR, FILE, which an OBJE may hold several of in both versions, and EMAIL,
+ * PHON, FAX, WWW, which 5.5.1 allows three of) may be added.
  */
 const SINGLE_VALUED = new Set(
-  `ABBR ADDR AGE AUTH CALN CAUS DATA DATE FILE FORM GIVN LATI LONG MAP NICK NPFX NSFX PAGE
+  `ABBR ADDR AGE AUTH CALN CAUS DATA DATE FORM GIVN LATI LONG MAP NICK NPFX NSFX PAGE
   PEDI PLAC PUBL QUAY RESN ROLE SEX SPFX SURN TEXT TIME TITL TYPE VERS`.split(/\s+/),
 );
 
@@ -124,7 +147,7 @@ const sameLine = (a: GedcomNode, b: GedcomNode) =>
 export function mergeUnmapped(
   ctx: MergeContext,
   record: GedcomNode,
-  raw: RawRecordRow | undefined,
+  raws: readonly RawRecordRow[],
   rows: UnmappedLineRow[] | undefined,
   label: string,
 ): void {
@@ -140,29 +163,57 @@ export function mergeUnmapped(
   }
   const lines = rows.filter((r) => !r.path.includes('('));
   if (!lines.length) return;
-  const source = raw ? parseGedcom(raw.raw_text).records[0] : undefined;
-  if (!source) {
+  const sources = raws.flatMap((raw) => parseRecord(raw.raw_text, ctx.sourceVersion) ?? []);
+  if (!sources.length) {
     // No imported text to say where nested lines belong; only top-level extension lines can be placed.
     fallback(ctx, record, lines, label);
     setLevels(record);
     return;
   }
-  const text = serializeNode(source).split('\n');
   const pending = new Map<string, number>();
   for (const r of lines) {
     const key = `${r.path}\u0000${r.line}`;
     pending.set(key, (pending.get(key) ?? 0) + 1);
   }
-  const isUnmapped = (node: GedcomNode, path: string) => {
-    const key = `${path}\u0000${text[node.line - source.line] ?? ''}`;
-    const n = pending.get(key);
-    if (!n) return false;
-    pending.set(key, n - 1);
-    return true;
-  };
-  const merger = new Merger(ctx, label, isUnmapped);
-  merger.walk(source, record, source.tag);
-  merger.reportCustom();
+  // Each imported record says where its own lines belong (a merged person has several).
+  for (const source of sources) {
+    const text = serializeNode(source, { version: ctx.sourceVersion >= 7 ? 7 : 5 }).split('\n');
+    const take = (node: GedcomNode, path: string) => {
+      const key = `${path}\u0000${text[node.line - source.line] ?? ''}`;
+      const n = pending.get(key);
+      if (!n) return false;
+      pending.set(key, n - 1);
+      return true;
+    };
+    // Shallowest lines first, and an unmapped line takes its whole subtree, so a
+    // mapped line never claims a nested unmapped line with the same text (the
+    // first FILE's `2 FORM jpg` taking the second FILE's).
+    const unmapped = new Set<GedcomNode>();
+    const claim = (node: GedcomNode, path: string) => {
+      for (const c of node.children) {
+        const childPath = `${path}.${c.tag}`;
+        take(c, childPath);
+        claim(c, childPath);
+      }
+    };
+    let level: [GedcomNode, string][] = [[source, source.tag]];
+    while (level.length) {
+      const next: [GedcomNode, string][] = [];
+      for (const [node, path] of level) {
+        for (const c of node.children) {
+          const childPath = `${path}.${c.tag}`;
+          if (take(c, childPath)) {
+            unmapped.add(c);
+            claim(c, childPath);
+          } else next.push([c, childPath]);
+        }
+      }
+      level = next;
+    }
+    const merger = new Merger(ctx, label, (node) => unmapped.has(node));
+    merger.walk(source, record, source.tag);
+    merger.reportCustom();
+  }
   setLevels(record);
 }
 
@@ -285,6 +336,11 @@ class Merger {
       this.lost(node, path, `${node.tag} is not a GEDCOM 7 tag`);
       return undefined;
     }
+    if (POINTER_TAGS.has(node.tag) && node.pointer === undefined) {
+      // e.g. `1 ASSO  @I2@ ` in GEDCOM 7, where a padded pointer is text.
+      this.lost(node, path, `${node.tag} should point at a record but holds text`);
+      return undefined;
+    }
     let pointer: string | undefined;
     if (node.pointer !== undefined && node.pointer !== '@VOID@') {
       pointer = this.ctx.pointer(node.pointer);
@@ -307,6 +363,23 @@ class Merger {
     for (const c of node.children) {
       const child = this.prepare(c, `${path}.${c.tag}`);
       if (child) copy.children.push(child);
+    }
+    if (node.tag === 'FILE' && path.endsWith('OBJE.FILE')) {
+      const form = copy.children.find((c) => c.tag === 'FORM');
+      if (form?.value) {
+        const original = form.value;
+        form.value = formValue(original, this.ctx.v7);
+        if (this.ctx.v7 && form.value === 'application/octet-stream' && !original.includes('/')) {
+          this.ctx.warn(
+            this.ctx.quoteLines
+              ? `${this.label}: FORM ${original} (${path}.FORM) has no known media type, written as application/octet-stream`
+              : `${this.label}: an imported FORM (${path}.FORM) has no known media type, written as application/octet-stream`,
+          );
+        }
+      } else if (this.ctx.v7 && !form) {
+        // GEDCOM 7 requires a media type on every FILE.
+        copy.children.unshift(n('FORM', mimeOfPath(node.value) ?? 'application/octet-stream'));
+      }
     }
     // GEDCOM 7 requires a ROLE on every association.
     if (node.tag === 'ASSO' && this.ctx.v7 && !copy.children.some((c) => c.tag === 'ROLE')) {

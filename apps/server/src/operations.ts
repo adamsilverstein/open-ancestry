@@ -1,5 +1,4 @@
 import { closeSync, openSync, readSync } from 'node:fs';
-import { join } from 'node:path';
 import {
   familyChildren,
   names,
@@ -13,7 +12,7 @@ import {
 } from '@open-ancestry/db';
 import { nameRow, refreshLiving, requireRow } from './edits';
 import { conflict, notFound } from './errors';
-import { sniffMediaType } from './routes/media';
+import { resolveMediaPathSync, sniffMediaType } from './routes/media';
 import type { BatchOperation, NameBody } from './schemas';
 import type { Static } from 'typebox';
 import type { FamilyChildPatch, PersonPatch, TagBody } from './schemas';
@@ -31,7 +30,9 @@ function profilePhotoProblem(store: TreeStore, media: MediaRow): string | null {
     return 'This media has no file in this tree, so it cannot be the profile photo';
   // In-memory trees (tests) have no media folder to check.
   if (store.dir === null) return null;
-  const path = join(treePaths(store.dir).media, ...media.local_path.split('/'));
+  // Confined like every media read: a symlink out of the media folder is no file here.
+  const path = resolveMediaPathSync(treePaths(store.dir).media, media.local_path);
+  if (!path) return 'This media has no file in this tree, so it cannot be the profile photo';
   let head: Buffer;
   try {
     const fd = openSync(path, 'r');
@@ -102,16 +103,21 @@ export function createTag(tx: Tx, body: Static<typeof TagBody>, attachTo?: strin
   return tag;
 }
 
+/** Tags a person; tagging them again changes nothing (so a retried request is harmless). */
 export function tagPerson(tx: Tx, personId: string, tagId: string) {
   requireRow(tx.store, 'person', personId);
   requireRow(tx.store, 'tag', tagId);
-  return tagLinks.create(tx, { tag_id: tagId, owner_type: 'person', owner_id: personId });
+  const existing = tagLinks.listFor(tx.store, 'person', personId).find((l) => l.tag_id === tagId);
+  return (
+    existing ?? tagLinks.create(tx, { tag_id: tagId, owner_type: 'person', owner_id: personId })
+  );
 }
 
+/** Untags a person; a tag they do not have is already gone, so that changes nothing. */
 export function untagPerson(tx: Tx, personId: string, tagId: string) {
+  requireRow(tx.store, 'person', personId);
   const link = tagLinks.listFor(tx.store, 'person', personId).find((l) => l.tag_id === tagId);
-  if (!link) throw notFound(`Person ${personId} does not have tag ${tagId}`);
-  tagLinks.delete(tx, link.id);
+  if (link) tagLinks.delete(tx, link.id);
 }
 
 /** Runs one batch operation; the result is what the single route would return. */

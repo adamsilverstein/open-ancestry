@@ -12,6 +12,8 @@ import { Input } from '../../../components/Input/Input';
 import { Select } from '../../../components/Select/Select';
 import { eventLabel } from '../../../lib/timeline';
 import { removeEvent } from './optimistic';
+import { useDirtyForm } from './dirty';
+import { SaveError, useSaveState } from './SaveError';
 import styles from './Edit.module.css';
 
 /** Event types offered when adding; `EVEN` is a custom event with its own name. */
@@ -73,6 +75,8 @@ export function EventDialog({
 }: EventDialogProps) {
   const base = `/trees/${seg(tree)}`;
   const edit = useEdit(tree);
+  // Stays open until the save succeeds, so a failure keeps the fields.
+  const saveState = useSaveState(() => onOpenChange(false));
   const event = item?.event;
   const [type, setType] = useState(event?.type ?? 'BIRT');
   const [customType, setCustomType] = useState(event?.custom_type ?? '');
@@ -82,11 +86,13 @@ export function EventDialog({
     (event && (VALUE_LABELS[event.type] ? event.value : event.description)) ?? '',
   );
   const [confirmDelete, setConfirmDelete] = useState(false);
+  useDirtyForm({ type, customType, date, place, detail });
   const types =
     event && !EVENT_TYPES.includes(event.type) ? [...EVENT_TYPES, event.type] : EVENT_TYPES;
   const label = eventLabel(type, customType);
 
   function save() {
+    if (edit.isPending) return;
     const valueField = VALUE_LABELS[type] ? 'value' : 'description';
     const body = {
       type,
@@ -95,16 +101,17 @@ export function EventDialog({
       place: place.trim() || null,
       [valueField]: detail.trim() || null,
     };
-    onOpenChange(false);
     edit.mutate(
       event
         ? {
             label: `Edit ${label}`,
             send: () => apiSend('PATCH', `${base}/events/${event.id}`, body),
+            ...saveState.handlers(),
           }
         : {
             label: `Add ${label}`,
             send: () => apiSend('POST', `${base}/people/${personId}/events`, body),
+            ...saveState.handlers(),
           },
     );
   }
@@ -141,8 +148,8 @@ export function EventDialog({
             <DialogClose asChild>
               <Button variant="ghost">Cancel</Button>
             </DialogClose>
-            <Button variant="primary" onClick={save}>
-              Save
+            <Button variant="primary" onClick={save} loading={edit.isPending}>
+              {saveState.submitLabel('Save')}
             </Button>
           </div>
         }
@@ -184,6 +191,7 @@ export function EventDialog({
             value={detail}
             onChange={(e) => setDetail(e.currentTarget.value)}
           />
+          <SaveError error={saveState.error} />
           <button type="submit" hidden />
         </form>
       </Dialog>

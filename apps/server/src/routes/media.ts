@@ -1,6 +1,7 @@
-import { createReadStream } from 'node:fs';
-import { open, realpath, stat } from 'node:fs/promises';
+import { constants, lstatSync, realpathSync, statSync, type Stats } from 'node:fs';
+import { lstat, open, realpath, stat, type FileHandle } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
+import { escapeControls } from '@open-ancestry/core';
 import { treePaths } from '@open-ancestry/db';
 import type { FastifyReply } from 'fastify';
 import type { Api, Deps } from '../context';
@@ -45,32 +46,169 @@ export function sniffMediaType(bytes: Buffer): string | null {
   return null;
 }
 
-async function readHead(file: string): Promise<Buffer> {
-  const handle = await open(file, 'r');
-  try {
-    const buffer = Buffer.alloc(SNIFF_BYTES);
-    const { bytesRead } = await handle.read(buffer, 0, SNIFF_BYTES, 0);
-    return buffer.subarray(0, bytesRead);
-  } finally {
-    await handle.close();
-  }
+async function readHead(handle: FileHandle): Promise<Buffer> {
+  const buffer = Buffer.alloc(SNIFF_BYTES);
+  const { bytesRead } = await handle.read(buffer, 0, SNIFF_BYTES, 0);
+  return buffer.subarray(0, bytesRead);
 }
 
-/** Resolves a media.local_path inside the tree's media folder, following symlinks; null if it escapes. */
-export async function resolveMediaPath(
+/*
+ * Media paths come from untrusted GEDCOM, and since #151 a library may be
+ * shared with other accounts that can write into a tree folder. A media file
+ * is served only when:
+ * - its path stays inside the root (no `..`, no absolute path);
+ * - the root itself is a real folder, not a symlink (a symlinked media/ would
+ *   make everything it points at count as inside the tree);
+ * - after following symlinks, the file is still inside the root;
+ * - it has a single hard link. A second link could be any file of yours,
+ *   linked into the tree by someone who can write there. The file's owner
+ *   is not checked: that linked file is owned by you, so a uid check would
+ *   pass it, and refusing every second link is the only rule that holds.
+ * Both resolvers apply the same rules (media-resolve.test.ts), and report
+ * why they refuse through `onRefuse` so a refusal is never silent.
+ */
+
+export type MediaRefusal =
+  | 'outside the media folder'
+  | 'missing'
+  | 'symlinked media folder'
+  | 'hard link'
+  /** The file at the checked path changed between the check and the open (a swapped folder). */
+  | 'changed';
+
+type OnRefuse = ((reason: MediaRefusal) => void) | undefined;
+
+function inside(root: string, localPath: string): string | null {
+  const resolvedRoot = resolve(root);
+  const candidate = resolve(resolvedRoot, localPath);
+  return candidate.startsWith(resolvedRoot + sep) ? candidate : null;
+}
+
+/** The final check shared by both resolvers. */
+function accept(
+  rootIsLink: boolean,
+  realRoot: string,
+  realFile: string,
+  links: number,
+  onRefuse: OnRefuse,
+): string | null {
+  const reason: MediaRefusal | null = rootIsLink
+    ? 'symlinked media folder'
+    : !realFile.startsWith(realRoot + sep)
+      ? 'outside the media folder'
+      : links > 1
+        ? 'hard link'
+        : null;
+  if (reason) onRefuse?.(reason);
+  return reason ? null : realFile;
+}
+
+/** `resolveMediaPath` for synchronous callers (the profile-photo check inside a transaction). */
+export function resolveMediaPathSync(
   mediaRoot: string,
   localPath: string,
-): Promise<string | null> {
-  const root = resolve(mediaRoot);
-  const candidate = resolve(root, localPath);
-  if (!candidate.startsWith(root + sep)) return null;
+  onRefuse?: (reason: MediaRefusal) => void,
+): string | null {
+  const candidate = inside(mediaRoot, localPath);
+  if (!candidate) {
+    onRefuse?.('outside the media folder');
+    return null;
+  }
   try {
-    const [realRoot, realFile] = await Promise.all([realpath(root), realpath(candidate)]);
-    return realFile.startsWith(realRoot + sep) ? realFile : null;
+    const root = resolve(mediaRoot);
+    // .native: the same realpath(3) the async version uses, so both agree on case.
+    const realFile = realpathSync.native(candidate);
+    return accept(
+      lstatSync(root).isSymbolicLink(),
+      realpathSync.native(root),
+      realFile,
+      statSync(realFile).nlink,
+      onRefuse,
+    );
   } catch {
+    onRefuse?.('missing');
     return null;
   }
 }
+
+/** `resolveMediaPath`, also returning the stat of the file it checked. */
+async function resolveChecked(
+  mediaRoot: string,
+  localPath: string,
+  onRefuse: OnRefuse,
+): Promise<{ path: string; info: Stats } | null> {
+  const candidate = inside(mediaRoot, localPath);
+  if (!candidate) {
+    onRefuse?.('outside the media folder');
+    return null;
+  }
+  let checked: [Stats, string, string, Stats];
+  try {
+    const root = resolve(mediaRoot);
+    const [rootStat, realRoot, realFile] = await Promise.all([
+      lstat(root),
+      realpath(root),
+      realpath(candidate),
+    ]);
+    checked = [rootStat, realRoot, realFile, await stat(realFile)];
+  } catch {
+    onRefuse?.('missing');
+    return null;
+  }
+  const [rootStat, realRoot, realFile, info] = checked;
+  const path = accept(rootStat.isSymbolicLink(), realRoot, realFile, info.nlink, onRefuse);
+  return path ? { path, info } : null;
+}
+
+/** Resolves a media.local_path inside the tree's media folder (see the rules above); null if refused. */
+export async function resolveMediaPath(
+  mediaRoot: string,
+  localPath: string,
+  onRefuse?: (reason: MediaRefusal) => void,
+): Promise<string | null> {
+  return (await resolveChecked(mediaRoot, localPath, onRefuse))?.path ?? null;
+}
+
+/**
+ * Opens a media file for serving: resolves it (see the rules above), then
+ * opens that path without following a symlink and checks through the open
+ * descriptor that it is still the same single-link regular file. Reading
+ * from the descriptor means a file swapped after the check is never served.
+ */
+export async function openMediaFile(
+  mediaRoot: string,
+  localPath: string,
+  onRefuse?: (reason: MediaRefusal) => void,
+  /** Test seam: runs between the check and the open. */
+  hooks: { afterResolve?: () => Promise<void> } = {},
+): Promise<{ handle: FileHandle; info: Stats } | null> {
+  const checked = await resolveChecked(mediaRoot, localPath, onRefuse);
+  if (!checked) return null;
+  await hooks.afterResolve?.();
+  let handle: FileHandle | undefined;
+  try {
+    handle = await open(checked.path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const info = await handle.stat();
+    // The same inode the checks passed, not a second look up of the path: an
+    // intermediate folder swapped for a symlink since then yields another file.
+    const same = info.isFile() && info.dev === checked.info.dev && info.ino === checked.info.ino;
+    if (same && info.nlink === 1) return { handle, info };
+    onRefuse?.(same ? 'hard link' : 'changed');
+  } catch {
+    onRefuse?.('changed');
+  }
+  await handle?.close();
+  return null;
+}
+
+/** Refusals worth a log line (a missing file is ordinary); each logged once per file. */
+const LOGGED_REASONS = new Set<MediaRefusal>([
+  'symlinked media folder',
+  'hard link',
+  'outside the media folder',
+  'changed',
+]);
+const logged = new Set<string>();
 
 /** Parses a single `bytes=` range; undefined for none or multi-range, null if unsatisfiable. */
 export function parseRange(
@@ -115,34 +253,55 @@ export function mediaRoutes(app: Api, { library }: Deps): void {
       const media = store.getRow('media', id);
       if (!media) throw notFound(`Media ${id} not found`);
       if (!media.local_path) throw notFound(`Media ${id} has no local file`);
-      const file = await resolveMediaPath(treePaths(library.dirOf(tree)).media, media.local_path);
-      const info = file ? await stat(file).catch(() => null) : null;
-      if (!file || !info?.isFile()) throw notFound(`Media ${id} file is missing`);
-
-      const etag = `"${info.size.toString(16)}-${Math.floor(info.mtimeMs).toString(16)}"`;
-      const sniffed = await readHead(file).then(sniffMediaType);
-      reply
-        .header('content-security-policy', MEDIA_CSP)
-        .header('x-content-type-options', 'nosniff')
-        .header('accept-ranges', 'bytes')
-        .header('etag', etag)
-        .header('last-modified', info.mtime.toUTCString())
-        .header('cache-control', 'private, no-cache')
-        .header('content-disposition', sniffed ? 'inline' : 'attachment')
-        .type(sniffed ?? OPAQUE_TYPE);
-      if (request.headers['if-none-match'] === etag) return reply.code(304).send();
-
-      const range = parseRange(request.headers.range, info.size);
-      if (range === null) return rangeNotSatisfiable(reply, info.size);
-      if (range) {
+      const opened = await openMediaFile(
+        treePaths(library.dirOf(tree)).media,
+        media.local_path,
+        (reason) => {
+          const key = `${tree}\0${id}\0${reason}`;
+          if (!LOGGED_REASONS.has(reason) || logged.has(key)) return;
+          if (logged.size > 10_000) logged.clear();
+          logged.add(key);
+          // console.warn, not app.log: the shipped CLI runs with logger: false. Values come
+          // from the tree, so control characters are escaped before reaching a terminal.
+          console.warn(
+            `open-ancestry: media file not served (${reason}): ${escapeControls(tree)} / ${escapeControls(media.local_path!)}`,
+          );
+        },
+      );
+      if (!opened) throw notFound(`Media ${id} file is missing`);
+      const { handle, info } = opened;
+      let streaming = false;
+      try {
+        const etag = `"${info.size.toString(16)}-${Math.floor(info.mtimeMs).toString(16)}"`;
+        const sniffed = sniffMediaType(await readHead(handle));
         reply
-          .code(206)
-          .header('content-range', `bytes ${range.start}-${range.end}/${info.size}`)
-          .header('content-length', range.end - range.start + 1);
-        return reply.send(createReadStream(file, range));
+          .header('content-security-policy', MEDIA_CSP)
+          .header('x-content-type-options', 'nosniff')
+          .header('accept-ranges', 'bytes')
+          .header('etag', etag)
+          .header('last-modified', info.mtime.toUTCString())
+          .header('cache-control', 'private, no-cache')
+          .header('content-disposition', sniffed ? 'inline' : 'attachment')
+          .type(sniffed ?? OPAQUE_TYPE);
+        if (request.headers['if-none-match'] === etag) return reply.code(304).send();
+
+        const range = parseRange(request.headers.range, info.size);
+        if (range === null) return rangeNotSatisfiable(reply, info.size);
+        if (range) {
+          reply
+            .code(206)
+            .header('content-range', `bytes ${range.start}-${range.end}/${info.size}`)
+            .header('content-length', range.end - range.start + 1);
+          streaming = true;
+          return reply.send(handle.createReadStream({ ...range, autoClose: true }));
+        }
+        reply.header('content-length', info.size);
+        streaming = true;
+        return reply.send(handle.createReadStream({ autoClose: true }));
+      } finally {
+        // The stream closes the handle when it ends; every other way out closes it here.
+        if (!streaming) await handle.close();
       }
-      reply.header('content-length', info.size);
-      return reply.send(createReadStream(file));
     },
   );
 }

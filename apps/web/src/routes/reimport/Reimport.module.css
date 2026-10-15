@@ -10,6 +10,24 @@
   font: var(--oa-text-sm);
 }
 
+.stale {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--oa-space-2) var(--oa-space-4);
+  padding: var(--oa-space-3) var(--oa-space-4);
+  border: 1px solid var(--oa-warning);
+  border-left-width: 4px;
+  border-radius: var(--oa-radius-md);
+  background: var(--oa-surface);
+}
+
+.stale p {
+  margin: 0;
+  flex: 1 1 20rem;
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -62,6 +80,55 @@
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-3);
+}
+
+.groupTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--oa-space-2);
+  margin: var(--oa-space-2) 0 0;
+  font: var(--oa-text-lg);
+  font-weight: var(--oa-weight-semibold);
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oa-space-1);
+}
+
+/* As the gallery's media-type filter. */
+.filter[aria-pressed='true'] {
+  border-color: var(--oa-accent);
+  background: var(--oa-surface-selected);
+  color: var(--oa-text);
+}
+
+/* Marked by an icon and a word, not only colour. */
+.flag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oa-space-1);
+  margin-right: var(--oa-space-2);
+  font: var(--oa-text-xs);
+  font-weight: var(--oa-weight-semibold);
+}
+
+/* The warning colour is too light for small text: only the icon carries it. */
+.flag svg,
+.groupTitle svg {
+  color: var(--oa-warning);
+}
+
+.conflict {
+  padding-left: var(--oa-space-2);
+  border-left: 3px solid var(--oa-warning);
 }
 
 .info {

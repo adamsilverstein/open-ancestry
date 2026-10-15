@@ -228,6 +228,19 @@ export interface TagLinkRow {
   owner_id: string;
 }
 
+/** A person merged into `person_id` (the merge deleted them); see v004-person-alias.ts. */
+export interface PersonAliasRow {
+  id: string;
+  person_id: string;
+  merged_person_id: string;
+  /** The merged person's GEDCOM xref (`@I2@`), when imported. */
+  merged_xref: string | null;
+  import_batch_id: string | null;
+  /** JSON array of the Ancestry record ids (`_APID`) cited for the merged person. */
+  apids_json: string;
+  merged_at: string;
+}
+
 export interface RawRecordRow {
   id: string;
   import_batch_id: string;
@@ -293,6 +306,7 @@ export interface TableRows {
   note_link: NoteLinkRow;
   tag: TagRow;
   tag_link: TagLinkRow;
+  person_alias: PersonAliasRow;
   raw_record: RawRecordRow;
   unmapped_line: UnmappedLineRow;
 }
@@ -320,6 +334,7 @@ export interface RequiredOnInsert {
   note_link: 'note_id' | 'owner_type' | 'owner_id';
   tag: 'name';
   tag_link: 'tag_id' | 'owner_type' | 'owner_id';
+  person_alias: 'person_id' | 'merged_person_id' | 'merged_at';
   raw_record: 'import_batch_id' | 'seq' | 'gedcom_tag' | 'raw_text';
   unmapped_line: 'import_batch_id' | 'path' | 'line_no' | 'line';
 }

@@ -1,6 +1,7 @@
 import { queryOptions } from '@tanstack/react-query';
 import type { EventRow, MediaRow } from '@open-ancestry/db';
 import { apiGet, apiSend, seg } from '../../../api/client';
+import { thumbUrl } from '../../../lib/media';
 
 export type MediaOwner =
   | { type: 'person'; id: string }
@@ -99,4 +100,56 @@ export function ancestryLink(url: string | null): string | null {
   } catch {
     return null;
   }
+}
+
+/** Longest edge of the `sm` and `md` thumbnails; they are never upscaled. */
+const EDGES = { sm: 160, md: 480 } as const;
+/** CSS width of a gallery tile's preview. */
+export const TILE_WIDTH = 190;
+
+/** Width of a thumbnail made from an original of `size`. */
+const thumbWidth = (size: { width: number; height: number }, edge: number) =>
+  Math.max(1, Math.round(size.width * Math.min(1, edge / Math.max(size.width, size.height))));
+
+/**
+ * `src`, `srcSet` and `sizes` for a tile image. With the original's size known,
+ * the descriptors are the thumbnails' real widths, so the browser draws each
+ * at its true size; an original no bigger than `sm` gets a plain `src`.
+ * Unknown sizes assume full-size thumbnails until the image says otherwise.
+ */
+export function tileImage(
+  tree: string,
+  mediaId: string,
+  size: { width: number; height: number } | null,
+): { src: string; srcSet?: string; sizes?: string } {
+  const src = thumbUrl(tree, mediaId, 'sm');
+  if (size && Math.max(size.width, size.height) <= EDGES.sm) return { src };
+  const [sm, md] = size
+    ? [thumbWidth(size, EDGES.sm), thumbWidth(size, EDGES.md)]
+    : [EDGES.sm, EDGES.md];
+  return {
+    src,
+    srcSet: `${src} ${sm}w, ${thumbUrl(tree, mediaId, 'md')} ${md}w`,
+    sizes: `${TILE_WIDTH}px`,
+  };
+}
+
+/**
+ * The original's size as far as a loaded tile image shows it: when the
+ * thumbnail it got is smaller than that thumbnail's full edge, the original
+ * was that small too. Null when the image does not tell (a big original).
+ */
+export function learnedSize(img: {
+  currentSrc: string;
+  naturalWidth: number;
+  naturalHeight: number;
+}): { width: number; height: number } | null {
+  const isMd = img.currentSrc.includes('/thumb/md');
+  const edge = isMd ? EDGES.md : EDGES.sm;
+  // naturalWidth is CSS pixels: the file's pixels divided by the srcset density.
+  const density = edge / TILE_WIDTH;
+  const width = Math.round(img.naturalWidth * density);
+  const height = Math.round(img.naturalHeight * density);
+  if (width <= 0 || height <= 0 || Math.max(width, height) >= edge - 1) return null;
+  return { width, height };
 }

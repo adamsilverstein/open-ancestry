@@ -19,6 +19,7 @@ import {
   sources,
   tagLinks,
   tags,
+  undo,
   type ChangeLogRow,
   type TreeStore,
 } from './index';
@@ -242,11 +243,14 @@ describe('persons and names', () => {
       f.sister,
     ]);
     expect(count(store, 'event')).toBe(9); // 9 births + census - mine
-    // Links owned by me are gone, the shared note/tag/media survive.
+    // Links owned by me are gone, and so are the note and photo only I had (#226);
+    // the tag is shared vocabulary and stays.
     expect(noteLinks.listFor(store, 'person', f.me)).toEqual([]);
     expect(tagLinks.listFor(store, 'person', f.me)).toEqual([]);
     expect(mediaLinks.listFor(store, 'person', f.me)).toEqual([]);
-    expect(notes.get(store, extra.note.id)).toBeDefined();
+    expect(notes.get(store, extra.note.id)).toBeUndefined();
+    expect(media.get(store, extra.pic.id)).toBeUndefined();
+    expect(tags.get(store, extra.tag.id)).toBeDefined();
     // My family keeps my spouse and child, my parents' family drops me as a child.
     expect(families.get(store, f.myFamily)).toMatchObject({
       partner1_id: null,
@@ -335,6 +339,82 @@ describe('families', () => {
     store.transact('del fam', (tx) => families.delete(tx, f.myFamily));
     expect(familyChildren.listForChild(store, f.kid)).toEqual([]);
     expect(persons.get(store, f.kid)).toBeDefined();
+    store.close();
+  });
+});
+
+describe('ending a partnership', () => {
+  it('deletes family events, and prunes families left with one partner and no children', () => {
+    const store = memoryTree();
+    const { result: ids } = store.transact('seed', (tx) => {
+      const a = persons.create(tx, {});
+      const b = persons.create(tx, {});
+      const c = persons.create(tx, {});
+      const fam = families.create(tx, {
+        partner1_id: a.id,
+        partner2_id: b.id,
+        children: [{ child_id: c.id }],
+      });
+      events.create(tx, { type: 'MARR', roles: [{ family_id: fam.id, role: 'principal' }] });
+      return { a: a.id, b: b.id, c: c.id, fam: fam.id };
+    });
+    // Two partners: kept.
+    store.transact('noop', (tx) => expect(families.pruneIfEmpty(tx, ids.fam)).toBe(false));
+    store.transact('end', (tx) => {
+      families.update(tx, ids.fam, { partner2_id: null });
+      families.deleteEvents(tx, ids.fam);
+      // One partner but a child: kept.
+      expect(families.pruneIfEmpty(tx, ids.fam)).toBe(false);
+    });
+    expect(count(store, 'event')).toBe(0);
+    const link = familyChildren.listForChild(store, ids.c)[0]!;
+    store.transact('unlink', (tx) => {
+      familyChildren.delete(tx, link.id);
+      expect(families.pruneIfEmpty(tx, ids.fam)).toBe(true);
+      expect(families.pruneIfEmpty(tx, ids.fam)).toBe(false);
+    });
+    expect(families.get(store, ids.fam)).toBeUndefined();
+    expect(persons.get(store, ids.a)).toBeDefined();
+    store.close();
+  });
+
+  it('keeps a one-partner, childless family with user data, not one with only imported GEDCOM', () => {
+    const store = memoryTree();
+    const { result: ids } = store.transact('seed', (tx) => {
+      const a = persons.create(tx, {});
+      const withEvent = families.create(tx, { partner1_id: a.id });
+      events.create(tx, { type: 'MARR', roles: [{ family_id: withEvent.id, role: 'principal' }] });
+      const withNote = families.create(tx, { partner1_id: a.id });
+      const note = notes.create(tx, { text: 'Kept' });
+      noteLinks.create(tx, { note_id: note.id, owner_type: 'family', owner_id: withNote.id });
+      const withRaw = families.create(tx, { partner1_id: a.id });
+      const batch = tx.insert('import_batch', { started_at: '2026-01-01T00:00:00Z' } as never) as {
+        id: string;
+      };
+      tx.insert('raw_record', {
+        import_batch_id: batch.id,
+        seq: 0,
+        owner_type: 'family',
+        owner_id: withRaw.id,
+        gedcom_tag: 'FAM',
+        raw_text: '0 @F1@ FAM',
+      } as never);
+      return { withEvent: withEvent.id, withNote: withNote.id, withRaw: withRaw.id };
+    });
+    store.transact('prune', (tx) => {
+      expect(families.pruneIfEmpty(tx, ids.withEvent)).toBe(false);
+      expect(families.pruneIfEmpty(tx, ids.withNote)).toBe(false);
+    });
+    // Imported GEDCOM alone does not keep a family: every imported family has it.
+    const { batchId } = store.transact('prune imported', (tx) =>
+      expect(families.pruneIfEmpty(tx, ids.withRaw)).toBe(true),
+    );
+    expect(families.get(store, ids.withRaw)).toBeUndefined();
+    expect(count(store, 'raw_record')).toBe(0);
+    // Undo brings the family back with its raw record, for round-trip export.
+    undo(store, batchId);
+    expect(families.get(store, ids.withRaw)).toBeDefined();
+    expect(count(store, 'raw_record')).toBe(1);
     store.close();
   });
 });

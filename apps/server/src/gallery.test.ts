@@ -107,6 +107,10 @@ describe('thumbnails', () => {
       expect(meta.format).toBe('webp');
       expect(Math.max(meta.width!, meta.height!)).toBe(Math.min(edge, 400));
       expect(existsSync(join(treeDir(), 'thumbs', `${id}-${size}.webp`))).toBe(true);
+      // Private whatever the process umask (#85).
+      if (process.platform !== 'win32') {
+        expect(statSync(join(treeDir(), 'thumbs', `${id}-${size}.webp`)).mode & 0o777).toBe(0o600);
+      }
     }
     const cached = join(treeDir(), 'thumbs', `${id}-sm.webp`);
     const before = statSync(cached).mtimeMs;
@@ -253,8 +257,31 @@ describe('attaching media', () => {
     });
     expect(media.local_path).toMatch(/^attached\/[0-9a-f]{12}-Ada at 20\.png$/);
     expect(existsSync(join(treeDir(), 'media', ...media.local_path.split('/')))).toBe(true);
+    if (process.platform !== 'win32') {
+      const stored = join(treeDir(), 'media', ...media.local_path.split('/'));
+      expect(statSync(stored).mode & 0o777).toBe(0o600);
+    }
     const listed = (await api.get(`${s.base}/people/${s.ada}/media`)).json();
     expect(listed.items.map((i: { media: { id: string } }) => i.media.id)).toContain(media.id);
+  });
+
+  it('checks the owner before reading the file (issue #98)', async () => {
+    const small = await testApi({ library, mediaUploadLimit: 1024 });
+    const big = { name: 'big.jpg', bytes: Buffer.alloc(4096, 1) };
+    const send = (fields: Record<string, string>, file = big) => {
+      const body = multipart(fields, file);
+      return small.inject({ method: 'POST', url: `${s.base}/media`, ...body });
+    };
+    // Over the size limit too: 404/400 (not 413) shows the file was never streamed.
+    const unknown = await send({ owner_type: 'person', owner_id: '01NOPE' });
+    expect(unknown.statusCode).toBe(404);
+    const badType = await send({ owner_type: 'tag', owner_id: s.ada });
+    expect(badType.statusCode).toBe(400);
+    // The file before its fields: refused without reading it.
+    const fileFirst = await send({});
+    expect(fileFirst.statusCode).toBe(400);
+    expect(fileFirst.json().error.message).toMatch(/owner_type and owner_id before the file/);
+    await small.app.close();
   });
 
   it('deduplicates by sha256 and can attach to an event', async () => {

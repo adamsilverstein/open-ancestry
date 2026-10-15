@@ -107,6 +107,10 @@ describe('thumbnails', () => {
       expect(meta.format).toBe('webp');
       expect(Math.max(meta.width!, meta.height!)).toBe(Math.min(edge, 400));
       expect(existsSync(join(treeDir(), 'thumbs', `${id}-${size}.webp`))).toBe(true);
+      // Private whatever the process umask (#85).
+      if (process.platform !== 'win32') {
+        expect(statSync(join(treeDir(), 'thumbs', `${id}-${size}.webp`)).mode & 0o777).toBe(0o600);
+      }
     }
     const cached = join(treeDir(), 'thumbs', `${id}-sm.webp`);
     const before = statSync(cached).mtimeMs;
@@ -253,6 +257,10 @@ describe('attaching media', () => {
     });
     expect(media.local_path).toMatch(/^attached\/[0-9a-f]{12}-Ada at 20\.png$/);
     expect(existsSync(join(treeDir(), 'media', ...media.local_path.split('/')))).toBe(true);
+    if (process.platform !== 'win32') {
+      const stored = join(treeDir(), 'media', ...media.local_path.split('/'));
+      expect(statSync(stored).mode & 0o777).toBe(0o600);
+    }
     const listed = (await api.get(`${s.base}/people/${s.ada}/media`)).json();
     expect(listed.items.map((i: { media: { id: string } }) => i.media.id)).toContain(media.id);
   });

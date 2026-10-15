@@ -15,6 +15,7 @@ import { fullName, lifeDate } from '../../../lib/person';
 import { CHILD_RELATIONSHIPS, RELATIONSHIP_TYPES } from './EditPersonDialog';
 import { NewPersonFields, useNewPerson } from './NewPersonFields';
 import { SaveError, useSaveState } from './SaveError';
+import { useDirtyForm } from './dirty';
 import styles from './Edit.module.css';
 
 export type RelativeKind = 'parent' | 'spouse' | 'child' | 'sibling';
@@ -62,6 +63,12 @@ export function AddRelativeDialog({
   const [rel, setRel] = useState<ChildRelationship>('biological');
   const [relationshipType, setRelationshipType] = useState<RelationshipType>('married');
   const families = detail.partnerFamilies;
+  useDirtyForm({
+    given: draft.given,
+    surname: draft.surname,
+    birth: draft.birth,
+    existing: existing?.id ?? null,
+  });
   const [familyId, setFamilyId] = useState<string>(families[0]?.family.id ?? 'none');
 
   const q = useDeferredValue(query.trim());

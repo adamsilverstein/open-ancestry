@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useToast } from '../components/Toast/Toast';
-import { ApiError } from './client';
+import { ApiError, isNotFound } from './client';
 import { personQuery } from './queries';
 import type { PersonDetail } from './types';
 
@@ -84,6 +84,30 @@ export function invalidateTree(queryClient: QueryClient, tree: string) {
   return queryClient.invalidateQueries({ predicate: (q) => q.queryKey[1] === tree });
 }
 
+/** Every edit to `tree` shares this key, so they can be counted and awaited. */
+export const editKey = (tree: string) => ['edit', tree] as const;
+
+/** Mutations sharing this scope run one at a time, in the order they were made. */
+export const editScope = (tree: string) => ({ id: `edit:${tree}` });
+
+/*
+ * An edit refused with 404 (what it changes was deleted in another window or
+ * by undo) is announced once: by the person page if its person is gone (it
+ * also has to move away), else by the edit hook just after the refetch.
+ */
+let unsaved: { tree: string; label: string } | null = null;
+
+/** Takes the pending "deleted elsewhere" notice for `tree`, so only one place shows it. */
+export function takeUnsaved(tree: string): string | null {
+  if (unsaved?.tree !== tree) return null;
+  const { label } = unsaved;
+  unsaved = null;
+  return label;
+}
+
+/** Long enough for a page whose person is gone to see the refetch and claim the notice. */
+const CLAIM_MS = 300;
+
 interface Run {
   edit: Edit;
   /** The detail before the optimistic update, for rollback. */
@@ -94,9 +118,19 @@ export function useEdit(tree: string) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const mutation = useMutation({
+    mutationKey: editKey(tree),
+    // One at a time, in the order they were made: a slow request can never land
+    // after a later one (TanStack runs mutations sharing a scope serially).
+    scope: editScope(tree),
     mutationFn: ({ edit }: Run) => edit.send(),
     onError: (error, { edit, rollback }) => {
       if (rollback) queryClient.setQueryData(rollback.key, rollback.previous);
+      if (isNotFound(error)) {
+        // The server message names row types and ids; say what happened instead.
+        unsaved = { tree, label: edit.label };
+        edit.onError?.(error);
+        return;
+      }
       toast({
         title: 'Could not save',
         description: `${edit.label}: ${friendlyMessage(error)}`,
@@ -105,7 +139,24 @@ export function useEdit(tree: string) {
       edit.onError?.(error);
     },
     onSuccess: (result, { edit }) => edit.onDone?.(result),
-    onSettled: () => invalidateTree(queryClient, tree),
+    // Refetch once the queue drains: a refetch between queued edits would show
+    // server state without them and overwrite their optimistic updates.
+    // (This edit still counts as pending while onSettled runs.)
+    onSettled: async () => {
+      if (queryClient.isMutating({ mutationKey: editKey(tree) }) > 1) return;
+      await invalidateTree(queryClient, tree);
+      if (unsaved?.tree !== tree) return;
+      setTimeout(() => {
+        const label = takeUnsaved(tree);
+        if (label) {
+          toast({
+            title: 'Not saved',
+            description: `${label}: part of it was deleted (in another window or by undo), so your changes couldn't be saved.`,
+            variant: 'error',
+          });
+        }
+      }, CLAIM_MS);
+    },
   });
 
   /**

@@ -59,7 +59,7 @@ export function HomePage() {
                     iconStart={<TreeDeciduous size={16} aria-hidden />}
                     onClick={() => void open(tree.id)}
                   >
-                    {tree.name}
+                    {tree.label}
                   </Button>
                 ))}
               </nav>

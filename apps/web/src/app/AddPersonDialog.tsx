@@ -38,11 +38,13 @@ export default function AddPersonDialog({
     isOpen.current = open;
   }, [open]);
   // Stays open until the save succeeds, so a failure keeps what was typed.
-  const saveState = useSaveState<{ person: ApiPersonSummary }>(({ person }) => {
+  const saveState = useSaveState<{ person: ApiPersonSummary }>((result) => {
     if (!isOpen.current) return;
+    // No result: the tree was removed elsewhere, so there is no one to open.
+    if (!result) return onOpenChange(false);
     saved.current = true;
     onOpenChange(false);
-    void navigate({ to: '/person/$personId', params: { personId: person.id } });
+    void navigate({ to: '/person/$personId', params: { personId: result.person.id } });
   });
 
   function save() {

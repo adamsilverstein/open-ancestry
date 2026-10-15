@@ -6,6 +6,7 @@ import {
   persons,
   events,
   type FamilyRow,
+  type PersonRow,
   type Privacy,
   type Tx,
 } from '@open-ancestry/db';
@@ -286,12 +287,55 @@ function refuseLineal(tx: Tx, keepId: string, otherId: string) {
   );
 }
 
+/**
+ * Records that `otherId` was merged into `keepId` (#70): the merged person's
+ * xref, import batch and the Ancestry record ids cited for them, so a re-import
+ * finds the kept person even though the xref will be gone. Aliases the merged
+ * person had already gathered move to the kept person. Call before moving links.
+ */
+function recordAlias(tx: Tx, keepId: string, other: PersonRow) {
+  const earlier = tx.store
+    .stmt('SELECT id FROM person_alias WHERE person_id = ?')
+    .pluck()
+    .all(other.id) as string[];
+  for (const id of earlier) tx.update('person_alias', id, { person_id: keepId });
+  const xref =
+    other.external_id ??
+    (tx.store
+      .stmt(`SELECT xref FROM raw_record WHERE owner_type = 'person' AND owner_id = ? ORDER BY seq`)
+      .pluck()
+      .get(other.id) as string | null | undefined) ??
+    null;
+  const apids = tx.store
+    .stmt(
+      `SELECT DISTINCT c.apid FROM citation c JOIN citation_link l ON l.citation_id = c.id
+       WHERE c.apid IS NOT NULL AND (
+         (l.owner_type = 'person' AND l.owner_id = @id)
+         OR (l.owner_type = 'person_name'
+             AND l.owner_id IN (SELECT id FROM person_name WHERE person_id = @id))
+         OR (l.owner_type = 'event' AND l.owner_id IN
+             (SELECT event_id FROM event_role WHERE person_id = @id AND role = 'principal')))
+       ORDER BY c.apid`,
+    )
+    .pluck()
+    .all({ id: other.id }) as string[];
+  tx.insert('person_alias', {
+    person_id: keepId,
+    merged_person_id: other.id,
+    merged_xref: xref,
+    import_batch_id: other.import_batch_id,
+    apids_json: JSON.stringify(apids),
+    merged_at: tx.now,
+  });
+}
+
 /** Merges `otherId` into `keepId` inside the caller's transaction. */
 export function mergePeople(tx: Tx, keepId: string, otherId: string, choices: MergeChoices = {}) {
   if (keepId === otherId) throw badRequest('Choose two different people to merge');
   const keep = requireRow(tx.store, 'person', keepId);
   const other = requireRow(tx.store, 'person', otherId);
   refuseLineal(tx, keepId, otherId);
+  recordAlias(tx, keepId, other);
 
   moveFamilies(tx, keepId, otherId);
   moveNames(tx, keepId, otherId, choices.name ?? 'keep');

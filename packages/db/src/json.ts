@@ -21,7 +21,7 @@ export const OA_JSON_FORMAT = 'open-ancestry';
 export const OA_JSON_FORMAT_VERSION = 1;
 
 /** Derived tables rebuilt on import rather than exported. */
-const DERIVED_TABLES = new Set(['search_doc', 'person_search', 'derived_state']);
+const DERIVED_TABLES = new Set(['search_doc', 'person_search', 'derived_state', 'person_sort']);
 const HISTORY_TABLES = new Set(['change_batch', 'change_log']);
 
 export type OaJsonTables = { [T in keyof TableRows]: TableRows[T][] } & {
@@ -37,9 +37,38 @@ export interface OaJsonDocument {
 }
 
 export interface ExportOptions {
-  /** Include change_batch and change_log (default true). */
+  /**
+   * Include change_batch and change_log (default true). Without them, import
+   * warnings (which can quote imported lines) are left out too.
+   */
   history?: boolean;
+  /**
+   * Records (`owner_type|owner_id`) whose raw_record and unmapped_line rows are
+   * left out: the imported text of records changed or deleted since import,
+   * which still holds what was edited away (see changedSinceImport in
+   * @open-ancestry/export).
+   */
+  omitImportedText?: ReadonlySet<string>;
 }
+
+/**
+ * An import batch without the imported lines it quotes: warnings, and the
+ * example line of each unmapped tag in its counts.
+ */
+function withoutImportedLines(row: Record<string, unknown>): Record<string, unknown> {
+  let counts = row.counts_json;
+  try {
+    const parsed = JSON.parse(String(counts)) as { unmapped?: { example?: unknown }[] };
+    for (const u of parsed.unmapped ?? []) delete u.example;
+    counts = JSON.stringify(parsed);
+  } catch {
+    counts = '{}';
+  }
+  return { ...row, warnings_json: '[]', counts_json: counts };
+}
+
+/** Tables holding a record's imported GEDCOM text, by owner. */
+const IMPORTED_TEXT_TABLES = new Set(['raw_record', 'unmapped_line']);
 
 function exportedTables(store: TreeStore, history: boolean): string[] {
   return listTables(store.db)
@@ -50,11 +79,22 @@ function exportedTables(store: TreeStore, history: boolean): string[] {
 
 export function exportJson(
   store: TreeStore,
-  { history = true }: ExportOptions = {},
+  { history = true, omitImportedText }: ExportOptions = {},
 ): OaJsonDocument {
   const tables: Record<string, unknown[]> = {};
   for (const name of exportedTables(store, history)) {
-    tables[name] = store.db.prepare(`SELECT * FROM ${name} ORDER BY ${store.plan(name).key}`).all();
+    let rows = store.db
+      .prepare(`SELECT * FROM ${name} ORDER BY ${store.plan(name).key}`)
+      .all() as Record<string, unknown>[];
+    if (omitImportedText?.size && IMPORTED_TEXT_TABLES.has(name)) {
+      rows = rows.filter(
+        (r) =>
+          r.owner_id == null ||
+          !omitImportedText.has(`${String(r.owner_type)}|${String(r.owner_id)}`),
+      );
+    }
+    if (!history && name === 'import_batch') rows = rows.map(withoutImportedLines);
+    tables[name] = rows;
   }
   return {
     format: OA_JSON_FORMAT,

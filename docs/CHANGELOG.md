@@ -6,6 +6,8 @@ The first release of open-ancestry: a local-first family tree app. Import your A
 
 PR numbers point to the change on GitHub.
 
+> **Upgrading a tree is one-way.** Opening a tree upgrades its database to schema version 5: version 4 records merges as person aliases (#219), and version 5 adds sort keys for the people list (#244). An older version of the app refuses a version 5 tree. Before opening a tree you care about, keep a copy of its folder or export it as JSON.
+
 ### Import and re-import
 
 - **Import Ancestry GEDCOM and GEDZIP files** from the start page (drag and drop) or with `open-ancestry import`. Ancestry's own tags are understood: record links (`_APID`), MyTreeTags, photos and primary photos, adopted and step relationships, and military events. Nothing is dropped: every line is either mapped or kept as is, so the tree can be exported again. (#22, #30, #43, #44)
@@ -17,6 +19,7 @@ PR numbers point to the change on GitHub.
 - **Accented names stay consistent**: text is normalized to NFC on import and edit, so names, places and media paths match however they were typed. (#164)
 - **Imports run in the background** in their own worker, with size limits that can be configured. A GEDZIP is limited by its GEDCOM text, not by its photos, an upload that can't succeed is refused before it is sent, and an import can be cancelled. (#156)
 - Writes to a tree are refused while it is importing. (#149)
+- **Command line and import polish**: `--help` and clear usage errors, `serve` opens the browser, blank tree names are refused with a plain message, a fuller import report, a size check before upload, and focus moves to the import result so it is announced. (#228)
 
 ### Tree views
 
@@ -25,6 +28,7 @@ PR numbers point to the change on GitHub.
 - **Expand and collapse** ancestors, descendants and siblings card by card. Half siblings hang from their shared parent, and cousins keep their parents together. (#31, #53, #73)
 - **Pan, zoom, minimap and keyboard navigation**: arrow keys move between related cards. The URL names the focus person, so any view can be bookmarked, and a hand-edited URL falls back to the default view instead of breaking it. (#39, #77, #214)
 - **Pedigree collapse** (the same person reached twice) is drawn as a linked duplicate card. (#39)
+- **Copied trees are told apart**: a tree folder copied by hand shows its folder name next to the tree name in the switcher, start page and export dialog. (#235)
 - **Kinship labels** on tree cards name step, adoptive and foster links, not just birth relationships. (#157)
 
 ### Person page
@@ -50,9 +54,10 @@ PR numbers point to the change on GitHub.
 
 - **Add, edit and delete** people, names, events (with a live preview of how the date is read), notes, tags and relationships. (#48)
 - **Relationship fixes**: set or change a partnership's type, and remove a wrong parent, partner or child link. People are never deleted by these. (#165)
-- **Merge duplicate people** in one step. (#70)
+- **Merge duplicate people** in one step. Each merge is recorded, so a later re-import still recognizes the person who was merged away. (#70, #219)
 - **Undo and redo everything**: Cmd/Ctrl-Z, Shift-Cmd/Ctrl-Z, and a History panel listing recent changes. Each dialog save is one undo step, and history survives app upgrades. (#48, #148)
 - **A failed save keeps the dialog open**, with what you typed and the reason, so you can try again. (#177)
+- **Edits to someone deleted elsewhere** (in another window, or by undo) get one plain message, no retry that can't work, and land on a close relative. (#240)
 - **Delete a person** and land on a close relative (or the people list), with an Undo button in the toast. Undo brings you back to the restored person. (#181)
 - **Keyboard friendly**: focus returns to whatever opened a dialog, including after a mouse click in Safari, and the History list scrolls from the keyboard. (#59, #171, #208)
 
@@ -60,6 +65,7 @@ PR numbers point to the change on GitHub.
 
 - **Your data stays on your computer.** Each tree is a folder (a SQLite database plus media) in your library. The app makes no third-party network requests. (#23, #29)
 - **Export GEDCOM 5.5.1** (Ancestry compatible, keeping Ancestry's custom tags), **GEDCOM 7**, **GEDZIP** with media, and **JSON** for backup and tools. Original records are re-read by their own GEDCOM version, so nothing is lost when a GEDCOM 7 import is exported as 5.5.1, and a line that should point at a record but holds text is reported, not silently dropped. (#23, #46, #223)
+- **JSON exports can leave out edit history**, and do by default from the export dialog, since that history holds anything you deleted. (#220)
 - **Privatize living people**, on by default when exporting. Private and confidential records are hidden, and record ids are renumbered so nothing about a hidden person leaks. (#46, #104)
 - **Living status** is worked out from dates and can be set by hand. (#21, #48)
 
@@ -83,7 +89,7 @@ Budgets are checked in CI on 10,000-person and 100,000-person synthetic trees. (
 | Re-focus the tree view | under 50 ms; under 35 ms at mid zoom (#78) |
 | Pan and zoom | 60 fps with 2,000 cards (#63) |
 
-Other speed-ups include faster imports that build indexes once at the end and batch their writes (#204), cached people lists and marriage indexes (#47, #150), and a tree view cache that starts over cleanly after an edit (#147).
+Other speed-ups include faster imports that build indexes once at the end and batch their writes (#204), cached people lists and marriage indexes (#47, #150), a tree view cache that starts over cleanly after an edit (#147), sibling links built in linear time so very large families lay out at once (#218), and stored sort keys so the people list opens sorted by birth or death in a 100,000-person tree without scanning it (#244).
 
 ### For contributors
 

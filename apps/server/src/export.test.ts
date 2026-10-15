@@ -163,6 +163,55 @@ describe('JSON export history (#197)', () => {
     }
   });
 
+  it('with history=0 also leaves out the imported text and warnings of changed records', async () => {
+    const base = await createTestTree(api, 'Secrets');
+    const store = openTree(join(api.root, 'Secrets.oatree'));
+    await importGedcom(
+      {
+        bytes: [
+          '0 HEAD',
+          '1 GEDC',
+          '2 VERS 5.5.1',
+          '0 @I1@ INDI',
+          '1 NAME Odile /Fernsby/',
+          '1 NOTE SECRET-INLINE-NOTE',
+          '1 NOTE @N1@',
+          '1 _SECRETTAG SECRET-UNMAPPED',
+          '0 @I2@ INDI',
+          '1 NAME Bastien /Corlew/',
+          '1 NOTE Kept note',
+          '0 @N1@ NOTE SECRET-RECORD-NOTE',
+          'SECRET-BROKEN-LINE',
+          '0 TRLR',
+          '',
+        ].join('\n'),
+      },
+      store,
+    );
+    const odile = store.db
+      .prepare("SELECT person_id FROM person_name WHERE given = 'Odile'")
+      .pluck()
+      .get() as string;
+    store.close();
+    const detail = (await api.get(`${base}/people/${odile}`)).json() as {
+      notes: { id: string }[];
+    };
+    expect(detail.notes).toHaveLength(2);
+    for (const note of detail.notes) await api.del(`${base}/notes/${note.id}`);
+
+    const res = await api.get(`${base}/export.json?history=0`);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).not.toMatch(/SECRET/);
+    const { tables } = res.json() as {
+      tables: { import_batch: { warnings_json: string }[]; raw_record: { raw_text: string }[] };
+    };
+    expect(tables.import_batch.every((b) => b.warnings_json === '[]')).toBe(true);
+    // Untouched records keep their imported text, so a re-export can still copy them.
+    expect(tables.raw_record.some((r) => r.raw_text.includes('Bastien'))).toBe(true);
+    // The full backup keeps everything.
+    expect((await api.get(`${base}/export.json`)).body).toMatch(/SECRET-INLINE-NOTE/);
+  });
+
   it('keeps the history by default, as a full backup', async () => {
     await deletedNote();
     const res = await api.get(`${s.base}/export.json`);

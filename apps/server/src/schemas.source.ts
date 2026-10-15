@@ -96,6 +96,9 @@ export const HistoryQuery = Type.Object({
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })),
 });
 
+/** `expect`: undo only if this batch is still the newest applied one (a toast's Undo). */
+export const UndoQuery = Type.Object({ expect: Type.Optional(Id) });
+
 export const HomeBody = Type.Object({ personId: Type.Union([Id, Type.Null()]) }, strict);
 
 // ---------------------------------------------------------------- people

@@ -127,3 +127,202 @@ describe('kinshipLabels', () => {
     expect(kinshipLabels(relations, 'missing', sexOf)).toEqual({});
   });
 });
+
+describe('step, adoptive and foster links', () => {
+  // George's birth parents are Arthur and Mary. Mary later married Leopold,
+  // George's stepfather; their daughter Iris is George's half-sister.
+  // Peter was adopted by Harold and Dorothy, whose son Thomas is his brother.
+  const sex: Record<string, 'M' | 'F'> = {
+    arthur: 'M',
+    mary: 'F',
+    leopold: 'M',
+    george: 'M',
+    iris: 'F',
+    harold: 'M',
+    dorothy: 'F',
+    thomas: 'M',
+    peter: 'M',
+    walt: 'M',
+    gil: 'M',
+    nan: 'F',
+    sue: 'F',
+  };
+  const kin: TreeGraph = {
+    people: Object.fromEntries(Object.entries(sex).map(([id, s]) => [id, person(id, s)])),
+    families: [
+      {
+        id: 'f-birth',
+        partners: ['arthur', 'mary'],
+        children: [{ id: 'george', preferred: true }],
+      },
+      {
+        id: 'f-step',
+        partners: ['leopold', 'mary'],
+        children: [
+          { id: 'george', rel1: 'step', rel2: 'biological' },
+          { id: 'iris', rel1: 'biological', rel2: 'biological' },
+        ],
+      },
+      { id: 'f-walt', partners: ['walt', null], children: [{ id: 'leopold' }] },
+      {
+        id: 'f-ash',
+        partners: ['harold', 'dorothy'],
+        children: [
+          { id: 'thomas', rel1: 'biological', rel2: 'biological' },
+          { id: 'peter', rel1: 'adopted', rel2: 'adopted' },
+        ],
+      },
+      {
+        id: 'f-foster',
+        partners: ['gil', 'nan'],
+        children: [
+          { id: 'sue', rel1: 'foster', rel2: 'foster' },
+          { id: 'george', rel1: 'foster', rel2: 'foster' },
+        ],
+      },
+    ],
+  };
+  const sexOfKin = (key: string) => sex[key.split('~')[0]!] ?? 'U';
+  const labels = (focus: string, options: Parameters<typeof layoutFamily>[2] = {}) => {
+    const l = layoutFamily(kin, focus, options);
+    return kinshipLabels(buildRelations(l, kin), l.focusKey!, sexOfKin);
+  };
+
+  it('names birth parents plainly', () => {
+    const k = labels('george');
+    expect(k.arthur).toBe('father');
+    expect(k.mary).toBe('mother');
+  });
+
+  it('names a stepparent and keeps a half-sibling half in the step set', () => {
+    const k = labels('george', { selectedParentFamilies: { george: 'f-step' } });
+    expect(k.leopold).toBe('stepfather');
+    expect(k.mary).toBe('mother');
+    expect(k.iris).toBe('half-sister');
+    // Further up through the step link.
+    expect(k.walt).toBe('step-grandfather');
+  });
+
+  it('names adoptive parents, and the adoptive family’s children as siblings', () => {
+    const k = labels('peter');
+    expect(k.harold).toBe('adoptive father');
+    expect(k.dorothy).toBe('adoptive mother');
+    // Siblings through an adoption, in the relationship calculator's words.
+    expect(k.thomas).toBe('adopted brother');
+    const t = labels('thomas');
+    expect(t.harold).toBe('father');
+    expect(t.peter).toBe('adopted brother');
+  });
+
+  it('names foster parents and foster siblings', () => {
+    const k = labels('george', { selectedParentFamilies: { george: 'f-foster' } });
+    expect(k.gil).toBe('foster father');
+    expect(k.nan).toBe('foster mother');
+    expect(k.sue).toBe('foster sister');
+  });
+
+  it('names stepsiblings who share no parent by birth or adoption', () => {
+    const blended: TreeGraph = {
+      people: { ...kin.people, ann: person('ann', 'F') } as Record<string, TreePerson>,
+      families: [
+        {
+          id: 'f-blend',
+          partners: ['leopold', 'mary'],
+          children: [
+            { id: 'george', rel1: 'step', rel2: 'biological' },
+            { id: 'ann', rel1: 'biological', rel2: 'step' },
+          ],
+        },
+      ],
+    };
+    const l = layoutFamily(blended, 'george', {});
+    const k = kinshipLabels(buildRelations(l, blended), l.focusKey!, (key) =>
+      key === 'ann' ? 'F' : 'M',
+    );
+    expect(k.ann).toBe('stepsister');
+  });
+
+  it('names the stepfather’s own family step-, never half- or plain (#157 review)', () => {
+    const wide: TreeGraph = {
+      people: {
+        ...kin.people,
+        ruth: person('ruth', 'F'),
+        max: person('max', 'M'),
+        hilda: person('hilda', 'F'),
+        karl: person('karl', 'M'),
+      } as Record<string, TreePerson>,
+      families: [
+        ...kin.families.filter((f) => f.id !== 'f-walt'),
+        // Leopold's earlier marriage: Max is George's stepbrother.
+        { id: 'f-ruth', partners: ['leopold', 'ruth'], children: [{ id: 'max' }] },
+        // Leopold's sister Hilda and her son Karl: step-aunt and step-cousin.
+        { id: 'f-walt', partners: ['walt', null], children: [{ id: 'leopold' }, { id: 'hilda' }] },
+        { id: 'f-hilda', partners: [null, 'hilda'], children: [{ id: 'karl' }] },
+      ],
+    };
+    const sexes2: Record<string, 'M' | 'F'> = {
+      ...sex,
+      ruth: 'F',
+      max: 'M',
+      hilda: 'F',
+      karl: 'M',
+    };
+    const l = layoutFamily(wide, 'george', {
+      selectedParentFamilies: { george: 'f-step' },
+      expanded: ['hilda:down'],
+    });
+    const k = kinshipLabels(buildRelations(l, wide), l.focusKey!, (key) => sexes2[key] ?? 'U');
+    expect(k.leopold).toBe('stepfather');
+    expect(k.max).toBe('stepbrother');
+    expect(k.hilda).toBe('step-aunt');
+    expect(k.karl).toBe('step-cousin');
+    expect(k.iris).toBe('half-sister');
+  });
+
+  it('keeps a half-sister half when the stepfather adopted the child (#157 review)', () => {
+    const adopted: TreeGraph = {
+      people: kin.people,
+      families: [
+        { id: 'f-birth', partners: ['arthur', 'mary'], children: [{ id: 'george' }] },
+        {
+          id: 'f-step',
+          partners: ['leopold', 'mary'],
+          children: [
+            { id: 'george', rel1: 'adopted', rel2: 'biological' },
+            { id: 'iris', rel1: 'biological', rel2: 'biological' },
+          ],
+        },
+      ],
+    };
+    for (const set of ['f-birth', 'f-step']) {
+      const l = layoutFamily(adopted, 'george', { selectedParentFamilies: { george: set } });
+      const k = kinshipLabels(buildRelations(l, adopted), l.focusKey!, sexOfKin);
+      expect(k.iris, set).toBe('half-sister');
+    }
+  });
+
+  it('treats guardian and other links like birth for siblings, as for parents', () => {
+    const g: TreeGraph = {
+      people: kin.people,
+      families: [
+        {
+          id: 'f-guard',
+          partners: ['harold', 'dorothy'],
+          children: [
+            { id: 'thomas', rel1: 'biological', rel2: 'biological' },
+            { id: 'peter', rel1: 'guardian', rel2: 'guardian' },
+          ],
+        },
+      ],
+    };
+    const l = layoutFamily(g, 'peter', {});
+    const k = kinshipLabels(buildRelations(l, g), l.focusKey!, sexOfKin);
+    expect(k.harold).toBe('father');
+    expect(k.thomas).toBe('brother');
+  });
+
+  it('treats a missing relationship as by birth', () => {
+    const k = labels('george', { selectedParentFamilies: { george: 'f-birth' } });
+    expect(k.arthur).toBe('father');
+  });
+});

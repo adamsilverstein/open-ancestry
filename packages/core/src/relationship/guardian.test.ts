@@ -46,4 +46,18 @@ describe('guardian links', () => {
     expect(relationship(couple, 'g1', 'kid').name).toBe('guardian');
     expect(relationship(couple, 'kid', 'g2').name).toBe('ward');
   });
+
+  it('still calls a guardian married to the birth mother a stepfather too', () => {
+    const family = kinshipGraph(
+      new GraphBuilder()
+        .person('guard', 'M')
+        .person('mom', 'F')
+        .person('kid', 'F')
+        .family('Fm', 'guard', 'mom', [['kid', 'guardian', 'biological']])
+        .build(),
+    );
+    expect(relationship(family, 'guard', 'kid').name).toBe('guardian and also stepfather');
+    expect(relationship(family, 'kid', 'guard').name).toBe('ward and also stepdaughter');
+    expect(relationship(family, 'mom', 'kid').name).toBe('mother');
+  });
 });

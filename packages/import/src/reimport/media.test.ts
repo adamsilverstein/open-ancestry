@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -217,5 +218,42 @@ describe('re-importing media files (#75)', () => {
     closeReimport(session);
     expect(existsSync(join(dir, 'new.jpg'))).toBe(false);
     expect(existsSync(join(tmp, 'new.jpg'))).toBe(false);
+  });
+});
+
+describe('re-import media without holding memory or the tree lock (#243 review)', () => {
+  const spills = () => readdirSync(dir).filter((name) => name.startsWith('.reimport-'));
+
+  it("keeps a GEDZIP's files in a folder under the tree, not in memory, until closed", async () => {
+    const session = await prepareReimport(store, { gedzip: laterZip() }, { today: TODAY });
+    expect(spills()).toHaveLength(1);
+    expect(readFileSync(join(dir, spills()[0]!, 'photos', 'new.jpg'), 'utf8')).toBe('NEW');
+    applyReimport(store, session, acceptAll(session), 'Re-import');
+    expect(readFileSync(join(dir, 'media', 'photos', 'new.jpg'), 'utf8')).toBe('NEW');
+    closeReimport(session);
+    expect(spills()).toEqual([]);
+  });
+
+  it('copies files before the write transaction, and leaves none it did not use', async () => {
+    const session = await prepareReimport(store, { gedzip: laterZip() }, { today: TODAY });
+    const transact = store.transact.bind(store);
+    let copiedFirst = false;
+    store.transact = ((label, fn) => {
+      copiedFirst = existsSync(join(dir, 'media', 'photos', 'new.jpg'));
+      return transact(label, fn);
+    }) as typeof store.transact;
+    // Only the placeholder's file is accepted; the new photo is left out.
+    const fileOnly = new Set(
+      session.diff.people
+        .flatMap((p) => p.changes)
+        .filter((c) => c.kind === 'media.file')
+        .map((c) => c.id),
+    );
+    applyReimport(store, session, fileOnly, 'Re-import');
+    store.transact = transact;
+    closeReimport(session);
+    expect(copiedFirst).toBe(true);
+    expect(readFileSync(join(dir, 'media', 'photos', 'portrait.jpg'), 'utf8')).toBe('PORTRAIT');
+    expect(existsSync(join(dir, 'media', 'photos', 'new.jpg'))).toBe(false);
   });
 });

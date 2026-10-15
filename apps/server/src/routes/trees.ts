@@ -5,6 +5,7 @@ import {
   listBatches,
   meta,
   redoLast,
+  undo,
   undoLatest,
   type TreeStore,
 } from '@open-ancestry/db';
@@ -16,8 +17,16 @@ import {
 } from '@open-ancestry/export';
 import type { Api, Deps } from '../context';
 import { edit } from '../edits';
-import { conflict } from '../errors';
-import { ExportQuery, GedzipQuery, HistoryQuery, HomeBody, TreeBody, TreeParams } from '../schemas';
+import {
+  ExportQuery,
+  GedzipQuery,
+  HistoryQuery,
+  HomeBody,
+  TreeBody,
+  TreeParams,
+  UndoQuery,
+} from '../schemas';
+import { conflict, notNewest } from '../errors';
 
 function treeDetail(deps: Deps, id: string) {
   const store = deps.library.open(id);
@@ -147,11 +156,27 @@ export function treeRoutes(app: Api, deps: Deps): void {
     },
   );
 
-  app.post('/api/trees/:tree/undo', { schema: { params: TreeParams } }, async (request) => {
-    const store = library.open(request.params.tree);
-    // `skipped`: newer batches stepped over because the NFC upgrade made them un-undoable.
-    return undoLatest(store);
-  });
+  app.post(
+    '/api/trees/:tree/undo',
+    { schema: { params: TreeParams, querystring: UndoQuery } },
+    async (request) => {
+      const store = library.open(request.params.tree);
+      const { expect } = request.query;
+      if (expect === undefined) {
+        // `skipped`: newer batches stepped over because the NFC upgrade made them un-undoable.
+        return undoLatest(store);
+      }
+      // A toast's Undo names its own batch: undo exactly that one, and only while nothing
+      // newer exists, so it never undoes a later change in its place.
+      const newest = store
+        .stmt("SELECT id FROM change_batch WHERE state = 'applied' ORDER BY seq DESC LIMIT 1")
+        .get() as { id: string } | undefined;
+      if (newest?.id !== expect) {
+        throw notNewest('Newer changes were made since; undo them from History first');
+      }
+      return { batch: undo(store, expect), skipped: [] };
+    },
+  );
 
   app.post('/api/trees/:tree/redo', { schema: { params: TreeParams } }, async (request) => {
     const store = library.open(request.params.tree);
@@ -163,6 +188,8 @@ export function treeRoutes(app: Api, deps: Deps): void {
     { schema: { params: TreeParams } },
     async (request, reply) => {
       const { tree } = request.params;
+      // Mid-import the tree is not the user's yet: export it once the import ends (#186).
+      library.assertIdle(tree);
       const json = exportJsonString(library.open(tree));
       return reply
         .type('application/json; charset=utf-8')
@@ -176,6 +203,8 @@ export function treeRoutes(app: Api, deps: Deps): void {
     { schema: { params: TreeParams, querystring: ExportQuery } },
     async (request, reply) => {
       const { tree } = request.params;
+      // Mid-import the tree is not the user's yet: export it once the import ends (#186).
+      library.assertIdle(tree);
       const { text, warnings } = buildGedcomExport(library.open(tree), {
         version: request.query.version ?? '5.5.1',
         privatizeLiving: request.query.privatize ?? false,
@@ -196,6 +225,8 @@ export function treeRoutes(app: Api, deps: Deps): void {
     { schema: { params: TreeParams, querystring: GedzipQuery } },
     async (request, reply) => {
       const { tree } = request.params;
+      // Mid-import the tree is not the user's yet: export it once the import ends (#186).
+      library.assertIdle(tree);
       // The GEDCOM text and media list are taken now, in one snapshot; the
       // media bytes are streamed one file at a time, so memory stays bounded
       // and other requests keep being served (#198).

@@ -63,15 +63,19 @@ for (const c of cases) {
   const metric = c.metric ?? 'p99';
   const value = result.latency[metric];
   const budget = c.budgetMs * factor;
-  const ok = value <= budget;
+  const peak = c.peakMemoryMB?.();
+  const memoryOk =
+    c.memoryBudgetMB === undefined || (peak !== undefined && peak <= c.memoryBudgetMB);
+  const ok = value <= budget && memoryOk;
   failed ||= !ok;
   rows.push({
     name: c.name,
     'mean ms': result.latency.mean.toFixed(2),
     'p99 ms': result.latency.p99.toFixed(2),
-    budget: `${metric} <= ${budget}ms`,
+    budget: `${metric} <= ${budget}ms${c.memoryBudgetMB === undefined ? '' : `, peak <= ${c.memoryBudgetMB}MB`}`,
+    'peak MB': peak === undefined ? '' : Math.round(peak),
     samples: result.latency.samplesCount,
-    status: ok ? 'ok' : 'OVER BUDGET',
+    status: ok ? 'ok' : value > budget ? 'OVER BUDGET' : 'OVER MEMORY',
   });
 }
 

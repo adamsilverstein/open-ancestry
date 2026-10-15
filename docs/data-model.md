@@ -1,6 +1,6 @@
 # open-ancestry data model
 
-Current schema version: **4**
+Current schema version: **5**
 
 This is the reference for the local data format: the SQLite schema inside every tree, the rules the code keeps on top of it, and the JSON interchange format. It is owned by `packages/db`. `packages/db/src/data-model-doc.test.ts` fails if a table or column exists in the live database but not here (or the other way round), or if an enum value is missing, so this document cannot drift from the DDL.
 
@@ -477,6 +477,20 @@ Derived: maps each person to their full-text row. Not exported; rebuilt on impor
 | `doc_id` | INTEGER | no | Rowid of the person's `person_search` row. |
 | `person_id` | TEXT | no | `person.id` (unique). |
 
+### `person_sort`
+
+Derived (schema v5, #114): each person's people-list sort keys and filters, refreshed with the search documents whenever a person, their names or their events change, so the first page of any order reads an index instead of sorting the tree. Every key has an ascending index and one with `person_id DESC`, so a descending order scanned backwards still breaks ties by ascending id. Not exported, not change-logged; rebuilt on import.
+
+| Column | Type | Null | Meaning |
+|---|---|---|---|
+| `person_id` | TEXT | no | `person.id` (primary key). |
+| `surname` | TEXT | yes | Primary name's surname (sorted `COLLATE NOCASE`). |
+| `given` | TEXT | yes | Primary name's given names (sorted `COLLATE NOCASE`). |
+| `birth_key` | INTEGER | yes | Earliest `date_sort` of the person's principal `BIRT`, `CHR` or `BAPM` events. |
+| `death_key` | INTEGER | yes | Earliest `date_sort` of the person's principal `DEAT`, `BURI` or `CREM` events. |
+| `sex` | TEXT | no | `person.sex`, for the sex filter. |
+| `living` | TEXT | no | `person.living`, for the living filter. |
+
 ### `person_search`
 
 Derived FTS5 table (`unicode61 remove_diacritics 2`, prefix indexes for 2 and 3 characters), one row per person. Not exported.
@@ -660,3 +674,4 @@ Human text is stored in Unicode NFC, so the same name, place or tag written comp
   2. run `npm run dump-schema -w @open-ancestry/db` and `npm run freeze-history-fixture -w @open-ancestry/db` to freeze `schema-vN.sql` and `oa-vN.json`;
   3. regenerate the JSON Schema (`npm run generate:json-schema -w @open-ancestry/db`);
   4. update this document (the doc test lists what is missing), and bump `formatVersion` only if the JSON envelope itself changes.
+  5. if the migration adds a derived table, or changes anything a derived table is computed from (names, events, event roles, the birth and death event types, Unicode forms), give it a `run` step that rebuilds the derived tables it affects: `rebuildSearchDocs` for `search_doc` and `person_search`, `rebuildSortKeys` for `person_sort`. A new derived table also goes in `DERIVED_TABLES` (`json.ts`) and `VERBATIM_TABLES` (`nfc.ts`), is refreshed beside the search documents (`refreshSearch`), and is dropped by the tests that fake an older tree (`nfc.test.ts`, `export/src/edits.test.ts`).

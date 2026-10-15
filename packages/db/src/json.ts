@@ -1,10 +1,11 @@
 import { createRequire } from 'node:module';
 import type { Ajv2020 as Ajv2020Class } from 'ajv/dist/2020.js';
 import type { ValidateFunction } from 'ajv';
+import Database from 'better-sqlite3';
 import { BulkWriter } from './bulk';
 import { refreshDerivedColumns } from './derived';
 import { ENUM_COLUMNS } from './enums';
-import { listTables, upgradeRow, type TableRowsByName } from './migrations/index';
+import { listTables, migrate, upgradeRow, type TableRowsByName } from './migrations/index';
 import type { TreeStore } from './store';
 import { parseLogImage } from './undo';
 import type { ChangeBatchRow, ChangeLogRow, TableRows } from './types';
@@ -149,8 +150,15 @@ export function importJson(
     if (!rows.every(isObject)) throw new Error(`Table ${name} rows must be objects`);
     tables[name] = rows as unknown as Record<string, unknown>[];
   }
-  if (version < store.schemaVersion) tables = upgradeTables(store, version, tables);
   const known = exportedTables(store, true);
+  if (version < store.schemaVersion) {
+    tables = upgradeTables(store, version, tables);
+    // A table added by a later migration has no rows in an older backup.
+    const existed = tablesAtVersion(store, version);
+    for (const name of known) {
+      if (!HISTORY_TABLES.has(name) && !existed.has(name)) tables[name] ??= [];
+    }
+  }
   const knownSet = new Set(known);
   for (const name of Object.keys(tables)) {
     if (!knownSet.has(name)) throw new Error(`Unknown table ${JSON.stringify(name)} in document`);
@@ -216,6 +224,17 @@ function upgradeTables(store: TreeStore, from: number, input: TableRowsByName): 
     migration.upgradeTables?.(tables);
   }
   return tables;
+}
+
+/** Tables the schema had at `version`, from an in-memory database migrated that far. */
+function tablesAtVersion(store: TreeStore, version: number): Set<string> {
+  const db = new Database(':memory:');
+  try {
+    migrate(db, { migrations: store.migrations, to: version });
+    return new Set(listTables(db).map((t) => t.name));
+  } finally {
+    db.close();
+  }
 }
 
 /** Parses and imports a JSON document, refusing oversized input before parsing. */

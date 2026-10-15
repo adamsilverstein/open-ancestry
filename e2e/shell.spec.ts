@@ -240,6 +240,35 @@ test.describe('command palette', () => {
     await expect(input).toHaveValue('ał\u00e9zz yy');
   });
 
+  test('a chunk slower than the backstop still gets every key typed while it loads', async ({
+    page,
+  }) => {
+    // The 3s release starts once the chunk has loaded, not at Cmd-K (#175 review).
+    await page.route(/\/assets\/ShellCommandPalette-[^/]+\.js$/, async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+      await route.continue();
+    });
+    await gotoReady(page, '/');
+    await page.keyboard.press(`${modKey}+k`);
+    await page.keyboard.type('zz');
+    await page.waitForTimeout(3300);
+    await page.keyboard.type('zz');
+    // Modified arrows (Alt+Left is Back) are never held.
+    const held = await page.evaluate(() => {
+      const event = new KeyboardEvent('keydown', {
+        key: 'ArrowLeft',
+        altKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    expect(held).toBe(false);
+    const input = page.getByRole('dialog', { name: 'Command palette' }).getByRole('combobox');
+    await expect(input).toHaveValue('zzzz', { timeout: 10_000 });
+  });
+
   test('Cmd/Ctrl-K toggles the palette closed', async ({ page }) => {
     await gotoReady(page, '/');
     await page.keyboard.press(`${modKey}+k`);

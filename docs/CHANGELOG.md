@@ -15,6 +15,7 @@ PR numbers point to the change on GitHub.
 - **Dates as they appear in real trees**: `ABT`, `BEF`, `AFT`, `BET … AND`, `FROM … TO`, US-style `05/28/1960`, ISO dates, decades, centuries and year ranges. Text that is not a date is kept as typed. (#21, #52, #66)
 - **GEDCOM 7** files, including calendar dates, which are validated. (#64, #142)
 - **Accented names stay consistent**: text is normalized to NFC on import and edit, so names, places and media paths match however they were typed. (#164)
+- **Imports run in the background** in their own worker, with size limits that can be configured. A GEDZIP is limited by its GEDCOM text, not by its photos, an upload that can't succeed is refused before it is sent, and an import can be cancelled. (#156)
 - Writes to a tree are refused while it is importing. (#149)
 
 ### Tree views
@@ -22,7 +23,7 @@ PR numbers point to the change on GitHub.
 - **Family tree view**: the focus person with partners, parents and grandparents above, and children below. Generation labels, photos or silhouettes, and life years. Click a card for a quick view; double-click or press Enter to re-center on that person. (#25, #39)
 - **Pedigree, descendant and fan views** from the same layout, switchable from the toolbar, keeping the focus person. (#25, #61, #154, #170, #191)
 - **Expand and collapse** ancestors, descendants and siblings card by card. Half siblings hang from their shared parent, and cousins keep their parents together. (#31, #53, #73)
-- **Pan, zoom, minimap and keyboard navigation**: arrow keys move between related cards. The URL names the focus person, so any view can be bookmarked. (#39, #77)
+- **Pan, zoom, minimap and keyboard navigation**: arrow keys move between related cards. The URL names the focus person, so any view can be bookmarked, and a hand-edited URL falls back to the default view instead of breaking it. (#39, #77, #214)
 - **Pedigree collapse** (the same person reached twice) is drawn as a linked duplicate card. (#39)
 - **Kinship labels** on tree cards name step, adoptive and foster links, not just birth relationships. (#157)
 
@@ -58,7 +59,7 @@ PR numbers point to the change on GitHub.
 ### Privacy and export
 
 - **Your data stays on your computer.** Each tree is a folder (a SQLite database plus media) in your library. The app makes no third-party network requests. (#23, #29)
-- **Export GEDCOM 5.5.1** (Ancestry compatible, keeping Ancestry's custom tags), **GEDCOM 7**, **GEDZIP** with media, and **JSON** for backup and tools. (#23, #46)
+- **Export GEDCOM 5.5.1** (Ancestry compatible, keeping Ancestry's custom tags), **GEDCOM 7**, **GEDZIP** with media, and **JSON** for backup and tools. Original records are re-read by their own GEDCOM version, so nothing is lost when a GEDCOM 7 import is exported as 5.5.1, and a line that should point at a record but holds text is reported, not silently dropped. (#23, #46, #223)
 - **Privatize living people**, on by default when exporting. Private and confidential records are hidden, and record ids are renumbered so nothing about a hidden person leaks. (#46, #104)
 - **Living status** is worked out from dates and can be set by hand. (#21, #48)
 
@@ -83,3 +84,8 @@ Budgets are checked in CI on 10,000-person and 100,000-person synthetic trees. (
 | Pan and zoom | 60 fps with 2,000 cards (#63) |
 
 Other speed-ups include faster imports that build indexes once at the end and batch their writes (#204), cached people lists and marriage indexes (#47, #150), and a tree view cache that starts over cleanly after an edit (#147).
+
+### For contributors
+
+- Property tests for round-trips and undo in the data layer, and fixes for the root causes of flaky tests. (#94, #105, #242)
+- `downgradeTree` rewrites a tree as an older schema version, so migration tests run the real migrations. (#229)

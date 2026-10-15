@@ -120,3 +120,12 @@ it('refuses to rename or delete a tree while a review of it is open', async () =
   expect((await a.del(`/api/reimports/${reimportId}`)).statusCode).toBe(204);
   expect((await a.patch(base, { name: 'Other' })).statusCode).toBe(200);
 });
+
+it("refuses to rename or delete a tree while another server's review of it is open", async () => {
+  const { base, treeDir } = await openReview();
+  // A second server has no review of its own, but sees the first's live folders.
+  b = await testApi({ library: a.root, importer: importFile });
+  expect((await b.patch(base, { name: 'Other' })).statusCode).toBe(409);
+  expect((await b.del(base)).statusCode).toBe(409);
+  expect(existsSync(treeDir)).toBe(true);
+});

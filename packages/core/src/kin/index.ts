@@ -101,6 +101,14 @@ const ORDINALS = [
   'tenth',
 ];
 
+/**
+ * A qualified cousin spells its ordinal ("step-first cousin", "half second
+ * cousin 1x removed"), which reads better than "step-1st cousin". Plain
+ * cousins keep Ancestry's "1st cousin".
+ */
+const spellCousin = (word: string) =>
+  word.replace(/^(\d+)(?:st|nd|rd|th)(?= cousin)/, (n, d: string) => ORDINALS[Number(d)] ?? n);
+
 const SIMPLE = new Set([
   'father',
   'mother',
@@ -115,17 +123,15 @@ const SIMPLE = new Set([
 
 /**
  * The one spelling of a qualified word: `stepfather`, `step-grandmother`,
- * `step-aunt`, `half-sister`, `half 1st cousin`, `adopted son`, `adoptive
+ * `step-aunt`, `half-sister`, `half first cousin`, `adopted son`, `adoptive
  * mother`, `foster brother`.
  */
 export function qualify(word: string, qualifier: KinQualifier | undefined): string {
   switch (qualifier) {
     case 'step':
-      if (SIMPLE.has(word)) return `step${word}`;
-      // "step-first cousin" reads better than "step-1st cousin".
-      return `step-${word.replace(/^(\d+)(?:st|nd|rd|th)(?= cousin)/, (n, d: string) => ORDINALS[Number(d)] ?? n)}`;
+      return SIMPLE.has(word) ? `step${word}` : `step-${spellCousin(word)}`;
     case 'half':
-      return /cousin/.test(word) ? `half ${word}` : `half-${word}`;
+      return /cousin/.test(word) ? `half ${spellCousin(word)}` : `half-${word}`;
     case 'adopted':
     case 'adoptive':
     case 'foster':

@@ -106,7 +106,7 @@ export function bloodName(
   }
   // A sibling through adoption is an "adopted brother" from either side.
   const qualifier = modifier === 'adoptive' && isSibling(shape) ? 'adopted' : modifier;
-  // stepfather, step-aunt, adopted son, foster sister, half-sister, half 1st cousin.
+  // stepfather, step-aunt, adopted son, foster sister, half-sister, half first cousin.
   return qualify(word, qualifier ?? (half ? 'half' : undefined));
 }
 

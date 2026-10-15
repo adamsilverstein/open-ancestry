@@ -12,7 +12,7 @@ import {
 } from '@open-ancestry/db';
 import { BASE_KEY, imageOfView } from './diff';
 import type { ReimportSession } from './session';
-import { mediaKey, norm, sourceKey } from './snapshot';
+import { mediaKeys, norm, sourceKey } from './snapshot';
 
 /*
  * Applies the changes a user accepted as one unit of work, so a single undo
@@ -174,17 +174,25 @@ export function applyReimport(
 
     const mediaMap = new Map<string, string>();
     const existingMedia = new Map<string, string>();
+    const existingKey = mediaKeys(tx.store);
+    const incomingKey = mediaKeys(inc);
     for (const m of tx.store.db.prepare('SELECT * FROM media').all() as MediaRow[]) {
-      existingMedia.set(mediaKey(m), m.id);
+      existingMedia.set(existingKey(m), m.id);
     }
+    /** Existing media already matched to an incoming row. */
+    const claimed = new Set<string>();
     const ensureMedia = (incomingId: string): string => {
       if (mediaMap.has(incomingId)) return mediaMap.get(incomingId)!;
       const m = get('media', incomingId)!;
-      const key = mediaKey(m);
+      const key = incomingKey(m);
       // Files are not copied by a re-import; a local path is kept only if the tree has it.
+      // Two incoming media never share one row: the second one's lines would replace the first's.
+      const match = existingMedia.get(key);
       const id =
-        existingMedia.get(key) ??
-        insert('media', { ...plain(m), local_path: localIfPresent(tx, m) });
+        match && !claimed.has(match)
+          ? match
+          : insert('media', { ...plain(m), local_path: localIfPresent(tx, m) });
+      claimed.add(id);
       existingMedia.set(key, id);
       mediaMap.set(incomingId, id);
       return id;
@@ -525,7 +533,7 @@ export function applyReimport(
         }
         case 'media': {
           const m = get('media', id);
-          return mediaMap.get(id) ?? (m ? (existingMedia.get(mediaKey(m)) ?? null) : null);
+          return mediaMap.get(id) ?? (m ? (existingMedia.get(incomingKey(m)) ?? null) : null);
         }
         case 'note': {
           const n = get('note', id);

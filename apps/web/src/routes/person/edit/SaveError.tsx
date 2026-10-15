@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { CircleAlert } from 'lucide-react';
+import { isNotFound } from '../../../api/client';
 import styles from './Edit.module.css';
 
 /**
@@ -29,7 +30,10 @@ export function useSaveState(onSaved: () => void) {
           if (mounted.current) onSaved();
         },
         onError: (cause: unknown) => {
-          if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause));
+          if (!mounted.current) return;
+          // Deleted elsewhere: a retry cannot succeed, so close; a toast says why.
+          if (isNotFound(cause)) onSaved();
+          else setError(cause instanceof Error ? cause.message : String(cause));
         },
       };
     },

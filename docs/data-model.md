@@ -1,6 +1,6 @@
 # open-ancestry data model
 
-Current schema version: **3**
+Current schema version: **5**
 
 This is the reference for the local data format: the SQLite schema inside every tree, the rules the code keeps on top of it, and the JSON interchange format. It is owned by `packages/db`. `packages/db/src/data-model-doc.test.ts` fails if a table or column exists in the live database but not here (or the other way round), or if an enum value is missing, so this document cannot drift from the DDL.
 
@@ -71,6 +71,7 @@ erDiagram
   import_batch ||--o{ raw_record : "preserved"
   import_batch ||--o{ unmapped_line : "preserved"
   import_batch |o--o{ person : "imported"
+  person ||--o{ person_alias : "absorbed by merging"
   change_batch ||--o{ change_log : "groups"
   person ||--|| search_doc : "indexed as"
   search_doc ||--|| person_search : "FTS row"
@@ -413,6 +414,22 @@ Lines the mapper did not understand. With `raw_record` this guarantees every inp
 | `line_no` | INTEGER | no | 1-based line number in the file. |
 | `line` | TEXT | no | The line as read. |
 
+### `person_alias`
+
+One row per person merged into another (tree checker, #57). The merge deletes the merged person; this row says who absorbed them, so re-import (#72) can map their old record to the kept person. Ancestry renumbers xrefs between exports, so `apids_json` is the sturdier key; `merged_xref` matches only within the same export. The row is written in the merge's change batch (undo removes it), moves to the new kept person when the kept person is merged again, and travels with the JSON interchange. Deleting the kept person deletes their aliases in the same batch (undo restores them), so a later re-import offers the merged records as new people again: the user deleted them, and a matcher must not count on aliases outliving the person.
+
+The merged person's `raw_record` and `unmapped_line` rows also move to the kept person, so GEDCOM export still places their unmapped lines (a person can then own several raw records); `person_alias` is the explicit mapping, raw_record ownership is not relied on for it.
+
+| Column | Type | Null | Meaning |
+|---|---|---|---|
+| `id` | TEXT | no | ULID. |
+| `person_id` | TEXT | no | FK `person.id`: the kept person. |
+| `merged_person_id` | TEXT | no | Id of the person merged away. No foreign key: that row is deleted by the merge. |
+| `merged_xref` | TEXT | yes | The merged person's GEDCOM xref (`@I2@`): their `external_id`, or their first raw record's xref. Null for people created in the app. |
+| `import_batch_id` | TEXT | yes | FK `import_batch.id`: the import the merged person came from. |
+| `apids_json` | TEXT | no | JSON array of the Ancestry record ids (`citation.apid`) cited on the merged person, their names or the facts they are the principal of, sorted. `[]` when none. |
+| `merged_at` | TEXT | no | When the merge happened (ISO 8601). |
+
 ### `change_batch`
 
 One unit of work (one user action). See [undo and redo](#change-log-undo-and-redo).
@@ -459,6 +476,20 @@ Derived: maps each person to their full-text row. Not exported; rebuilt on impor
 |---|---|---|---|
 | `doc_id` | INTEGER | no | Rowid of the person's `person_search` row. |
 | `person_id` | TEXT | no | `person.id` (unique). |
+
+### `person_sort`
+
+Derived (schema v5, #114): each person's people-list sort keys and filters, refreshed with the search documents whenever a person, their names or their events change, so the first page of any order reads an index instead of sorting the tree. Every key has an ascending index and one with `person_id DESC`, so a descending order scanned backwards still breaks ties by ascending id. Not exported, not change-logged; rebuilt on import.
+
+| Column | Type | Null | Meaning |
+|---|---|---|---|
+| `person_id` | TEXT | no | `person.id` (primary key). |
+| `surname` | TEXT | yes | Primary name's surname (sorted `COLLATE NOCASE`). |
+| `given` | TEXT | yes | Primary name's given names (sorted `COLLATE NOCASE`). |
+| `birth_key` | INTEGER | yes | Earliest `date_sort` of the person's principal `BIRT`, `CHR` or `BAPM` events. |
+| `death_key` | INTEGER | yes | Earliest `date_sort` of the person's principal `DEAT`, `BURI` or `CREM` events. |
+| `sex` | TEXT | no | `person.sex`, for the sex filter. |
+| `living` | TEXT | no | `person.living`, for the living filter. |
 
 ### `person_search`
 
@@ -539,7 +570,7 @@ The importer is `packages/import` (`importGedcom`); see its README for the API a
 - **Child relationships.** Per partner, the first of `INDI.FAMC._FREL`/`_MREL`, `INDI.FAMC.PEDI`, `FAM.CHIL._FREL`/`_MREL`, `FAM.CHIL.PEDI`, then `ADOP.FAMC.ADOP`, else `biological`. So a `PEDI` on the child's `FAMC` beats `_MREL` on the family's `CHIL`.
 - **Places** are deduplicated by their normalized text exactly as written (case-sensitive), so `boston, ...` and `Boston, ...` are separate places until a merge tool exists.
 - **Custom events.** Known Ancestry/FTM fact tags (`_MILT`, `_DNA`, `_FUN`, ...) and any other underscore tag with a `DATE`, `PLAC`, `TYPE` or `AGE` child become events with that tag as `type`.
-- **Media.** `FILE` URLs go to `remote_url` (never fetched). Local paths are normalized to forward slashes; paths with `..` are refused (`media-unsafe-path`). `local_path` is set only for files actually copied into the tree; unresolved, refused, too-large or failed files leave it null and their `FILE` line in `unmapped_line`. With a GEDZIP or a media folder the file is found by relative path, case-insensitively, or by a unique file name (for absolute paths from the exporting computer), copied into the tree's `media/` folder and hashed; files that are not found are listed in the report. Copies never overwrite: a file already at the path with the same bytes is reused, different bytes get a `-2`, `-3`, ... suffix, and identical content from several source files is stored once.
+- **Media.** `FILE` URLs go to `remote_url` (never fetched). Local paths are normalized to forward slashes; paths with `..` are refused (`media-unsafe-path`). `local_path` is set only for files actually copied into the tree; unresolved, refused, too-large or failed files leave it null and their `FILE` line in `unmapped_line`, owned by the media row (also for an inline `OBJE`, whose other lines stay with the record). Generated exports (GEDCOM 7, GEDZIP, privatized) write that original path as the media's `FILE`, percent-encoded for GEDCOM 7, so the reference survives; media with no file and no imported path are left out with a warning rather than written with an empty `FILE`. With a GEDZIP or a media folder the file is found by relative path, case-insensitively, or by a unique file name (for absolute paths from the exporting computer), copied into the tree's `media/` folder and hashed; files that are not found are listed in the report. Copies never overwrite: a file already at the path with the same bytes is reused, different bytes get a `-2`, `-3`, ... suffix, and identical content from several source files is stored once.
 - **GEDCOM 7 phrases.** A `PHRASE` under `DATE` (events, citation `DATA.DATE`), `AGE` or `NAME.TYPE OTHER` is the value as written: it becomes `date_text` (parsed when it can be, else sorted by the `DATE` value beside it), `age` or the name type. Exports put Ancestry's free-form dates there (`DATE ABT 1842` / `PHRASE Abt. 1842`), so a GEDCOM 7 round trip keeps them. GEDCOM 7 `FILE` paths are percent-decoded before matching.
 - **Home person.** A `_HOME`, `_ROOT`, `_HOMEPERSON` or `_HME` pointer under `HEAD` (or `HEAD.SOUR._TREE`) when present, else the first individual. Stored in `meta.home_person_id`.
 
@@ -643,3 +674,4 @@ Human text is stored in Unicode NFC, so the same name, place or tag written comp
   2. run `npm run dump-schema -w @open-ancestry/db` and `npm run freeze-history-fixture -w @open-ancestry/db` to freeze `schema-vN.sql` and `oa-vN.json`;
   3. regenerate the JSON Schema (`npm run generate:json-schema -w @open-ancestry/db`);
   4. update this document (the doc test lists what is missing), and bump `formatVersion` only if the JSON envelope itself changes.
+  5. if the migration adds a derived table, or changes anything a derived table is computed from (names, events, event roles, the birth and death event types, Unicode forms), give it a `run` step that rebuilds the derived tables it affects: `rebuildSearchDocs` for `search_doc` and `person_search`, `rebuildSortKeys` for `person_sort`. A new derived table also goes in `DERIVED_TABLES` (`json.ts`) and `VERBATIM_TABLES` (`nfc.ts`), is refreshed beside the search documents (`refreshSearch`), and is dropped by the tests that fake an older tree (`nfc.test.ts`, `export/src/edits.test.ts`).

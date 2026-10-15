@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { CircleHelp, TriangleAlert } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -78,13 +78,13 @@ function PersonCard({
   active: Set<string>;
   onToggle: (change: ReviewChange, on: boolean) => void;
 }) {
-  const nameId = useId();
   // An article per card: the four groups stay the only regions (landmarks).
   return (
-    <article aria-labelledby={nameId} className={styles.card} data-status={person.status}>
+    // Named by the person alone (the heading also shows their lifespan).
+    <article aria-label={person.name} className={styles.card} data-status={person.status}>
       <header className={styles.cardHeader}>
         <div>
-          <h3 id={nameId} className={styles.name}>
+          <h3 className={styles.name}>
             {person.name}
             {person.lifespan && <span className={styles.lifespan}> {person.lifespan}</span>}
           </h3>

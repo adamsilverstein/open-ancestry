@@ -192,21 +192,11 @@ describe('cleaning up orphans left by earlier deletes (#226)', () => {
     store.close();
   });
 
-  it('removes imported NOTE and OBJE records a deleted person pointed to, keeping standalone ones', () => {
+  it('removes an imported NOTE record whose link a pre-fix delete removed, keeping standalone ones', () => {
     const store = memoryTree();
     const w = new BulkWriter(store);
-    const batch = w.insert('import_batch', { file_name: 'tree.ged' });
-    w.insert('raw_record', {
-      import_batch_id: batch,
-      seq: 1,
-      gedcom_tag: 'INDI',
-      xref: '@I9@',
-      raw_text: '0 @I9@ INDI\n1 NAME Gone /Person/\n1 OBJE @O2@\n',
-    });
     w.insert('note', { text: 'standalone note', external_id: '@N2@' });
     w.insert('media', { kind: 'photo', title: 'standalone photo', external_id: '@O1@' });
-    // Unlinked before the change log existed: only the import's pointer tells.
-    w.insert('media', { kind: 'photo', title: 'their photo record', external_id: '@O2@' });
     w.commit();
     // A delete from before #226: the link went, the NOTE record stayed.
     const { note, link } = store.transact('Add', (tx) => {
@@ -229,6 +219,42 @@ describe('cleaning up orphans left by earlier deletes (#226)', () => {
     expect(store.getRow('note', note.id)).toBeUndefined();
     // Undoing the old delete now says why it cannot.
     expect(() => undoLast(store)).toThrow(/cleaned up/);
+    store.close();
+  });
+
+  it('keeps NOTE and OBJE records a surviving record still points to in its imported text', () => {
+    // review-21's probe: @I1@ points to them from an ASSO NOTE and a _CUSTOM subtree, kept
+    // as raw text rather than links, and an old delete of someone else's link to them.
+    const store = memoryTree();
+    const w = new BulkWriter(store);
+    const batch = w.insert('import_batch', { file_name: 'tree.ged' });
+    w.insert('raw_record', {
+      import_batch_id: batch,
+      seq: 1,
+      gedcom_tag: 'INDI',
+      xref: '@I1@',
+      raw_text:
+        '0 @I1@ INDI\n1 NAME Ada /Vale/\n1 ASSO @I2@\n2 RELA Friend\n2 NOTE @N3@\n1 _CUSTOM\n2 OBJE @O3@\n',
+    });
+    w.commit();
+    const { link } = store.transact('Add', (tx) => {
+      const person = persons.create(tx, { names: [{ given: 'Ivo' }] });
+      tx.insert('media', { kind: 'photo', title: 'shared photo', external_id: '@O3@' });
+      const note = tx.insert('note', { text: 'shared note', external_id: '@N3@' });
+      const link = noteLinks.create(tx, {
+        note_id: note.id,
+        owner_type: 'person',
+        owner_id: person.id,
+      });
+      return { link };
+    }).result;
+    store.transact('Old delete', (tx) => tx.delete('note_link', link.id));
+    store.db.prepare('DELETE FROM derived_state').run();
+
+    refreshDerivedColumns(store);
+    const texts = (sql: string) => store.db.prepare(sql).pluck().all();
+    expect(texts('SELECT text FROM note')).toEqual(['shared note']);
+    expect(texts('SELECT title FROM media')).toEqual(['shared photo']);
     store.close();
   });
 });

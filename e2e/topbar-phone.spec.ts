@@ -9,6 +9,7 @@ import { expect, test } from './fixtures';
 test.use({ viewport: { width: 390, height: 844 } });
 
 test('the top bar shows the tree name at 390px', async ({ page, request, baseURL }, testInfo) => {
+  // No screenshot: Playwright injects a <style> to take one, which the CSP guard catches in WebKit.
   const { tree } = await seedTree(request, baseURL!, `${testInfo.project.name} phone`);
   await page.addInitScript((name) => localStorage.setItem('oa-tree', name), tree);
   await page.goto('/people');
@@ -45,9 +46,4 @@ test('the top bar shows the tree name at 390px', async ({ page, request, baseURL
   }
   const overflow = await banner.evaluate((el) => el.scrollWidth - el.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
-
-  await testInfo.attach('top bar at 390px', {
-    body: await banner.screenshot(),
-    contentType: 'image/png',
-  });
 });

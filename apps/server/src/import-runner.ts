@@ -1,8 +1,5 @@
 import { fileURLToPath } from 'node:url';
 import { Worker, type ResourceLimits } from 'node:worker_threads';
-import { randomUUID } from 'node:crypto';
-import { rmSync } from 'node:fs';
-import { join } from 'node:path';
 import { reimportFromData, type ImportLimits, type ReimportData } from '@open-ancestry/import';
 import type { Comparer, Importer, ImporterOptions } from './jobs';
 import type { WorkerInput, WorkerMessage } from './import-worker';
@@ -144,18 +141,24 @@ export function workerComparer(
 ): Comparer {
   return async (path, store, options) => {
     if (!store.dir) throw new Error('Re-imports need a tree on disk');
-    const incomingDir = join(store.dir, `.reimport-${randomUUID()}.oatree`);
+    const { folders, ...run } = options;
+    // Made here, so this server owns them; the worker only fills them.
+    const incomingDir = folders.create(store.dir, 'export');
+    const mediaDir = folders.create(store.dir, 'media');
     try {
-      const data = await runInWorker(
+      const data = (await runInWorker(
         script,
-        { path, treeDir: store.dir, limits, reimport: { incomingDir } },
+        { path, treeDir: store.dir, limits, reimport: { incomingDir, mediaDir } },
         { resourceLimits, graceMs, execArgv },
-        options,
+        run,
         're-import',
-      );
-      return reimportFromData(data as ReimportData);
+      )) as ReimportData;
+      // Not a GEDZIP: no media waited there.
+      if (!data.mediaDir) folders.release(mediaDir);
+      return reimportFromData(data);
     } catch (error) {
-      rmSync(incomingDir, { recursive: true, force: true });
+      folders.release(incomingDir);
+      folders.release(mediaDir);
       throw error;
     }
   };

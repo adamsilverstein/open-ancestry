@@ -5,6 +5,7 @@ import { createTree, type TreeStore } from '@open-ancestry/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { generateGedcom } from '../../../fixtures/generate';
 import { applyReimport, closeReimport, importGedcom } from '@open-ancestry/import';
+import { ReimportFolders } from './reimport-folders';
 import { devWorkerComparer, devWorkerImporter, type WorkerImporterOptions } from './import-runner';
 import type { ImportProgress } from './jobs';
 
@@ -114,6 +115,12 @@ describe('worker importer', () => {
 });
 
 describe('worker re-import compare (#161)', () => {
+  let folders: ReimportFolders;
+  beforeEach(() => {
+    folders = new ReimportFolders();
+  });
+  afterEach(() => folders.close());
+
   it('compares in a worker, keeps the event loop free, and returns a usable review', async () => {
     const base = generateGedcom({ people: 3000, seed: 5 });
     await importGedcom({ bytes: base }, store);
@@ -130,6 +137,7 @@ describe('worker re-import compare (#161)', () => {
     const session = await devWorkerComparer()(file('later.ged', later), store, {
       onProgress: (p) => progress.push(p),
       signal: new AbortController().signal,
+      folders,
     });
     clearInterval(tick);
     try {
@@ -143,6 +151,7 @@ describe('worker re-import compare (#161)', () => {
       applyReimport(store, session, new Set(), 'Re-import');
     } finally {
       closeReimport(session);
+      folders.close();
     }
     expect(readdirSync(join(root, 'T.oatree')).filter((n) => n.startsWith('.reimport-'))).toEqual(
       [],
@@ -156,7 +165,7 @@ describe('worker re-import compare (#161)', () => {
     const done = devWorkerComparer({ graceMs: 200 })(
       file('big.ged', generateGedcom({ people: 60_000, seed: 7 })),
       store,
-      { onProgress: (p) => progress.push(p), signal: controller.signal },
+      { onProgress: (p) => progress.push(p), signal: controller.signal, folders },
     );
     while (!progress.some((p) => p.phase === 'parse')) await new Promise((r) => setTimeout(r, 5));
     controller.abort();

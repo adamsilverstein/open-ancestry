@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { closeReimport, type ReimportSession } from '@open-ancestry/import';
-import { REVIEW_MAX_AGE_MS, touchFolder } from './reimport-folders';
+import type { ReimportFolders } from './reimport-folders';
 
 /*
  * Re-import sessions: an updated export compared with a tree, held in memory
@@ -20,9 +20,22 @@ export class ReimportSessions {
   private readonly maxSessions: number;
   private readonly maxAgeMs: number;
 
-  constructor({ maxSessions = 4, maxAgeMs = REVIEW_MAX_AGE_MS } = {}) {
+  private readonly folders: ReimportFolders | undefined;
+
+  constructor({
+    maxSessions = 4,
+    maxAgeMs = 60 * 60 * 1000,
+    folders,
+  }: { maxSessions?: number; maxAgeMs?: number; folders?: ReimportFolders } = {}) {
     this.maxSessions = maxSessions;
     this.maxAgeMs = maxAgeMs;
+    this.folders = folders;
+  }
+
+  /** Whether a review of `tree` is open: the tree must not be renamed or deleted under it. */
+  hasTree(tree: string): boolean {
+    this.expire();
+    return [...this.sessions.values()].some((s) => s.tree === tree);
   }
 
   add(tree: string, fileName: string, session: ReimportSession): StoredReimport {
@@ -49,8 +62,6 @@ export class ReimportSessions {
     const stored = this.sessions.get(id);
     if (stored) {
       stored.at = Date.now();
-      // Its working folder is in use: keep the crash-leftover sweeps away from it.
-      touchFolder(stored.session.incomingDir);
     }
     return stored;
   }
@@ -60,6 +71,9 @@ export class ReimportSessions {
     if (!stored) return;
     this.sessions.delete(id);
     closeReimport(stored.session);
+    // Its working folder and owner file go with it.
+    this.folders?.release(stored.session.mediaDir);
+    this.folders?.release(stored.session.incomingDir);
   }
 
   closeAll(): void {

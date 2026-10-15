@@ -44,6 +44,7 @@ export function importRoutes(app: Api, deps: Deps): void {
     archiveUploadLimit,
     thumbnails,
     reimports,
+    reimportFolders,
   } = deps;
 
   /** Streams the one uploaded file to a private temp folder. */
@@ -201,6 +202,7 @@ export function importRoutes(app: Api, deps: Deps): void {
             const session = await comparer(upload.path, library.open(tree), {
               signal,
               onProgress,
+              folders: reimportFolders,
             });
             const stored = reimports.add(tree, upload.fileName, session);
             return { reimportId: stored.id, counts: session.diff.counts };

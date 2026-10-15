@@ -1,6 +1,7 @@
 import { openMemoryTree, openTree, type TreeStore } from '@open-ancestry/db';
 import { rmSync } from 'node:fs';
 import { importGedcom } from '../import';
+import { MediaSource } from '../media';
 import type { ImportInput, ImportOptions, ImportPhase, ImportReport } from '../types';
 import { treeRevision } from './apply';
 import { diffTrees, localHistory, type ReimportDiff } from './diff';
@@ -24,6 +25,13 @@ export interface ReimportSession {
   /** The tree's revision when compared (see `treeRevision`); apply refuses if it moved. */
   baseRevision: string;
   timings: { import: number; compare: number };
+  /**
+   * The export's media files (a GEDZIP's entries, or `mediaDir`): apply copies
+   * the ones accepted changes need into the tree (#75).
+   */
+  media: MediaSource;
+  /** Where a GEDZIP's media files wait for apply (under the tree); removed on close. */
+  mediaDir: string | null;
 }
 
 /**
@@ -33,34 +41,50 @@ export interface ReimportSession {
 export async function prepareReimport(
   store: TreeStore,
   input: ImportInput,
-  options: Pick<ImportOptions, 'signal' | 'maxBytes' | 'today' | 'limits'> & {
+  options: Pick<
+    ImportOptions,
+    'signal' | 'maxBytes' | 'maxMediaBytes' | 'today' | 'limits' | 'mediaDir'
+  > & {
     onProgress?: (phase: ReimportPhase, done: number, total: number) => void;
     /**
      * Import the export into a new tree in this folder instead of memory, so
      * the compare can run in a worker and hand the review back by path (#161).
      */
     incomingDir?: string;
+    /**
+     * Gives a folder to keep a GEDZIP's media in while the review waits, so
+     * they aren't held in memory. The caller owns it (the server tracks who
+     * made it); without one the files stay in memory.
+     */
+    spillDir?: () => string;
   } = {},
 ): Promise<ReimportSession> {
   const started = performance.now();
-  const { incomingDir, onProgress, ...rest } = options;
+  const { incomingDir, onProgress, spillDir, ...rest } = options;
   let incoming: TreeStore | undefined;
+  let mediaDir: string | null = null;
   try {
+    let media = MediaSource.none();
     // The import's own 'done' isn't the end of a re-import: the compare follows.
-    const importProgress = (phase: ImportPhase, done: number, total: number) => {
-      if (phase !== 'done') onProgress?.(phase, done, total);
+    const importOptions = {
+      ...rest,
+      onProgress: (phase: ImportPhase, done: number, total: number) => {
+        if (phase !== 'done') onProgress?.(phase, done, total);
+      },
+      onMediaSource: (source: MediaSource) => (media = source),
     };
     let report: ImportReport;
     if (incomingDir) {
-      report = await importGedcom(
-        input,
-        { dir: incomingDir },
-        { ...rest, onProgress: importProgress },
-      );
+      report = await importGedcom(input, { dir: incomingDir }, importOptions);
       incoming = openTree(incomingDir);
     } else {
       incoming = openMemoryTree();
-      report = await importGedcom(input, incoming, { ...rest, onProgress: importProgress });
+      report = await importGedcom(input, incoming, importOptions);
+    }
+    // A review can wait an hour: keep a GEDZIP's files on disk, not in memory.
+    if (media.inMemory && spillDir) {
+      mediaDir = spillDir();
+      media = media.spill(mediaDir);
     }
     const imported = performance.now();
     onProgress?.('compare', 0, 1);
@@ -70,6 +94,8 @@ export async function prepareReimport(
       report,
       comparison: 1,
       ...compare(store, incoming),
+      media,
+      mediaDir,
       timings: {
         import: Math.round(imported - started),
         compare: Math.round(performance.now() - imported),
@@ -78,6 +104,7 @@ export async function prepareReimport(
   } catch (error) {
     incoming?.close();
     if (incomingDir) rmSync(incomingDir, { recursive: true, force: true });
+    if (mediaDir) rmSync(mediaDir, { recursive: true, force: true });
     throw error;
   }
 }
@@ -86,21 +113,28 @@ export async function prepareReimport(
 export type ReimportPhase = Exclude<ImportPhase, 'done'> | 'compare';
 
 /** A prepared review as plain data (what a worker posts back), without its open tree. */
-export type ReimportData = Omit<ReimportSession, 'incoming' | 'matches'> & {
+export type ReimportData = Omit<ReimportSession, 'incoming' | 'matches' | 'media'> & {
   incomingDir: string;
   matches: [string, PersonMatch][];
 };
 
 export function reimportData(session: ReimportSession): ReimportData {
   if (!session.incomingDir) throw new Error('Only a review prepared on disk can be handed over');
-  const { incoming: _incoming, matches, ...rest } = session;
+  // The media source isn't data: a spilled GEDZIP's files are reread from mediaDir.
+  const { incoming: _incoming, media: _media, matches, ...rest } = session;
   void _incoming;
+  void _media;
   return { ...rest, incomingDir: session.incomingDir, matches: [...matches] };
 }
 
 /** Reopens a review a worker prepared (see `reimportData`). */
 export function reimportFromData(data: ReimportData): ReimportSession {
-  return { ...data, incoming: openTree(data.incomingDir), matches: new Map(data.matches) };
+  return {
+    ...data,
+    incoming: openTree(data.incomingDir),
+    matches: new Map(data.matches),
+    media: data.mediaDir ? MediaSource.fromDir(data.mediaDir) : MediaSource.none(),
+  };
 }
 
 /** Matches and diffs the export against the tree as it is now. */
@@ -134,4 +168,6 @@ export function refreshReimport(store: TreeStore, session: ReimportSession): Rei
 export function closeReimport(session: ReimportSession): void {
   session.incoming.close();
   if (session.incomingDir) rmSync(session.incomingDir, { recursive: true, force: true });
+  if (session.mediaDir) rmSync(session.mediaDir, { recursive: true, force: true });
+  session.media = MediaSource.none();
 }

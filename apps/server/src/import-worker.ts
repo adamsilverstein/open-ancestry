@@ -19,7 +19,7 @@ export interface WorkerInput {
   treeDir: string;
   limits: Partial<ImportLimits>;
   /** A re-import compare (#161): import the export into `incomingDir`, compare, hand back. */
-  reimport?: { incomingDir: string };
+  reimport?: { incomingDir: string; mediaDir: string };
 }
 
 export type WorkerMessage =
@@ -44,7 +44,13 @@ try {
     const session = await prepareReimport(
       store,
       { path },
-      { signal: controller.signal, limits, onProgress, incomingDir: reimport.incomingDir },
+      {
+        signal: controller.signal,
+        limits,
+        onProgress,
+        incomingDir: reimport.incomingDir,
+        spillDir: () => reimport.mediaDir,
+      },
     );
     session.incoming.close();
     post({ type: 'done', report: reimportData(session) });

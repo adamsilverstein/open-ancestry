@@ -22,7 +22,7 @@ import {
   TreeParams,
   UndoQuery,
 } from '../schemas';
-import { notNewest } from '../errors';
+import { conflict, notNewest } from '../errors';
 
 function treeDetail(deps: Deps, id: string) {
   const store = deps.library.open(id);
@@ -93,6 +93,13 @@ export function treeRoutes(app: Api, deps: Deps): void {
     return reply.code(201).send({ tree: treeDetail(deps, request.body.name) });
   });
 
+  /** A re-import review holds files in the tree's folder and applies to it by name. */
+  const assertNoReview = (tree: string) => {
+    if (deps.reimports.hasTree(tree)) {
+      throw conflict(`Tree "${tree}" has a re-import review open; apply or discard it first`);
+    }
+  };
+
   app.get('/api/trees/:tree', { schema: { params: TreeParams } }, async (request) => ({
     tree: treeDetail(deps, request.params.tree),
   }));
@@ -101,12 +108,14 @@ export function treeRoutes(app: Api, deps: Deps): void {
     '/api/trees/:tree',
     { schema: { params: TreeParams, body: TreeBody } },
     async (request) => {
+      assertNoReview(request.params.tree);
       library.rename(request.params.tree, request.body.name);
       return { tree: treeDetail(deps, request.body.name) };
     },
   );
 
   app.delete('/api/trees/:tree', { schema: { params: TreeParams } }, async (request, reply) => {
+    assertNoReview(request.params.tree);
     library.delete(request.params.tree);
     return reply.code(204).send();
   });

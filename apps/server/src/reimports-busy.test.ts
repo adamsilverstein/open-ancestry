@@ -61,7 +61,11 @@ it('keeps the tree from being renamed or deleted while a re-import compares', as
   await vi.waitFor(() => expect(held.started).toBe(true));
   expect((await api.patch(base, { name: 'Other' })).statusCode).toBe(409);
   held.release();
-  expect((await finished(res.json().jobId)).state).toBe('completed');
+  const done = await finished(res.json().jobId);
+  expect(done.state).toBe('completed');
+  // Then the open review holds it, until it is discarded.
+  expect((await api.patch(base, { name: 'Other' })).statusCode).toBe(409);
+  await api.del(`/api/reimports/${(done.result as { reimportId: string }).reimportId}`);
   expect((await api.patch(base, { name: 'Other' })).statusCode).toBe(200);
 });
 

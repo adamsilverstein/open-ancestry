@@ -24,6 +24,7 @@ import { checkRoutes } from './routes/checks';
 import { editRoutes } from './routes/edit';
 import { importRoutes, sweepStaleUploads } from './routes/imports';
 import { reimportRoutes } from './routes/reimports';
+import { ReimportFolders } from './reimport-folders';
 import { ReimportSessions } from './reimports';
 import { mediaRoutes } from './routes/media';
 import { peopleRoutes } from './routes/people';
@@ -173,29 +174,45 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   });
   // Leftovers of imports a crash or restart interrupted: their empty trees and uploads.
   library.sweepInterruptedImports();
-  library.sweepReimportLeftovers();
   void sweepStaleUploads();
   const importLimits = resolveImportLimits(options.importLimits);
+  // This server's re-import working folders; opening a tree sweeps others' leftovers.
+  const reimportFolders = new ReimportFolders();
+  library.reimportFolders = reimportFolders;
+  // Leftovers whose owner is gone: a crash, or a server that has stopped.
+  library.sweepReimportLeftovers();
   const deps: Deps = {
     library,
     jobs,
     importer: options.importer,
     comparer:
       options.comparer ??
-      ((path, store, { onProgress, signal }) =>
-        prepareReimport(
-          store,
-          { path },
-          {
-            signal,
-            onProgress: (phase, done, total) => onProgress({ phase, done, total }),
-          },
-        )),
+      (async (path, store, { onProgress, signal, folders }) => {
+        let spilled: string | undefined;
+        try {
+          return await prepareReimport(
+            store,
+            { path },
+            {
+              signal,
+              onProgress: (phase, done, total) => onProgress({ phase, done, total }),
+              // Owned by this server, so another server's sweep leaves it alone.
+              ...(store.dir && {
+                spillDir: () => (spilled = folders.create(store.dir!, 'media')),
+              }),
+            },
+          );
+        } catch (error) {
+          folders.release(spilled);
+          throw error;
+        }
+      }),
     uploadLimit: options.uploadLimit ?? importLimits.maxBytes,
     archiveUploadLimit: options.archiveUploadLimit ?? importLimits.maxArchiveBytes,
     mediaUploadLimit: options.mediaUploadLimit ?? DEFAULT_MEDIA_UPLOAD_LIMIT,
     thumbnails: new ThumbnailQueue(),
-    reimports: new ReimportSessions(),
+    reimports: new ReimportSessions({ folders: reimportFolders }),
+    reimportFolders,
   };
 
   registerErrorHandling(app);
@@ -292,6 +309,7 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   app.addHook('preClose', drain);
   app.addHook('onClose', async () => {
     deps.reimports.closeAll();
+    reimportFolders.close();
     library.closeAll();
   });
 

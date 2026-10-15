@@ -10,7 +10,7 @@ import {
   type TreeStore,
 } from '@open-ancestry/db';
 import { ApiError, conflict, notFound } from './errors';
-import { sweepReimportFolders } from './reimport-folders';
+import type { ReimportFolders } from './reimport-folders';
 
 /*
  * The library is a folder of trees: `<root>/<name>.oatree/`. A tree's API id
@@ -119,6 +119,12 @@ export class Library {
   /** Trees that must not be renamed or deleted right now (e.g. importing). */
   /** Trees with an import queued or running, and how many. */
   private readonly busy = new Map<string, number>();
+
+  /**
+   * The re-import folders of the server using this library: opening a tree
+   * sweeps the leftovers whose owner is gone (see reimport-folders.ts).
+   */
+  reimportFolders: ReimportFolders | undefined;
 
   constructor(root: string) {
     this.root = resolve(root);
@@ -260,15 +266,15 @@ export class Library {
   }
 
   /**
-   * Removes crash leftovers among the trees' `.reimport-*` folders (an export
-   * being compared, or a GEDZIP's media waiting for a review), with the same
-   * rule as the sweep when a tree opens (see reimport-folders.ts): only those
-   * untouched for longer than a review lives, so another server process's
-   * live review is never removed.
+   * At startup: removes the trees' re-import folders whose owner is gone,
+   * by the same ownership rule as the sweep when a tree opens (see
+   * reimport-folders.ts), so another live server's reviews are kept.
    */
   sweepReimportLeftovers(): string[] {
     if (!existsSync(this.root)) return [];
-    return this.list().flatMap(({ id }) => sweepReimportFolders(this.dirOf(id)));
+    const folders = this.reimportFolders;
+    if (!folders) return [];
+    return this.list().flatMap(({ id }) => folders.sweep(this.dirOf(id)));
   }
 
   private isPendingImport(id: string, marker: string): boolean {
@@ -288,6 +294,8 @@ export class Library {
     const canonical = this.canonical(id);
     const existing = this.stores.get(canonical);
     if (existing) return existing;
+    // A crash can leave a re-import's working folders (up to 256 MiB of media) behind.
+    this.reimportFolders?.sweep(this.dirOf(canonical));
     const store = openTree(this.dirOf(canonical), { busyTimeoutMs: LIBRARY_BUSY_TIMEOUT_MS });
     this.stores.set(canonical, store);
     return store;

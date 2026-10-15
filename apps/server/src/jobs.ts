@@ -1,4 +1,5 @@
 import type { ReimportSession } from '@open-ancestry/import';
+import type { ReimportFolders } from './reimport-folders';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { TreeStore } from '@open-ancestry/db';
@@ -39,7 +40,10 @@ export type Importer = (
 export type Comparer = (
   filePath: string,
   tree: TreeStore,
-  options: ImporterOptions,
+  options: ImporterOptions & {
+    /** Makes the review's working folders, owned by this server (see reimport-folders.ts). */
+    folders: ReimportFolders;
+  },
 ) => Promise<ReimportSession>;
 
 export type JobState = 'queued' | 'running' | 'completed' | 'failed';

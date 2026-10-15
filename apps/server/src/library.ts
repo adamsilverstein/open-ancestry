@@ -95,17 +95,25 @@ export class Library {
   /** Trees may be opened from a folder other accounts can write to (--shared-library). */
   readonly shared: boolean;
   private readonly platform: NodeJS.Platform;
+  private readonly uid: number | undefined;
 
   constructor(
     root: string,
     {
       shared = false,
       platform = process.platform,
-    }: { shared?: boolean; platform?: NodeJS.Platform } = {},
+      uid = typeof process.getuid === 'function' ? process.getuid() : undefined,
+    }: {
+      shared?: boolean;
+      /** For tests: the platform and account id to check as. */
+      platform?: NodeJS.Platform;
+      uid?: number | undefined;
+    } = {},
   ) {
     this.root = resolve(root);
     this.shared = shared;
     this.platform = platform;
+    this.uid = uid;
   }
 
   private rootChecked = false;
@@ -124,12 +132,16 @@ export class Library {
     }
     if (this.rootChecked) return this.assertRootSafe();
     this.rootChecked = true;
-    if (this.platform === 'win32' || (statSync(this.root).mode & 0o077) === 0) return;
+    if (this.platform === 'win32' || (statSync(this.root).mode & 0o077) === 0) {
+      return this.assertRootSafe();
+    }
     const ours = (name: string) =>
       name.endsWith(TREE_EXTENSION) || name === TRASH_DIR || name === '.DS_Store';
     const entries = readdirSync(this.root);
     if (entries.length > 0 && entries.every(ours)) {
       ensurePrivateDir(this.root);
+      // Tightening skips a folder that is not ours, so check what it is now.
+      this.assertRootSafe();
     } else {
       this.assertRootSafe();
       console.warn(
@@ -147,12 +159,24 @@ export class Library {
    */
   private assertRootSafe(): void {
     if (this.shared || this.platform === 'win32') return;
-    let mode: number;
+    let stat;
     try {
-      mode = statSync(this.root).mode;
+      stat = statSync(this.root);
     } catch {
       return; // Not there yet: ensureRoot creates it private.
     }
+    // A folder that looks private but is someone else's (swapped in under a
+    // parent others can write to) is no safer than a writable one.
+    if (this.uid !== undefined && stat.uid !== this.uid) {
+      throw new ApiError(
+        403,
+        'forbidden',
+        `The library folder ${this.root} belongs to another account, so it could ` +
+          'swap a tree while it is open. Use a folder of your own, or pass --shared-library ' +
+          '(or set OA_SHARED_LIBRARY=1) if you trust that account.',
+      );
+    }
+    const { mode } = stat;
     if ((mode & 0o022) === 0) return;
     throw new ApiError(
       403,

@@ -1,4 +1,4 @@
-import { createTree, openTree, undoLast, type TreeStore } from '@open-ancestry/db';
+import { openTree, undoLast, type TreeStore } from '@open-ancestry/db';
 import { zipSync } from 'fflate';
 import {
   existsSync,

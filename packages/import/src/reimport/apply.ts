@@ -10,6 +10,7 @@ import {
   type TreeStore,
   type Tx,
 } from '@open-ancestry/db';
+import { MediaCopier } from './media';
 import type { ReimportSession } from './session';
 import { mediaKey, norm, sourceKey } from './snapshot';
 
@@ -33,6 +34,11 @@ export interface ApplyResult {
   skipped: number;
   /** Changes not applied because a change they depend on was rejected. */
   blocked: string[];
+  /**
+   * Media rows whose files this apply copied into the tree (queue their
+   * thumbnails), and rows kept without a file because it could not be copied.
+   */
+  media: { copied: string[]; refused: string[] };
 }
 
 /**
@@ -68,6 +74,7 @@ export function applyReimport(
   session: ReimportSession,
   accepted: ReadonlySet<string>,
   label: string,
+  { maxMediaBytes = 256 * 1024 ** 2 }: { maxMediaBytes?: number } = {},
 ): ApplyResult {
   if (treeRevision(store) !== session.baseRevision) throw new ReimportStaleError();
   const inc = session.incoming;
@@ -95,7 +102,12 @@ export function applyReimport(
   const incAll = <T>(sql: string, ...params: unknown[]) =>
     inc.db.prepare(sql).all(...params) as T[];
 
-  const { batchId } = store.transact(label, (tx) => {
+  const copier = new MediaCopier(store, session.media, maxMediaBytes);
+  const copied: string[] = [];
+  const refused: string[] = [];
+
+  // Named rather than inline so a failed apply can discard the files it copied.
+  const write = (tx: Tx): number => {
     const has = (table: TableName, id: string) => !!tx.store.getRow(table, id);
     const insert = <T extends TableName>(table: T, row: Writable): string => {
       const id = row.id as string | undefined;
@@ -175,16 +187,23 @@ export function applyReimport(
     const existingMedia = new Map<string, string>();
     for (const m of tx.store.db.prepare('SELECT * FROM media').all() as MediaRow[]) {
       existingMedia.set(mediaKey(m), m.id);
+      if (m.sha256 && m.local_path) existingMedia.set(`sha:${m.sha256}`, m.id);
     }
     const ensureMedia = (incomingId: string): string => {
       if (mediaMap.has(incomingId)) return mediaMap.get(incomingId)!;
       const m = get('media', incomingId)!;
       const key = mediaKey(m);
-      // Files are not copied by a re-import; a local path is kept only if the tree has it.
-      const id =
-        existingMedia.get(key) ??
-        insert('media', { ...plain(m), local_path: localIfPresent(tx, m) });
+      // The same scan under another _OID or name is the same media: reuse it by its bytes.
+      let id =
+        existingMedia.get(key) ?? (m.sha256 ? existingMedia.get(`sha:${m.sha256}`) : undefined);
+      if (!id) {
+        const file = copier.copy(m);
+        id = insert('media', { ...plain(m), local_path: file?.local_path ?? null });
+        if (file) copied.push(id);
+        else if (m.local_path) refused.push(id);
+      }
       existingMedia.set(key, id);
+      if (m.sha256) existingMedia.set(`sha:${m.sha256}`, id);
       mediaMap.set(incomingId, id);
       return id;
     };
@@ -453,6 +472,22 @@ export function applyReimport(
         case 'media.add':
           link('media_link', 'media_id', ensureMedia(c.incomingMediaId), 'person', person!);
           break;
+        case 'media.file': {
+          const m = get('media', c.incomingMediaId)!;
+          const file = copier.copy(m);
+          (file ? copied : refused).push(c.existingMediaId);
+          if (file) {
+            tx.update('media', c.existingMediaId, {
+              ...file,
+              sha256: m.sha256,
+              byte_size: m.byte_size,
+              width: m.width,
+              height: m.height,
+              ...(m.mime && { mime: m.mime }),
+            });
+          }
+          break;
+        }
         case 'family.add':
           familyFor(c.incomingFamilyId, true);
           break;
@@ -626,7 +661,14 @@ export function applyReimport(
     }
     recordStale(tx, batch.id, stale);
     return applied;
-  }) as { batchId: string; result: number };
+  };
+  let batchId: string;
+  try {
+    ({ batchId } = store.transact(label, write));
+  } catch (error) {
+    copier.discard();
+    throw error;
+  }
 
   const appliedCount = toApply.length;
   return {
@@ -634,6 +676,7 @@ export function applyReimport(
     applied: appliedCount,
     skipped: changes.filter((c) => c.applicable).length - appliedCount,
     blocked,
+    media: { copied, refused },
   };
 }
 
@@ -667,10 +710,4 @@ function recordStale(tx: Tx, importBatchId: string, stale: Set<string>) {
       value: JSON.stringify([...stale].sort()),
     } as never);
   }
-}
-
-function localIfPresent(tx: Tx, m: MediaRow): string | null {
-  if (!m.local_path || !tx.store.dir) return null;
-  const known = tx.store.stmt('SELECT 1 FROM media WHERE local_path = ?').get(m.local_path);
-  return known ? m.local_path : null;
 }

@@ -1,5 +1,6 @@
 import { openMemoryTree, type TreeStore } from '@open-ancestry/db';
 import { importGedcom } from '../import';
+import { MediaSource } from '../media';
 import type { ImportInput, ImportOptions, ImportReport } from '../types';
 import { treeRevision } from './apply';
 import { diffTrees, localHistory, type ReimportDiff } from './diff';
@@ -16,6 +17,11 @@ export interface ReimportSession {
   /** The tree's revision when compared (see `treeRevision`); apply refuses if it moved. */
   baseRevision: string;
   timings: { import: number; compare: number };
+  /**
+   * The export's media files (a GEDZIP's entries, or `mediaDir`): apply copies
+   * the ones accepted changes need into the tree (#75).
+   */
+  media: MediaSource;
 }
 
 /**
@@ -25,12 +31,19 @@ export interface ReimportSession {
 export async function prepareReimport(
   store: TreeStore,
   input: ImportInput,
-  options: Pick<ImportOptions, 'onProgress' | 'signal' | 'maxBytes' | 'today'> = {},
+  options: Pick<
+    ImportOptions,
+    'onProgress' | 'signal' | 'maxBytes' | 'maxMediaBytes' | 'today' | 'mediaDir'
+  > = {},
 ): Promise<ReimportSession> {
   const started = performance.now();
   const incoming = openMemoryTree();
   try {
-    const report = await importGedcom(input, incoming, options);
+    let media = MediaSource.none();
+    const report = await importGedcom(input, incoming, {
+      ...options,
+      onMediaSource: (source) => (media = source),
+    });
     const imported = performance.now();
     const existingSnap = snapshot(store);
     const incomingSnap = snapshot(incoming);
@@ -43,6 +56,7 @@ export async function prepareReimport(
       matches,
       diff,
       baseRevision: treeRevision(store),
+      media,
       timings: {
         import: Math.round(imported - started),
         compare: Math.round(performance.now() - imported),

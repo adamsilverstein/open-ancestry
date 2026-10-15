@@ -185,6 +185,7 @@ export async function importGedcom(
 
   progress('read', 0, 1);
   const read = readInput(input, options);
+  options.onMediaSource?.(read.media);
   const readMs = ms(started);
   progress('read', 1, 1);
 

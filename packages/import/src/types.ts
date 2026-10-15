@@ -1,4 +1,5 @@
 import type { BulkCounts, TreeStore } from '@open-ancestry/db';
+import type { MediaSource } from './media';
 
 /** What to import: GEDCOM bytes, a file on disk (GEDCOM or GEDZIP), or GEDZIP bytes. */
 export type ImportInput =
@@ -26,6 +27,12 @@ export interface ImportOptions {
   maxWarnings?: number;
   /** "Now" for living inference (default: the current date). */
   today?: Date;
+  /**
+   * Receives the media files the input offers (a GEDZIP's entries or
+   * `mediaDir`). Re-import keeps them to copy files only when changes are
+   * applied, since it imports the export into an in-memory tree first.
+   */
+  onMediaSource?: (media: MediaSource) => void;
 }
 
 export type ImportWarningCode =

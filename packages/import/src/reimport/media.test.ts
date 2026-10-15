@@ -151,6 +151,24 @@ describe('re-importing media files (#75)', () => {
     ]);
   });
 
+  it('keeps the export text of media matched by bytes owned by the tree row (lossless export)', async () => {
+    const session = await prepareReimport(store, { gedzip: laterZip() }, { today: TODAY });
+    applyReimport(store, session, acceptAll(session), 'Re-import');
+    closeReimport(session);
+    // @O53@ is the old scan under a new _OID: matched by its bytes, so its
+    // record must point at the tree's Old scan row, not at nothing.
+    const owner = store.db
+      .prepare(
+        "SELECT owner_type, owner_id FROM raw_record WHERE gedcom_tag = 'OBJE' AND raw_text LIKE '%old-again.jpg%'",
+      )
+      .get() as { owner_type: string | null; owner_id: string | null };
+    const oldScan = store.db
+      .prepare("SELECT id FROM media WHERE title = 'Old scan'")
+      .pluck()
+      .get() as string;
+    expect(owner).toEqual({ owner_type: 'media', owner_id: oldScan });
+  });
+
   it('reads files from a media folder next to a GEDCOM', async () => {
     const folder = join(tmp, 'export-media');
     for (const [path, text] of Object.entries(LATER_FILES)) {

@@ -413,6 +413,8 @@ test.describe('history and errors', () => {
     const dialog = await editPerson(page);
     await dialog.getByRole('textbox', { name: 'Given names' }).first().fill('Roan');
     await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect(dialog.getByRole('alert')).toContainText('Missing or invalid token');
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
     await expect(toasts(page).filter({ hasText: 'Could not save' })).toContainText(
       'Missing or invalid token',
     );
@@ -456,10 +458,16 @@ test.describe('history and errors', () => {
     const dialog = await editPerson(page);
     await dialog.getByRole('textbox', { name: 'Given names' }).first().fill('Roan');
     await dialog.getByRole('button', { name: 'Save' }).click();
-    // Optimistic: the new name shows before the server answers.
-    await expect(h1(page)).toHaveText('Roan Ashdown');
+    // Optimistic: the new name shows behind the dialog before the server answers.
+    // (The open modal hides the page from the accessibility tree, so match by tag.)
+    await expect(page.locator('h1')).toHaveText('Roan Ashdown');
     release();
-    await expect(h1(page)).toHaveText('Rowan Ashdown');
-    await expect(toasts(page).filter({ hasText: 'Could not save' })).toContainText('Disk full');
+    await expect(page.locator('h1')).toHaveText('Rowan Ashdown');
+    await expect(page.locator('li').filter({ hasText: 'Could not save' })).toContainText(
+      'Disk full',
+    );
+    // The dialog stays open with the edit, so it can be saved again (#109).
+    await expect(dialog.getByRole('alert')).toContainText('Disk full');
+    await expect(dialog.getByRole('textbox', { name: 'Given names' }).first()).toHaveValue('Roan');
   });
 });

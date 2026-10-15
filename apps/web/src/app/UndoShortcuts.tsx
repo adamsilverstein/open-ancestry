@@ -54,14 +54,10 @@ export function UndoShortcuts() {
       busy = true;
       try {
         // Loaded on first use so the undo code stays off the initial bundle.
-        const { undoRedo } = await import('../api/history');
-        const batch = await undoRedo(queryClient, action);
-        toast({
-          title: batch
-            ? `${action === 'undo' ? 'Undid' : 'Redid'} ${batch.label}`
-            : `Nothing to ${action}`,
-          duration: 3000,
-        });
+        const { undoRedo, undoRedoMessage } = await import('../api/history');
+        const result = await undoRedo(queryClient, action);
+        const message = undoRedoMessage(action, result);
+        toast({ ...message, duration: message.description ? 6000 : 3000 });
       } catch (error) {
         toast({
           title: `Could not ${action}`,

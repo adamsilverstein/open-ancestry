@@ -56,6 +56,15 @@ function IssueRow({
           })}
         </ul>
       </div>
+      {issue.kind === 'possible-duplicate' && !dismissed && issue.people.length === 2 && (
+        <Link
+          to="/merge"
+          search={{ keep: issue.people[0]!.id, other: issue.people[1]!.id }}
+          className={styles.mergeLink}
+        >
+          Compare and merge
+        </Link>
+      )}
       <Button size="sm" variant="ghost" onClick={() => onToggle(issue)}>
         {dismissed ? 'Restore' : 'Dismiss'}
       </Button>

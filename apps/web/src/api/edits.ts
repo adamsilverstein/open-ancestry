@@ -17,6 +17,8 @@ export interface Edit<T = unknown> {
   optimistic?: { personId: string; update: (detail: PersonDetail) => PersonDetail };
   /** Runs after success, before queries refetch (e.g. navigate away from a deleted person). */
   onDone?: (result: T) => void;
+  /** Runs after the rollback and error toast, e.g. so a dialog can show the error and stay open. */
+  onError?: (error: unknown) => void;
 }
 
 const changeListeners = new Set<(tree: string) => void>();
@@ -65,6 +67,7 @@ export function useEdit(tree: string) {
         description: `${edit.label}: ${error instanceof Error ? error.message : String(error)}`,
         variant: 'error',
       });
+      edit.onError?.(error);
     },
     onSuccess: (result, { edit }) => edit.onDone?.(result),
     // Refetch once the queue drains: a refetch between queued edits would show
@@ -80,7 +83,7 @@ export function useEdit(tree: string) {
    * Starts an edit. The optimistic update is applied synchronously, in the same
    * event as the click, so a controlled checkbox or field never flips back.
    */
-  const mutate = (edit: Edit) => {
+  const mutate = <T>(edit: Edit<T>) => {
     let rollback: Run['rollback'] = null;
     if (edit.optimistic) {
       const { queryKey } = personQuery(tree, edit.optimistic.personId);
@@ -93,7 +96,7 @@ export function useEdit(tree: string) {
         rollback = { key: queryKey, previous };
       }
     }
-    mutation.mutate({ edit, rollback });
+    mutation.mutate({ edit: edit as Edit, rollback });
   };
 
   return { mutate, isPending: mutation.isPending };

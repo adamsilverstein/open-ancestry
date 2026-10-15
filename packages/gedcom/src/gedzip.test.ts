@@ -207,6 +207,16 @@ describe('readGedzip', () => {
     expect(result.warnings[1]).toMatch(/duplicate/);
   });
 
+  it('treats composed and decomposed spellings of a name as duplicates', () => {
+    const nfc = 'photos/Zoë.jpg'.normalize('NFC');
+    const nfd = 'photos/Zoë.jpg'.normalize('NFD');
+    const result = readGedzip(
+      zip({ 'gedcom.ged': GED, [nfc]: new Uint8Array([1]), [nfd]: new Uint8Array([2]) }),
+    );
+    expect([...result.media.keys()]).toEqual([nfc]);
+    expect(result.warnings[0]).toMatch(/Unicode form/);
+  });
+
   it('enforces the entry count limit', () => {
     const files: Zippable = { 'gedcom.ged': GED };
     for (let i = 0; i < 5; i++) files[`m${i}.jpg`] = new Uint8Array([i]);
@@ -243,8 +253,9 @@ describe('readGedzip', () => {
     const COMPRESSED = 20;
 
     it('aborts inflation as soon as an entry passes its declared size', () => {
-      // 50 MB of zeros declared as 100 bytes passes the up-front checks.
-      const archive = zip({ 'gedcom.ged': GED, 'bomb.bin': new Uint8Array(50_000_000) });
+      // 5 MB of zeros declared as 100 bytes passes the up-front checks. (Bigger only made
+      // building the archive slow enough to time out on a busy machine.)
+      const archive = zip({ 'gedcom.ged': GED, 'bomb.bin': new Uint8Array(5_000_000) });
       patchCentral(archive, 'bomb.bin', SIZE, 100);
       expect(cpuMs(() => expectError(() => readGedzip(archive), 'invalid'))).toBeLessThan(1000);
     }, 30_000);

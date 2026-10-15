@@ -1,7 +1,7 @@
-import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
+import { link, mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Library } from './library';
 import { MEDIA_CSP, parseRange, resolveMediaPath, sniffMediaType } from './routes/media';
 import { createTestTree, testApi, type TestApi } from './test/helpers';
@@ -128,6 +128,22 @@ describe('with a tree', () => {
       const res = await api.get(`${base}/media/${id}`);
       expect(res.statusCode).toBe(404);
       expect(res.body).not.toContain('secret');
+    });
+
+    it('refuses a hard-linked file and logs why, once per file (#207)', async () => {
+      const outside = join(await mkdtemp(join(tmpdir(), 'oa-secret-')), 'secret.jpg');
+      await writeFile(outside, BYTES);
+      await link(outside, join(library.root, 'Test.oatree', 'media', 'hard.jpg'));
+      const id = addMedia({ local_path: 'hard.jpg' });
+      const warn = vi.spyOn(api.app.log, 'warn');
+      for (let i = 0; i < 2; i++) {
+        const res = await api.get(`${base}/media/${id}`);
+        expect(res.statusCode).toBe(404);
+        expect(res.rawPayload.equals(BYTES)).toBe(false);
+      }
+      const logged = warn.mock.calls.filter((call) => JSON.stringify(call).includes('hard link'));
+      expect(logged).toHaveLength(1);
+      expect(JSON.stringify(logged[0])).toContain('hard.jpg');
     });
 
     it('accepts only the named thumbnail sizes', async () => {

@@ -33,6 +33,8 @@ interface Case {
   setup: () => Promise<[root: string, localPath: string]>;
   /** Expected resolved path relative to the tree folder, or null. */
   expected: string | null;
+  /** Why it is refused, as reported to `onRefuse` (the media route logs it). */
+  reason?: string;
 }
 
 const media = () => join(tree, 'media');
@@ -51,11 +53,13 @@ const cases: Case[] = [
     name: 'a path that climbs out of media/',
     setup: async () => (await plainMedia(), [media(), '../thumbs']),
     expected: null,
+    reason: 'outside the media folder',
   },
   {
     name: 'a missing file',
     setup: async () => (await plainMedia(), [media(), 'photos/missing.jpg']),
     expected: null,
+    reason: 'missing',
   },
   {
     name: 'a symlink to a file outside the tree',
@@ -65,6 +69,7 @@ const cases: Case[] = [
       return [media(), 'link.jpg'];
     },
     expected: null,
+    reason: 'outside the media folder',
   },
   {
     name: 'a symlink to another file inside media/',
@@ -83,6 +88,7 @@ const cases: Case[] = [
       return [media(), 'hard.jpg'];
     },
     expected: null,
+    reason: 'hard link',
   },
   {
     // Which side of a hard link is the original cannot be told, so any second link is refused.
@@ -93,6 +99,7 @@ const cases: Case[] = [
       return [media(), 'photos/a.jpg'];
     },
     expected: null,
+    reason: 'hard link',
   },
   {
     name: 'media/ itself a symlink out of the tree',
@@ -103,6 +110,7 @@ const cases: Case[] = [
       return [media(), 'photos/a.jpg'];
     },
     expected: null,
+    reason: 'symlinked media folder',
   },
   {
     name: 'media/ itself a symlink to another folder in the tree',
@@ -113,6 +121,7 @@ const cases: Case[] = [
       return [media(), 'a.jpg'];
     },
     expected: null,
+    reason: 'symlinked media folder',
   },
   {
     name: 'a thumbnail under thumbs/ (resolved from the tree folder)',
@@ -131,6 +140,7 @@ const cases: Case[] = [
       return [tree, 'thumbs/m-200.webp'];
     },
     expected: null,
+    reason: 'outside the media folder',
   },
 ];
 
@@ -138,9 +148,11 @@ describe('media path resolvers', () => {
   it.each(cases.map((c) => [c.name, c] as const))('%s', async (_name, c) => {
     const [root, localPath] = await c.setup();
     const expected = c.expected === null ? null : join(tree, c.expected);
-    const sync = resolveMediaPathSync(root, localPath);
-    const async = await resolveMediaPath(root, localPath);
+    const reasons: string[] = [];
+    const sync = resolveMediaPathSync(root, localPath, (r) => reasons.push(r));
+    const async = await resolveMediaPath(root, localPath, (r) => reasons.push(r));
     expect(async).toBe(expected);
     expect(sync).toBe(async);
+    expect(reasons).toEqual(c.reason ? [c.reason, c.reason] : []);
   });
 });

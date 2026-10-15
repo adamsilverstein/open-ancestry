@@ -24,6 +24,7 @@ PR numbers point to the change on GitHub.
 - **Expand and collapse** ancestors, descendants and siblings card by card. Half siblings hang from their shared parent, and cousins keep their parents together. (#31, #53, #73)
 - **Pan, zoom, minimap and keyboard navigation**: arrow keys move between related cards. The URL names the focus person, so any view can be bookmarked. (#39, #77)
 - **Pedigree collapse** (the same person reached twice) is drawn as a linked duplicate card. (#39)
+- **Kinship labels** on tree cards name step, adoptive and foster links, not just birth relationships. (#157)
 
 ### Person page
 
@@ -51,7 +52,8 @@ PR numbers point to the change on GitHub.
 - **Merge duplicate people** in one step. (#70)
 - **Undo and redo everything**: Cmd/Ctrl-Z, Shift-Cmd/Ctrl-Z, and a History panel listing recent changes. Each dialog save is one undo step, and history survives app upgrades. (#48, #148)
 - **A failed save keeps the dialog open**, with what you typed and the reason, so you can try again. (#177)
-- **Keyboard friendly**: focus returns to whatever opened a dialog, and the History list scrolls from the keyboard. (#59, #171)
+- **Delete a person** and land on a close relative (or the people list), with an Undo button in the toast. Undo brings you back to the restored person. (#181)
+- **Keyboard friendly**: focus returns to whatever opened a dialog, including after a mouse click in Safari, and the History list scrolls from the keyboard. (#59, #171, #208)
 
 ### Privacy and export
 
@@ -62,7 +64,7 @@ PR numbers point to the change on GitHub.
 
 ### Security
 
-- The server listens on `127.0.0.1` only. Requests are checked by Host and Origin, every change needs a per-session token, and a strict Content Security Policy is sent with no inline scripts. (#29, #34, #47)
+- The server listens on `127.0.0.1` only. Requests are checked by Host and Origin, every change needs a per-session token, and a strict Content Security Policy is sent with no inline scripts. Nothing in the app trips that policy, and every end-to-end test fails if anything does. (#29, #34, #47, #174)
 - GEDCOM files are treated as untrusted. Values cannot inject extra GEDCOM lines on export, text that looks like a pointer stays text, coordinates are parsed safely, and control characters are escaped in command-line output. (#26, #150, #166, #179)
 - Media is served without path traversal, and uploads have size limits. (#29, #51)
 
@@ -72,7 +74,7 @@ Budgets are checked in CI on 10,000-person and 100,000-person synthetic trees. (
 
 | What | Budget on a 10,000-person tree |
 | --- | --- |
-| Import an Ancestry GEDCOM | under 3 s |
+| Import an Ancestry GEDCOM | under 3 s (#204) |
 | Server start to first answer | under 300 ms (#55) |
 | First page load | under 1 s, with under 150 KB of JavaScript (#55) |
 | Open a person or a part of the tree | under 20 ms on the server |
@@ -80,4 +82,4 @@ Budgets are checked in CI on 10,000-person and 100,000-person synthetic trees. (
 | Re-focus the tree view | under 50 ms; under 35 ms at mid zoom (#78) |
 | Pan and zoom | 60 fps with 2,000 cards (#63) |
 
-Other speed-ups include cached people lists and marriage indexes (#47, #150), and a tree view cache that starts over cleanly after an edit (#147).
+Other speed-ups include faster imports that build indexes once at the end and batch their writes (#204), cached people lists and marriage indexes (#47, #150), and a tree view cache that starts over cleanly after an edit (#147).

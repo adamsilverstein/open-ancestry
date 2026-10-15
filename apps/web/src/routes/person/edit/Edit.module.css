@@ -109,3 +109,10 @@
   color: var(--oa-danger);
   font: var(--oa-text-sm);
 }
+
+/* After Reload form: what changed, and which fields to check. */
+.notice {
+  margin: 0;
+  color: var(--oa-text-muted);
+  font: var(--oa-text-sm);
+}

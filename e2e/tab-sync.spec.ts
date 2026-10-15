@@ -57,6 +57,8 @@ test('a save made from stale data is refused, not mixed in', async ({ page, requ
   await page.getByRole('button', { name: 'Edit person' }).click();
   const dialog = page.getByRole('dialog', { name: 'Edit person' });
   await dialog.getByRole('textbox', { name: 'Surname' }).first().fill('Ashby');
+  // Padding only: not an edit, so on reload it must not undo the rename made elsewhere.
+  await dialog.getByRole('textbox', { name: 'Given names' }).first().fill('Rowan  ');
 
   // Meanwhile something this tab never hears about renames Rowan (a script, another device).
   const s = await session(request, baseURL!);
@@ -81,9 +83,23 @@ test('a save made from stale data is refused, not mixed in', async ({ page, requ
   await expect(dialog.getByRole('textbox', { name: 'Given names' }).first()).toHaveValue('Roland');
   await expect(dialog.getByRole('textbox', { name: 'Surname' }).first()).toHaveValue('Ashby');
   await expect(dialog.getByRole('alert')).toHaveCount(0);
+  await expect(dialog.getByRole('status')).toContainText('your changes are kept');
+
+  // Both sides change the given name: the form keeps the user's and marks it.
+  await send(request, s, 'post', `${base}/batch`, {
+    label: 'Elsewhere again',
+    operations: [{ op: 'name.update', id: detail.names[0].id, name: { given: 'Rolf' } }],
+  });
+  await dialog.getByRole('textbox', { name: 'Given names' }).first().fill('Robin');
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await dialog.getByRole('button', { name: 'Reload form' }).click();
+  const given = dialog.getByRole('textbox', { name: 'Given names' }).first();
+  await expect(given).toHaveValue('Robin');
+  await expect(given).toHaveAccessibleDescription(/Also changed elsewhere, to “Rolf”/);
+  await expect(dialog.getByRole('status')).toContainText('One field was also changed elsewhere');
   await dialog.getByRole('button', { name: 'Save' }).click();
   await expect(dialog).toBeHidden();
-  await expect(h1(page)).toHaveText('Roland Ashby');
+  await expect(h1(page)).toHaveText('Robin Ashby');
 });
 
 test('an open form does not save over an undo from another tab', async ({ page }) => {

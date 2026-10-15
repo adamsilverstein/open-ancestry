@@ -3,7 +3,7 @@ import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2 } from 'lucide-react';
 import type { ChildRelationship, LivingStatus, NameType, Sex } from '@open-ancestry/db';
-import { seg } from '../../../api/client';
+import { isNotFound, seg } from '../../../api/client';
 import { useEdit } from '../../../api/edits';
 import { apiSend } from '../../../api/client';
 import { personQuery } from '../../../api/queries';
@@ -50,6 +50,15 @@ export const CHILD_RELATIONSHIPS: { value: ChildRelationship; label: string }[] 
 ];
 
 type LivingChoice = 'infer' | 'living' | 'dead';
+
+const LIVING_LABELS: Record<LivingChoice, string> = {
+  infer: 'Work out from dates',
+  living: 'Living',
+  dead: 'Deceased',
+};
+
+const optionLabel = (options: { value: string; label: string }[], value: string) =>
+  options.find((o) => o.value === value)?.label ?? value;
 
 function livingChoice(status: LivingStatus): LivingChoice {
   return status === 'living' ? 'living' : status === 'dead' ? 'dead' : 'infer';
@@ -117,6 +126,10 @@ export function EditPersonDialog({
   const [living, setLiving] = useState<LivingChoice>(livingChoice(detail.person.living));
   const [links, setLinks] = useState<ParentLink[]>(() => parentLinks(detail));
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // After Reload form: fields both sides changed, what changed, and a reload that failed.
+  const [conflicts, setConflicts] = useState<Map<string, string>>(() => new Map());
+  const [notice, setNotice] = useState<string | null>(null);
+  const [reloadError, setReloadError] = useState<string | null>(null);
   // Given names is what people edit most, so focus starts there.
   const firstGiven = useRef<HTMLInputElement>(null);
   const name = fullName(detail.summary);
@@ -133,6 +146,7 @@ export function EditPersonDialog({
     // draft, so the "nothing changed" check below would close the dialog and lose the
     // edits if that save then fails.
     if (edit.isPending) return;
+    setNotice(null);
     const removed = detail.names.filter((row) => !names.some((n) => n.id === row.id));
     const operations: Record<string, unknown>[] = names.flatMap((draft) => {
       const row = detail.names.find((n) => n.id === draft.id);
@@ -188,24 +202,72 @@ export function EditPersonDialog({
 
   /** After a stale refusal: the latest data, with what the user changed kept (rebase.ts). */
   async function reload() {
-    const latest = await queryClient.fetchQuery({ ...personQuery(tree, id), staleTime: 0 });
-    setNames(rebaseNames(names, detail.names, latest.names));
-    setSex(rebaseValue(sex, detail.person.sex, latest.person.sex));
-    setLiving(
-      rebaseValue(living, livingChoice(detail.person.living), livingChoice(latest.person.living)),
+    setReloadError(null);
+    let latest: PersonDetail;
+    try {
+      latest = await queryClient.fetchQuery({ ...personQuery(tree, id), staleTime: 0 });
+    } catch (error) {
+      setReloadError(
+        isNotFound(error)
+          ? `${name} was deleted (in another window or by undo), so the form cannot reload.`
+          : `Could not reload the form: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return;
+    }
+    const found = new Map<string, string>();
+    const rebased = rebaseNames(names, detail.names, latest.names);
+    for (const [key, value] of rebased.conflicts) {
+      const field = key.slice(key.lastIndexOf(':') + 1);
+      found.set(key, field === 'type' ? optionLabel(NAME_TYPES, value) : value);
+    }
+    setNames(rebased.names);
+    const nextSex = rebaseValue(sex, detail.person.sex, latest.person.sex);
+    if (nextSex.conflict) found.set('sex', optionLabel(SEX_OPTIONS, latest.person.sex));
+    setSex(nextSex.value);
+    const nextLiving = rebaseValue(
+      living,
+      livingChoice(detail.person.living),
+      livingChoice(latest.person.living),
     );
+    if (nextLiving.conflict) found.set('living', LIVING_LABELS[livingChoice(latest.person.living)]);
+    setLiving(nextLiving.value);
     const opened = parentLinks(detail);
     setLinks(
       parentLinks(latest).map((link) => {
         const was = opened.find((l) => l.linkId === link.linkId && l.slot === link.slot);
         const mine = links.find((l) => l.linkId === link.linkId && l.slot === link.slot);
-        return was && mine ? { ...link, rel: rebaseValue(mine.rel, was.rel, link.rel) } : link;
+        if (!was || !mine) return link;
+        const rel = rebaseValue(mine.rel, was.rel, link.rel);
+        if (rel.conflict) {
+          found.set(`link:${link.linkId}:${link.slot}`, optionLabel(CHILD_RELATIONSHIPS, link.rel));
+        }
+        return { ...link, rel: rel.value };
       }),
+    );
+    setConflicts(found);
+    setNotice(
+      [
+        'Reloaded with the latest data; your changes are kept.',
+        found.size > 0 &&
+          `${found.size === 1 ? 'One field was' : `${found.size} fields were`} also changed elsewhere; check the marked ${found.size === 1 ? 'field' : 'fields'} before saving.`,
+        rebased.primaryDropped &&
+          'The name you made primary was deleted elsewhere, so the primary name is unchanged.',
+      ]
+        .filter(Boolean)
+        .join(' '),
     );
     setDetail(latest);
     saveState.reset();
     firstGiven.current?.focus();
   }
+
+  /** Marks a field the user and someone else both changed (after Reload form). */
+  const elsewhere = (key: string) => {
+    const other = conflicts.get(key);
+    return other === undefined
+      ? undefined
+      : `Also changed elsewhere, to “${other || 'blank'}”. Saving keeps your value.`;
+  };
 
   function deletePerson() {
     onOpenChange(false);
@@ -267,33 +329,39 @@ export function EditPersonDialog({
               <div className={styles.grid}>
                 <Select
                   label="Name type"
+                  hint={draft.id && elsewhere(`${draft.id}:type`)}
                   value={draft.type}
                   onValueChange={(value) => setName(index, { type: value as NameType })}
                   options={NAME_TYPES}
                 />
                 <Input
                   label="Given names"
+                  hint={draft.id && elsewhere(`${draft.id}:given`)}
                   ref={index === 0 ? firstGiven : undefined}
                   value={draft.given}
                   onChange={(e) => setName(index, { given: e.currentTarget.value })}
                 />
                 <Input
                   label="Surname"
+                  hint={draft.id && elsewhere(`${draft.id}:surname`)}
                   value={draft.surname}
                   onChange={(e) => setName(index, { surname: e.currentTarget.value })}
                 />
                 <Input
                   label="Prefix"
+                  hint={draft.id && elsewhere(`${draft.id}:prefix`)}
                   value={draft.prefix}
                   onChange={(e) => setName(index, { prefix: e.currentTarget.value })}
                 />
                 <Input
                   label="Suffix"
+                  hint={draft.id && elsewhere(`${draft.id}:suffix`)}
                   value={draft.suffix}
                   onChange={(e) => setName(index, { suffix: e.currentTarget.value })}
                 />
                 <Input
                   label="Nickname"
+                  hint={draft.id && elsewhere(`${draft.id}:nickname`)}
                   value={draft.nickname}
                   onChange={(e) => setName(index, { nickname: e.currentTarget.value })}
                 />
@@ -330,6 +398,7 @@ export function EditPersonDialog({
           <div className={styles.grid}>
             <Select
               label="Sex"
+              hint={elsewhere('sex')}
               value={sex}
               onValueChange={(value) => setSex(value as Sex)}
               options={SEX_OPTIONS}
@@ -338,7 +407,10 @@ export function EditPersonDialog({
               label="Living status"
               value={living}
               onValueChange={(value) => setLiving(value as LivingChoice)}
-              hint="Worked out from dates unless you choose. Living people stay private in exports."
+              hint={
+                elsewhere('living') ??
+                'Worked out from dates unless you choose. Living people stay private in exports.'
+              }
               options={[
                 {
                   value: 'infer',
@@ -358,6 +430,7 @@ export function EditPersonDialog({
                   <Select
                     key={`${link.linkId}:${link.slot}`}
                     label={`Relationship to ${link.parentName}`}
+                    hint={elsewhere(`link:${link.linkId}:${link.slot}`)}
                     value={link.rel}
                     onValueChange={(value) =>
                       setLinks((list) =>
@@ -373,11 +446,20 @@ export function EditPersonDialog({
             </fieldset>
           )}
           {/* Lets Enter in a field submit the form. */}
+          {notice && (
+            <p role="status" className={styles.notice}>
+              {notice}
+            </p>
+          )}
+          {reloadError && (
+            <p role="alert" className={styles.error}>
+              {reloadError}
+            </p>
+          )}
           <SaveError
             error={saveState.error}
             stale={saveState.stale}
-            // A person deleted meanwhile cannot load; the page leaves on its own.
-            onReload={() => void reload().catch(() => undefined)}
+            onReload={() => void reload()}
           />
           <button type="submit" hidden />
         </form>

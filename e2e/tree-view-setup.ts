@@ -8,10 +8,12 @@ import {
   meta,
 } from '@open-ancestry/db';
 import {
+  BIG_FAMILY_TREE,
   FAMILY_TREE,
   PERF_TREE,
   PERF_TREE_100K,
   SEED_FILE,
+  bigFamilyRows,
   familyRows,
   type PerfTree,
   type SeedInfo,
@@ -55,6 +57,13 @@ export function seedTreeViewTrees(library: string): void {
   // densest view in it, so the 100k checks lay out more than the 10k ones.
   if (process.env.OA_PERF_100K === '1') {
     seed.perf100k = perfTree(PERF_TREE_100K, 100_000, 11, 'widest');
+  }
+  if (process.env.OA_PERF === '1') {
+    const big = fresh(BIG_FAMILY_TREE);
+    bulkInsert(big, bigFamilyRows(2_000));
+    big.transact('Set home person', (tx) => meta.setHomePerson(tx, 'p-big-father'));
+    big.close();
+    seed.bigFamily = { tree: BIG_FAMILY_TREE, fatherId: 'p-big-father', people: 2_002 };
   }
   writeFileSync(join(library, SEED_FILE), JSON.stringify(seed));
 }

@@ -32,6 +32,8 @@ export interface SeedInfo {
   perf: PerfTree;
   /** Only with OA_PERF_100K=1 (the perf job): seeding 100,000 people takes several seconds. */
   perf100k?: PerfTree;
+  /** Only with OA_PERF=1: one couple with 2,000 children (#209). */
+  bigFamily?: { tree: string; fatherId: string; people: number };
 }
 
 export const FAMILY_TREE = 'e2e tree view family';
@@ -48,6 +50,7 @@ export interface PerfTree {
   wideId: string;
   people: number;
 }
+export const BIG_FAMILY_TREE = 'e2e tree view big family';
 export const SEED_FILE = 'tree-view-seed.json';
 
 type Sex = 'M' | 'F';
@@ -189,6 +192,52 @@ export function familyRows(): { data: BulkData; ids: Record<string, string> } {
     });
   }
   return { data, ids };
+}
+
+/**
+ * One couple with `children` children: bad data the import accepts (one
+ * "unknown parents" family holding everyone), which once took 38 seconds to
+ * label (#209).
+ */
+export function bigFamilyRows(children: number): BulkData {
+  const person = (id: string, sex: Sex, given: string, born: number) => ({ id, sex, given, born });
+  const everyone = [
+    person('p-big-father', 'M', 'Aldous', 1800),
+    person('p-big-mother', 'F', 'Briony', 1802),
+    ...Array.from({ length: children }, (_, i) =>
+      person(`p-big-${i}`, i % 2 ? 'F' : 'M', `Kit ${i + 1}`, 1820 + (i % 40)),
+    ),
+  ];
+  return {
+    person: everyone.map(({ id, sex }) => ({ id, sex, living: 'dead', ...stamp })),
+    person_name: everyone.map(({ id, given }) => ({
+      id: `n-${id}`,
+      person_id: id,
+      given,
+      surname: 'Mallow',
+      full_text: `${given} /Mallow/`,
+      is_primary: 1,
+    })),
+    family: [
+      {
+        id: 'f-big',
+        partner1_id: 'p-big-father',
+        partner2_id: 'p-big-mother',
+        relationship_type: 'married',
+        ...stamp,
+      },
+    ],
+    family_child: Array.from({ length: children }, (_, i) => ({
+      id: `c-big-${i}`,
+      family_id: 'f-big',
+      child_id: `p-big-${i}`,
+      partner1_rel: 'biological',
+      partner2_rel: 'biological',
+      sort_order: i,
+      child_order: 0,
+      is_preferred: 1,
+    })),
+  };
 }
 
 /** The seed written by global-setup.ts, read by the specs. */

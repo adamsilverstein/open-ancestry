@@ -152,7 +152,7 @@ function Review({ review }: { review: ReimportReview }) {
   // Matched people without a card: nothing in the export changed them.
   const unchanged = Math.max(
     0,
-    counts.matched - review.diff.people.filter((p) => p.status === 'matched').length,
+    review.diff.counts.matched - review.diff.people.filter((p) => p.status === 'matched').length,
   );
   const active = useMemo(() => effective(review, selected), [review, selected]);
   const { counts } = review.diff;

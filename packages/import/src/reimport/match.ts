@@ -265,12 +265,14 @@ const MAX_APID_HOLDERS = 32;
  * Each key gets the same bounded walk, so a common nickname stays cheap.
  */
 function nameKeys(p: SnapPerson): { names: string[]; surnames: string[] } {
-  const raw = new Set([p.given, ...p.names.map((n) => norm(n.given))].filter(Boolean));
+  // Names normalized once per person (see prepare), not on every call.
+  const prepared = prepare(p).names;
+  const raw = new Set([p.given, ...prepared.map((n) => n.given)].filter(Boolean));
   const givens = [...new Set([...raw].filter((g) => g.length >= 2).map((g) => soundex(g)))];
   if (!givens.length) givens.push(p.given ? soundex(p.given) : '');
   const surnames = [
     ...new Set(
-      [p.surname, ...p.names.map((n) => norm(n.surname))].filter(Boolean).map((s) => soundex(s!)),
+      [p.surname, ...prepared.map((n) => n.surname)].filter(Boolean).map((s) => soundex(s)),
     ),
   ];
   const names = surnames.flatMap((s) => givens.map((g) => `${g}:${s}`));

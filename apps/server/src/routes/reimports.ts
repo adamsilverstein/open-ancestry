@@ -93,7 +93,8 @@ export function reimportRoutes(app: Api, { library, reimports, thumbnails }: Dep
         const dir = library.dirOf(stored.tree);
         for (const id of result.media.copied) {
           const media = store.getRow('media', id);
-          if (media?.local_path) thumbnails.enqueue(dir, id, media.local_path);
+          // A replaced file (#75) must not keep the old file's thumbnails.
+          if (media?.local_path) await thumbnails.refresh(dir, id, media.local_path);
         }
         return result;
       } catch (error) {

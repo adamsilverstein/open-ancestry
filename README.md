@@ -37,6 +37,14 @@ Import limits, for `serve` and `import` (flag, or environment variable):
 | `--max-archive-mb` | `OA_MAX_ARCHIVE_MB` | 1024 | A whole GEDZIP, photos included (each photo up to 256 MB, all of them up to 1 GB). |
 | `--import-heap-mb` | `OA_IMPORT_HEAP_MB` | 2048 | Memory for each import's worker (`serve` only). Raise it with `--max-gedcom-mb`: a 64 MB file needs about 1 GB. |
 
+### One person per computer account
+
+Open Ancestry assumes the account that runs it is the only one that should see the library:
+
+- The library, its trees and everything in them are created readable by your account alone (folders `0700`, files `0600`), and existing trees are tightened when they open. A `--library` folder the app did not create keeps its permissions (so `--library ~` or a shared folder is not locked); the app warns if other accounts can see it.
+- On Windows there are no such modes: the app relies on your profile folder's permissions (ACLs), which other standard accounts cannot open, so keep the library inside it.
+- While the server runs, any program on this computer can reach it at `127.0.0.1`, including programs run by other accounts. Binding to loopback keeps other machines out, not other users of this one. On a shared computer, stop the server (Ctrl+C) when you're done.
+
 ## Development
 
 ```sh

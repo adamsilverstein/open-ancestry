@@ -40,6 +40,12 @@ export function invalidateTree(queryClient: QueryClient, tree: string) {
   return queryClient.invalidateQueries({ predicate: (q) => q.queryKey[1] === tree });
 }
 
+/** Every edit to `tree` shares this key, so they can be counted and awaited. */
+export const editKey = (tree: string) => ['edit', tree] as const;
+
+/** Mutations sharing this scope run one at a time, in the order they were made. */
+export const editScope = (tree: string) => ({ id: `edit:${tree}` });
+
 /*
  * An edit refused with 404 (what it changes was deleted in another window or
  * by undo) is announced once: by the person page if its person is gone (it
@@ -68,6 +74,10 @@ export function useEdit(tree: string) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const mutation = useMutation({
+    mutationKey: editKey(tree),
+    // One at a time, in the order they were made: a slow request can never land
+    // after a later one (TanStack runs mutations sharing a scope serially).
+    scope: editScope(tree),
     mutationFn: ({ edit }: Run) => edit.send(),
     onError: (error, { edit, rollback }) => {
       if (rollback) queryClient.setQueryData(rollback.key, rollback.previous);
@@ -85,7 +95,11 @@ export function useEdit(tree: string) {
       edit.onError?.(error);
     },
     onSuccess: (result, { edit }) => edit.onDone?.(result),
+    // Refetch once the queue drains: a refetch between queued edits would show
+    // server state without them and overwrite their optimistic updates.
+    // (This edit still counts as pending while onSettled runs.)
     onSettled: async () => {
+      if (queryClient.isMutating({ mutationKey: editKey(tree) }) > 1) return;
       await invalidateTree(queryClient, tree);
       if (unsaved?.tree !== tree) return;
       setTimeout(() => {

@@ -149,6 +149,43 @@ test.describe('family view', () => {
     await expect(page).toHaveURL(new RegExp(`/person/${ids.bram}$`));
   });
 
+  test('quick view Edit opens the editor, not just the profile (#134)', async ({ page }) => {
+    await open(page);
+    await card(page, 'Bram Vale').click();
+    await page
+      .getByRole('dialog', { name: 'Bram Vale' })
+      .getByRole('button', { name: 'Edit' })
+      .click();
+    await expect(page).toHaveURL(new RegExp(`/person/${ids.bram}\\?edit=true$`));
+    const editor = page.getByRole('dialog', { name: 'Edit person' });
+    await expect(editor).toBeVisible();
+    // Closing the editor leaves the plain profile URL, so reload does not reopen it.
+    await page.keyboard.press('Escape');
+    await expect(editor).toHaveCount(0);
+    await expect(page).toHaveURL(new RegExp(`/person/${ids.bram}$`));
+    // Focus lands on the header's Edit person button, not lost on the page.
+    await expect(page.getByRole('button', { name: 'Edit person' })).toBeFocused();
+  });
+
+  test('quick view says Living once (#134)', async ({ page }) => {
+    await open(page);
+    await card(page, 'Wren Ash').click();
+    const quick = page.getByRole('dialog', { name: 'Wren Ash' });
+    await expect(quick).toContainText('Living');
+    await expect(quick.getByText(/Living/)).toHaveCount(1);
+  });
+
+  test('cards without a photo show a silhouette tinted by sex, without a badge (#134)', async ({
+    page,
+  }) => {
+    await open(page);
+    for (const name of ['Bram Vale', 'Elsa Hale']) {
+      const c = card(page, name);
+      await expect(c.locator('[data-fallback="silhouette"] svg.lucide-user-round')).toHaveCount(1);
+      await expect(c.locator('svg.lucide-mars, svg.lucide-venus')).toHaveCount(0);
+    }
+  });
+
   test('Escape closes the quick view and returns focus to the card', async ({ page }) => {
     await open(page);
     await card(page, 'Elsa Hale').click();
@@ -1211,6 +1248,15 @@ test.describe('wide descendant charts (#74)', () => {
     // The minimap re-checks its corner 150ms after each pan settles.
     await expect(check).toPass({ timeout: 2000 });
   });
+});
+
+test('the fan has no minimap, so its toolbar offers none (#134)', async ({ page }) => {
+  await open(page, 'ada', '&layout=fan');
+  const tools = page.getByRole('toolbar', { name: 'Tree tools' });
+  await expect(tools.getByRole('button', { name: 'Fit to screen' })).toBeVisible();
+  await expect(tools.getByRole('button', { name: 'Minimap' })).toHaveCount(0);
+  await page.keyboard.press('m');
+  await expect(page.getByTestId('tree-minimap')).toHaveCount(0);
 });
 
 test.describe('fan labels (#137)', () => {

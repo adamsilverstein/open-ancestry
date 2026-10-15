@@ -142,7 +142,7 @@ test.describe('facts', () => {
       'Birth of brother Tobias Ashdown',
       'Residence',
       'Death of father Edmund Ashdown',
-      'Birth of half sister Nell Marsh',
+      'Birth of half-sister Nell Marsh',
       'Marriage to Iris Vale',
       'Birth of daughter Lena Ashdown',
       'Birth of son Arthur Ashdown',
@@ -204,8 +204,8 @@ test.describe('facts', () => {
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await expect(family.getByRole('link', { name: /Tobias Ashdown/ })).toBeHidden();
 
-    const half = family.getByRole('button', { name: /Half siblings/ });
-    await expect(half).toHaveText('Half siblings (1)');
+    const half = family.getByRole('button', { name: /Half-siblings/ });
+    await expect(half).toHaveText('Half-siblings (1)');
     await expect(family.getByRole('link', { name: /Nell Marsh/ })).toBeVisible();
 
     const spouse = family.getByRole('region', { name: 'Spouse and children' });

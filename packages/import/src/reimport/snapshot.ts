@@ -39,6 +39,11 @@ export interface SnapPerson {
   surname: string;
   events: SnapEvent[];
   birthYear: number | null;
+  /**
+   * Years a birth date spans when it is not one year: `BET 1940 AND 1949`,
+   * or 30 years before `BEF` / after `AFT`. Null for a plain date.
+   */
+  birthRange: { start: number; end: number } | null;
   deathYear: number | null;
   birthPlace: string | null;
   parents: string[];
@@ -65,6 +70,21 @@ export interface Snapshot {
 }
 
 const year = (sort: number | null | undefined) => (sort ? Math.floor(sort / 10000) : null);
+
+/** How far a BEF or AFT date reaches, in years. */
+export const OPEN_RANGE_YEARS = 30;
+
+function birthRange(
+  start: number | null,
+  end: number | null,
+  qualifier: string | null,
+): SnapPerson['birthRange'] {
+  if (start === null) return null;
+  if (end !== null && end !== start) return { start, end };
+  if (qualifier === 'before') return { start: start - OPEN_RANGE_YEARS, end: start };
+  if (qualifier === 'after') return { start, end: start + OPEN_RANGE_YEARS };
+  return null;
+}
 
 export const norm = (text: string | null | undefined) => normalizeForSearch(text ?? '').trim();
 
@@ -126,6 +146,7 @@ export function snapshot(store: TreeStore): Snapshot {
       surname: '',
       events: [],
       birthYear: null,
+      birthRange: null,
       deathYear: null,
       birthPlace: null,
       parents: [],
@@ -199,7 +220,10 @@ export function snapshot(store: TreeStore): Snapshot {
     };
     p.events.push(event);
     if (event.isPreferred && row.type === 'BIRT') {
-      p.birthYear ??= year(row.date_sort);
+      if (p.birthYear === null) {
+        p.birthYear = year(row.date_sort);
+        p.birthRange = birthRange(p.birthYear, year(row.date_sort_end), row.date_qualifier);
+      }
       p.birthPlace ??= place_name;
     }
     if (event.isPreferred && row.type === 'DEAT') p.deathYear ??= year(row.date_sort);

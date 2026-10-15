@@ -137,6 +137,9 @@ describe('getRelationship keeps its graph current', () => {
     store.transact('tag', (tx) => tags.create(tx, { name: 'Research' }));
     store.transact('meta', (tx) => meta.setHomePerson(tx, f.me));
     store.transact('note', (tx) => notes.create(tx, { text: 'A note' }));
+    // Columns the graph does not read.
+    store.transact('living', (tx) => tx.update('person', f.dad, { living: 'dead' }));
+    store.transact('privacy', (tx) => tx.update('family', f.parentsFamily, { privacy: 'private' }));
     expect(getRelationship(store, f.kid, f.dad).name).toBe('grandson');
     expect(kinshipStats).toEqual(before);
   });

@@ -89,7 +89,8 @@ export class Library {
   readonly root: string;
   private readonly stores = new Map<string, TreeStore>();
   /** Trees that must not be renamed or deleted right now (e.g. importing). */
-  private readonly busy = new Set<string>();
+  /** Trees with an import queued or running, and how many. */
+  private readonly busy = new Map<string, number>();
 
   constructor(root: string) {
     this.root = resolve(root);
@@ -265,17 +266,38 @@ export class Library {
     renameSync(this.dirOf(id), join(trash, `${id} ${stamp}${TREE_EXTENSION}`));
   }
 
-  /** Marks a tree busy for the duration of `fn` (rename and delete are refused). */
+  /**
+   * Marks a tree busy (an import is queued or running) until the returned
+   * release is called: every write to it, rename and delete are refused.
+   */
+  markBusy(id: string): () => void {
+    this.busy.set(id, (this.busy.get(id) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const left = (this.busy.get(id) ?? 1) - 1;
+      if (left > 0) this.busy.set(id, left);
+      else this.busy.delete(id);
+    };
+  }
+
+  /** Marks a tree busy for the duration of `fn`. */
   async whileBusy<R>(id: string, fn: () => Promise<R>): Promise<R> {
-    this.busy.add(id);
+    const release = this.markBusy(id);
     try {
       return await fn();
     } finally {
-      this.busy.delete(id);
+      release();
     }
   }
 
-  private assertIdle(id: string): void {
+  isBusy(id: string): boolean {
+    return this.busy.has(id);
+  }
+
+  /** Throws 409 while the tree is importing. */
+  assertIdle(id: string): void {
     if (this.busy.has(id)) throw conflict(`Tree "${id}" is busy (an import is running)`);
   }
 

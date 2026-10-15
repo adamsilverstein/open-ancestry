@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useRouterState } from '@tanstack/react-router';
-import { House, Moon, Palette, Sun, Users } from 'lucide-react';
+import { House, ListChecks, Moon, Palette, Sun, Users } from 'lucide-react';
 import { useSearchPeople, type SearchHit } from '../api/search';
 import { Avatar } from '../components/Avatar/Avatar';
 import {
@@ -69,6 +69,13 @@ export default function ShellCommandPalette({ open, onOpenChange }: ShellCommand
             icon: <Users size={16} aria-hidden />,
             keywords: ['people', 'list', 'everyone', 'table'],
             onSelect: () => void navigate({ to: '/people' }),
+          },
+          {
+            id: 'checker',
+            label: 'Open tree checker',
+            icon: <ListChecks size={16} aria-hidden />,
+            keywords: ['check', 'checker', 'problems', 'duplicates', 'errors', 'sources'],
+            onSelect: () => void navigate({ to: '/checker' }),
           },
         ]
       : []),

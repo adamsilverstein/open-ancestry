@@ -9,6 +9,7 @@ import { isNotFound } from '../api/client';
 import { currentTreeQuery, personQuery } from '../api/queries';
 import { PersonNotFound } from '../routes/person/PersonNotFound';
 import { PersonSkeleton } from '../routes/person/PersonSkeleton';
+import { validateMergeSearch } from '../routes/merge/search';
 import { validatePersonSearch } from '../routes/person/search';
 import { queryClient } from './queryClient';
 import { AppShell } from './AppShell';
@@ -16,6 +17,7 @@ import { HomePage } from '../routes/HomePage';
 import { NotFoundPage } from '../routes/NotFoundPage';
 import { RouteErrorPage } from '../routes/RouteErrorPage';
 import { validatePeopleSearch } from '../routes/people/search';
+import { parseGenerations } from '../tree/api';
 
 const rootRoute = createRootRoute({
   component: AppShell,
@@ -43,11 +45,6 @@ interface TreeSearch {
   up?: number;
   down?: number;
 }
-const generations = (value: unknown) =>
-  typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 10
-    ? value
-    : undefined;
-
 const treeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/tree/$personId',
@@ -58,10 +55,10 @@ const treeRoute = createRoute({
     if (treeLayouts.includes(search.layout as TreeLayoutKind)) {
       valid.layout = search.layout as TreeLayoutKind;
     }
-    const up = generations(search.up);
-    if (up !== undefined) valid.up = up;
-    const down = generations(search.down);
-    if (down !== undefined) valid.down = down;
+    // Set even when undefined: the root route passes the raw search through,
+    // so an unset key would let `up=abc` reach the view as a string.
+    valid.up = parseGenerations(search.up);
+    valid.down = parseGenerations(search.down);
     return valid;
   },
   component: lazyRouteComponent(() => import('../routes/TreePage'), 'TreePage'),
@@ -97,10 +94,29 @@ const peopleRoute = createRoute({
   component: lazyRouteComponent(() => import('../routes/people/PeoplePage'), 'PeoplePage'),
 });
 
+const checkerRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/checker',
+  component: lazyRouteComponent(() => import('../routes/checker/CheckerPage'), 'CheckerPage'),
+});
+
+const mergeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/merge',
+  validateSearch: validateMergeSearch,
+  component: lazyRouteComponent(() => import('../routes/merge/MergePage'), 'MergePage'),
+});
+
 const importRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/import/$jobId',
   component: lazyRouteComponent(() => import('../routes/import/ImportPage'), 'ImportPage'),
+});
+
+const reimportRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/reimport/$jobId',
+  component: lazyRouteComponent(() => import('../routes/reimport/ReimportPage'), 'ReimportPage'),
 });
 
 const routeTree = rootRoute.addChildren([
@@ -110,6 +126,9 @@ const routeTree = rootRoute.addChildren([
   personRoute,
   peopleRoute,
   importRoute,
+  reimportRoute,
+  checkerRoute,
+  mergeRoute,
 ]);
 
 export const router = createRouter({

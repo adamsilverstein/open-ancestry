@@ -145,6 +145,11 @@
   background: color-mix(in oklab, var(--oa-canvas) 85%, transparent);
 }
 
+/* Too tall for the gap it sits in: out of sight, still read by screen readers. */
+.labelGutter[data-thin] {
+  opacity: 0;
+}
+
 .labelColumn {
   transform: translate(0, -100%);
   /* Clear of the expand chevrons that sit on the top cards' edges. */
@@ -246,6 +251,12 @@
   z-index: 2;
 }
 
+/* Moved out of the way of a row label or the active card (see useMinimapCorner). */
+.minimap[data-corner='right'] {
+  right: var(--oa-space-4);
+  left: auto;
+}
+
 .empty {
   display: grid;
   place-items: center;
@@ -315,4 +326,15 @@
   color: var(--oa-text);
   font: var(--oa-text-sm);
   transform: translateX(-50%);
+}
+
+/* A note rather than a warning: the view works, another goes further. */
+.notice[data-tone='info'] {
+  border-left-color: var(--oa-accent);
+}
+
+.noticeLink {
+  padding: var(--oa-space-1) var(--oa-space-2);
+  color: var(--oa-accent);
+  font-weight: var(--oa-weight-medium);
 }

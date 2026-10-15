@@ -17,10 +17,25 @@ export interface Edit<T = unknown> {
   optimistic?: { personId: string; update: (detail: PersonDetail) => PersonDetail };
   /** Runs after success, before queries refetch (e.g. navigate away from a deleted person). */
   onDone?: (result: T) => void;
+  /** Runs after the rollback and error toast, e.g. so a dialog can show the error and stay open. */
+  onError?: (error: unknown) => void;
 }
 
-/** Refetches every query of the tree: keys are `[kind, tree, ...]`. */
+const changeListeners = new Set<(tree: string) => void>();
+
+/**
+ * Tells views that keep tree data outside the query cache (the tree view's
+ * merged neighborhoods) that `tree` changed. Unlike query invalidation, this
+ * does not depend on any query still being in the cache.
+ */
+export function onTreeChanged(listener: (tree: string) => void): () => void {
+  changeListeners.add(listener);
+  return () => changeListeners.delete(listener);
+}
+
+/** Refetches every query of the tree (keys are `[kind, tree, ...]`) and notifies `onTreeChanged`. */
 export function invalidateTree(queryClient: QueryClient, tree: string) {
+  for (const listener of changeListeners) listener(tree);
   return queryClient.invalidateQueries({ predicate: (q) => q.queryKey[1] === tree });
 }
 
@@ -42,6 +57,7 @@ export function useEdit(tree: string) {
         description: `${edit.label}: ${error instanceof Error ? error.message : String(error)}`,
         variant: 'error',
       });
+      edit.onError?.(error);
     },
     onSuccess: (result, { edit }) => edit.onDone?.(result),
     onSettled: () => invalidateTree(queryClient, tree),
@@ -51,7 +67,7 @@ export function useEdit(tree: string) {
    * Starts an edit. The optimistic update is applied synchronously, in the same
    * event as the click, so a controlled checkbox or field never flips back.
    */
-  const mutate = (edit: Edit) => {
+  const mutate = <T>(edit: Edit<T>) => {
     let rollback: Run['rollback'] = null;
     if (edit.optimistic) {
       const { queryKey } = personQuery(tree, edit.optimistic.personId);
@@ -64,7 +80,7 @@ export function useEdit(tree: string) {
         rollback = { key: queryKey, previous };
       }
     }
-    mutation.mutate({ edit, rollback });
+    mutation.mutate({ edit: edit as Edit, rollback });
   };
 
   return { mutate, isPending: mutation.isPending };

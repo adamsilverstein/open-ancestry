@@ -44,6 +44,11 @@ export interface PersonSummary {
   living: LivingStatus;
   privacy: Privacy;
   primaryMediaId: string | null;
+  /**
+   * The primary photo has a local file (not only an Ancestry URL, and not a
+   * file missing at import), so clients can request its thumbnail.
+   */
+  primaryPhotoLocal: boolean;
   given: string | null;
   surname: string | null;
   surnamePrefix: string | null;
@@ -60,6 +65,7 @@ interface SummaryRow {
   living: LivingStatus;
   privacy: Privacy;
   primary_media_id: string | null;
+  primary_local: number;
   given: string | null;
   surname: string | null;
   surname_prefix: string | null;
@@ -93,8 +99,10 @@ export function getPersonSummaries(store: TreeStore, ids: readonly string[]): Pe
   const rows = store
     .stmt(
       `SELECT p.id, p.sex, p.living, p.privacy, p.primary_media_id,
+              m.local_path IS NOT NULL AS primary_local,
               n.given, n.surname, n.surname_prefix, n.prefix, n.suffix, n.nickname
        FROM person p LEFT JOIN person_name n ON n.person_id = p.id AND n.is_primary = 1
+       LEFT JOIN media m ON m.id = p.primary_media_id
        WHERE p.id IN (${IDS})`,
     )
     .all(json) as SummaryRow[];
@@ -124,6 +132,7 @@ export function getPersonSummaries(store: TreeStore, ids: readonly string[]): Pe
       living: r.living,
       privacy: r.privacy,
       primaryMediaId: r.primary_media_id,
+      primaryPhotoLocal: r.primary_local === 1,
       given: r.given,
       surname: r.surname,
       surnamePrefix: r.surname_prefix,
@@ -749,7 +758,7 @@ const vitalSort = (types: readonly string[]) =>
 const ORDER_CACHE_SIZE = 4;
 const orderCache = new WeakMap<TreeStore, Map<string, string[]>>();
 
-function databaseVersion(store: TreeStore): string {
+export function databaseVersion(store: TreeStore): string {
   const { changes } = store.stmt('SELECT total_changes() AS changes').get() as { changes: number };
   return `${changes}:${store.db.pragma('data_version', { simple: true }) as number}`;
 }

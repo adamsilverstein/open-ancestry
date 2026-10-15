@@ -1,22 +1,29 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { Network, Pencil } from 'lucide-react';
-import { ancestorsQuery, mediaUrl, treeQuery } from '../../api/queries';
+import { Ellipsis, House, Network, Pencil, Route } from 'lucide-react';
+import { apiSend, seg } from '../../api/client';
+import { useEdit } from '../../api/edits';
+import { relationshipQuery, treeQuery } from '../../api/queries';
+import { avatarUrl } from '../../lib/media';
 import type { PersonDetail } from '../../api/types';
+import { IconButton } from '../../components/IconButton/IconButton';
+import { Menu, MenuContent, MenuItem, MenuTrigger } from '../../components/Menu/Menu';
+import { useToast } from '../../components/Toast/Toast';
 import { Avatar } from '../../components/Avatar/Avatar';
 import { Popover, PopoverContent, PopoverTrigger } from '../../components/Popover/Popover';
 import { RelationshipChart } from '../../components/RelationshipChart/RelationshipChart';
-import type { RelationshipChartCell } from '../../components/RelationshipChart/RelationshipChart';
+import type { RelationshipChartPath } from '../../components/RelationshipChart/RelationshipChart';
 import buttonStyles from '../../components/Button/Button.module.css';
 import { Button } from '../../components/Button/Button';
 import { TagBadge } from '../../components/TagBadge/TagBadge';
 import { EditPersonDialog } from './edit/EditPersonDialog';
 import { TagsEditor } from './edit/TagsEditor';
 import { cx } from '../../lib/cx';
-import { fullName, isLivingStatus, toPersonSummary } from '../../lib/person';
+import { fullName, isLivingStatus } from '../../lib/person';
 import type { TagColor } from '../../lib/person';
-import { relationshipPath } from '../../lib/relationship';
+import { relationshipCharts } from '../../lib/relationship';
+import { RelationshipCalculator } from './RelationshipCalculator';
 import { formatDate } from '@open-ancestry/core';
 import type { EventBrief } from '../../api/types';
 import styles from './PersonPage.module.css';
@@ -58,49 +65,49 @@ function Vital({
 interface RelationshipToHome {
   /** `father of Rowan Ashdown`, `Home person`; null while loading or unrelated. */
   text: string | null;
-  /** One mini chart per connecting path, for blood relatives (several with pedigree collapse). */
-  charts: { label: string; cells: RelationshipChartCell[] }[];
+  /** One mini chart per connecting path (several with pedigree collapse). */
+  charts: RelationshipChartPath[];
 }
 
+/** The person's relationship to the home person, named by the server over the whole tree. */
 function useRelationshipToHome(tree: string, detail: PersonDetail): RelationshipToHome {
   const id = detail.person.id;
   const { data: info } = useQuery(treeQuery(tree));
   const home = info?.homePersonId ?? null;
-  const spouseOfHome = detail.partnerFamilies.find((f) => f.partner?.id === home)?.partner;
-  const needsAncestors = !!home && home !== id && !spouseOfHome;
-  const homeAncestors = useQuery({ ...ancestorsQuery(tree, home ?? ''), enabled: needsAncestors });
-  const personAncestors = useQuery({ ...ancestorsQuery(tree, id), enabled: needsAncestors });
-  const found = useMemo(
-    () =>
-      homeAncestors.data && personAncestors.data
-        ? relationshipPath(homeAncestors.data, personAncestors.data)
-        : null,
-    [homeAncestors.data, personAncestors.data],
-  );
-
+  const { data } = useQuery({
+    ...relationshipQuery(tree, id, home ?? ''),
+    enabled: !!home && home !== id,
+  });
   if (!home) return { text: null, charts: [] };
   if (home === id) return { text: 'Home person', charts: [] };
-  if (spouseOfHome) {
-    const role =
-      detail.summary.sex === 'M' ? 'husband' : detail.summary.sex === 'F' ? 'wife' : 'spouse';
-    return { text: `${role} of ${fullName(spouseOfHome)}`, charts: [] };
-  }
-  const people = new Map(
-    [...(homeAncestors.data?.people ?? []), ...(personAncestors.data?.people ?? [])].map((p) => [
-      p.id,
-      p,
-    ]),
-  );
-  const homePerson = people.get(home);
-  if (!found || !homePerson) return { text: null, charts: [] };
-  const charts = found.paths.map(({ label, cells }) => ({
-    label,
-    cells: cells.map((cell): RelationshipChartCell => {
-      const person = people.get(cell.id);
-      return { ...cell, person: person ? toPersonSummary(person) : null };
-    }),
-  }));
-  return { text: `${found.name} of ${fullName(homePerson)}`, charts };
+  const homePerson = data?.people.find((p) => p.id === home);
+  if (!data || !homePerson) return { text: null, charts: [] };
+  const { name, charts } = relationshipCharts(data);
+  if (name) return { text: `${name} of ${fullName(homePerson)}`, charts };
+  // The search stopped at its limits: say so rather than look unrelated.
+  return data.complete
+    ? { text: null, charts: [] }
+    : {
+        text: `No relationship to ${fullName(homePerson)} found within the search limits`,
+        charts: [],
+      };
+}
+
+/** "Set as home person": an undoable edit that re-bases every relationship line. */
+function useSetHome(tree: string, detail: PersonDetail) {
+  const edit = useEdit(tree);
+  const toast = useToast();
+  const name = fullName(detail.summary);
+  return () =>
+    edit.mutate({
+      label: 'Set home person',
+      send: () => apiSend('PUT', `/trees/${seg(tree)}/home`, { personId: detail.person.id }),
+      onDone: () =>
+        toast({
+          title: `${name} is now the home person`,
+          description: 'Undo from History or with Ctrl+Z (⌘Z on a Mac).',
+        }),
+    });
 }
 
 export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDetail }) {
@@ -109,13 +116,23 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
   const relationship = useRelationshipToHome(tree, detail);
   const sex = summary.sex === 'M' || summary.sex === 'F' ? summary.sex : 'U';
   const [editing, setEditing] = useState(false);
+  const [calculating, setCalculating] = useState(false);
+  const setHome = useSetHome(tree, detail);
+  const { data: info } = useQuery(treeQuery(tree));
+  const isHome = info?.homePersonId === summary.id;
+  const { data: home } = useQuery({
+    ...relationshipQuery(tree, summary.id, info?.homePersonId ?? ''),
+    enabled: !!info?.homePersonId && !isHome,
+  });
+  const homeSummary = home?.people.find((p) => p.id === info?.homePersonId) ?? null;
   return (
     <header className={styles.header} data-surface="canvas" data-testid="person-header">
       <Avatar
         name={name}
         sex={sex}
         size={120}
-        src={summary.primaryMediaId ? mediaUrl(tree, summary.primaryMediaId) : undefined}
+        // 120px: the 480px thumbnail keeps it sharp on 2x screens.
+        src={avatarUrl(tree, summary, 'md')}
         className={styles.avatar}
       />
       <div className={styles.identity}>
@@ -176,7 +193,36 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
           <Network size={14} aria-hidden />
           View in tree
         </Link>
+        {/* Not modal: the calculator dialog opens from it and must own focus. */}
+        <Menu modal={false}>
+          <MenuTrigger asChild>
+            <IconButton
+              label="More actions"
+              icon={<Ellipsis size={16} aria-hidden />}
+              size="sm"
+              variant="secondary"
+              tooltip={false}
+            />
+          </MenuTrigger>
+          <MenuContent align="end">
+            <MenuItem onSelect={() => setCalculating(true)}>
+              <Route size={14} aria-hidden /> Relationship to…
+            </MenuItem>
+            <MenuItem disabled={isHome} onSelect={setHome}>
+              <House size={14} aria-hidden /> {isHome ? 'Home person' : 'Set as home person'}
+            </MenuItem>
+          </MenuContent>
+        </Menu>
       </div>
+      {calculating && (
+        <RelationshipCalculator
+          tree={tree}
+          from={summary}
+          to={homeSummary}
+          open
+          onOpenChange={(open) => !open && setCalculating(false)}
+        />
+      )}
       {editing && (
         <EditPersonDialog
           tree={tree}

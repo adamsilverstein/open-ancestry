@@ -12,6 +12,7 @@ import { Input } from '../../../components/Input/Input';
 import { Select } from '../../../components/Select/Select';
 import { eventLabel } from '../../../lib/timeline';
 import { removeEvent } from './optimistic';
+import { SaveError, useSaveState } from './SaveError';
 import styles from './Edit.module.css';
 
 /** Event types offered when adding; `EVEN` is a custom event with its own name. */
@@ -58,12 +59,23 @@ interface EventDialogProps {
   item?: EventDetail | undefined;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Where focus goes on close if the opener is gone (the event was deleted). */
+  returnFocusFallback?: () => HTMLElement | null | undefined;
 }
 
 /** Add or edit an event: type, date with the parser's live preview, place and details. */
-export function EventDialog({ tree, personId, item, open, onOpenChange }: EventDialogProps) {
+export function EventDialog({
+  tree,
+  personId,
+  item,
+  open,
+  onOpenChange,
+  returnFocusFallback,
+}: EventDialogProps) {
   const base = `/trees/${seg(tree)}`;
   const edit = useEdit(tree);
+  // Stays open until the save succeeds, so a failure keeps the fields.
+  const saveState = useSaveState(() => onOpenChange(false));
   const event = item?.event;
   const [type, setType] = useState(event?.type ?? 'BIRT');
   const [customType, setCustomType] = useState(event?.custom_type ?? '');
@@ -78,6 +90,7 @@ export function EventDialog({ tree, personId, item, open, onOpenChange }: EventD
   const label = eventLabel(type, customType);
 
   function save() {
+    if (edit.isPending) return;
     const valueField = VALUE_LABELS[type] ? 'value' : 'description';
     const body = {
       type,
@@ -86,16 +99,17 @@ export function EventDialog({ tree, personId, item, open, onOpenChange }: EventD
       place: place.trim() || null,
       [valueField]: detail.trim() || null,
     };
-    onOpenChange(false);
     edit.mutate(
       event
         ? {
             label: `Edit ${label}`,
             send: () => apiSend('PATCH', `${base}/events/${event.id}`, body),
+            ...saveState.handlers(),
           }
         : {
             label: `Add ${label}`,
             send: () => apiSend('POST', `${base}/people/${personId}/events`, body),
+            ...saveState.handlers(),
           },
     );
   }
@@ -116,6 +130,7 @@ export function EventDialog({ tree, personId, item, open, onOpenChange }: EventD
         open={open}
         onOpenChange={onOpenChange}
         title={event ? 'Edit event' : 'Add event'}
+        {...(returnFocusFallback ? { returnFocusFallback } : {})}
         footer={
           <div className={styles.footer}>
             {event && (
@@ -131,8 +146,8 @@ export function EventDialog({ tree, personId, item, open, onOpenChange }: EventD
             <DialogClose asChild>
               <Button variant="ghost">Cancel</Button>
             </DialogClose>
-            <Button variant="primary" onClick={save}>
-              Save
+            <Button variant="primary" onClick={save} loading={edit.isPending}>
+              {saveState.submitLabel('Save')}
             </Button>
           </div>
         }
@@ -174,6 +189,7 @@ export function EventDialog({ tree, personId, item, open, onOpenChange }: EventD
             value={detail}
             onChange={(e) => setDetail(e.currentTarget.value)}
           />
+          <SaveError error={saveState.error} />
           <button type="submit" hidden />
         </form>
       </Dialog>

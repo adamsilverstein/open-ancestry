@@ -4,6 +4,10 @@ import { describe, expect, it } from 'vitest';
 import { importInto, rawText } from './test-helpers';
 import { ImportError } from './types';
 
+// Property tests run hundreds of cases; under coverage on a shared CI runner that can
+// pass Vitest's 5s default, so they get room. A hang still fails.
+const PROPERTY_TIMEOUT = 30_000;
+
 const RUNS = Number(process.env.FUZZ_RUNS ?? 60);
 
 // Record-shaped noise: real tags in random nesting, with pointers that may or
@@ -103,7 +107,7 @@ const document = fc
   .array(line, { maxLength: 60 })
   .map((lines) => ['0 HEAD', '1 CHAR UTF-8', ...lines].join('\n'));
 
-describe('fuzz: import never throws on bad data', () => {
+describe('fuzz: import never throws on bad data', { timeout: PROPERTY_TIMEOUT }, () => {
   it('keeps every line accounted for and the raw text intact', async () => {
     await fc.assert(
       fc.asyncProperty(document, async (text) => {

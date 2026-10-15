@@ -6,8 +6,11 @@ import {
   CloudOff,
   ExternalLink,
   FileText,
+  FileX,
   Image,
+  ImageOff,
   ImagePlus,
+  Link2Off,
   Music,
   UserRound,
 } from 'lucide-react';
@@ -25,11 +28,14 @@ import {
   ancestryLink,
   attachMedia,
   hasThumbnail,
+  learnedSize,
   mediaGroup,
+  mediaSource,
   originalUrl,
   personMediaQuery,
   setProfilePhoto,
   thumbUrl,
+  tileImage,
   type GalleryItem,
   type MediaFilter,
   type MediaOwner,
@@ -42,7 +48,8 @@ const FILTERS: [MediaFilter, string][] = [
   ['photos', 'Photos'],
   ['documents', 'Documents'],
   ['av', 'Audio & video'],
-  ['online', 'On Ancestry'],
+  ['online', 'Online'],
+  ['missing', 'Missing'],
 ];
 
 const titleOf = (media: MediaRow) => media.title || media.description || 'Untitled';
@@ -64,17 +71,64 @@ function fileType(media: MediaRow): string {
   return 'File';
 }
 
-function Preview({ tree, media }: { tree: string; media: MediaRow }) {
-  if (hasThumbnail(media)) {
+/** Thumbnails that failed to load (a corrupt or unreadable file), shared by tiles and lightbox. */
+type ThumbFailures = { has: (id: string) => boolean; add: (id: string) => void };
+
+function Preview({
+  tree,
+  media,
+  failures,
+}: {
+  tree: string;
+  media: MediaRow;
+  failures: ThumbFailures;
+}) {
+  // The original's size: stored, or learned from the first thumbnail that loads.
+  const [learned, setLearned] = useState<{ width: number; height: number } | null>(null);
+  const known =
+    media.width !== null ? { width: media.width, height: media.height ?? media.width } : learned;
+  if (hasThumbnail(media) && !failures.has(media.id)) {
+    const image = tileImage(tree, media.id, known);
     // Decorative: the tile's caption already names it.
-    return <img src={thumbUrl(tree, media.id, 'sm')} alt="" loading="lazy" decoding="async" />;
+    return (
+      <img
+        // A new element when the srcset changes: browsers keep the old density for a URL.
+        key={image.srcSet ?? 'plain'}
+        {...image}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        onLoad={(event) => {
+          // Size unknown (trees imported before sizes were recorded): learn it once.
+          if (known) return;
+          const size = learnedSize(event.currentTarget);
+          if (size) setLearned(size);
+        }}
+        onError={() => failures.add(media.id)}
+      />
+    );
   }
-  if (!media.local_path) {
-    // Never fetched: Ancestry media are shown as placeholders.
+  const source = mediaSource(media);
+  if (source !== 'local') {
+    // Never fetched: remote media are placeholders, and only Ancestry's say so.
+    const [Icon, label] =
+      source === 'ancestry'
+        ? [CloudOff, 'On Ancestry']
+        : source === 'remote'
+          ? [Link2Off, 'Online, not linked']
+          : [FileX, 'File missing'];
     return (
       <span className={styles.placeholder}>
-        <CloudOff size={28} aria-hidden />
-        On Ancestry
+        <Icon size={28} aria-hidden />
+        {label}
+      </span>
+    );
+  }
+  if (hasThumbnail(media)) {
+    return (
+      <span className={styles.placeholder}>
+        <ImageOff size={28} aria-hidden />
+        Image unavailable
       </span>
     );
   }
@@ -91,12 +145,14 @@ function Tile({
   tree,
   item,
   primary,
+  failures,
   onOpen,
   buttonRef,
 }: {
   tree: string;
   item: GalleryItem;
   primary: boolean;
+  failures: ThumbFailures;
   onOpen: () => void;
   buttonRef: (element: HTMLButtonElement | null) => void;
 }) {
@@ -105,7 +161,7 @@ function Tile({
   return (
     <button type="button" className={styles.tile} onClick={onOpen} ref={buttonRef}>
       <span className={styles.preview}>
-        <Preview tree={tree} media={media} />
+        <Preview tree={tree} media={media} failures={failures} />
       </span>
       <span className={styles.caption}>
         <span className={styles.title}>{titleOf(media)}</span>
@@ -123,12 +179,14 @@ function Lightbox({
   items,
   index,
   primaryId,
+  failures,
   onIndexChange,
   onClose,
   onSetPrimary,
 }: {
   tree: string;
   items: GalleryItem[];
+  failures: ThumbFailures;
   index: number;
   primaryId: string | null;
   onIndexChange: (index: number) => void;
@@ -153,10 +211,14 @@ function Lightbox({
   }, [index, items.length, onIndexChange]);
   const where = attachedTo(item);
   const remoteLink = ancestryLink(media.remote_url);
+  // A photo whose thumbnail failed (corrupt file) is not offered as the profile photo.
+  const showsImage = hasThumbnail(media) && !failures.has(media.id);
   return (
     <Dialog
       open
       onOpenChange={(open) => !open && onClose()}
+      // The gallery focuses the tile of the photo last shown (see close()).
+      onCloseAutoFocus={(event) => event.preventDefault()}
       title={titleOf(media)}
       size="lg"
       footer={
@@ -180,10 +242,14 @@ function Lightbox({
     >
       <div className={styles.lightbox}>
         <div className={styles.stage}>
-          {hasThumbnail(media) ? (
-            <img src={thumbUrl(tree, media.id, 'lg')} alt={titleOf(media)} />
+          {showsImage ? (
+            <img
+              src={thumbUrl(tree, media.id, 'lg')}
+              alt={titleOf(media)}
+              onError={() => failures.add(media.id)}
+            />
           ) : (
-            <Preview tree={tree} media={media} />
+            <Preview tree={tree} media={media} failures={failures} />
           )}
         </div>
         <dl className={styles.details}>
@@ -225,7 +291,7 @@ function Lightbox({
           ) : (
             <span />
           )}
-          {hasThumbnail(media) &&
+          {showsImage &&
             (primaryId === media.id ? (
               <span className={styles.badge}>
                 <UserRound size={16} aria-hidden />
@@ -324,6 +390,14 @@ export function GalleryTab({ tree, detail }: { tree: string; detail: PersonDetai
   const [open, setOpen] = useState<number | null>(null);
   const [attaching, setAttaching] = useState(false);
   const tiles = useRef(new Map<string, HTMLButtonElement>());
+  const [failed, setFailed] = useState<ReadonlySet<string>>(() => new Set());
+  const failures = useMemo<ThumbFailures>(
+    () => ({
+      has: (id) => failed.has(id),
+      add: (id) => setFailed((prev) => (prev.has(id) ? prev : new Set(prev).add(id))),
+    }),
+    [failed],
+  );
 
   const counts = useMemo(() => {
     const result: Record<MediaFilter, number> = {
@@ -332,6 +406,7 @@ export function GalleryTab({ tree, detail }: { tree: string; detail: PersonDetai
       documents: 0,
       av: 0,
       online: 0,
+      missing: 0,
     };
     for (const item of items ?? []) {
       result.all++;
@@ -401,6 +476,7 @@ export function GalleryTab({ tree, detail }: { tree: string; detail: PersonDetai
                 tree={tree}
                 item={item}
                 primary={detail.person.primary_media_id === item.media.id}
+                failures={failures}
                 onOpen={() => setOpen(index)}
                 buttonRef={(element) => {
                   if (element) tiles.current.set(item.media.id, element);
@@ -417,6 +493,7 @@ export function GalleryTab({ tree, detail }: { tree: string; detail: PersonDetai
           items={shown}
           index={open}
           primaryId={detail.person.primary_media_id}
+          failures={failures}
           onIndexChange={setOpen}
           onClose={close}
           onSetPrimary={(mediaId) =>
@@ -430,7 +507,12 @@ export function GalleryTab({ tree, detail }: { tree: string; detail: PersonDetai
                 update: (d) => ({
                   ...d,
                   person: { ...d.person, primary_media_id: mediaId },
-                  summary: { ...d.summary, primaryMediaId: mediaId },
+                  summary: {
+                    ...d.summary,
+                    primaryMediaId: mediaId,
+                    primaryPhotoLocal: !!items?.find((i) => i.media.id === mediaId)?.media
+                      .local_path,
+                  },
                 }),
               },
             })

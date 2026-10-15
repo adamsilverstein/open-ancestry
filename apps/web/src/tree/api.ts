@@ -47,3 +47,22 @@ export const treeKeys = {
     ['tree', tree, 'neighborhood', r.focus, r.up, r.down, r.siblingsDepth ?? 1] as const,
   search: (tree: string, q: string) => ['tree', tree, 'search', q] as const,
 };
+
+/** The server's limit on generations per neighborhood request (db `MAX_NEIGHBORHOOD_GENERATIONS`). */
+export const MAX_GENERATIONS = 10;
+
+/** A generation count from the URL, as a whole number from 0 to MAX_GENERATIONS. */
+export function clampGenerations(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(MAX_GENERATIONS, Math.max(0, Math.round(value)));
+}
+
+/**
+ * A generation count from a hand-editable URL value, clamped, or undefined when
+ * it isn't a number (`abc`, empty) so the caller falls back to its default.
+ */
+export function parseGenerations(value: unknown): number | undefined {
+  if (typeof value === 'string' && value.trim() === '') return undefined;
+  const n = typeof value === 'string' ? Number(value) : value;
+  return typeof n === 'number' && Number.isFinite(n) ? clampGenerations(n) : undefined;
+}

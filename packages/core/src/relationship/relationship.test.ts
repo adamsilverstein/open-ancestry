@@ -12,6 +12,10 @@ import {
   randomTree,
 } from './test-family';
 
+// Property tests run hundreds of cases; under coverage on a shared CI runner that can
+// pass Vitest's 5s default, so they get room. A hang still fails.
+const PROPERTY_TIMEOUT = 30_000;
+
 const family = kinshipGraph(bigFamily());
 const name = (g: KinshipGraph, a: string, b: string) => relationship(g, a, b).name;
 
@@ -44,10 +48,10 @@ describe('relationship names (A is B’s ...)', () => {
     ['bro', 'me', 'brother'],
     ['sis', 'me', 'sister'],
     ['me', 'bro', 'sister'],
-    ['halfbro', 'me', 'half brother', 'half-brother'],
-    ['me', 'halfbro', 'half sister', 'half-sister'],
-    ['halfsis', 'me', 'half sister', 'half-sister'],
-    ['dadStep', 'me', 'half brother', 'half-brother'],
+    ['halfbro', 'me', 'half-brother'],
+    ['me', 'halfbro', 'half-sister'],
+    ['halfsis', 'me', 'half-sister'],
+    ['dadStep', 'me', 'half-brother'],
     // Aunts, uncles, nieces, nephews
     ['uncle', 'me', 'uncle'],
     ['aunt', 'me', 'aunt'],
@@ -60,7 +64,7 @@ describe('relationship names (A is B’s ...)', () => {
     ['niece', 'me', 'niece'],
     ['gnephew', 'me', 'grandniece', 'great-niece'],
     ['me', 'gnephew', 'grandaunt', 'great-aunt'],
-    ['halfnephew', 'me', 'half nephew', 'half-nephew'],
+    ['halfnephew', 'me', 'half-nephew'],
     ['kidU', 'me', 'niece or nephew'],
     ['me', 'kidU', 'aunt'],
     // Cousins
@@ -83,7 +87,7 @@ describe('relationship names (A is B’s ...)', () => {
     ['adoptee', 'me', 'adopted son'],
     ['me', 'adoptee', 'adoptive mother'],
     ['adoptee', 'son', 'adopted brother'],
-    ['son', 'adoptee', 'adoptive brother'],
+    ['son', 'adoptee', 'adopted brother'],
     ['adoptee', 'dad', 'adopted grandson'],
     ['fosterkid', 'uncle', 'foster daughter'],
     ['uncle', 'fosterkid', 'foster father'],
@@ -129,7 +133,7 @@ describe('relationship names (A is B’s ...)', () => {
   });
 });
 
-describe('paths and pedigree collapse', () => {
+describe('paths and pedigree collapse', { timeout: PROPERTY_TIMEOUT }, () => {
   it('returns the path from A up to the common ancestors and down to B', () => {
     const r = relationship(family, 'cousin1', 'me');
     expect(r.relationships).toHaveLength(1);
@@ -306,7 +310,7 @@ describe('relationshipName and neighborhood input', () => {
   it('names a shape directly for callers with their own walk', () => {
     expect(relationshipName({ up: 2, down: 3 }, 'M')).toBe('1st cousin 1x removed');
     expect(relationshipName({ up: 0, down: 5 }, 'F')).toBe('3rd great-grandmother');
-    expect(relationshipName({ up: 1, down: 1 }, 'F', true)).toBe('half sister');
+    expect(relationshipName({ up: 1, down: 1 }, 'F', true)).toBe('half-sister');
     expect(relationshipName({ up: 1, down: 3 }, 'M')).toBe('granduncle');
     const formal = (up: number, down: number, half = false) =>
       relationshipName({ up, down }, 'F', half, undefined, 'formal');

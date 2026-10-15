@@ -25,6 +25,11 @@ export const Id = Type.String({ minLength: 1, maxLength: 64, pattern: '^[0-9A-Za
 export const TreeParams = Type.Object({ tree: Type.String({ minLength: 1, maxLength: 100 }) });
 export const TreeIdParams = Type.Object({ tree: TreeParams.properties.tree, id: Id });
 export const JobParams = Type.Object({ id: Type.String({ format: 'uuid' }) });
+/** The change ids from a re-import review the user accepted. */
+export const ReimportApplyBody = Type.Object(
+  { accept: Type.Array(Type.String({ maxLength: 32 }), { maxItems: 1_000_000 }) },
+  strict,
+);
 
 export const TreeBody = Type.Object(
   { name: Type.String({ minLength: 1, maxLength: 100 }) },
@@ -65,6 +70,12 @@ export const NeighborhoodQuery = Type.Object({
   siblings: Type.Optional(Type.Boolean()),
   /** 0 none, 1 the focus person's siblings (default), 2 also aunts and uncles, ... */
   siblingsDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 10 })),
+});
+
+/** What `from` is to `to`; `to` defaults to the home person. */
+export const RelationshipQuery = Type.Object({
+  from: Id,
+  to: Type.Optional(Id),
 });
 
 export const SearchQuery = Type.Object({
@@ -239,6 +250,44 @@ export const BatchBody = Type.Object(
     /** Shown in history and undo toasts, e.g. `Edit Ada Vale`. */
     label: Type.String({ minLength: 1, maxLength: 100 }),
     operations: Type.Array(BatchOperation, { minItems: 1, maxItems: 100 }),
+  },
+  strict,
+);
+
+// ---------------------------------------------------------------- checks
+
+/** Issue keys from GET /checks: `kind:id+id[:eventId]`. */
+export const CheckKey = Type.String({ maxLength: 300, pattern: '^[a-z-]+:[0-9A-Za-z_+:-]+$' });
+export const DismissBody = Type.Object(
+  { keys: Type.Array(CheckKey, { minItems: 1, maxItems: 5000 }) },
+  strict,
+);
+
+// ---------------------------------------------------------------- merge
+
+const Side = Type.Union([Type.Literal('keep'), Type.Literal('other')]);
+export const MergeBody = Type.Object(
+  {
+    /** The person merged into `:id` and then deleted. */
+    otherId: Id,
+    choices: Type.Optional(
+      Type.Object(
+        {
+          name: Type.Optional(Side),
+          sex: Type.Optional(Side),
+          living: Type.Optional(Side),
+          /** Needed when one record is locked and the other private or confidential. */
+          privacy: Type.Optional(Side),
+          /** Event type to whose fact is preferred, e.g. `{ "BIRT": "other" }`. */
+          preferred: Type.Optional(
+            Type.Record(Type.String({ pattern: '^[A-Z_][A-Z0-9_]{0,31}$' }), Side, {
+              additionalProperties: false,
+            }),
+          ),
+        },
+        strict,
+      ),
+    ),
   },
   strict,
 );

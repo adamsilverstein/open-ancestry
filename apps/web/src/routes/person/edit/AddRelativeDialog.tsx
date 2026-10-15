@@ -15,6 +15,7 @@ import { Select } from '../../../components/Select/Select';
 import { formatLifespan } from '../../../lib/lifespan';
 import { fullName, lifeDate } from '../../../lib/person';
 import { CHILD_RELATIONSHIPS, SEX_OPTIONS } from './EditPersonDialog';
+import { SaveError, useSaveState } from './SaveError';
 import styles from './Edit.module.css';
 
 export type RelativeKind = 'parent' | 'spouse' | 'child' | 'sibling';
@@ -52,6 +53,8 @@ export function AddRelativeDialog({
 }: AddRelativeDialogProps) {
   const id = detail.person.id;
   const edit = useEdit(tree);
+  // Stays open until the save succeeds, so a failure keeps what was typed.
+  const saveState = useSaveState(() => onOpenChange(false));
   const radioName = useId();
   const [mode, setMode] = useState<'new' | 'existing'>('new');
   const [given, setGiven] = useState('');
@@ -80,7 +83,7 @@ export function AddRelativeDialog({
     mode === 'existing' ? existing !== null : given.trim() !== '' || surname.trim() !== '';
 
   function save() {
-    if (!ready) return;
+    if (!ready || edit.isPending) return;
     const relative =
       mode === 'existing'
         ? { personId: existing!.id }
@@ -98,10 +101,10 @@ export function AddRelativeDialog({
         : kind === 'child' && familyId !== 'none'
           ? { ...relative, familyId }
           : relative;
-    onOpenChange(false);
     edit.mutate({
       label: RELATIVE_TITLES[kind],
       send: () => apiSend('POST', `${base}/${kind === 'child' ? 'children' : `${kind}s`}`, body),
+      ...saveState.handlers(),
     });
   }
 
@@ -110,14 +113,23 @@ export function AddRelativeDialog({
       open={open}
       onOpenChange={onOpenChange}
       title={RELATIVE_TITLES[kind]}
+      // Start in Given names, so typing a name works right away.
+      onOpenAutoFocus={(event) => {
+        const first = (event.currentTarget as HTMLElement | null)?.querySelector<HTMLElement>(
+          'input:not([type="radio"])',
+        );
+        if (!first) return;
+        event.preventDefault();
+        first.focus();
+      }}
       description={`Of ${fullName(detail.summary)}`}
       footer={
         <>
           <DialogClose asChild>
             <Button variant="ghost">Cancel</Button>
           </DialogClose>
-          <Button variant="primary" onClick={save} disabled={!ready}>
-            Add
+          <Button variant="primary" onClick={save} disabled={!ready} loading={edit.isPending}>
+            {saveState.submitLabel('Add')}
           </Button>
         </>
       }
@@ -207,6 +219,7 @@ export function AddRelativeDialog({
             ]}
           />
         )}
+        <SaveError error={saveState.error} />
         <button type="submit" hidden />
       </form>
     </Dialog>

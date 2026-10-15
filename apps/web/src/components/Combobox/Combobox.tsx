@@ -77,14 +77,19 @@ export function Combobox({
               sideOffset={4}
               aria-label={label}
             >
-              <Command filter={substringFilter} shouldFilter={!onSearchChange} label={label}>
+              <Command
+                className={styles.command}
+                filter={substringFilter}
+                shouldFilter={!onSearchChange}
+                label={label}
+              >
                 <Command.Input
                   className={styles.input}
                   placeholder={searchLabel}
                   aria-label={searchLabel}
                   onValueChange={onSearchChange}
                 />
-                <Command.List id={listId} className={selectStyles.viewport}>
+                <Command.List id={listId} className={cx(selectStyles.viewport, styles.list)}>
                   <Command.Empty className={styles.empty}>{emptyText}</Command.Empty>
                   {options.map((option) => (
                     <Command.Item

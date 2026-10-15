@@ -44,6 +44,10 @@ export function HomePage() {
         action={
           <div className={styles.actions}>
             <ImportDropZone />
+            <Link to="/design" className={styles.link}>
+              Browse the design system
+            </Link>
+            {/* Last, since it arrives with the tree list: nothing below it moves (no layout shift). */}
             {recent.length > 0 && (
               <nav aria-label="Recent trees" className={importStyles.trees}>
                 {recent.map((tree) => (
@@ -59,9 +63,6 @@ export function HomePage() {
                 ))}
               </nav>
             )}
-            <Link to="/design" className={styles.link}>
-              Browse the design system
-            </Link>
           </div>
         }
       />

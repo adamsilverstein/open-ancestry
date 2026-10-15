@@ -24,6 +24,32 @@ async function open(page: Page, key = 'ada', extra = '') {
   await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
 }
 
+/**
+ * The top bar's File button once its menu has loaded: until then a disabled
+ * placeholder stands in, and focus on it is lost when the real one replaces it.
+ */
+async function fileMenu(page: Page) {
+  const file = page.getByRole('banner').getByRole('button', { name: 'File' });
+  await expect(file).not.toHaveAttribute('aria-disabled', 'true');
+  return file;
+}
+
+/**
+ * Waits until `name` is the laid-out focus person and the view has stopped
+ * moving: the URL changes first, the layout and re-centering come after.
+ */
+async function focusedOn(page: Page, name: string) {
+  await expect(card(page, name)).toHaveAccessibleName(/focus person/);
+  await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+  await settled(page);
+}
+
+/** Waits for the minimap's pending corner check, so it is in its final corner. */
+async function minimapRested(page: Page) {
+  const minimap = page.getByTestId('tree-minimap');
+  if (await minimap.count()) await expect(minimap).not.toHaveAttribute('data-settling');
+}
+
 /** Waits for pan/zoom animations to finish. */
 async function settled(page: Page) {
   await expect(world(page)).not.toHaveAttribute('data-animating');
@@ -199,6 +225,18 @@ test.describe('family view', () => {
     expect(await box(card(page, 'Ada Vale'))).toEqual(fitted);
   });
 
+  test('keyboard focus survives a chevron changing the layout', async ({ page }) => {
+    await open(page);
+    const hide = canvas(page).getByRole('button', { name: 'Hide children of Ada Vale' });
+    await hide.focus();
+    await page.keyboard.press('Enter');
+    await expect(card(page, 'Wren Ash')).toHaveCount(0);
+    // The chevron's card keeps focus, so the keyboard carries on from there.
+    await expect(card(page, 'Ada Vale')).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    expect(await activeKey(page)).toBe(ids.bram);
+  });
+
   test('descendants and siblings collapse and expand', async ({ page }) => {
     await open(page);
     await canvas(page).getByRole('button', { name: 'Hide children of Ada Vale' }).click();
@@ -339,7 +377,8 @@ test.describe('family view', () => {
   test('a click on empty canvas keeps the tree shortcuts working', async ({ page }) => {
     await open(page);
     const viewport = await box(canvas(page));
-    await page.mouse.click(viewport.x + viewport.width - 40, viewport.y + viewport.height - 40);
+    // Top right: the bottom corners can hold the minimap, which moves to stay off labels.
+    await page.mouse.click(viewport.x + viewport.width - 40, viewport.y + 40);
     await expect(canvas(page)).toBeFocused();
     const before = await transform(page);
     await page.keyboard.press('+');
@@ -380,6 +419,8 @@ test.describe('family view', () => {
 
   test('zoom in, zoom out, fit, wheel, drag and home', async ({ page }) => {
     await open(page, 'bram');
+    // The first view frames the family with an animation; measure from where it lands.
+    await settled(page);
     const start = await transform(page);
     await page.getByRole('button', { name: 'Zoom in' }).click();
     await expect.poll(async () => (await transform(page)).scale).toBeGreaterThan(start.scale);
@@ -434,23 +475,51 @@ test.describe('family view', () => {
 
     await page.getByRole('button', { name: 'Go to home person' }).click();
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.ada}\\?`));
+    // The new focus re-centers once its relatives load; a card is only a stable
+    // target after that, not merely after the URL changed.
+    await focusedOn(page, 'Ada Vale');
     await card(page, 'Ada Vale').focus();
     await settled(page);
     await card(page, 'Elsa Hale').dblclick();
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.elsa}\\?`));
+    await focusedOn(page, 'Elsa Hale');
     // Keyboard focus follows to the new focus card.
     await expect(card(page, 'Elsa Hale')).toBeFocused();
     await page.keyboard.press('h');
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.ada}\\?`));
+    await focusedOn(page, 'Ada Vale');
 
     // Single-key shortcuts only act while focus is in the tree (WCAG 2.1.4).
     await expect(card(page, 'Ada Vale')).toHaveAccessibleName(/focus person/);
     await card(page, 'Bram Vale').focus();
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
-    await page.getByRole('banner').getByRole('button', { name: 'File' }).focus();
+    await (await fileMenu(page)).focus();
     await page.keyboard.press('h');
     await page.keyboard.press('0');
+    await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
+  });
+
+  test('a re-focus that lands late does not take focus back from the top bar', async ({ page }) => {
+    await open(page);
+    await settled(page);
+    // Hold Bram's relatives so his layout arrives after focus has moved on.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route(`**/neighborhood?focus=${ids.bram}*`, async (route) => {
+      await held;
+      await route.continue();
+    });
+    await card(page, 'Bram Vale').focus();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
+    const file = await fileMenu(page);
+    await file.focus();
+    release();
+    await focusedOn(page, 'Bram Vale');
+    await expect(file).toBeFocused();
+    // So the tree's single-key shortcuts stay off (WCAG 2.1.4).
+    await page.keyboard.press('h');
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
   });
 
@@ -467,14 +536,59 @@ test.describe('family view', () => {
     await expect(canvas(page).getByText('Ada’s grandparents')).toBeInViewport();
   });
 
+  test('the minimap settles before it moves, and does not flip back and forth', async ({
+    page,
+  }) => {
+    await open(page);
+    await settled(page);
+    const minimap = page.getByTestId('tree-minimap');
+    await expect(minimap).toBeVisible();
+    await minimap.evaluate((el) => {
+      const w = window as unknown as { __cornerChanges: number };
+      w.__cornerChanges = 0;
+      new MutationObserver((records) => (w.__cornerChanges += records.length)).observe(el, {
+        attributes: true,
+        attributeFilter: ['data-corner', 'hidden'],
+      });
+    });
+    // A slow pan that carries row labels and cards across the bottom corners and back.
+    const v = await box(canvas(page));
+    const at = (fx: number, fy: number) => [v.x + v.width * fx, v.y + v.height * fy] as const;
+    await page.mouse.move(...at(0.5, 0.3));
+    await page.mouse.down();
+    for (const [fx, fy] of [
+      [0.3, 0.8],
+      [0.7, 0.9],
+      [0.5, 0.6],
+      [0.2, 0.9],
+      [0.6, 0.5],
+    ] as const) {
+      await page.mouse.move(...at(fx, fy), { steps: 20 });
+    }
+    await page.mouse.up();
+    await settled(page);
+    await page.waitForTimeout(400);
+    const changes = await page.evaluate(
+      () => (window as unknown as { __cornerChanges: number }).__cornerChanges,
+    );
+    expect(changes).toBeLessThanOrEqual(1);
+  });
+
   test('the minimap shows the viewport and navigates on click and drag', async ({ page }) => {
     await open(page);
     const minimap = page.getByRole('application', { name: 'Minimap' });
     await expect(minimap).toBeVisible();
-    const m = await box(minimap);
+    // The minimap may change corners once the view rests (150ms): measure it after.
+    const rested = async () => {
+      await minimapRested(page);
+      return box(minimap);
+    };
+    let m = await rested();
     const start = await transform(page);
     await page.mouse.click(m.x + 10, m.y + 10);
     await expect.poll(async () => (await transform(page)).x).not.toBe(start.x);
+    await settled(page);
+    m = await rested();
     const clicked = await transform(page);
     await page.mouse.move(m.x + 20, m.y + 20);
     await page.mouse.down();
@@ -760,6 +874,287 @@ test.describe('pedigree, descendant and fan views', () => {
   });
 });
 
+test.describe('generation depth in the URL', () => {
+  /** The `up` and `down` of every neighborhood request the page makes. */
+  function depths(page: Page) {
+    const seen: { up: number; down: number }[] = [];
+    page.on('request', (r) => {
+      const url = new URL(r.url());
+      if (!url.pathname.startsWith('/api/') || !url.pathname.endsWith('/neighborhood')) return;
+      seen.push({
+        up: Number(url.searchParams.get('up')),
+        down: Number(url.searchParams.get('down')),
+      });
+    });
+    return seen;
+  }
+
+  for (const layout of ['family', 'pedigree', 'fan']) {
+    test(`up=10 (the maximum) renders the ${layout} view`, async ({ page }) => {
+      const seen = depths(page);
+      await open(page, 'ada', `&layout=${layout}&up=10&down=10`);
+      await expect(page.getByText('Could not load the tree')).toHaveCount(0);
+      const focus =
+        layout === 'fan'
+          ? canvas(page).getByRole('button', { name: /^Ada Vale/ })
+          : card(page, 'Ada Vale');
+      await expect(focus).toBeAttached();
+      expect(seen.length).toBeGreaterThan(0);
+      for (const { up, down } of seen) {
+        expect(up).toBeLessThanOrEqual(10);
+        expect(down).toBeLessThanOrEqual(10);
+      }
+    });
+  }
+
+  test('the fan caps its rings and offers the pedigree for deeper', async ({ page }) => {
+    const seen = depths(page);
+    await open(page, 'ada', '&layout=fan&up=10');
+    await expect(canvas(page).getByRole('button', { name: /^Ada Vale/ })).toBeAttached();
+    // Six generations up (seven rings with the focus), plus one prefetched.
+    expect(seen.length).toBeGreaterThan(0);
+    for (const { up } of seen) expect(up).toBeLessThanOrEqual(7);
+    const note = page.getByRole('status').filter({ hasText: 'The fan shows 6 generations' });
+    await expect(note).toBeVisible();
+    await note.getByRole('link', { name: 'Open the pedigree' }).click();
+    await expect(page).toHaveURL(/layout=pedigree/);
+    await expect(page).toHaveURL(/up=10/);
+    await expect(note).toHaveCount(0);
+  });
+
+  test('the fan within its cap shows no note', async ({ page }) => {
+    await open(page, 'ada', '&layout=fan&up=6');
+    await expect(canvas(page).getByRole('button', { name: /^Ada Vale/ })).toBeAttached();
+    await expect(page.getByText('The fan shows 6 generations')).toHaveCount(0);
+  });
+
+  test('out-of-range depths clamp instead of failing', async ({ page }) => {
+    const seen = depths(page);
+    await open(page, 'ada', '&up=99&down=-4');
+    await expect(page.getByText('Could not load the tree')).toHaveCount(0);
+    await expect(card(page, 'Ada Vale')).toBeAttached();
+    // 99 clamps to the maximum; a negative depth to none.
+    expect(seen.length).toBeGreaterThan(0);
+    for (const { up, down } of seen) {
+      expect(up).toBeLessThanOrEqual(10);
+      expect(down).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  for (const value of ['abc', '', '%20']) {
+    test(`a non-numeric depth (${JSON.stringify(value)}) falls back to the default`, async ({
+      page,
+    }) => {
+      const seen = depths(page);
+      await open(page, 'ada', `&up=${value}&down=${value}`);
+      await expect(card(page, 'Ada Vale')).toBeAttached();
+      // The family view's defaults are 3 up and 2 down, never 0.
+      expect(seen.length).toBeGreaterThan(0);
+      for (const { up, down } of seen) {
+        expect(up).toBeGreaterThanOrEqual(3);
+        expect(down).toBeGreaterThanOrEqual(2);
+      }
+    });
+  }
+});
+
+test.describe('fan chart keyboard', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+  const segment = (page: Page, name: string) =>
+    page.getByTestId('tree-fan').getByRole('button', { name: new RegExp(`^${name},`) });
+
+  test('one tab stop, arrows by relationship, and focus follows a re-focus', async ({ page }) => {
+    await open(page, 'ada', '&layout=fan');
+    // The toolbar comes first in Tab order, as it does on screen.
+    const layoutButton = page.getByRole('button', { name: /^Layout:/ });
+    await layoutButton.focus();
+    await page.keyboard.press('Tab');
+    await expect(segment(page, 'Ada Vale')).toBeFocused();
+    await page.keyboard.press('Tab');
+    expect(
+      await page.evaluate(() =>
+        Boolean(document.activeElement?.closest('[data-testid="tree-fan"]')),
+      ),
+    ).toBe(false);
+    await page.keyboard.press('Shift+Tab');
+    await expect(segment(page, 'Ada Vale')).toBeFocused();
+    await expect(page.getByTestId('tree-fan').locator('[tabindex="0"]')).toHaveCount(1);
+
+    // Up is the father's side of the parent ring, down back toward the center.
+    await page.keyboard.press('ArrowUp');
+    await expect(segment(page, 'Bram Vale')).toBeFocused();
+    await page.keyboard.press('ArrowUp');
+    await expect(segment(page, 'Otto Vale')).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(segment(page, 'Bram Vale')).toBeFocused();
+    // Along the ring.
+    await page.keyboard.press('ArrowRight');
+    await expect(segment(page, 'Elsa Hale')).toBeFocused();
+    await page.keyboard.press('ArrowLeft');
+    await expect(segment(page, 'Bram Vale')).toBeFocused();
+    await page.keyboard.press('Home');
+    await expect(segment(page, 'Ada Vale')).toBeFocused();
+
+    // Enter re-focuses; keyboard focus lands on the new center.
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?.*layout=fan`));
+    await expect(segment(page, 'Bram Vale')).toHaveAccessibleName(/focus person/);
+    await expect(segment(page, 'Bram Vale')).toBeFocused();
+  });
+});
+
+test.describe('far zoom', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  test('re-focusing while cards are painted on the canvas raises no errors', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    const { perf } = seed;
+    await page.goto(`/tree/${perf.wideId}?tree=${encodeURIComponent(perf.tree)}&down=7&up=1`);
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    await page.getByRole('button', { name: 'Fit to screen' }).click();
+    await settled(page);
+    expect((await transform(page)).scale).toBeLessThan(0.35);
+    await canvas(page).locator(`[data-key="${perf.wideId}"]`).focus();
+    for (const key of ['ArrowDown', 'ArrowUp', 'ArrowDown', 'ArrowUp']) {
+      await page.keyboard.press(key);
+      const target = await activeKey(page);
+      await page.keyboard.press('Enter');
+      // Straight on to the next, while the previous re-focus tween is still
+      // running its frames: that is where the painted layer redraws.
+      await expect(page).toHaveURL(new RegExp(`/tree/${target}\\?`));
+      await expect.poll(() => activeKey(page)).toBe(target);
+    }
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    await settled(page);
+    expect(errors).toEqual([]);
+  });
+});
+
+test.describe('wide descendant charts (#74)', () => {
+  test.use({ viewport: { width: 900, height: 700 } });
+
+  type Box = { x: number; y: number; width: number; height: number };
+  const intersects = (a: Box, b: Box) =>
+    a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+
+  async function visibleBoxes(locator: Locator) {
+    const out: Box[] = [];
+    for (const el of await locator.all()) {
+      if (!(await el.isVisible())) continue;
+      // Thin gaps fade a label out but keep it in the reading order.
+      if ((await el.getAttribute('data-thin')) !== null) continue;
+      const b = await el.boundingBox();
+      if (b) out.push(b);
+    }
+    return out;
+  }
+
+  const labels = (page: Page) => page.getByTestId('tree-row-label');
+  const cards = (page: Page) => canvas(page).getByRole('button', { name: /, (male|female)/ });
+
+  async function expectLabelsClear(page: Page) {
+    const cardBoxes = await visibleBoxes(cards(page));
+    for (const l of await visibleBoxes(labels(page))) {
+      for (const c of cardBoxes) expect(intersects(l, c)).toBe(false);
+    }
+  }
+
+  async function drag(page: Page, dx: number, dy: number) {
+    await page.mouse.move(450, 350);
+    await page.mouse.down();
+    await page.mouse.move(450 + dx, 350 + dy, { steps: 5 });
+    await page.mouse.up();
+    await settled(page);
+  }
+
+  test('row labels never cover a card, at fit, 100% and zoomed out', async ({ page }) => {
+    await open(page, 'bram', '&layout=descendants');
+    await settled(page);
+    await expectLabelsClear(page);
+    await drag(page, 300, 0);
+    await expectLabelsClear(page);
+    // 100%, then zoomed out to just above the canvas level of detail.
+    await page.getByRole('button', { name: 'Fit to screen' }).click();
+    await settled(page);
+    while ((await transform(page)).scale < 1) {
+      await page.getByRole('button', { name: 'Zoom in' }).click();
+      await settled(page);
+    }
+    await drag(page, 250, 0);
+    await expectLabelsClear(page);
+    for (let i = 0; i < 4 && (await transform(page)).scale > 0.45; i++) {
+      await page.getByRole('button', { name: 'Zoom out' }).click();
+      await settled(page);
+      await expectLabelsClear(page);
+    }
+    // Slide the rows under the gutter: their gaps are now thinner than a label,
+    // which fades out but stays in the reading order.
+    await drag(page, -200, 0);
+    await expectLabelsClear(page);
+    await expect(page.locator('[data-testid="tree-row-label"][data-thin]')).not.toHaveCount(0);
+    await expect(page.locator('[data-testid="tree-row-label"][hidden]')).toHaveCount(0);
+  });
+
+  test('row labels stay clear of cards after the text size changes', async ({ page }) => {
+    await open(page, 'bram', '&layout=descendants');
+    await settled(page);
+    await page.getByRole('button', { name: 'Fit to screen' }).click();
+    await settled(page);
+    while ((await transform(page)).scale < 1) {
+      await page.getByRole('button', { name: 'Zoom in' }).click();
+      await settled(page);
+    }
+    // Clear every row of its label, then slide left until one row reaches its
+    // label and back one step: that label sits just beside its row.
+    const above = page.locator('[data-testid="tree-row-label"][data-above]');
+    for (let i = 0; i < 15 && (await above.count()) > 0; i++) await drag(page, 100, 0);
+    await expect(above).toHaveCount(0);
+    for (let i = 0; i < 100 && (await above.count()) === 0; i++) await drag(page, -8, 0);
+    await expect(above).not.toHaveCount(0);
+    await drag(page, 8, 0);
+    await expect(above).toHaveCount(0);
+    // Like a minimum font size setting or a late web font: the labels grow,
+    // and now reach into their rows unless they move up into the gap.
+    await labels(page).evaluateAll((els) => {
+      for (const el of els.flatMap((l) => [...l.querySelectorAll<HTMLElement>('*')])) {
+        el.style.fontSize = '26px';
+      }
+    });
+    await drag(page, 6, 0);
+    await expectLabelsClear(page);
+  });
+
+  test('the minimap moves or collapses rather than cover a label or the active card', async ({
+    page,
+  }) => {
+    await open(page, 'bram', '&layout=descendants');
+    await settled(page);
+    const minimap = page.getByTestId('tree-minimap');
+    // Shown at the start (bottom-left unless something is already there).
+    await expect(minimap).toBeVisible();
+    const check = async () => {
+      const m = await visibleBoxes(minimap);
+      if (!m.length) return; // collapsed
+      for (const l of await visibleBoxes(labels(page))) expect(intersects(m[0]!, l)).toBe(false);
+      const active = canvas(page).locator('[data-key][tabindex="0"]');
+      for (const a of await visibleBoxes(active)) expect(intersects(m[0]!, a)).toBe(false);
+    };
+    // The minimap re-checks its corner 150ms after each pan settles.
+    await expect(check).toPass({ timeout: 2000 });
+    // Bring the focus card and the lowest rows down to the bottom-left corner:
+    // the minimap gets out of the way.
+    await drag(page, -150, 250);
+    // The minimap re-checks its corner 150ms after each pan settles.
+    await expect(check).toPass({ timeout: 2000 });
+    await expect(minimap).not.toHaveAttribute('data-corner', 'left');
+    await drag(page, 300, 0);
+    // The minimap re-checks its corner 150ms after each pan settles.
+    await expect(check).toPass({ timeout: 2000 });
+  });
+});
+
 test.describe('visual snapshots', () => {
   // Baselines are Linux Chromium only, like design.spec.ts.
   test.skip(
@@ -767,11 +1162,30 @@ test.describe('visual snapshots', () => {
     'Linux Chromium baselines only',
   );
 
+  for (const zoom of ['fit', '100'] as const) {
+    test(`wide descendant chart at ${zoom === 'fit' ? 'fit' : '100%'}`, async ({ page }) => {
+      await page.setViewportSize({ width: 900, height: 700 });
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await open(page, 'bram', '&layout=descendants');
+      await settled(page);
+      if (zoom === '100') {
+        while ((await transform(page)).scale < 1) {
+          await page.getByRole('button', { name: 'Zoom in' }).click();
+          await settled(page);
+        }
+      }
+      await minimapRested(page);
+      await page.evaluate(() => document.fonts.ready);
+      await expect(canvas(page)).toHaveScreenshot(`tree-descendants-wide-${zoom}.png`);
+    });
+  }
+
   for (const colorScheme of ['light', 'dark'] as const) {
     test(`family view canvas (${colorScheme})`, async ({ page }) => {
       await page.setViewportSize({ width: 1280, height: 800 });
       await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
       await open(page);
+      await minimapRested(page);
       await page.evaluate(() => document.fonts.ready);
       await expect(canvas(page)).toHaveScreenshot(`tree-family-${colorScheme}.png`);
     });

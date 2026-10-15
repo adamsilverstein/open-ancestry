@@ -52,7 +52,7 @@ test('filters by type', async ({ page }) => {
   await filters.getByRole('button', { name: /Documents/ }).click();
   await expect(gallery.getByRole('button', { name: /Baptism record/ })).toBeVisible();
   await expect(gallery.getByRole('button', { name: /Wedding day/ })).toHaveCount(0);
-  await filters.getByRole('button', { name: /On Ancestry/ }).click();
+  await filters.getByRole('button', { name: /Online/ }).click();
   await expect(gallery.getByRole('button', { name: /1911 census page/ })).toBeVisible();
   await expect(gallery.getByRole('button', { name: /Baptism record/ })).toHaveCount(0);
   await filters.getByRole('button', { name: /Photos/ }).click();

@@ -9,9 +9,10 @@ import type {
   Sex,
   TableName,
 } from '@open-ancestry/db';
-import { CITATION_OWNERS, MEDIA_OWNERS, NOTE_OWNERS, TAG_OWNERS } from '@open-ancestry/db';
+import { CITATION_OWNERS, MEDIA_OWNERS, NOTE_OWNERS, TAG_OWNERS, toNFC } from '@open-ancestry/db';
 import { serializeNode, type GedcomNode, type ParseResult } from '@open-ancestry/gedcom';
 import { createHash } from 'node:crypto';
+import { imageSize } from './image-size';
 import { classifyFile, kindFromType, mediaType, storeMediaFile, type MediaSource } from './media';
 import { Places, coordinate, placeParts } from './places';
 import {
@@ -24,6 +25,7 @@ import {
   OTHER_DEATH_FACTS,
   SINGULAR_EVENTS,
   childRelationship,
+  morePrivate,
   nameType,
   privacy,
   relationshipStatus,
@@ -70,6 +72,8 @@ interface PersonState {
   nameOrder: number;
   singular: Set<string>;
   fams: { familyId: string; node: GedcomNode }[];
+  /** Family ids in `fams`, for the duplicate check (a person can have thousands). */
+  famsIds: Set<string>;
   famcCount: number;
   marriages: GedcomNode[];
   adoptions: GedcomNode[];
@@ -178,6 +182,8 @@ export class Mapper {
   private readonly major: number;
 
   private readonly doc: ParseResult;
+  /** Each record's original text, captured before its values are normalized. */
+  private readonly rawText: string[];
   private readonly sink: Sink;
   private readonly options: MapperOptions;
 
@@ -189,6 +195,13 @@ export class Mapper {
     this.places = new Places(options.newId);
     this.major = doc.header.majorVersion ?? 5;
     this.recordIds = new Array(doc.records.length);
+    // raw_record keeps each record exactly as written; every value mapped from it is NFC.
+    // Records read each other's values, so all are normalized before any is mapped.
+    this.rawText = doc.records.map((record) => {
+      const raw = serializeNode(record, { version: this.major });
+      normalizeValues(record);
+      return raw;
+    });
     this.assignIds();
   }
 
@@ -207,7 +220,9 @@ export class Mapper {
       let id = this.options.newId();
       if (record.tag === '_MTTAG') {
         // Tags are unique by category and name; repeated tag records share one row.
-        const key = `${text(this.child(record, '_MTCAT')) ?? ''}\u0000${text(this.child(record, 'NAME')) ?? ''}`;
+        const key = toNFC(
+          `${text(this.child(record, '_MTCAT')) ?? ''}\u0000${text(this.child(record, 'NAME')) ?? ''}`,
+        );
         const existing = tags.get(key);
         if (existing) id = existing;
         else tags.set(key, id);
@@ -327,6 +342,7 @@ export class Mapper {
 
   mapRecord(index: number): void {
     const record = this.doc.records[index]!;
+    const raw = this.rawText[index]!;
     this.recordCounts[record.tag] = (this.recordCounts[record.tag] ?? 0) + 1;
     // Duplicate xrefs are warned about by the parser; pointers go to the first record.
     const id = this.recordIds[index];
@@ -362,7 +378,6 @@ export class Mapper {
         ownerType = 'tag';
         break;
     }
-    const raw = serializeNode(record, { version: this.major });
     this.sink.insert('raw_record', {
       import_batch_id: this.options.batchId,
       seq: index,
@@ -396,6 +411,7 @@ export class Mapper {
       nameOrder: 0,
       singular: new Set(),
       fams: [],
+      famsIds: new Set(),
       famcCount: 0,
       marriages: [],
       adoptions: [],
@@ -449,10 +465,11 @@ export class Mapper {
         case 'FAMS': {
           const familyId = this.resolve(c, 'FAM');
           if (!familyId) break;
-          if (person.fams.some((f) => f.familyId === familyId)) {
+          if (person.famsIds.has(familyId)) {
             this.warn('duplicate-link', c.line, `FAMS ${c.pointer} is repeated`);
             break;
           }
+          person.famsIds.add(familyId);
           person.fams.push({ familyId, node: c });
           break;
         }
@@ -485,8 +502,8 @@ export class Mapper {
           break;
         case 'RESN': {
           const level = privacy(c.value);
-          if (level && person.privacy === 'public') {
-            person.privacy = level;
+          if (level) {
+            person.privacy = morePrivate(person.privacy, level);
             this.use(c);
           }
           break;
@@ -692,8 +709,8 @@ export class Mapper {
         }
         case 'RESN': {
           const level = privacy(c.value);
-          if (level && row.privacy == null) {
-            row.privacy = level;
+          if (level) {
+            row.privacy = morePrivate(row.privacy, level);
             this.use(c);
           }
           break;
@@ -1053,7 +1070,7 @@ export class Mapper {
     if (this.major >= 7 && ref.type !== 'remote') {
       // GEDCOM 7 FILE values are URI references, so local paths are percent-encoded. An
       // encoded scheme (`http%3A%2F%2F...`) stays a local name rather than becoming a URL.
-      const decoded = decodeUri(value);
+      const decoded = toNFC(decodeUri(value));
       const decodedRef = classifyFile(decoded);
       if (decodedRef.type !== 'remote') {
         value = decoded;
@@ -1096,9 +1113,13 @@ export class Mapper {
     try {
       const bytes = file.read();
       const hash = sha256(bytes);
-      row.local_path = this.storeMedia(file.path, bytes, hash);
+      // Stored under its NFC name: the same file whichever form the archive or folder used.
+      row.local_path = this.storeMedia(toNFC(file.path), bytes, hash);
       row.byte_size = bytes.length;
       row.sha256 = hash;
+      // The real size, so clients can pick thumbnails without probing (and before _WDTH).
+      const dimensions = imageSize(bytes);
+      if (dimensions) Object.assign(row, dimensions);
       this.linkedMedia++;
       this.use(node);
     } catch (error) {
@@ -1212,8 +1233,8 @@ export class Mapper {
         }
         case 'RESN': {
           const level = privacy(c.value);
-          if (level && family.privacy === 'public') {
-            family.privacy = level;
+          if (level) {
+            family.privacy = morePrivate(family.privacy, level);
             this.use(c);
           }
           break;
@@ -1465,13 +1486,16 @@ export class Mapper {
     for (const person of this.persons.values()) {
       if (!person.marriages.length) continue;
       const families = this.partnerFamilies.get(person.id) ?? [];
+      // Indexed rather than searched per MARR: one person can have thousands
+      // of families and marriages, which made this quadratic.
+      const index = new MarriageIndex();
+      families.forEach((family, f) => family.marriages.forEach((m, i) => index.add(m, f, i)));
+      let unmarried = families.filter((f) => !f.marriages.length);
       for (const node of person.marriages) {
         const date = normalizeDate(text(this.child(node, 'DATE')));
         const placeNode = this.child(node, 'PLAC');
         const place = text(placeNode) ? placeParts(placeNode!.value!).join(', ') : '';
-        const match = families
-          .flatMap((f) => f.marriages)
-          .find((m) => (!date || normalizeDate(m.date) === date) && (!place || m.place === place));
+        const match = index.find(date, place);
         if (match) {
           // Same marriage as the family's: keep one event, moving any citations and notes onto it.
           this.use(node);
@@ -1481,7 +1505,6 @@ export class Mapper {
             this.mapAttachment(c, { type: 'event', id: match.eventId });
           continue;
         }
-        const unmarried = families.filter((f) => !f.marriages.length);
         if (unmarried.length === 1) {
           const family = unmarried[0]!;
           const event = this.mapEvent(
@@ -1490,7 +1513,10 @@ export class Mapper {
             family.eventOrder++,
             true,
           );
-          family.marriages.push(marriage(event));
+          const added = marriage(event);
+          family.marriages.push(added);
+          index.add(added, families.indexOf(family), family.marriages.length - 1);
+          unmarried = [];
         } else {
           this.mapPersonEvent(node, person);
         }
@@ -1750,7 +1776,7 @@ export class Mapper {
       const owner = ownerType ? { type: ownerType, id: this.recordIds[i]! } : null;
       let lines: string[] | undefined;
       const lineText = (n: number) => {
-        lines ??= serializeNode(record, { version: this.major }).split('\n');
+        lines ??= this.rawText[i]!.split('\n');
         return lines[n - record.line] ?? '';
       };
       const visit = (node: GedcomNode, path: string) => {
@@ -1792,6 +1818,12 @@ export class Mapper {
   }
 }
 
+/** NFC-normalizes the values of a record subtree in place (pointers and raw text untouched). */
+function normalizeValues(node: GedcomNode): void {
+  if (node.value !== undefined) node.value = toNFC(node.value);
+  for (const child of node.children) normalizeValues(child);
+}
+
 function countLines(node: GedcomNode): number {
   let n = 1 + (node.extra?.length ?? 0);
   for (const c of node.continuations ?? []) n += 1 + (c.extra?.length ?? 0);
@@ -1801,6 +1833,37 @@ function countLines(node: GedcomNode): number {
 
 function marriage(event: { id: string; date: string | undefined; place: string }): Marriage {
   return { eventId: event.id, date: event.date ?? '', place: event.place };
+}
+
+/**
+ * A person's family marriages, looked up the way the old linear `find` did:
+ * the first marriage in (family, marriage) order whose date matches when a
+ * date is given and whose place matches when a place is given. Marriages can
+ * be added to an earlier family later, so each key keeps the lowest rank
+ * rather than the first added.
+ */
+class MarriageIndex {
+  private readonly byKey = new Map<string, { m: Marriage; family: number; order: number }>();
+
+  add(m: Marriage, family: number, order: number): void {
+    const date = normalizeDate(m.date);
+    for (const key of ['', `d${date}`, `p${m.place}`, `b${date}\u0000${m.place}`]) {
+      const current = this.byKey.get(key);
+      if (
+        !current ||
+        family < current.family ||
+        (family === current.family && order < current.order)
+      ) {
+        this.byKey.set(key, { m, family, order });
+      }
+    }
+  }
+
+  find(date: string, place: string): Marriage | undefined {
+    const key =
+      !date && !place ? '' : !date ? `p${place}` : !place ? `d${date}` : `b${date}\u0000${place}`;
+    return this.byKey.get(key)?.m;
+  }
 }
 
 function normalizeDate(date: string | undefined): string {

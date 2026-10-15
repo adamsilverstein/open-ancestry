@@ -65,6 +65,13 @@ test('arrow keys move through results and Shift+Enter or Alt+Enter focus the tre
   await page.keyboard.press('ArrowUp');
   await page.keyboard.press('Shift+Enter');
   await expect(page).toHaveURL(new RegExp(`/tree/${ezra}$`));
+  // Let the tree finish loading first. The client-side navigation to it can still be
+  // committing when page.goto starts a new document, and WebKit then reports the
+  // goto as interrupted by a navigation to /tree/<id> (seen in CI).
+  await expect(page.getByRole('application', { name: /^Family tree/ })).toHaveAttribute(
+    'aria-busy',
+    'false',
+  );
 
   await page.goto('/');
   await expect(page.locator('html[data-shell-ready]')).toBeAttached();

@@ -6,6 +6,8 @@ export interface BenchCase {
   fn: () => unknown;
   /** Runs once before measuring; use it to build inputs so they are not timed. */
   setup?: () => unknown;
+  /** Runs before every iteration, untimed; for inputs one run uses up. */
+  beforeEach?: () => unknown;
   /** Fails `npm run bench` when `metric` latency exceeds this many milliseconds. */
   budgetMs: number;
   /** Defaults to p99. */

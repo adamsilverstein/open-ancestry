@@ -4,6 +4,10 @@ import { parseGedcom } from './parser';
 import { GedcomSerializeError, serializeGedcom, serializeNode, valueLines } from './serialize';
 import type { GedcomNode } from './types';
 
+// Property tests run hundreds of cases; under coverage on a shared CI runner that can
+// pass Vitest's 5s default, so they get room. A hang still fails.
+const PROPERTY_TIMEOUT = 30_000;
+
 const node = (partial: Partial<GedcomNode> & Pick<GedcomNode, 'level' | 'tag'>): GedcomNode => ({
   children: [],
   line: 0,
@@ -271,7 +275,7 @@ describe('structure is validated', () => {
   });
 });
 
-describe('fuzz: serialize -> parse keeps records and values', () => {
+describe('fuzz: serialize -> parse keeps records and values', { timeout: PROPERTY_TIMEOUT }, () => {
   const piece = fc.oneof(
     fc.string({ unit: 'binary', maxLength: 20 }),
     fc.constantFrom(
@@ -410,5 +414,23 @@ describe('fuzz: serialize -> parse keeps records and values', () => {
       }),
       { numRuns: Number(process.env.FUZZ_RUNS ?? 500) },
     );
+  });
+});
+
+describe('text that looks like a padded pointer', () => {
+  // The parser reads `1 ASSO  @I1@ ` in 5.5.1 as a pointer, as lenient readers do, so
+  // text with whitespace before an xref shape must be written so it stays text.
+  it.each([
+    ['\t@!@', 5],
+    [' @I1@', 5],
+    [' @I1@ ', 5],
+    ['\t@!@', 7],
+    [' @I1@', 7],
+  ] as const)('keeps %j as text in GEDCOM %i', (value, version) => {
+    const out = serializeNode(node({ level: 0, tag: 'NOTE', xref: '@N1@', value }), { version });
+    const header = version === 7 ? '0 HEAD\n1 GEDC\n2 VERS 7.0\n' : '';
+    const parsed = parseGedcom(header + out).records.find((r) => r.tag === 'NOTE')!;
+    expect(parsed.pointer).toBeUndefined();
+    expect(parsed.value).toBe(value);
   });
 });

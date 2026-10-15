@@ -314,6 +314,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       const offset = gutter.offsetLeft;
       for (const label of labels) {
         label.dataset.right ||= String(offset + label.offsetLeft + label.offsetWidth + 8);
+        label.dataset.h ||= String(label.offsetHeight);
       }
     }
     for (const label of labels) {
@@ -322,6 +323,12 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       // the label never covers a card.
       const under = Number(label.dataset.left) * t.scale + t.x < Number(label.dataset.right);
       const y = under ? Number(label.dataset.gapY) : Number(label.dataset.y);
+      // Zoomed far out the gap is thinner than the label: hide it rather than cover cards.
+      // Faded rather than `hidden`, so it stays in the reading order.
+      label.toggleAttribute(
+        'data-thin',
+        under && Number(label.dataset.gapH) * t.scale < Number(label.dataset.h) + 4,
+      );
       label.style.transform = `translateY(${y * t.scale + t.y}px) translateY(-50%)`;
       label.toggleAttribute('data-above', under);
     }
@@ -348,16 +355,31 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   });
 
   const source = layout ?? fan;
-  const nodeIndex = useMemo(() => new GridIndex(layout?.nodes ?? [], CELL), [layout]);
-  const edgeIndex = useMemo(
-    () => new GridIndex((layout?.edges ?? []).map(edgeRect), CELL),
+  // A layout and the indexes built from it travel together: frame callbacks
+  // queued for an older layout must never pair its indexes with a newer one.
+  const indexed = useMemo(
+    () => ({
+      layout,
+      nodes: new GridIndex(layout?.nodes ?? [], CELL),
+      edges: new GridIndex((layout?.edges ?? []).map(edgeRect), CELL),
+    }),
     [layout],
   );
+  const nodeIndex = indexed.nodes;
   const relations = useMemo(() => (layout ? buildRelations(layout) : null), [layout]);
 
   // Latest props for callbacks that must stay stable.
-  const latest = useRef({ onInteract, onViewportChange, onPrefetch, layout, fan, person, kind });
-  latest.current = { onInteract, onViewportChange, onPrefetch, layout, fan, person, kind };
+  const latest = useRef({
+    onInteract,
+    onViewportChange,
+    onPrefetch,
+    layout,
+    fan,
+    person,
+    kind,
+    indexed,
+  });
+  latest.current = { onInteract, onViewportChange, onPrefetch, layout, fan, person, kind, indexed };
 
   const measure = useCallback(() => {
     const el = viewportRef.current;
@@ -390,62 +412,59 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   }, [theme]);
 
   /** Paints every card and edge in view onto the canvas layer when zoomed far out. */
-  const drawLod = useCallback(
-    (lod: boolean, world: Rect) => {
-      const canvas = lodRef.current;
-      const ctx = canvas?.getContext('2d');
-      const current = latest.current.layout;
-      if (!canvas || !ctx) return 0;
-      const { width, height } = size.current;
-      const dpr = window.devicePixelRatio || 1;
-      if (canvas.width !== Math.round(width * dpr)) canvas.width = Math.round(width * dpr);
-      if (canvas.height !== Math.round(height * dpr)) canvas.height = Math.round(height * dpr);
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const nodes = current ? nodeIndex.query(world) : [];
-      const c = colors.current;
-      if (!lod || !current || !c) return nodes.length;
-      const t = transform.current;
-      ctx.setTransform(dpr * t.scale, 0, 0, dpr * t.scale, dpr * t.x, dpr * t.y);
-      ctx.beginPath();
-      for (const i of edgeIndex.query(world)) {
-        const [first, ...rest] = current.edges[i]!.points;
-        if (!first) continue;
-        ctx.moveTo(first[0], first[1]);
-        for (const [x, y] of rest) ctx.lineTo(x, y);
-      }
-      ctx.strokeStyle = c.line;
-      ctx.lineWidth = 1.5 / t.scale;
-      ctx.stroke();
-      ctx.fillStyle = c.surface;
+  const drawLod = useCallback((lod: boolean, world: Rect) => {
+    const canvas = lodRef.current;
+    const ctx = canvas?.getContext('2d');
+    const { layout: current, nodes: nodeIndex, edges: edgeIndex } = latest.current.indexed;
+    if (!canvas || !ctx) return 0;
+    const { width, height } = size.current;
+    const dpr = window.devicePixelRatio || 1;
+    if (canvas.width !== Math.round(width * dpr)) canvas.width = Math.round(width * dpr);
+    if (canvas.height !== Math.round(height * dpr)) canvas.height = Math.round(height * dpr);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const nodes = current ? nodeIndex.query(world) : [];
+    const c = colors.current;
+    if (!lod || !current || !c) return nodes.length;
+    const t = transform.current;
+    ctx.setTransform(dpr * t.scale, 0, 0, dpr * t.scale, dpr * t.x, dpr * t.y);
+    ctx.beginPath();
+    for (const i of edgeIndex.query(world)) {
+      const [first, ...rest] = current.edges[i]!.points;
+      if (!first) continue;
+      ctx.moveTo(first[0], first[1]);
+      for (const [x, y] of rest) ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = c.line;
+    ctx.lineWidth = 1.5 / t.scale;
+    ctx.stroke();
+    ctx.fillStyle = c.surface;
+    for (const i of nodes) {
+      const n = current.nodes[i]!;
+      ctx.fillRect(n.x, n.y, n.width, n.height);
+    }
+    // The sex stripe, grouped by color to keep fill style changes few.
+    const stripe = Math.max(12, 4 / t.scale);
+    for (const sex of ['M', 'F', 'U'] as const) {
+      ctx.fillStyle = c[sex];
       for (const i of nodes) {
         const n = current.nodes[i]!;
-        ctx.fillRect(n.x, n.y, n.width, n.height);
+        const p = latest.current.person(n.personId);
+        if ((p?.sex ?? 'U') === sex) ctx.fillRect(n.x, n.y, n.width, stripe);
       }
-      // The sex stripe, grouped by color to keep fill style changes few.
-      const stripe = Math.max(12, 4 / t.scale);
-      for (const sex of ['M', 'F', 'U'] as const) {
-        ctx.fillStyle = c[sex];
-        for (const i of nodes) {
-          const n = current.nodes[i]!;
-          const p = latest.current.person(n.personId);
-          if ((p?.sex ?? 'U') === sex) ctx.fillRect(n.x, n.y, n.width, stripe);
-        }
-      }
-      const focus = current.nodes.find((n) => n.isFocus);
-      if (focus) {
-        ctx.strokeStyle = c.focus;
-        ctx.lineWidth = 3 / t.scale;
-        ctx.strokeRect(focus.x, focus.y, focus.width, focus.height);
-      }
-      return nodes.length;
-    },
-    [nodeIndex, edgeIndex],
-  );
+    }
+    const focus = current.nodes.find((n) => n.isFocus);
+    if (focus) {
+      ctx.strokeStyle = c.focus;
+      ctx.lineWidth = 3 / t.scale;
+      ctx.strokeRect(focus.x, focus.y, focus.width, focus.height);
+    }
+    return nodes.length;
+  }, []);
 
   const updateVisible = useCallback(
     (force = false) => {
-      const { layout: current, fan: currentFan } = latest.current;
+      const { layout: current, fan: currentFan, indexed } = latest.current;
       const t = transform.current;
       const { width, height } = size.current;
       const world = visibleWorld(t, width, height);
@@ -482,13 +501,13 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       };
       setVisible({
         source: current ?? currentFan,
-        nodes: lod ? [] : nodeIndex.query(rect),
-        edges: lod ? [] : edgeIndex.query(rect),
+        nodes: lod ? [] : indexed.nodes.query(rect),
+        edges: lod ? [] : indexed.edges.query(rect),
         lod,
         light,
       });
     },
-    [nodeIndex, edgeIndex, drawLod],
+    [drawLod],
   );
   const updateVisibleRef = useRef(updateVisible);
   useEffect(() => {
@@ -754,6 +773,13 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     measure();
     const prev = previous.current;
     previous.current = { layout, kind, focus: focusPersonId };
+    // A new layout remounts the cards: if one had keyboard focus, give it back
+    // (or the focus card, when that person is no longer shown).
+    const had = focusedKey.current;
+    if (had && !viewportRef.current?.contains(document.activeElement)) {
+      const nodes = layout?.nodes ?? fan?.segments ?? [];
+      pendingFocus.current = nodes.some((n) => n.key === had) ? had : focusPersonId;
+    }
     if (!prev || prev.kind !== kind) {
       stopAnimation();
       apply(centeredOnFocus(transform.current, true));
@@ -800,6 +826,14 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     }
     const key = pendingFocus.current;
     if (key) {
+      // Only while focus is still the tree's to give: the layout for a re-focus can land
+      // after the user has moved on (to the top bar, say), and taking focus back would
+      // also turn the tree's single-key shortcuts back on behind their back.
+      const focused = document.activeElement;
+      if (focused && focused !== document.body && !focused.closest('[data-tree-region]')) {
+        pendingFocus.current = null;
+        return;
+      }
       const el = viewportRef.current?.querySelector<HTMLElement>(`[data-key="${CSS.escape(key)}"]`);
       if (el) {
         el.focus({ preventScroll: true });
@@ -807,6 +841,24 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       }
     }
   });
+
+  // Labels re-measure when their size changes (a minimum font size, a late
+  // web font); placeGutter caches it otherwise.
+  useEffect(() => {
+    const gutter = gutterRef.current;
+    if (!gutter) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const { target } of entries) {
+        const label = target as HTMLElement;
+        delete label.dataset.right;
+        delete label.dataset.h;
+      }
+      placeGutter();
+    });
+    for (const label of gutter.children) observer.observe(label);
+    return () => observer.disconnect();
+    // The labels change with the layout.
+  }, [layout]);
 
   // Size changes re-run virtualization.
   useEffect(() => {
@@ -1095,9 +1147,31 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   }
 
   // Keyboard focus landing on a card off screen (Tab, screen reader) brings it into view.
+  /**
+   * The card with keyboard focus, kept while a new layout briefly unmounts it
+   * (an undo, a chevron, a re-focus), so focus can be put back afterwards.
+   */
+  const focusedKey = useRef<string | null>(null);
+
+  function onBlur(event: FocusEvent<HTMLDivElement>) {
+    const target = event.target as HTMLElement;
+    const next = event.relatedTarget as Node | null;
+    if (next) {
+      if (!viewportRef.current?.contains(next)) focusedKey.current = null;
+      return;
+    }
+    // No new target: either the card was removed (keep it, to restore) or focus
+    // left for the page or another window (forget it unless it comes back).
+    setTimeout(() => {
+      if (target.isConnected && document.activeElement !== target) focusedKey.current = null;
+    }, 0);
+  }
+
   function onFocus(event: FocusEvent<HTMLDivElement>) {
     const target = event.target as HTMLElement;
     const key = target.dataset.key;
+    // A chevron or switcher counts as its card.
+    focusedKey.current = key ?? target.dataset.node ?? target.dataset.switch ?? null;
     if (key) {
       setActiveKey(key);
       // Only for keyboard focus: a click must not slide the card from under the pointer.
@@ -1115,7 +1189,10 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   const shown = visible.source === layout && layout ? visible : null;
   // Per labelled row: its leftmost card, and the middle of the gap above it.
   const rowExtent = useMemo(() => {
-    const extent = new Map<number, { 'data-left': number; 'data-gap-y': number }>();
+    const extent = new Map<
+      number,
+      { 'data-left': number; 'data-gap-y': number; 'data-gap-h': number }
+    >();
     if (!layout) return extent;
     const rows = new Map<number, { left: number; top: number }>();
     for (const n of layout.nodes) {
@@ -1128,7 +1205,9 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       const height = layout.nodes[0]!.height;
       // Chevrons sit on the cards' top edges: keep the label clear of them.
       const gapY = above ? (above.top + height + row.top) / 2 - 7 : row.top - 28;
-      extent.set(generation, { 'data-left': row.left, 'data-gap-y': gapY });
+      // Room between the row above and the chevrons on this row's cards.
+      const gapH = above ? row.top - (above.top + height) - 14 : 56;
+      extent.set(generation, { 'data-left': row.left, 'data-gap-y': gapY, 'data-gap-h': gapH });
     }
     return extent;
   }, [layout]);
@@ -1181,6 +1260,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       onKeyDown={onKeyDown}
       onKeyUp={onKeyUp}
       onFocus={onFocus}
+      onBlur={onBlur}
     >
       <p id={helpId} className="oa-visually-hidden">
         Arrow keys move between relatives, Enter centers on a person, Space opens their summary.

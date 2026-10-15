@@ -21,7 +21,7 @@
     "test:watch": "vitest",
     "e2e": "npm run build && playwright test -c e2e",
     "e2e:coverage": "rm -rf coverage/e2e && E2E_COVERAGE=1 npm run e2e",
-    "e2e:perf": "rm -rf perf-results && npm run build && OA_PERF=1 OA_PERF_100K=1 playwright test -c e2e tree-perf.spec.ts --project chromium --workers 1",
+    "e2e:perf": "rm -rf perf-results && npm run build && OA_PERF=1 OA_PERF_100K=1 playwright test -c e2e --grep @perf --project chromium --workers 1",
     "coverage": "npm test && npm run e2e:coverage && npm run coverage:merge",
     "coverage:merge": "tsx scripts/coverage-merge.ts",
     "size": "tsx scripts/check-bundle-size.ts",

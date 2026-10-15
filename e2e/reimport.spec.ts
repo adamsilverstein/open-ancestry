@@ -50,19 +50,32 @@ async function seed(
   const { token } = (await (await request.get('/api/session')).json()) as { token: string };
   const headers = { origin: new URL(baseURL).origin, 'x-oa-token': token };
   const name = `Reimport ${testInfo.project.name} ${testInfo.workerIndex}${testInfo.retry} ${Date.now() % 1e6}`;
-  const started = await request.post('/api/import', {
-    headers,
-    multipart: {
-      file: {
-        name: `${name}.ged`,
-        mimeType: 'application/octet-stream',
-        buffer: Buffer.from(SAMPLE),
-      },
-    },
-  });
-  const { jobId } = (await started.json()) as { jobId: string };
+  // The e2e server runs one import at a time with a short queue, shared with
+  // other specs' large imports: retry a full queue (429) and allow for waiting.
+  let jobId: string | undefined;
   await expect
-    .poll(async () => (await (await request.get(`/api/jobs/${jobId}`)).json()).state)
+    .poll(
+      async () => {
+        const started = await request.post('/api/import', {
+          headers,
+          multipart: {
+            file: {
+              name: `${name}.ged`,
+              mimeType: 'application/octet-stream',
+              buffer: Buffer.from(SAMPLE),
+            },
+          },
+        });
+        if (started.status() === 202) jobId = ((await started.json()) as { jobId: string }).jobId;
+        return started.status();
+      },
+      { timeout: 60_000, intervals: [500, 1000, 2000] },
+    )
+    .toBe(202);
+  await expect
+    .poll(async () => (await (await request.get(`/api/jobs/${jobId}`)).json()).state, {
+      timeout: 60_000,
+    })
     .toBe('completed');
   const job = (await (await request.get(`/api/jobs/${jobId}`)).json()) as { tree: string };
   return { tree: job.tree, headers };

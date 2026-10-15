@@ -53,6 +53,22 @@
   font: var(--oa-text-sm);
 }
 
+.action {
+  flex: none;
+  padding: var(--oa-space-1) var(--oa-space-2);
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-accent);
+  font: var(--oa-text-sm);
+  font-weight: var(--oa-weight-semibold);
+  cursor: pointer;
+}
+
+.action:hover {
+  background: var(--oa-surface-hover);
+}
+
 .close {
   display: grid;
   place-items: center;

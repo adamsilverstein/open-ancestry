@@ -2228,6 +2228,15 @@
       }
     }
   },
+  "JsonExportQuery": {
+    "type": "object",
+    "properties": {
+      "history": {
+        "enum": ["0", "1", "false", "true"]
+      }
+    },
+    "additionalProperties": false
+  },
   "Living": {
     "enum": ["living", "dead", "inferred_living", "inferred_dead", "unknown"]
   },
@@ -2980,6 +2989,17 @@
         "type": "string",
         "minLength": 1,
         "maxLength": 100
+      }
+    }
+  },
+  "UndoQuery": {
+    "type": "object",
+    "properties": {
+      "expect": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "pattern": "^[0-9A-Za-z_-]+$"
       }
     }
   }

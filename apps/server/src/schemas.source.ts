@@ -70,6 +70,12 @@ export const ExportQuery = Type.Object(
   strict,
 );
 
+/** `history=0` (or `false`) leaves the edit history, and the deleted text it keeps, out. */
+export const JsonExportQuery = Type.Object(
+  { history: Type.Optional(Type.Enum(['0', '1', 'false', 'true'])) },
+  strict,
+);
+
 export const GedzipQuery = Type.Object({ privatize: Type.Optional(Type.Boolean()) }, strict);
 
 export const NeighborhoodQuery = Type.Object({
@@ -95,6 +101,9 @@ export const SearchQuery = Type.Object({
 export const HistoryQuery = Type.Object({
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })),
 });
+
+/** `expect`: undo only if this batch is still the newest applied one (a toast's Undo). */
+export const UndoQuery = Type.Object({ expect: Type.Optional(Id) });
 
 export const HomeBody = Type.Object({ personId: Type.Union([Id, Type.Null()]) }, strict);
 

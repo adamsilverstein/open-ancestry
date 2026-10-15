@@ -56,6 +56,24 @@ describe('NameScrubber', () => {
     expect(file('m/liwu.jpg')).toBe('m/Private.jpg');
   });
 
+  it('treats links and e-mail addresses inside prose like file names (#212 review)', () => {
+    expect(text('Found him at facebook.com/zedekiahlivingson today')).toBe(
+      'Found him at facebook.com/PrivatePrivate today',
+    );
+    expect(text('Write to zedlivingson@gmail.com or https://x.org/zedekiah2015.')).toBe(
+      'Write to zedPrivate@gmail.com or https://x.org/Private2015.',
+    );
+    // The rest of the sentence keeps the text-mode rules: no substrings in ordinary words.
+    expect(text('Livingstone visited')).toBe('Livingstone visited');
+  });
+
+  it('replaces names in an encoded link without decoding anything else', () => {
+    expect(file('https://x.org/a%26b/Zedekiah%20Livingson.jpg?q=%2F')).toBe(
+      'https://x.org/a%26b/Private%20Private.jpg?q=%2F',
+    );
+    expect(file('https://x.org/%E6%9D%8E%E6%98%8E.png')).toBe('https://x.org/Private.png');
+  });
+
   it('leaves text without withheld names untouched', () => {
     expect(text('Born at Rose Hill in 1850')).toBe('Born at Rose Hill in 1850');
     expect(new NameScrubber([]).scrub('Zedekiah', 'text')).toBe('Zedekiah');

@@ -1612,3 +1612,39 @@ describe('three-way re-import, review findings (#224)', () => {
     }
   });
 });
+
+describe('dates compared by meaning (#194)', () => {
+  it('offers no change when a date is only written differently', async () => {
+    const text = renumber(
+      SAMPLE.replace('2 DATE 3 Mar 1846', '2 DATE 03 MAR 1846').replace(
+        '2 DATE 12 JUN 1868',
+        '2 DATE 12 June 1868',
+      ),
+    );
+    const s2 = await prepareReimport(store, { bytes: text }, { today: TODAY });
+    try {
+      expect(s2.diff.people.flatMap((p) => p.changes)).toEqual([]);
+    } finally {
+      closeReimport(s2);
+    }
+  });
+});
+
+describe('three-way with dates by meaning (#224 on #194)', () => {
+  it('does not re-offer a value the export only wrote differently', async () => {
+    const person = (date: string) =>
+      ged('0 @I1@ INDI', '1 NAME Ada /Vale/', '1 SEX F', '1 DEAT', `2 DATE ${date}`);
+    const tree = openMemoryTree();
+    await importGedcom({ bytes: person('1 JAN 1900') }, tree, { today: TODAY });
+    const death = value<string>(tree, "SELECT id FROM event WHERE type = 'DEAT'");
+    tree.transact('Edit', (tx) => tx.update('event', death, { date_text: '2 JAN 1900' }));
+    const s2 = await prepareReimport(tree, { bytes: person('01 JAN 1900') }, { today: TODAY });
+    try {
+      // The base said 1 Jan 1900; the export still does, so the user's 2 Jan stands.
+      expect(s2.diff.people.flatMap((p) => p.changes)).toEqual([]);
+    } finally {
+      closeReimport(s2);
+      tree.close();
+    }
+  });
+});

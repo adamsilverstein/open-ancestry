@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, deleteTree, hasImportExtension, importIntoNewTree } from './api';
+import { ApiError, cancelJob, deleteTree, hasImportExtension, importIntoNewTree } from './api';
 
 describe('import helpers', () => {
   it('accepts GEDCOM and GEDZIP extensions in any case', () => {
@@ -49,6 +49,19 @@ describe('importIntoNewTree and mutations', () => {
     expect(
       calls.filter((c) => c.url !== '/api/session').map((c) => `${c.method} ${c.url}`),
     ).toEqual(['POST /api/import']);
+  });
+
+  it('cancels a job with DELETE, treating an already finished job as no-op', async () => {
+    const calls = server((url, init) =>
+      url === '/api/jobs/j1' && init.method === 'DELETE'
+        ? Response.json({ job: { id: 'j1' } }, { status: 202 })
+        : Response.json({ error: { code: 'conflict', message: 'finished' } }, { status: 409 }),
+    );
+    expect(await cancelJob('j1')).toBe(true);
+    expect(calls.at(-1)).toMatchObject({ method: 'DELETE', url: '/api/jobs/j1' });
+    expect(await cancelJob('j2')).toBe(false);
+    server(() => Response.json({ error: { code: 'not_found', message: 'gone' } }, { status: 404 }));
+    await expect(cancelJob('j3')).rejects.toBeInstanceOf(ApiError);
   });
 
   it('refreshes the session token once after a 403 (server restarted)', async () => {

@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { CircleHelp, TriangleAlert } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ApiError } from '../../api/client';
 import { invalidateTree } from '../../api/edits';
 import { treeQuery } from '../../api/queries';
 import { Button } from '../../components/Button/Button';
@@ -16,10 +18,13 @@ import {
   applyReimport,
   discardReimport,
   getReimport,
+  getReimportStatus,
+  refreshReimport,
   type PersonReview,
   type ReimportReview,
   type ReviewChange,
 } from './api';
+import { groupReview, QUESTIONS, type GroupId } from './group';
 import { describeChange } from './labels';
 import styles from './Reimport.module.css';
 
@@ -31,6 +36,15 @@ const STATUS: Record<PersonReview['status'], string> = {
   new: 'New person',
   missing: 'Not in the new export',
 };
+
+/** What a change says, without its per-comparison ids: equal only if nothing about it changed. */
+function contentOf(change: ReviewChange): string {
+  const { id: _id, requires: _requires, defaultAccept: _default, ...rest } = change;
+  void _id;
+  void _requires;
+  void _default;
+  return JSON.stringify(rest);
+}
 
 /** Changes that would be applied: chosen, applicable, and with every prerequisite chosen. */
 function effective(review: ReimportReview, selected: Set<string>): Set<string> {
@@ -64,14 +78,16 @@ function PersonCard({
   active: Set<string>;
   onToggle: (change: ReviewChange, on: boolean) => void;
 }) {
+  const nameId = useId();
+  // An article per card: the four groups stay the only regions (landmarks).
   return (
-    <section aria-label={person.name} className={styles.card} data-status={person.status}>
+    <article aria-labelledby={nameId} className={styles.card} data-status={person.status}>
       <header className={styles.cardHeader}>
         <div>
-          <h2 className={styles.name}>
+          <h3 id={nameId} className={styles.name}>
             {person.name}
             {person.lifespan && <span className={styles.lifespan}> {person.lifespan}</span>}
-          </h2>
+          </h3>
           <p className={styles.meta}>
             {STATUS[person.status]}
             {person.confidence !== null && ` · ${Math.round(person.confidence * 100)}% match`}
@@ -88,6 +104,11 @@ function PersonCard({
           if (!change.applicable) {
             return (
               <li key={change.id} className={styles.info}>
+                {QUESTIONS.has(change.kind) && (
+                  <span className={styles.flag}>
+                    <CircleHelp aria-hidden size={14} /> Check
+                  </span>
+                )}
                 {label}
                 {change.kind === 'person.missing' && '. Kept in your tree.'}
               </li>
@@ -95,19 +116,25 @@ function PersonCard({
           }
           const waiting = change.requires?.some((r) => !active.has(r)) ?? false;
           return (
-            <li key={change.id}>
+            <li key={change.id} className={change.conflict ? styles.conflict : undefined}>
               <Checkbox
                 label={label}
                 checked={active.has(change.id)}
                 disabled={waiting}
                 description={
-                  change.conflict === 'local-edit'
-                    ? 'Edited in this tree since the last import; your edit is kept unless you tick this.'
-                    : change.conflict === 'local-delete'
-                      ? 'You deleted this in this tree; it stays deleted unless you tick this.'
-                      : waiting
-                        ? 'Needs the new person above.'
-                        : undefined
+                  change.conflict ? (
+                    // The marker is part of the description, so it is announced with the checkbox.
+                    <>
+                      <span className={styles.flag}>
+                        <TriangleAlert aria-hidden size={14} /> Conflict
+                      </span>
+                      {change.conflict === 'local-edit'
+                        ? 'Edited in this tree since the last import; your edit is kept unless you tick this.'
+                        : 'You deleted this in this tree; it stays deleted unless you tick this.'}
+                    </>
+                  ) : waiting ? (
+                    'Needs the new person above.'
+                  ) : undefined
                 }
                 onChange={(event) => onToggle(change, event.target.checked)}
               />
@@ -115,7 +142,7 @@ function PersonCard({
           );
         })}
       </ul>
-    </section>
+    </article>
   );
 }
 
@@ -128,10 +155,81 @@ function Review({ review }: { review: ReimportReview }) {
     () => new Set(all.filter((c) => c.applicable && c.defaultAccept).map((c) => c.id)),
   );
   const [pending, setPending] = useState(false);
+  const [stale, setStale] = useState(review.stale);
+  const [comparing, setComparing] = useState(false);
   // A large export can change thousands of people: render cards in pages.
   const [shown, setShown] = useState(PAGE);
+  const [filter, setFilter] = useState<GroupId | 'all'>('all');
+  const groups = useMemo(() => groupReview(review.diff.people), [review]);
+  const visible = groups.filter((g) => g.people.length && (filter === 'all' || g.id === filter));
+  const listed = visible.reduce((n, g) => n + g.people.length, 0);
+  // Matched people without a card: nothing in the export changed them.
+  const unchanged = Math.max(
+    0,
+    review.diff.counts.matched - review.diff.people.filter((p) => p.status === 'matched').length,
+  );
   const active = useMemo(() => effective(review, selected), [review, selected]);
   const { counts } = review.diff;
+
+  // Edits elsewhere (another tab) make the review stale: check whenever the page is back in view.
+  useEffect(() => {
+    let current = true;
+    let last = 0;
+    const check = () => {
+      // Focus and visibilitychange usually fire together: ask once.
+      if (document.visibilityState === 'hidden' || Date.now() - last < 250) return;
+      last = Date.now();
+      getReimportStatus(review.id, review.comparison)
+        .then((status) => current && setStale(status.stale))
+        .catch(() => {});
+    };
+    window.addEventListener('focus', check);
+    document.addEventListener('visibilitychange', check);
+    return () => {
+      current = false;
+      window.removeEventListener('focus', check);
+      document.removeEventListener('visibilitychange', check);
+    };
+  }, [review.id, review.comparison]);
+
+  /**
+   * Compares the export again and keeps every choice the user made: a change
+   * that still says exactly the same thing keeps a tick that differs from its
+   * old default; anything else takes its new default, so a choice never
+   * carries over onto a value the user hasn't seen.
+   */
+  async function compareAgain() {
+    setComparing(true);
+    try {
+      const fresh = await refreshReimport(review.id);
+      const chosen = new Map(
+        all
+          .filter((c) => c.applicable && selected.has(c.id) !== c.defaultAccept)
+          .map((c) => [c.key, { on: selected.has(c.id), content: contentOf(c) }]),
+      );
+      const keep = (c: ReviewChange) => {
+        const before = chosen.get(c.key);
+        return before && before.content === contentOf(c) ? before.on : c.defaultAccept;
+      };
+      const next = new Set(
+        fresh.diff.people
+          .flatMap((p) => p.changes)
+          .filter((c) => c.applicable && keep(c))
+          .map((c) => c.id),
+      );
+      queryClient.setQueryData(['reimport', review.id], fresh);
+      setSelected(next);
+      setStale(fresh.stale);
+    } catch (error) {
+      toast({
+        title: 'Could not compare again',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'error',
+      });
+    } finally {
+      setComparing(false);
+    }
+  }
 
   function toggle(change: ReviewChange, on: boolean) {
     setSelected((current) => {
@@ -162,7 +260,7 @@ function Review({ review }: { review: ReimportReview }) {
   async function apply() {
     setPending(true);
     try {
-      const result = await applyReimport(review.id, [...active]);
+      const result = await applyReimport(review.id, review.comparison, [...active]);
       await invalidateTree(queryClient, review.tree);
       toast({
         title: `Applied ${result.applied} change${result.applied === 1 ? '' : 's'}`,
@@ -173,6 +271,12 @@ function Review({ review }: { review: ReimportReview }) {
         ? navigate({ to: '/tree/$personId', params: { personId: tree.homePersonId } })
         : navigate({ to: '/' }));
     } catch (error) {
+      setPending(false);
+      // The tree moved since the comparison: offer to compare again instead.
+      if (error instanceof ApiError && error.status === 409) {
+        setStale(true);
+        return;
+      }
       toast({
         title: 'Could not apply the re-import',
         description: error instanceof Error ? error.message : String(error),
@@ -197,11 +301,21 @@ function Review({ review }: { review: ReimportReview }) {
           </p>
         </div>
       </header>
+      {stale && (
+        <div role="alert" className={styles.stale}>
+          <p>
+            Your tree changed since this comparison, so it can't be applied as it is. Compare again
+            to see what the export would change now; the choices you made are kept.
+          </p>
+          <Button size="sm" disabled={comparing} onClick={() => void compareAgain()}>
+            {comparing ? 'Comparing…' : 'Compare again'}
+          </Button>
+        </div>
+      )}
       <section aria-label="Summary" className={styles.summary}>
         <span>
-          {counts.matched} matched ({counts.highConfidence} high confidence)
+          In the export: {counts.matched} matched ({unchanged} unchanged, not listed)
         </span>
-        <span>{counts.changedPeople} with changes</span>
         <span>{counts.newPeople} new</span>
         <span>{counts.missingPeople} missing</span>
       </section>
@@ -219,13 +333,62 @@ function Review({ review }: { review: ReimportReview }) {
         </p>
       ) : (
         <>
-          {review.diff.people.slice(0, shown).map((person) => (
-            <PersonCard key={person.key} person={person} active={active} onToggle={toggle} />
-          ))}
-          {review.diff.people.length > shown && (
+          <div role="group" aria-label="Filter the review" className={styles.filters}>
+            {[
+              { id: 'all' as const, title: 'All', count: review.diff.people.length },
+              ...groups
+                .filter((g) => g.people.length)
+                .map((g) => ({ id: g.id, title: g.title, count: g.people.length })),
+            ].map((f) => (
+              <Button
+                key={f.id}
+                size="sm"
+                variant="secondary"
+                className={styles.filter}
+                aria-pressed={filter === f.id}
+                onClick={() => {
+                  setFilter(f.id);
+                  setShown(PAGE);
+                }}
+              >
+                {f.title} {f.count}
+              </Button>
+            ))}
+          </div>
+          {(() => {
+            // Pages run through the groups in reading order.
+            let left = shown;
+            return visible.map((g) => {
+              const people = g.people.slice(0, Math.max(0, left));
+              left -= people.length;
+              if (!people.length) return null;
+              return (
+                <section
+                  key={g.id}
+                  aria-labelledby={`group-${g.id}`}
+                  data-group={g.id}
+                  className={styles.group}
+                >
+                  <h2 id={`group-${g.id}`} className={styles.groupTitle}>
+                    {g.id === 'decide' && <TriangleAlert aria-hidden size={18} />}
+                    {g.title} ({g.people.length})
+                  </h2>
+                  {people.map((person) => (
+                    <PersonCard
+                      key={person.key}
+                      person={person}
+                      active={active}
+                      onToggle={toggle}
+                    />
+                  ))}
+                </section>
+              );
+            });
+          })()}
+          {listed > shown && (
             <Button onClick={() => setShown((n) => n + PAGE)}>
-              Show {Math.min(PAGE, review.diff.people.length - shown)} more (
-              {review.diff.people.length - shown} not shown; bulk choices include them)
+              Show {Math.min(PAGE, listed - shown)} more ({listed - shown} not shown; bulk choices
+              include them)
             </Button>
           )}
         </>
@@ -236,7 +399,7 @@ function Review({ review }: { review: ReimportReview }) {
         </Button>
         <Button
           variant="primary"
-          disabled={pending || active.size === 0}
+          disabled={pending || stale || active.size === 0}
           onClick={() => void apply()}
         >
           Apply {active.size} change{active.size === 1 ? '' : 's'}
@@ -292,9 +455,8 @@ export function ReimportPage() {
   /** Stops the comparison, or discards its review if it finished in the meantime. */
   async function cancel() {
     setCancelling(true);
-    try {
-      await cancelJob(jobId);
-    } catch {
+    // False (409): the comparison already finished, so discard its review.
+    if (!(await cancelJob(jobId).catch(() => false))) {
       const latest = await getJob(jobId).catch(() => null);
       const done = latest?.result as unknown as { reimportId?: string } | undefined;
       if (done?.reimportId) await discardReimport(done.reimportId).catch(() => {});

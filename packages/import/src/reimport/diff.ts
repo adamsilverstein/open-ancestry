@@ -1,3 +1,4 @@
+import { formatDate } from '@open-ancestry/core';
 import type { FamilyRow, MediaRow, TableName, TreeStore } from '@open-ancestry/db';
 import { HIGH_CONFIDENCE, POSSIBLE_MATCH, type NearMiss, type PersonMatch } from './match';
 import {
@@ -96,6 +97,12 @@ export type ReimportChange =
 
 export type ReviewChange = ReimportChange & {
   id: string;
+  /**
+   * The same in every comparison of the same export while the change says
+   * the same thing, so choices can carry over when the review is compared
+   * again (#163). `id` is only unique within one comparison.
+   */
+  key: string;
   /** Applied unless the user unticks it. */
   defaultAccept: boolean;
   /** False for information only (missing people and facts): never applied. */
@@ -151,11 +158,19 @@ const factOf = (e: SnapEvent): FactView => ({
 
 type FamilyChildRef = Snapshot['familyChildren'][number];
 
+/**
+ * A date as it reads, so texts that mean the same date compare equal
+ * ("3 Mar 1846" and "03 MAR 1846", "BET 1850 AND 1860" and "1850-1860").
+ */
+// Calendar escapes it can't show fold away too: "@#DUNKNOWN@ 1900" reads, and compares, as "1900".
+const dateKey = (text: string | null | undefined) => norm(text ? formatDate(text) : '');
+const sameDate = (a: string | null, b: string | null) => dateKey(a) === dateKey(b);
+
 const sameText = (a: string | null, b: string | null) => norm(a) === norm(b);
 const sameFact = (a: SnapEvent, b: SnapEvent) =>
   a.row.type === b.row.type &&
   sameText(a.row.custom_type, b.row.custom_type) &&
-  sameText(a.row.date_text, b.row.date_text) &&
+  sameDate(a.row.date_text, b.row.date_text) &&
   sameText(a.place, b.place) &&
   sameText(a.row.value, b.row.value);
 
@@ -486,6 +501,15 @@ function foldMerged(
   }
 }
 
+/** The person, the kind and every row id a change refers to (see `ReviewChange.key`). */
+function changeKey(personKey: string, change: ReimportChange): string {
+  const ids = Object.entries(change)
+    .filter(([k, v]) => (k.endsWith('Id') || k === 'familyKey') && typeof v === 'string')
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([k, v]) => `${k}=${v as string}`);
+  return [personKey, change.kind, ...ids].join('|');
+}
+
 /** Whether the user removed something like this here: such changes are offered unticked. */
 interface Removed {
   /**
@@ -534,14 +558,15 @@ export const imageOfView = (f: FactView): FactImage => ({
 const sameImage = (a: Partial<FactImage>, b: FactImage) =>
   a.type === b.type &&
   sameText(a.custom_type ?? null, b.custom_type) &&
-  sameText(a.date_text ?? null, b.date_text) &&
+  // By meaning (#194): a base of "01 JAN 1900" and an export of "1 JAN 1900" are the same.
+  sameDate(a.date_text ?? null, b.date_text) &&
   sameText(a.place_name ?? null, b.place_name) &&
   sameText(a.value ?? null, b.value);
 
 const DELETED: Partial<ReviewChange> = { conflict: 'local-delete', defaultAccept: false };
 
 const factKey = (f: FactView) =>
-  `fact|${f.type}|${norm(f.customType)}|${norm(f.date)}|${norm(f.place)}|${norm(f.value)}`;
+  `fact|${f.type}|${norm(f.customType)}|${dateKey(f.date)}|${norm(f.place)}|${norm(f.value)}`;
 
 /** Pairs the incoming person's events with the existing person's. */
 function diffFacts(
@@ -577,7 +602,7 @@ function diffFacts(
             !used.has(ee.row.id) &&
             ee.row.type === ie.row.type &&
             sameText(ee.row.custom_type, ie.row.custom_type) &&
-            (sameText(ee.row.date_text, ie.row.date_text) ||
+            (sameDate(ee.row.date_text, ie.row.date_text) ||
               (sameText(ee.place, ie.place) && sameText(ee.row.value, ie.row.value))),
         );
     if (counterpart) {
@@ -684,7 +709,7 @@ export function diffTrees(
         if (sameImage(was, incoming)) return { state: 'same', eventId: f.eventId };
         const related =
           SINGULAR.has(incoming.type) ||
-          sameText(was.date_text ?? null, incoming.date_text) ||
+          sameDate(was.date_text ?? null, incoming.date_text) ||
           sameText(was.place_name ?? null, incoming.place_name) ||
           (!!incoming.value && sameText(was.value ?? null, incoming.value));
         if (related) changed ??= f.eventId;
@@ -716,6 +741,7 @@ export function diffTrees(
       const item = {
         ...change,
         id: `c${++seq}`,
+        key: changeKey(r.key, change),
         defaultAccept: true,
         applicable: true,
         ...defaults,
@@ -1025,11 +1051,12 @@ export function diffTrees(
     if (existingFamily) {
       // Family facts (marriage, divorce) new in the export.
       const have = new Set(
-        existing.familyEvents.get(existingFamily)?.map((e) => `${e.type}|${norm(e.date_text)}`) ??
-          [],
+        existing.familyEvents
+          .get(existingFamily)
+          ?.map((e) => `${e.type}|${dateKey(e.date_text)}`) ?? [],
       );
       for (const fe of incoming.familyEvents.get(f.id) ?? []) {
-        if (have.has(`${fe.type}|${norm(fe.date_text)}`)) continue;
+        if (have.has(`${fe.type}|${dateKey(fe.date_text)}`)) continue;
         const deleted = removed.fact(existingFamily, {
           type: fe.type,
           custom_type: fe.custom_type,

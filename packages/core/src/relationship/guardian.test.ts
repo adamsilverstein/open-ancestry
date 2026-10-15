@@ -33,4 +33,17 @@ describe('guardian links', () => {
     expect(relationship(g, 'aunt', 'ward').name).toBe(parentWord('F', 'guardian'));
     expect(relationship(g, 'ward', 'aunt').name).toBe(childWord('M', 'guardian'));
   });
+
+  it('does not also call a guardian couple step-parents', () => {
+    const couple = kinshipGraph(
+      new GraphBuilder()
+        .person('g1', 'F')
+        .person('g2', 'M')
+        .person('kid', 'F')
+        .family('Fg', 'g2', 'g1', [['kid', 'guardian']])
+        .build(),
+    );
+    expect(relationship(couple, 'g1', 'kid').name).toBe('guardian');
+    expect(relationship(couple, 'kid', 'g2').name).toBe('ward');
+  });
 });

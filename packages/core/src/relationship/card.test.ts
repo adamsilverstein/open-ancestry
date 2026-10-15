@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Sex } from '../layout/types';
+import type { ChildRelation, Sex } from '../layout/types';
 import { cardTerm, kinshipGraph, relationship } from './index';
 import type { CardStep } from './index';
 import { GraphBuilder } from './test-family';
@@ -63,6 +63,15 @@ const ROWS: [string, CardStep[], Sex, string | undefined][] = [
 type Child = NonNullable<Parameters<GraphBuilder['family']>[3]>[number];
 
 /**
+ * The child's link to the other partner: a stepparent's partner is a birth
+ * parent, while adoptive, foster and guardian couples share the link.
+ */
+const otherLink = (rel: ChildRelation | undefined): ChildRelation =>
+  rel === 'adopted' || rel === 'foster' || rel === 'guardian' || rel === 'related'
+    ? rel
+    : 'biological';
+
+/**
  * A family in which `path` really leads from the focus (`n0`) to the card, so
  * cardTerm can be checked against the calculator on the same people.
  */
@@ -95,12 +104,12 @@ function graphFor(path: CardStep[], cardSex: Sex) {
       const parent = node(sex);
       parentFamily.set(
         current,
-        family(parent, node(), [[current, step.rel ?? 'biological', 'biological']]),
+        family(parent, node(), [[current, step.rel ?? 'biological', otherLink(step.rel)]]),
       );
       current = parent;
     } else if (step.step === 'D') {
       const child = node(sex);
-      family(current, node(), [[child, step.rel ?? 'biological', 'biological']]);
+      family(current, node(), [[child, step.rel ?? 'biological', otherLink(step.rel)]]);
       current = child;
     } else if (step.step === 'S') {
       const partner = node(sex);

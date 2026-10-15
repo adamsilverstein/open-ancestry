@@ -136,13 +136,14 @@ const orphanCleanup: DerivedStep = {
       ],
       [
         'note',
-        'SELECT id FROM note n WHERE external_id IS NULL AND NOT EXISTS (SELECT 1 FROM note_link l WHERE l.note_id = n.id)',
+        `SELECT id FROM note n WHERE NOT EXISTS (SELECT 1 FROM note_link l WHERE l.note_id = n.id)
+           AND ${wasLinked('note')}`,
       ],
       [
         'media',
-        `SELECT id FROM media m WHERE external_id IS NULL
-           AND NOT EXISTS (SELECT 1 FROM media_link l WHERE l.media_id = m.id)
-           AND NOT EXISTS (SELECT 1 FROM person p WHERE p.primary_media_id = m.id)`,
+        `SELECT id FROM media m WHERE NOT EXISTS (SELECT 1 FROM media_link l WHERE l.media_id = m.id)
+           AND NOT EXISTS (SELECT 1 FROM person p WHERE p.primary_media_id = m.id)
+           AND ${wasLinked('media')}`,
       ],
     ];
     let removed = 0;
@@ -178,6 +179,21 @@ const orphanCleanup: DerivedStep = {
     return removed;
   },
 };
+
+/**
+ * SQL true for a note (`n`) or media row (`m`) that something used to point to,
+ * as opposed to an imported NOTE or OBJE record that always stood alone: an
+ * inline one, one whose link a delete removed, or one an imported record
+ * pointed to.
+ */
+function wasLinked(table: 'note' | 'media'): string {
+  const row = table === 'note' ? 'n' : 'm';
+  return `(${row}.external_id IS NULL
+    OR EXISTS (SELECT 1 FROM change_log c WHERE c.entity = '${table}_link' AND c.op = 'delete'
+                 AND json_extract(c.before_json, '$.${table}_id') = ${row}.id)
+    OR EXISTS (SELECT 1 FROM raw_record r WHERE r.xref IS NOT ${row}.external_id
+                 AND instr(r.raw_text, ' ' || ${row}.external_id) > 0))`;
+}
 
 /** An import report without quoted lines, or null when it has none. */
 function scrubReport(

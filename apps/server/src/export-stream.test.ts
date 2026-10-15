@@ -1,10 +1,10 @@
-import { mkdtempSync, rmSync, truncateSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, truncateSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { treePaths } from '@open-ancestry/db';
 import { importGedcom } from '@open-ancestry/import';
 import { zipSync } from 'fflate';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import { startServer } from './index';
 
 /*
@@ -90,6 +90,39 @@ describe('GEDZIP export of a large media library', () => {
       expect(((await res.json()) as { error: { message: string } }).error.message).toMatch(
         /largest archive this export can write/,
       );
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('closes the media file when the client hangs up mid-download', async () => {
+    const dir = join(root, 'Hangup.oatree');
+    await importGedcom(
+      {
+        gedzip: zipSync({
+          'gedcom.ged': new TextEncoder().encode(
+            '0 HEAD\n1 GEDC\n2 VERS 5.5.1\n0 @I1@ INDI\n1 OBJE\n2 FILE scan.jpg\n0 TRLR\n',
+          ),
+          'scan.jpg': new Uint8Array([0xff, 0xd8, 0xff, 0]),
+        }),
+      },
+      { dir },
+    );
+    truncateSync(join(treePaths(dir).media, 'scan.jpg'), 256 * 1024 * 1024);
+    const server = await startServer({ library: root });
+    try {
+      const openFds = () => readdirSync('/dev/fd').length;
+      const before = openFds();
+      const controller = new AbortController();
+      const res = await fetch(`${server.url}/api/trees/Hangup/export.gdz`, {
+        signal: controller.signal,
+      });
+      const reader = res.body!.getReader();
+      let received = 0;
+      while (received < 8 * 1024 * 1024) received += (await reader.read()).value!.byteLength;
+      controller.abort();
+      await reader.cancel().catch(() => {});
+      await vi.waitFor(() => expect(openFds()).toBeLessThanOrEqual(before), { timeout: 5000 });
     } finally {
       await server.close();
     }

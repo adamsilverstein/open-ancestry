@@ -12,6 +12,8 @@ import type { GedcomExport, GedzipExport, GedzipExportOptions } from './types';
 const GEDCOM_ENTRY = 'gedcom.ged';
 /** Problems found while streaming, after the response headers went out. */
 const WARNINGS_ENTRY = 'warnings.txt';
+/** Characters of warnings.txt kept (at most 4 UTF-8 bytes each, within the 64 KiB reserved). */
+const MAX_WARNINGS_TEXT = 15_000;
 
 /** Formats that are already compressed; deflating them again only costs time. */
 const STORED = /\.(jpe?g|png|gif|webp|heic|avif|mp3|m4a|ogg|mp4|mov|webm|zip|pdf)$/i;
@@ -42,6 +44,9 @@ interface PlannedFile {
   path: string;
   size: number;
   mtimeMs: number;
+  /** Device and inode, so a file swapped for another of the same size and time is noticed. */
+  dev: number;
+  ino: number;
   level: 0 | 6;
 }
 
@@ -72,7 +77,8 @@ export function planGedzipExport(
   const root = store.dir ? treePaths(store.dir).media : null;
   const realRoot = root ? safeRealpath(root) : null;
   const files = new Map<string, PlannedFile>();
-  const entries = new Set<string>([GEDCOM_ENTRY]);
+  // Reserved: media named like either goes under media/.
+  const entries = new Set<string>([GEDCOM_ENTRY, WARNINGS_ENTRY]);
   const warnings: string[] = [];
 
   const entryName = (path: string): string => {
@@ -112,11 +118,21 @@ export function planGedzipExport(
     filePath,
   });
   const planned = [...files.values()];
-  // Local header, data descriptor and central directory record per entry, plus the end record.
-  const entryBytes = (name: string, size: number) => size + 30 + 16 + 46 + 2 * name.length;
+  // Local header, data descriptor and central directory record per entry (names in
+  // UTF-8), the data, and for deflated entries deflate's worst case: 5 bytes per
+  // stored block of up to 16 KiB, plus a little. Then the end record and, for
+  // the warnings entry that may follow, some room.
+  const entryBytes = (name: string, size: number, level: 0 | 6) =>
+    size +
+    (level ? Math.ceil(size / 16_383) * 5 + 64 : 0) +
+    30 +
+    16 +
+    46 +
+    2 * Buffer.byteLength(name);
   const archiveBytes =
-    planned.reduce((sum, f) => sum + entryBytes(f.entry, f.size), 0) +
-    entryBytes(GEDCOM_ENTRY, Buffer.byteLength(result.text)) +
+    planned.reduce((sum, f) => sum + entryBytes(f.entry, f.size, f.level), 0) +
+    entryBytes(GEDCOM_ENTRY, Buffer.byteLength(result.text), 6) +
+    entryBytes(WARNINGS_ENTRY, 4 * MAX_WARNINGS_TEXT + 1024, 6) +
     22;
   const limit = Math.min(maxArchiveBytes, ZIP32_MAX_BYTES);
   if (archiveBytes > limit) {
@@ -190,7 +206,14 @@ async function* gedzipChunks(plan: GedzipPlan): AsyncGenerator<Uint8Array> {
       await handle.close();
     }
   }
-  if (late.length) add(WARNINGS_ENTRY, 6).push(text.encode(`${late.join('\n')}\n`), true);
+  if (late.length) {
+    // Bounded, so the size estimate's room for this entry holds.
+    let body = `${late.join('\n')}\n`;
+    if (body.length > MAX_WARNINGS_TEXT) {
+      body = `${body.slice(0, MAX_WARNINGS_TEXT)}\n... (${late.length} files in all)\n`;
+    }
+    add(WARNINGS_ENTRY, 6).push(text.encode(body), true);
+  }
   zip.end();
   yield* flush();
 }
@@ -201,7 +224,13 @@ async function openUnchanged(file: PlannedFile) {
   try {
     const handle = await open(file.path, constants.O_RDONLY | constants.O_NOFOLLOW);
     const stat = await handle.stat();
-    if (stat.isFile() && stat.size === file.size && stat.mtimeMs === file.mtimeMs) return handle;
+    const same =
+      stat.isFile() &&
+      stat.dev === file.dev &&
+      stat.ino === file.ino &&
+      stat.size === file.size &&
+      stat.mtimeMs === file.mtimeMs;
+    if (same) return handle;
     await handle.close();
   } catch {
     // Gone or replaced: left out.
@@ -251,12 +280,14 @@ function safeRealpath(path: string): string | null {
 function statInside(
   realRoot: string,
   path: string,
-): { path: string; size: number; mtimeMs: number } | undefined {
+): { path: string; size: number; mtimeMs: number; dev: number; ino: number } | undefined {
   const real = safeRealpath(path);
   if (!real || !real.startsWith(realRoot + sep)) return undefined;
   try {
     const stat = lstatSync(real);
-    return stat.isFile() ? { path: real, size: stat.size, mtimeMs: stat.mtimeMs } : undefined;
+    if (!stat.isFile()) return undefined;
+    const { size, mtimeMs, dev, ino } = stat;
+    return { path: real, size, mtimeMs, dev, ino };
   } catch {
     return undefined;
   }

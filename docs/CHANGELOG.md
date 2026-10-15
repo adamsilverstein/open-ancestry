@@ -79,7 +79,7 @@ PR numbers point to the change on GitHub.
 - The server listens on `127.0.0.1` only. Requests are checked by Host and Origin, every change needs a per-session token, and a strict Content Security Policy is sent with no inline scripts. Nothing in the app trips that policy, and every end-to-end test fails if anything does. (#29, #34, #47, #174)
 - GEDCOM files are treated as untrusted. Values cannot inject extra GEDCOM lines on export, text that looks like a pointer stays text, coordinates are parsed safely, and control characters are escaped in command-line output. (#26, #150, #166, #179)
 - Media is served without path traversal, hard-linked media files and a symlinked media folder are refused, and uploads have size limits. (#29, #51, #236)
-- The library folder is private to your user account, and the API refuses navigations from other sites. (#151)
+- The library's files are private to your user account, and the API refuses navigations from other sites, so another site can't drop an export into Downloads. open-ancestry assumes one user per computer: a running app answers anyone on that machine at `127.0.0.1`. (#151)
 
 ### Performance
 

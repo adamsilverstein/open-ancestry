@@ -103,6 +103,27 @@ export function applyReimport(
     inc.db.prepare(sql).all(...params) as T[];
 
   const copier = new MediaCopier(store, session.media, maxMediaBytes);
+  // Copy the files apply may need now, before the transaction takes the tree's write lock:
+  // new media (not already in the tree by key or bytes), and files for placeholders.
+  {
+    const have = new Set<string>();
+    for (const m of store.db.prepare('SELECT * FROM media').all() as MediaRow[]) {
+      have.add(mediaKey(m));
+      if (m.sha256 && m.local_path) have.add(`sha:${m.sha256}`);
+    }
+    const filling = new Set(
+      changes.flatMap((c) =>
+        c.kind === 'media.file' && chosen.has(c.id) ? [c.incomingMediaId] : [],
+      ),
+    );
+    copier.prepare(
+      incAll<MediaRow>('SELECT * FROM media WHERE local_path IS NOT NULL').filter(
+        (m) =>
+          filling.has(m.id) ||
+          !(have.has(mediaKey(m)) || (m.sha256 && have.has(`sha:${m.sha256}`))),
+      ),
+    );
+  }
   const copied: string[] = [];
   const refused: string[] = [];
 
@@ -669,6 +690,7 @@ export function applyReimport(
     copier.discard();
     throw error;
   }
+  copier.keepUsed();
 
   const appliedCount = toApply.length;
   return {

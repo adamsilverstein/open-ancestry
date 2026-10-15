@@ -444,7 +444,7 @@ describe('undo, redo and history', () => {
   it('returns null when there is nothing to undo', async () => {
     const fresh = '/api/trees/Empty';
     await api.post('/api/trees', { name: 'Empty' });
-    expect((await api.post(`${fresh}/undo`)).json()).toEqual({ batch: null });
+    expect((await api.post(`${fresh}/undo`)).json()).toEqual({ batch: null, skipped: [] });
     expect((await api.get(`${fresh}/history`)).json()).toEqual({
       items: [],
       canUndo: false,

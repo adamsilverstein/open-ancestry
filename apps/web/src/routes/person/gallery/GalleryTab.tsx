@@ -28,12 +28,14 @@ import {
   ancestryLink,
   attachMedia,
   hasThumbnail,
+  learnedSize,
   mediaGroup,
   mediaSource,
   originalUrl,
   personMediaQuery,
   setProfilePhoto,
   thumbUrl,
+  tileImage,
   type GalleryItem,
   type MediaFilter,
   type MediaOwner,
@@ -81,17 +83,27 @@ function Preview({
   media: MediaRow;
   failures: ThumbFailures;
 }) {
+  // The original's size: stored, or learned from the first thumbnail that loads.
+  const [learned, setLearned] = useState<{ width: number; height: number } | null>(null);
+  const known =
+    media.width !== null ? { width: media.width, height: media.height ?? media.width } : learned;
   if (hasThumbnail(media) && !failures.has(media.id)) {
+    const image = tileImage(tree, media.id, known);
     // Decorative: the tile's caption already names it.
     return (
       <img
-        src={thumbUrl(tree, media.id, 'sm')}
-        // Tiles are about 190px wide: 2x screens pick the 480px thumbnail.
-        srcSet={`${thumbUrl(tree, media.id, 'sm')} 160w, ${thumbUrl(tree, media.id, 'md')} 480w`}
-        sizes="190px"
+        // A new element when the srcset changes: browsers keep the old density for a URL.
+        key={image.srcSet ?? 'plain'}
+        {...image}
         alt=""
         loading="lazy"
         decoding="async"
+        onLoad={(event) => {
+          // Size unknown (trees imported before sizes were recorded): learn it once.
+          if (known) return;
+          const size = learnedSize(event.currentTarget);
+          if (size) setLearned(size);
+        }}
         onError={() => failures.add(media.id)}
       />
     );

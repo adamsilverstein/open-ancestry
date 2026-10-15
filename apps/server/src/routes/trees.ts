@@ -5,7 +5,7 @@ import {
   listBatches,
   meta,
   redoLast,
-  undoLast,
+  undoLatest,
   type TreeStore,
 } from '@open-ancestry/db';
 import { buildGedcomExport, buildGedzipExport } from '@open-ancestry/export';
@@ -143,12 +143,13 @@ export function treeRoutes(app: Api, deps: Deps): void {
 
   app.post('/api/trees/:tree/undo', { schema: { params: TreeParams } }, async (request) => {
     const store = library.open(request.params.tree);
-    return { batch: undoLast(store) };
+    // `skipped`: newer batches stepped over because the NFC upgrade made them un-undoable.
+    return undoLatest(store);
   });
 
   app.post('/api/trees/:tree/redo', { schema: { params: TreeParams } }, async (request) => {
     const store = library.open(request.params.tree);
-    return { batch: redoLast(store) };
+    return { batch: redoLast(store), skipped: [] };
   });
 
   app.get(

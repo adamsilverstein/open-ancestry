@@ -36,7 +36,7 @@ describe('parentless families beside real ones', () => {
   });
 
   it('still finds half siblings through their known parents', () => {
-    expect(relationship(g, 'half', 'me').name).toBe('half brother');
+    expect(relationship(g, 'half', 'me').name).toBe('half-brother');
   });
 });
 

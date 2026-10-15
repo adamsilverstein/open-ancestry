@@ -25,6 +25,7 @@ import { useToast } from '../../../components/Toast/Toast';
 import { fullName, isLivingStatus, nearestRelative } from '../../../lib/person';
 import { useOpenRestored } from '../../../lib/useOpenRestored';
 import { applyNames, applyPerson, nameChanges, toDraft, type NameDraft } from './optimistic';
+import { useDirtyForm } from './dirty';
 import { SaveError, useSaveState } from './SaveError';
 import styles from './Edit.module.css';
 
@@ -128,6 +129,7 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
   const [living, setLiving] = useState<LivingChoice>(livingChoice(detail.person.living));
   const [links, setLinks] = useState<ParentLink[]>(() => parentLinks(detail));
   const [confirmDelete, setConfirmDelete] = useState(false);
+  useDirtyForm({ names, sex, living, links });
   // Given names is what people edit most, so focus starts there.
   const firstGiven = useRef<HTMLInputElement>(null);
   const name = fullName(detail.summary);

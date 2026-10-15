@@ -28,7 +28,7 @@ const port = Number(process.env.E2E_PORT);
 if (!process.env.OA_E2E_LIBRARY) {
   process.env.OA_E2E_LIBRARY = join(tmpdir(), `oa-e2e-library-${port}`);
   // Ours to remove when the run ends (global-teardown.ts); a library passed in is kept.
-  process.env.OA_E2E_LIBRARY_OWNED = '1';
+  process.env.OA_E2E_LIBRARY_OWNER = String(process.pid);
 }
 const library = process.env.OA_E2E_LIBRARY;
 const baseURL = `http://127.0.0.1:${port}`;

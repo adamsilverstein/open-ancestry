@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 
 /*
  * Temp folders for tests and benches. Every folder made here is removed when
@@ -18,16 +18,38 @@ const made = (shared[REGISTRY] ??= new Set<string>());
 
 /** A fresh folder in the OS temp dir, removed after the current test file. */
 export function makeTempDir(prefix = 'oa-test-'): string {
+  if (/[/\\]/.test(prefix)) throw new Error(`Temp dir prefix has a path separator: ${prefix}`);
   const dir = mkdtempSync(join(tmpdir(), prefix));
   made.add(dir);
   return dir;
 }
 
+/**
+ * The e2e library to remove when a Playwright run ends: only the one this
+ * process made (OA_E2E_LIBRARY_OWNER is its pid, so a nested run that
+ * inherits the variables gets null), and only an `oa-e2e-library-` folder
+ * directly in the OS temp dir.
+ */
+export function ownedE2eLibrary(
+  env: NodeJS.ProcessEnv = process.env,
+  pid: number = process.pid,
+): string | null {
+  const library = env.OA_E2E_LIBRARY;
+  if (!library || env.OA_E2E_LIBRARY_OWNER !== String(pid)) return null;
+  const path = resolve(library);
+  const inTemp = dirname(path) === resolve(tmpdir());
+  return inTemp && basename(path).startsWith('oa-e2e-library-') ? path : null;
+}
+
 /** Removes every folder makeTempDir made so far. */
 export function removeTempDirs(): void {
   for (const dir of made) {
-    rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
     made.delete(dir);
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+    } catch {
+      // Best effort: one folder that cannot go must not keep the rest.
+    }
   }
 }
 

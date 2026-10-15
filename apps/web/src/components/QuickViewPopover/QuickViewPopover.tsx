@@ -95,7 +95,8 @@ export function QuickViewPopover({
         </div>
         <div className={styles.events}>
           {eventLine('Born', birth)}
-          {person.living ? <p className={styles.event}>Living</p> : eventLine('Died', death)}
+          {/* A living person's lifespan already ends in "Living". */}
+          {!person.living && eventLine('Died', death)}
         </div>
         <div className={styles.actions}>
           <Link

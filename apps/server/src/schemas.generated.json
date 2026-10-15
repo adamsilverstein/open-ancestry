@@ -2822,7 +2822,7 @@
   },
   "ReimportApplyBody": {
     "type": "object",
-    "required": ["accept"],
+    "required": ["accept", "comparison"],
     "properties": {
       "accept": {
         "type": "array",
@@ -2831,6 +2831,20 @@
           "maxLength": 32
         },
         "maxItems": 1000000
+      },
+      "comparison": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "additionalProperties": false
+  },
+  "ReimportStatusQuery": {
+    "type": "object",
+    "properties": {
+      "comparison": {
+        "type": "integer",
+        "minimum": 1
       }
     },
     "additionalProperties": false

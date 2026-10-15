@@ -94,3 +94,11 @@ export {
   type RefreshOptions,
 } from './derived';
 export { getRelationship, type RelationshipView } from './kinship';
+export {
+  checkMediaPathSync,
+  openMediaFile,
+  openMediaFileSync,
+  resolveMediaPath,
+  resolveMediaPathSync,
+  type MediaRefusal,
+} from './media-path';

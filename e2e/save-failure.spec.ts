@@ -239,3 +239,42 @@ test('a save that finishes after Cancel does not close the next dialog', async (
   await second.getByRole('button', { name: 'Cancel' }).click();
   await expect(timeline(page).getByText('1905').first()).toBeVisible();
 });
+
+test('a server validation error reads as a plain sentence in every dialog, never schema text', async ({
+  page,
+}) => {
+  await openSeeded(page, seeded);
+  const refuse = (route: Route) =>
+    route.request().method() === 'GET'
+      ? route.fallback()
+      : route.fulfill({
+          status: 400,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: {
+              code: 'validation_failed',
+              message:
+                'body/operations/0/name/surname must NOT have more than 200 characters, body/operations/0/name/surname must be null',
+            },
+          }),
+        });
+  await page.route(/\/batch$|\/children$/, refuse);
+
+  // Edit person (a batch save).
+  await page.getByRole('button', { name: 'Edit person', exact: true }).click();
+  const edit = page.getByRole('dialog', { name: 'Edit person' });
+  await edit.getByRole('textbox', { name: 'Surname' }).first().fill('Ashdowne');
+  await edit.getByRole('button', { name: 'Save' }).click();
+  await expect(edit.getByRole('alert')).toContainText('Surname can be at most 200 characters');
+  await expect(edit.getByRole('alert')).not.toContainText('body/');
+  await edit.getByRole('button', { name: 'Cancel' }).click();
+
+  // Add relative.
+  await relationships(page).getByRole('button', { name: 'Add family member' }).click();
+  await page.getByRole('menuitem', { name: 'Add child' }).click();
+  const add = page.getByRole('dialog', { name: 'Add child' });
+  await add.getByRole('textbox', { name: 'Given names' }).fill('Rollo');
+  await add.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(add.getByRole('alert')).toContainText('Surname can be at most 200 characters');
+  await expect(add.getByRole('alert')).not.toContainText('body/');
+});

@@ -95,7 +95,8 @@ export function treeRoutes(app: Api, deps: Deps): void {
 
   /** A re-import review holds files in the tree's folder and applies to it by name. */
   const assertNoReview = (tree: string) => {
-    if (deps.reimports.hasTree(tree)) {
+    // This server's reviews, or any live server's working folders in the tree (#246 review).
+    if (deps.reimports.hasTree(tree) || deps.reimportFolders.inUse(library.dirOf(tree))) {
       throw conflict(`Tree "${tree}" has a re-import review open; apply or discard it first`);
     }
   };

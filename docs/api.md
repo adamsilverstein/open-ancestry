@@ -43,7 +43,7 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 |---|---|
 | `GET /api/health` | Liveness. |
 | `GET /api/session` | Mutation token. |
-| `GET /api/trees` | `{ trees: [{ id, name, modifiedAt }] }` |
+| `GET /api/trees` | `{ trees: [{ id, name, label, modifiedAt }] }`. `name` is the stored name; `label` adds the folder (`Smith (Smith copy)`) for every tree whose folder is not exactly its name when two trees share a name. |
 | `POST /api/trees` `{ name }` | Create a tree (201). Names cannot contain path separators or `%`, start or end with a dot, or be a Windows device name (`CON`, `NUL`, `COM1`, ...). |
 | `GET /api/trees/:tree` | Tree info with `peopleCount`, `livingCount` and `privateCount` (who a privatized export hides: people who may be living, and others marked private or confidential), `homePersonId`, `schemaVersion`. |
 | `PATCH /api/trees/:tree` `{ name }` | Rename (folder and display name). |
@@ -59,9 +59,10 @@ The SPA fetches the token once at startup and sends it with every mutation; brow
 | `GET /api/trees/:tree/tags` | Tags with person counts. |
 | `GET /api/trees/:tree/history?limit` | Change batches, newest first in commit order (`seq`, not the ULID, so clock changes cannot reorder them), `canUndo`, `canRedo`. |
 | `POST /api/trees/:tree/undo`, `/redo` | Undo or redo the latest batch; `{ batch, skipped }`. `batch` is null if there was none. `skipped` lists newer batches undo stepped over because the NFC upgrade made them impossible to undo (always empty for redo). Undo takes `?expect=<batch id>`: it then undoes exactly that batch, only while it is still the newest applied one, else `409 not_newest` (a toast's Undo for one change must not undo a later one). |
-| `GET /api/trees/:tree/export.json` | Full open-ancestry JSON download. |
+| `GET /api/trees/:tree/export.json` | Full open-ancestry JSON download, with the edit history (`change_batch`, `change_log`: undo, and the text of anything deleted). `?history=0` leaves the history out, along with import warnings, unmapped-tag examples, and the imported text (`raw_record`, `unmapped_line`) of records changed or deleted since import; the export dialog does unless asked. |
 | `GET /api/trees/:tree/export.ged?version&privatize` | GEDCOM download (`text/vnd.familysearch.gedcom`); `version` is `5.5.1` (default, Ancestry-compatible) or `7`; `privatize=true` writes living people, and anyone marked private or confidential, as "Private" with only their family links, and names the download `private-tree.ged` instead of after the tree. |
 | `GET /api/trees/:tree/export.gdz?privatize` | GEDZIP download (GEDCOM 7 plus the tree's media files), streamed one file at a time so memory stays bounded. The GEDCOM text and media list are one snapshot; a media file that changes while streaming is left out and named in a final `warnings.txt` entry. 409 when the archive would pass 4 GiB (ZIP64 is not written). |
+| `GET /api/limits` | Upload caps in bytes: `{ importUpload: { gedcomBytes, archiveBytes }, mediaUploadBytes }`, so the app can refuse an oversized file before sending it. A 413 names the cap in KB, MB or GB. |
 | `POST /api/import` (multipart `file`: .ged, .gedcom, .zip, .gdz) | Imports into a new tree named after the file (" 2", " 3", ... when taken); 202 `{ jobId, job }` with `job.tree` and `job.createdTree: true`. The server owns that tree: if the import fails or is cancelled it removes it, but only while it is still the empty tree it created. |
 | `POST /api/trees/:tree/import` (multipart `file`) | Starts an import into an existing, empty tree (202 `{ jobId, job }`); that tree is never removed. |
 | `POST /api/trees/:tree/reimport` (multipart `file`) | Compares an updated export with the tree as a job (`kind: 'reimport'`); its `result` is `{ reimportId, counts }`. Nothing is written. |

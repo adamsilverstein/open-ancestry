@@ -739,13 +739,36 @@ export interface ListPeopleOptions {
   offset?: number;
 }
 
-/** Earliest principal date of the given event types per person, as one grouped pass. */
-const vitalSort = (types: readonly string[]) =>
-  `LEFT JOIN (SELECT r.person_id, min(e.date_sort) AS k FROM event_role r
+/** The people list order computed from the tables themselves, as person_sort indexes it. */
+function sortFromTables(
+  store: TreeStore,
+  sort: PeopleSort,
+  dir: 'ASC' | 'DESC',
+  where: string[],
+  params: unknown[],
+): string[] {
+  const vital = (types: readonly string[]) =>
+    `LEFT JOIN (SELECT r.person_id, min(e.date_sort) AS k FROM event_role r
       CROSS JOIN event e ON e.id = r.event_id
       WHERE r.role = 'principal' AND e.type IN (${types.map((t) => `'${t}'`).join(', ')})
         AND e.date_sort IS NOT NULL
       GROUP BY r.person_id) v ON v.person_id = p.id`;
+  const keys: Record<PeopleSort, string> = {
+    surname: `n.surname IS NULL, n.surname COLLATE NOCASE ${dir}, n.given COLLATE NOCASE ${dir}`,
+    given: `n.given IS NULL, n.given COLLATE NOCASE ${dir}, n.surname COLLATE NOCASE ${dir}`,
+    birth: `v.k IS NULL, v.k ${dir}`,
+    death: `v.k IS NULL, v.k ${dir}`,
+  };
+  const join = sort === 'birth' ? vital(BIRTH_TYPES) : sort === 'death' ? vital(DEATH_TYPES) : '';
+  return store
+    .stmt(
+      `SELECT p.id FROM person p LEFT JOIN person_name n ON n.person_id = p.id AND n.is_primary = 1
+       ${join} ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+       ORDER BY ${keys[sort]}, p.id`,
+    )
+    .pluck()
+    .all(...params) as string[];
+}
 
 /*
  * Sorting a whole tree (and OFFSET deep into it) costs far more than reading
@@ -798,40 +821,52 @@ function sortedPeople(
     return hit;
   }
 
-  const dir = direction === 'desc' ? 'DESC' : 'ASC';
-  const where: string[] = [];
+  // person_sort holds each person's keys (sort-keys.ts), with an index per order and
+  // direction, so this reads an index instead of sorting the tree (#114). The order is
+  // `key IS NULL, key, [second key,] id` with the direction on the keys; NULL keys are
+  // read as a second range so each range is one index scan.
+  const desc = direction === 'desc';
+  const dir = desc ? 'DESC' : 'ASC';
+  // Filters on `alias` (person_sort or person), with the person id in `id`.
   const params: unknown[] = [];
-  if (sex) {
-    where.push('p.sex = ?');
-    params.push(sex);
-  }
-  if (living) {
-    where.push(`p.living IN (${IDS})`);
-    params.push(JSON.stringify(living));
-  }
-  if (tagId) {
-    where.push(
-      "EXISTS (SELECT 1 FROM tag_link t WHERE t.tag_id = ? AND t.owner_type = 'person' AND t.owner_id = p.id)",
-    );
-    params.push(tagId);
-  }
-  const keys: Record<string, string> = {
-    surname: `n.surname IS NULL, n.surname COLLATE NOCASE ${dir}, n.given COLLATE NOCASE ${dir}`,
-    given: `n.given IS NULL, n.given COLLATE NOCASE ${dir}, n.surname COLLATE NOCASE ${dir}`,
-    birth: `v.k IS NULL, v.k ${dir}`,
-    death: `v.k IS NULL, v.k ${dir}`,
+  if (sex) params.push(sex);
+  if (living) params.push(JSON.stringify(living));
+  if (tagId) params.push(tagId);
+  const filters = (alias: string, id: string) => [
+    ...(sex ? [`${alias}.sex = ?`] : []),
+    ...(living ? [`${alias}.living IN (${IDS})`] : []),
+    ...(tagId
+      ? [
+          `EXISTS (SELECT 1 FROM tag_link t WHERE t.tag_id = ? AND t.owner_type = 'person' AND t.owner_id = ${id})`,
+        ]
+      : []),
+  ];
+  const where = filters('s', 's.person_id');
+  const orders: Record<PeopleSort, [string, string | null]> = {
+    surname: ['surname', 'given'],
+    given: ['given', 'surname'],
+    birth: ['birth_key', null],
+    death: ['death_key', null],
   };
-  const key = keys[sort ?? 'surname'] ?? keys.surname;
-  const join =
-    sort === 'birth' ? vitalSort(BIRTH_TYPES) : sort === 'death' ? vitalSort(DEATH_TYPES) : '';
-  const ids = store
-    .stmt(
-      `SELECT p.id FROM person p LEFT JOIN person_name n ON n.person_id = p.id AND n.is_primary = 1
-       ${join} ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-       ORDER BY ${key}, p.id`,
-    )
-    .pluck()
-    .all(...params) as string[];
+  const name = (sort && sort in orders ? sort : 'surname') as PeopleSort;
+  const [key, second] = orders[name];
+  const text = second !== null;
+  const index = `person_sort_${name}${desc ? '_desc' : ''}_idx`;
+  const by = (column: string) => `s.${column}${text ? ' COLLATE NOCASE' : ''} ${dir}`;
+  const range = (isNull: boolean) =>
+    store
+      .stmt(
+        `SELECT s.person_id FROM person_sort s INDEXED BY ${index}
+         WHERE s.${key} IS ${isNull ? '' : 'NOT '}NULL${where.map((w) => ` AND ${w}`).join('')}
+         ORDER BY ${[...(isNull ? [] : [by(key)]), ...(second ? [by(second)] : []), 's.person_id'].join(', ')}`,
+      )
+      .pluck()
+      .all(...params) as string[];
+  // Inside an open transaction person_sort may not have caught up with this unit of
+  // work's writes yet (it is refreshed when the work flushes): sort from the tables.
+  const ids = store.db.inTransaction
+    ? sortFromTables(store, name, dir, filters('p', 'p.id'), params)
+    : [...range(false), ...range(true)];
 
   if (!cacheable) return ids;
   if (!cache) {

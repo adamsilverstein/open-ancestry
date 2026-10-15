@@ -1,5 +1,6 @@
 import { getPersonSummaries, type PersonSummary } from './queries';
 import { DOC_COLUMNS, rebuildSearchDocs } from './search-docs';
+import { rebuildSortKeys, refreshSortKeys } from './sort-keys';
 import type { TreeStore } from './store';
 
 /*
@@ -54,6 +55,8 @@ export function markSearchDirty(
 /** Rewrites the search documents of the given people (removing those that no longer exist). */
 export function refreshSearch(store: TreeStore, personIds: string[]): void {
   if (personIds.length === 0) return;
+  // The people list's sort keys come from the same rows (names, vital events).
+  refreshSortKeys(store, personIds);
   const ids = JSON.stringify(personIds);
   store
     .stmt(
@@ -74,7 +77,10 @@ export function refreshSearch(store: TreeStore, personIds: string[]): void {
 
 /** Drops and rebuilds the whole search index. */
 export function rebuildSearchIndex(store: TreeStore): void {
-  store.db.transaction(() => rebuildSearchDocs(store.db))();
+  store.db.transaction(() => {
+    rebuildSearchDocs(store.db);
+    rebuildSortKeys(store.db);
+  })();
 }
 
 export interface SearchOptions {

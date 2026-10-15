@@ -14,3 +14,4 @@ export {
   type GedzipPlan,
   type GedzipPlanOptions,
 } from './gedzip';
+export { changedSinceImport } from './dirty';

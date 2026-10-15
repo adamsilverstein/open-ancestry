@@ -12,6 +12,7 @@ import {
 import {
   GedzipTooLargeError,
   buildGedcomExport,
+  changedSinceImport,
   planGedzipExport,
   streamGedzip,
 } from '@open-ancestry/export';
@@ -22,6 +23,7 @@ import {
   GedzipQuery,
   HistoryQuery,
   HomeBody,
+  JsonExportQuery,
   TreeBody,
   TreeParams,
   UndoQuery,
@@ -185,12 +187,20 @@ export function treeRoutes(app: Api, deps: Deps): void {
 
   app.get(
     '/api/trees/:tree/export.json',
-    { schema: { params: TreeParams } },
+    { schema: { params: TreeParams, querystring: JsonExportQuery } },
     async (request, reply) => {
       const { tree } = request.params;
       // Mid-import the tree is not the user's yet: export it once the import ends (#186).
       library.assertIdle(tree);
-      const json = exportJsonString(library.open(tree));
+      // A full backup keeps the edit history (undo, and the text of deleted rows) unless asked not to.
+      const { history } = request.query;
+      const store = library.open(tree);
+      const keep = history !== '0' && history !== 'false';
+      // Without the history, deleted and edited-away text must not survive elsewhere either.
+      const json = exportJsonString(store, {
+        history: keep,
+        ...(!keep && { omitImportedText: changedSinceImport(store) }),
+      });
       return reply
         .type('application/json; charset=utf-8')
         .header('content-disposition', attachment(tree, 'json'))

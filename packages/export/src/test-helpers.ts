@@ -153,12 +153,35 @@ export function gedcom7Problems(text: string): string[] {
     ) {
       problems.push(`bad RESN ${v}`);
     }
-    if (path.endsWith('OBJE.FILE') && !node.children.some((c) => c.tag === 'FORM')) {
-      problems.push(`FILE without FORM at ${at}`);
+    if (node.tag === 'FILE') {
+      const forms = node.children.filter((c) => c.tag === 'FORM');
+      if (forms.length !== 1) problems.push(`FILE with ${forms.length} FORMs at ${at}`);
+      for (const f of forms) {
+        if (!/^[a-z]+\/[\w.+-]+$/i.test(f.value ?? '')) {
+          problems.push(`FORM "${f.value ?? ''}" is not a media type at ${at}`);
+        }
+      }
     }
     for (const c of node.children) visit(c, `${path}.${c.tag}`);
   };
   for (const r of doc.records) visit(r, r.tag);
+  problems.push(...fileProblems(text));
+  return problems;
+}
+
+/**
+ * FILE lines without a value, invalid in GEDCOM 5.5.1 (MULTIMEDIA_FILE_REFN
+ * is required) and 7 (the FilePath payload is required). Empty means none.
+ */
+export function fileProblems(text: string): string[] {
+  const problems: string[] = [];
+  const visit = (node: GedcomNode, path: string) => {
+    if (node.tag === 'FILE' && !node.value?.trim()) {
+      problems.push(`FILE with no value at ${path} (line ${node.line})`);
+    }
+    for (const c of node.children) visit(c, `${path}.${c.tag}`);
+  };
+  for (const r of parseGedcom(text).records) visit(r, r.tag);
   return problems;
 }
 

@@ -290,7 +290,9 @@ export function TreeView({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const kind: LayoutKind = search.layout ?? 'family';
+  // Only a known layout: never trust an inherited key like `toString`.
+  const kind: LayoutKind =
+    search.layout && Object.hasOwn(DEFAULT_DEPTH, search.layout) ? search.layout : 'family';
   // Hand-edited URLs can hold anything: clamp to what the server serves.
   const requestedUp = parseGenerations(search.up) ?? DEFAULT_DEPTH[kind].up;
   const fanCapped = kind === 'fan' && requestedUp > MAX_FAN_GENERATIONS;

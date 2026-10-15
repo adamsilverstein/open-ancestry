@@ -343,6 +343,16 @@ const mentions = [
   '1 BIRT',
   '2 DATE 2001',
   '1 FAMC @F1@',
+  '0 @I3@ INDI',
+  '1 NAME Li /Wu/',
+  '1 BIRT',
+  '2 DATE 2003',
+  '1 FAMC @F1@',
+  '0 @I4@ INDI',
+  '1 NAME 明 /李/',
+  '1 BIRT',
+  '2 DATE 2005',
+  '1 FAMC @F1@',
   '0 @I2@ INDI',
   '1 NAME Old /Livingson/',
   '1 BIRT',
@@ -353,12 +363,15 @@ const mentions = [
   '1 EVEN Read by Quillon',
   '2 TYPE Witnessed by Zedekiah Livingson',
   '1 NOTE Zed (Zedekiah Marriedname) kept his watch.',
+  '1 NOTE Photo of Li Wu at school; 李明的照片; Zoe and zedekiah2015.',
   '1 NOTE @N1@',
   '1 OBJE @O1@',
   '1 FAMS @F1@',
   '0 @F1@ FAM',
   '1 HUSB @I2@',
   '1 CHIL @I1@',
+  '1 CHIL @I3@',
+  '1 CHIL @I4@',
   '0 @N1@ NOTE Told by zedekiah, his great-grandson.',
   '0 @O1@ OBJE',
   '1 FILE photos/zedekiah-graduation.png',
@@ -369,7 +382,8 @@ const mentions = [
 ];
 
 describe('privatized exports remove withheld people named in other records (#195)', () => {
-  const named = (text: string) => text.match(/zedekiah|quillon|zeddo|marriedname|\bzed\b/gi) ?? [];
+  const named = (text: string) =>
+    text.match(/zedekiah|quillon|zeddo|marriedname|\bzed\b|li wu|李明/gi) ?? [];
 
   it('5.5.1, 7 and GEDZIP name no withheld person, and keep the deceased name', async () => {
     const root = mkdtempSync(join(tmpdir(), 'oa-privacy-'));

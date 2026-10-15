@@ -1368,3 +1368,62 @@ describe('trustworthy confidence and reasons (#159)', () => {
     }
   });
 });
+
+describe('review of #221: media whose files were missing at import', () => {
+  const TWO_MISSING = ged(
+    '0 @I1@ INDI',
+    '1 NAME Ivo /Canary/',
+    '1 OBJE',
+    '2 FILE photos/untitled-a.jpg',
+    '1 OBJE',
+    '2 FILE photos/untitled-b.jpg',
+  );
+  const files = (tree: TreeStore) =>
+    rows<{ line: string }>(
+      tree,
+      `SELECT u.line FROM unmapped_line u JOIN media m ON m.id = u.owner_id
+        WHERE u.owner_type = 'media' ORDER BY u.line`,
+    ).map((r) => r.line);
+
+  it('keeps two untitled missing photos apart, each with its own path', async () => {
+    const tree = openMemoryTree();
+    await importGedcom({ bytes: TWO_MISSING }, tree, { today: TODAY });
+    expect(files(tree)).toEqual(['2 FILE photos/untitled-a.jpg', '2 FILE photos/untitled-b.jpg']);
+
+    const again = await prepareReimport(tree, { bytes: renumber(TWO_MISSING) }, { today: TODAY });
+    try {
+      expect(again.diff.counts).toMatchObject({ newPeople: 0, changes: 0 });
+      applyReimport(tree, again, defaults(again), 'Re-import');
+    } finally {
+      closeReimport(again);
+    }
+    expect(value(tree, 'SELECT count(*) FROM media')).toBe(2);
+    expect(files(tree)).toEqual(['2 FILE photos/untitled-a.jpg', '2 FILE photos/untitled-b.jpg']);
+    tree.close();
+  });
+
+  it('never merges two incoming media into one existing row', async () => {
+    const tree = openMemoryTree();
+    // An older tree: one untitled missing photo, keyed by title only.
+    await importGedcom(
+      {
+        bytes: ged('0 @I1@ INDI', '1 NAME Ivo /Canary/', '1 OBJE', '2 FILE photos/untitled-a.jpg'),
+      },
+      tree,
+      { today: TODAY },
+    );
+    tree.db.prepare("DELETE FROM unmapped_line WHERE owner_type = 'media'").run();
+    const again = await prepareReimport(tree, { bytes: renumber(TWO_MISSING) }, { today: TODAY });
+    try {
+      applyReimport(tree, again, defaults(again), 'Re-import');
+    } finally {
+      closeReimport(again);
+    }
+    const lines = rows<{ n: number }>(
+      tree,
+      `SELECT count(*) AS n FROM unmapped_line WHERE owner_type = 'media' GROUP BY owner_id`,
+    );
+    expect(lines.every((l) => l.n <= 1)).toBe(true);
+    tree.close();
+  });
+});

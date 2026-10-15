@@ -151,7 +151,16 @@ test('import, edit, re-import, review, apply, then undo', async ({
       .getByRole('listitem')
       .filter({ hasText: /Applied \d+ change/ }),
   ).toBeVisible({ timeout: 30_000 });
-  await expect(page).toHaveURL(/\/(tree|person)\//);
+  // The result lists what was applied, by person, with links, and what was skipped (#158).
+  const result = page.getByRole('region', { name: 'Re-import applied' });
+  await expect(result).toBeVisible();
+  const thaddeusLink = result.getByRole('link', { name: 'Thaddeus Ashgrove' });
+  await expect(thaddeusLink).toHaveAttribute('href', new RegExp(`/person/${thaddeus}$`));
+  await expect(result.getByRole('link', { name: 'Noah Ashgrove' })).toBeVisible();
+  await expect(
+    result.getByText(/Birth: abt\. 1842 → 12 Mar 1842|Birth: Abt\. 1842 → 12 MAR 1842/),
+  ).toBeVisible();
+  await expect(result.getByText(/^Skipped \d+ change/)).toBeVisible();
   expect((await eventDate(request, seeded.tree, thaddeus, 'BIRT')).date_text).toBe('12 MAR 1842');
   expect((await eventDate(request, seeded.tree, josiah, 'DEAT')).date_text).toBe('3 MAY 1939');
   expect(await personByName(request, seeded.tree, 'Noah')).toBeTruthy();
@@ -165,6 +174,15 @@ test('import, edit, re-import, review, apply, then undo', async ({
       .getByRole('listitem')
       .filter({ hasText: 'Undid Re-import' }),
   ).toBeVisible();
+  // Undo dismisses the Applied toast, so the two don't sit side by side.
+  await expect(
+    page
+      .getByRole('region', { name: /Notifications/ })
+      .getByRole('listitem')
+      .filter({ hasText: /Applied \d+ change/ }),
+  ).toHaveCount(0);
+  await result.getByRole('link', { name: 'Go to the tree' }).click();
+  await expect(page).toHaveURL(/\/(tree|person)\//);
   expect((await eventDate(request, seeded.tree, thaddeus, 'BIRT')).date_text).toBe('Abt. 1842');
   expect(await personByName(request, seeded.tree, 'Noah')).toBeUndefined();
 });

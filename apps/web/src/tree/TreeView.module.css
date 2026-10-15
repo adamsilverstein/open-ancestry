@@ -377,7 +377,7 @@
 
 /* The phone layout (PHONE_LAYOUT_QUERY): the toolbar along the bottom, the
    labels and minimap clear of it. --oa-tree-bottom-bar is set by TreeView. */
-@media (max-width: 640px), (pointer: coarse) and (max-height: 500px) {
+@media (width < 640px), (pointer: coarse) and (max-height: 500px) {
   .toolbar {
     top: auto;
     bottom: var(--oa-space-4);

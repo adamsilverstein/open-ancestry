@@ -1,6 +1,6 @@
 # open-ancestry data model
 
-Current schema version: **4**
+Current schema version: **5**
 
 This is the reference for the local data format: the SQLite schema inside every tree, the rules the code keeps on top of it, and the JSON interchange format. It is owned by `packages/db`. `packages/db/src/data-model-doc.test.ts` fails if a table or column exists in the live database but not here (or the other way round), or if an enum value is missing, so this document cannot drift from the DDL.
 
@@ -476,6 +476,20 @@ Derived: maps each person to their full-text row. Not exported; rebuilt on impor
 |---|---|---|---|
 | `doc_id` | INTEGER | no | Rowid of the person's `person_search` row. |
 | `person_id` | TEXT | no | `person.id` (unique). |
+
+### `person_sort`
+
+Derived (schema v5, #114): each person's people-list sort keys and filters, refreshed with the search documents whenever a person, their names or their events change, so the first page of any order reads an index instead of sorting the tree. Every key has an ascending index and one with `person_id DESC`, so a descending order scanned backwards still breaks ties by ascending id. Not exported, not change-logged; rebuilt on import.
+
+| Column | Type | Null | Meaning |
+|---|---|---|---|
+| `person_id` | TEXT | no | `person.id` (primary key). |
+| `surname` | TEXT | yes | Primary name's surname (sorted `COLLATE NOCASE`). |
+| `given` | TEXT | yes | Primary name's given names (sorted `COLLATE NOCASE`). |
+| `birth_key` | INTEGER | yes | Earliest `date_sort` of the person's principal `BIRT`, `CHR` or `BAPM` events. |
+| `death_key` | INTEGER | yes | Earliest `date_sort` of the person's principal `DEAT`, `BURI` or `CREM` events. |
+| `sex` | TEXT | no | `person.sex`, for the sex filter. |
+| `living` | TEXT | no | `person.living`, for the living filter. |
 
 ### `person_search`
 

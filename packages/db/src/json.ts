@@ -21,7 +21,7 @@ export const OA_JSON_FORMAT = 'open-ancestry';
 export const OA_JSON_FORMAT_VERSION = 1;
 
 /** Derived tables rebuilt on import rather than exported. */
-const DERIVED_TABLES = new Set(['search_doc', 'person_search', 'derived_state']);
+const DERIVED_TABLES = new Set(['search_doc', 'person_search', 'derived_state', 'person_sort']);
 const HISTORY_TABLES = new Set(['change_batch', 'change_log']);
 
 export type OaJsonTables = { [T in keyof TableRows]: TableRows[T][] } & {

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { closeReimport, type ReimportSession } from '@open-ancestry/import';
+import { REVIEW_MAX_AGE_MS, touchFolder } from './reimport-folders';
 
 /*
  * Re-import sessions: an updated export compared with a tree, held in memory
@@ -19,7 +20,7 @@ export class ReimportSessions {
   private readonly maxSessions: number;
   private readonly maxAgeMs: number;
 
-  constructor({ maxSessions = 4, maxAgeMs = 60 * 60 * 1000 } = {}) {
+  constructor({ maxSessions = 4, maxAgeMs = REVIEW_MAX_AGE_MS } = {}) {
     this.maxSessions = maxSessions;
     this.maxAgeMs = maxAgeMs;
   }
@@ -44,7 +45,10 @@ export class ReimportSessions {
 
   get(id: string): StoredReimport | undefined {
     this.expire();
-    return this.sessions.get(id);
+    const stored = this.sessions.get(id);
+    // Its working folder is in use: keep the crash-leftover sweeps away from it.
+    if (stored) touchFolder(stored.session.mediaDir);
+    return stored;
   }
 
   remove(id: string): void {

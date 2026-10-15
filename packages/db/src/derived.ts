@@ -181,18 +181,18 @@ const orphanCleanup: DerivedStep = {
 };
 
 /**
- * SQL true for a note (`n`) or media row (`m`) that something used to point to,
- * as opposed to an imported NOTE or OBJE record that always stood alone: an
- * inline one, one whose link a delete removed, or one an imported record
- * pointed to.
+ * SQL true for a note (`n`) or media row (`m`) that was someone's and is now
+ * no one's: an inline one, or an imported record whose link a delete removed.
+ * A pointer in any imported record's text counts as a use (an ASSO NOTE or a
+ * custom subtree is kept as text, not as a link), so such a record is kept.
  */
 function wasLinked(table: 'note' | 'media'): string {
   const row = table === 'note' ? 'n' : 'm';
   return `(${row}.external_id IS NULL
-    OR EXISTS (SELECT 1 FROM change_log c WHERE c.entity = '${table}_link' AND c.op = 'delete'
-                 AND json_extract(c.before_json, '$.${table}_id') = ${row}.id)
-    OR EXISTS (SELECT 1 FROM raw_record r WHERE r.xref IS NOT ${row}.external_id
-                 AND instr(r.raw_text, ' ' || ${row}.external_id) > 0))`;
+    OR (EXISTS (SELECT 1 FROM change_log c WHERE c.entity = '${table}_link' AND c.op = 'delete'
+                  AND json_extract(c.before_json, '$.${table}_id') = ${row}.id)
+        AND NOT EXISTS (SELECT 1 FROM raw_record r WHERE r.xref IS NOT ${row}.external_id
+                          AND instr(r.raw_text, ' ' || ${row}.external_id) > 0)))`;
 }
 
 /** An import report without quoted lines, or null when it has none. */

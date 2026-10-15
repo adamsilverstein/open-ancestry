@@ -209,7 +209,9 @@ function baseScore(
  * until MAX_NEAR candidates are found. Same-name people who share a death
  * year are always compared, however far apart their birth years: an export
  * that turns "BET 1920 AND 1929" into "1 JAN 1929" moves the birth year
- * further than the nearest few reach in a crowded name. A name with at most
+ * further than the nearest few reach in a crowded name; for the same reason a
+ * tree person born in a range is compared with any birth year inside it. A
+ * name with at most
  * SMALL_BLOCK tree people is compared in full, and a person without a birth
  * year meets the same-name people without one (up to MAX_UNDATED). Surname sound with the exact
  * birth year finds a changed given name; when
@@ -246,6 +248,8 @@ interface NameBlock {
   years: number[];
   ids: string[];
   undated: string[];
+  /** People born within a range wider than NEAR_YEARS (`BET 1940 AND 1949`). */
+  ranges: { start: number; end: number; id: string }[];
 }
 
 /** The tree's people indexed by blocking key. */
@@ -268,12 +272,19 @@ class Blocks {
         }
         let block = this.byName.get(name);
         if (!block) {
-          block = { years: [], ids: [], undated: [] };
+          block = { years: [], ids: [], undated: [], ranges: [] };
           this.byName.set(name, block);
           dated.set(name, []);
         }
         if (p.birthYear === null) block.undated.push(p.row.id);
         else dated.get(name)!.push({ year: p.birthYear, id: p.row.id });
+        if (
+          p.birthYear !== null &&
+          p.birthYearEnd !== null &&
+          p.birthYearEnd - p.birthYear > NEAR_YEARS
+        ) {
+          block.ranges.push({ start: p.birthYear, end: p.birthYearEnd, id: p.row.id });
+        }
       }
       if (p.birthYear !== null) {
         for (const s of surnames) {
@@ -317,6 +328,11 @@ class Blocks {
         continue;
       }
       nearby = nearestByYear(block, p.birthYear, into) || nearby;
+      // A range refined to one of its years ("BET 1940 AND 1949" to 1949) is still near.
+      for (const r of block.ranges) {
+        if (r.start - NEAR_YEARS <= p.birthYear && p.birthYear <= r.end + NEAR_YEARS)
+          into.add(r.id);
+      }
     }
     if (p.birthYear === null) return;
     for (const s of surnames) {

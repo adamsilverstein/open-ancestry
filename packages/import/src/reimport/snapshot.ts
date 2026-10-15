@@ -38,6 +38,8 @@ export interface SnapPerson {
   surname: string;
   events: SnapEvent[];
   birthYear: number | null;
+  /** Last year of a birth date range (`BET 1940 AND 1949`), else null. */
+  birthYearEnd: number | null;
   deathYear: number | null;
   birthPlace: string | null;
   parents: string[];
@@ -100,6 +102,7 @@ export function snapshot(store: TreeStore): Snapshot {
       surname: '',
       events: [],
       birthYear: null,
+      birthYearEnd: null,
       deathYear: null,
       birthPlace: null,
       parents: [],
@@ -173,7 +176,10 @@ export function snapshot(store: TreeStore): Snapshot {
     };
     p.events.push(event);
     if (event.isPreferred && row.type === 'BIRT') {
-      p.birthYear ??= year(row.date_sort);
+      if (p.birthYear === null) {
+        p.birthYear = year(row.date_sort);
+        p.birthYearEnd = year(row.date_sort_end);
+      }
       p.birthPlace ??= place_name;
     }
     if (event.isPreferred && row.type === 'DEAT') p.deathYear ??= year(row.date_sort);

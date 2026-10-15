@@ -129,6 +129,34 @@ describe('deleting a person (#226)', () => {
     store.close();
   });
 
+  it("keeps a SOUR record another person's imported text still points to", () => {
+    const store = memoryTree();
+    const w = new BulkWriter(store);
+    const batch = w.insert('import_batch', { file_name: 'tree.ged' });
+    w.insert('raw_record', {
+      import_batch_id: batch,
+      seq: 1,
+      gedcom_tag: 'INDI',
+      xref: '@I1@',
+      raw_text: '0 @I1@ INDI\n1 _CUSTOM\n2 SOUR @S1@\n',
+    });
+    w.commit();
+    const { pat, source } = store.transact('Add', (tx) => {
+      const pat = persons.create(tx, { names: [{ given: 'Pat' }] });
+      const source = tx.insert('source', { title: 'Parish register', external_id: '@S1@' });
+      const citation = citations.create(tx, { source_id: source.id, page: 'p. 3' });
+      citationLinks.create(tx, {
+        citation_id: citation.id,
+        owner_type: 'person',
+        owner_id: pat.id,
+      });
+      return { pat, source };
+    }).result;
+    store.transact('Delete Pat', (tx) => persons.delete(tx, pat.id));
+    expect(store.getRow('source', source.id)).toBeDefined();
+    store.close();
+  });
+
   it('deletes a note on a citation together with the citation', () => {
     const store = memoryTree();
     const pat = personWithItems(store, 'Pat');

@@ -193,6 +193,8 @@ const SIMULATED: Migration = {
     ALTER TABLE event DROP COLUMN cause;
     ALTER TABLE person_name ADD COLUMN display TEXT;
     UPDATE person_name SET display = given || ' ' || surname;
+    -- A new table: older backups have no rows for it, and need no upgrade step.
+    CREATE TABLE future_table (id TEXT PRIMARY KEY NOT NULL, note TEXT) STRICT;
   `,
   run(db) {
     const update = db.prepare('UPDATE place SET name = ?, full_name = ? WHERE id = ?');
@@ -309,6 +311,13 @@ describe('a future migration keeps older history working (simulated)', () => {
     const store = openMemoryTree({ migrations: UPGRADED });
     importJson(store, doc);
     expect(exportJson(store).schemaVersion).toBe(SIMULATED.version);
+    expect(exportJson(store).tables).toHaveProperty('future_table', []);
+    // A table the backup's own version had is still required.
+    const broken = structuredClone(doc) as { tables: Record<string, unknown> };
+    delete broken.tables.place;
+    const strict = openMemoryTree({ migrations: UPGRADED });
+    expect(() => importJson(strict, broken)).toThrow(/required property 'place'/);
+    strict.close();
     expect(snapshot(store)).toBe(snapshot(migrated));
     migrated.close();
     expect(undoRedoAll(store).undone).toEqual(STEPS.map(([label]) => label).reverse());

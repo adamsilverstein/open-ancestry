@@ -17,6 +17,11 @@
   stroke-width: 1.5;
 }
 
+/* Step, adoptive and foster links are not by birth. */
+.lines [data-marked] {
+  stroke-dasharray: 4 3;
+}
+
 .list {
   margin: 0;
   padding: 0;

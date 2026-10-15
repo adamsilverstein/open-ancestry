@@ -1399,7 +1399,7 @@ describe('trustworthy confidence and reasons (#159)', () => {
       expect(mary.reasons.some((r) => /^closest: Mary Brown, \d+%$/.test(r))).toBe(true);
       const quill = fresh.find((p) => p.name === 'Quill Vexbury')!;
       expect(quill.changes.map((c) => [c.kind, c.defaultAccept])).toEqual([['person.new', true]]);
-      expect(quill.reasons).toEqual(['no one with a similar name in your tree']);
+      expect(quill.reasons).toEqual(['no close match in your tree']);
     } finally {
       closeReimport(s2);
       tree.close();

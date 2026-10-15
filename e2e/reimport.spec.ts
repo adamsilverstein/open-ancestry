@@ -421,10 +421,11 @@ test('match percent and reasons say what differs, and why a new person is new', 
   await expect(add).not.toBeChecked();
   await page.getByRole('button', { name: 'Accept all high-confidence' }).click();
   await expect(add).not.toBeChecked();
-  // A genuinely new person says so.
+  // A genuinely new person says so, truthfully: nobody was close enough to compare.
   await expect(
-    card(page, 'Noah Ashgrove').getByText(/closest:|no one with a similar name/),
+    card(page, 'Noah Ashgrove').getByText('no close match in your tree', { exact: false }),
   ).toBeVisible();
+  await expect(card(page, 'Noah Ashgrove').getByText(/closest:/)).toHaveCount(0);
 });
 
 test('the review lists what needs a decision first, filters by group, and formats dates', async ({

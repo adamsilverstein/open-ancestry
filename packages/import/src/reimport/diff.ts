@@ -738,7 +738,8 @@ export function diffTrees(
     const nearName = near && displayName(existing.people.get(near.existingId)!);
     r.reasons = near
       ? [`closest: ${nearName}, ${Math.round(near.score * 100)}%`]
-      : ['no one with a similar name in your tree'];
+      : // Only people sharing a name sound, or a surname and birth year, are compared.
+        ['no close match in your tree'];
     const lookalike = !suspect && near && near.score >= POSSIBLE_MATCH ? near : undefined;
     if (lookalike) {
       adder(r, { applicable: false, defaultAccept: false })({

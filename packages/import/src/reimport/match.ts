@@ -258,16 +258,23 @@ const MAX_SURNAME_YEAR = 64;
 /** An Ancestry record id held by more tree people than this is not a blocking key. */
 const MAX_APID_HOLDERS = 32;
 
-/** Given and surname sounds, for every name the person has, so married names meet birth names. */
+/**
+ * Given and surname sounds, for every name the person has: married names meet
+ * birth names, and an alternate given name ("Joe" for Joseph) meets records
+ * that use it (#234). Initials ("J.") are left out: their sound is too broad.
+ * Each key gets the same bounded walk, so a common nickname stays cheap.
+ */
 function nameKeys(p: SnapPerson): { names: string[]; surnames: string[] } {
-  const given = p.given ? soundex(p.given) : '';
+  const raw = new Set([p.given, ...p.names.map((n) => norm(n.given))].filter(Boolean));
+  const givens = [...new Set([...raw].filter((g) => g.length >= 2).map((g) => soundex(g)))];
+  if (!givens.length) givens.push(p.given ? soundex(p.given) : '');
   const surnames = [
     ...new Set(
       [p.surname, ...p.names.map((n) => norm(n.surname))].filter(Boolean).map((s) => soundex(s!)),
     ),
   ];
-  const names = surnames.map((s) => `${given}:${s}`);
-  if (!names.length && given) names.push(`${given}:`);
+  const names = surnames.flatMap((s) => givens.map((g) => `${g}:${s}`));
+  if (!names.length) for (const g of givens) if (g) names.push(`${g}:`);
   return { names, surnames };
 }
 

@@ -235,6 +235,21 @@ describe('POST import', () => {
     fake.release();
   });
 
+  it('shuts down even when a job is cancelled before its importer starts listening', async () => {
+    // The queue-full test flaked with "Hook timed out" in afterEach: releasing
+    // the first job let the second one start, and close() cancelled it while
+    // its importer was still reading the upload. An abort that lands before
+    // the importer looks at its signal must still end the job.
+    const fake = controllableImporter();
+    api = await testApi({ importer: fake.importer });
+    const base = await createTestTree(api);
+    expect((await upload(api, base)).statusCode).toBe(202);
+    // The job is running and its importer is awaiting the upload's contents.
+    const drained = api.app.drain().then(() => 'drained');
+    const timeout = new Promise((r) => setTimeout(() => r('hung'), 3000));
+    expect(await Promise.race([drained, timeout])).toBe('drained');
+  });
+
   it('refuses an import into a tree with people before reading the body (issue #98)', async () => {
     const fake = controllableImporter();
     api = await testApi({ importer: fake.importer, uploadLimit: 1024 });

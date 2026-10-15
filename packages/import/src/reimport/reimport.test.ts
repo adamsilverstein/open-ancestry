@@ -9,9 +9,11 @@ import {
   ReimportStaleError,
   applyReimport,
   closeReimport,
+  isReimportStale,
   jaroWinkler,
   localHistory,
   prepareReimport,
+  refreshReimport,
   type PersonReview,
   type ReimportSession,
   type ReviewChange,
@@ -1260,6 +1262,42 @@ describe('UX QA (#72): new people who look like someone in the tree', () => {
   });
 });
 
+describe('comparing again (#163)', () => {
+  it('re-diffs against the tree as it is now, with stable change keys', async () => {
+    const s2 = await prepareReimport(store, { bytes: updatedSample() }, { today: TODAY });
+    try {
+      const keys = (s: ReimportSession) =>
+        new Map(s.diff.people.flatMap((p) => p.changes.map((c) => [c.key, c])));
+      const before = keys(s2);
+      expect(new Set([...before.keys()]).size).toBe(before.size);
+      expect(isReimportStale(store, s2)).toBe(false);
+      const josiah = pid(store, '@I3@');
+      const death = value<string>(
+        store,
+        "SELECT e.id FROM event e JOIN event_role r ON r.event_id = e.id WHERE r.person_id = ? AND e.type = 'DEAT'",
+        josiah,
+      );
+      store.transact('Edit', (tx) => tx.update('event', death, { date_text: '3 MAY 1939' }));
+      expect(isReimportStale(store, s2)).toBe(true);
+      refreshReimport(store, s2);
+      expect(isReimportStale(store, s2)).toBe(false);
+      const after = keys(s2);
+      // Every change not about the edited death keeps its key.
+      for (const [key, c] of before) {
+        if (c.kind === 'fact.change' && c.existingEventId === death) continue;
+        expect(after.has(key)).toBe(true);
+      }
+      const edited = [...after.values()].find(
+        (c) => c.kind === 'fact.change' && c.existingEventId === death,
+      );
+      expect(edited).toMatchObject({ conflict: 'local-edit', defaultAccept: false });
+      applyReimport(store, s2, new Set(), 'Re-import');
+    } finally {
+      closeReimport(s2);
+    }
+  });
+});
+
 describe('trustworthy confidence and reasons (#159)', () => {
   it('is below 100% when a fact differs, and 100% when nothing does', async () => {
     const s2 = await prepareReimport(store, { bytes: renumber(updatedSample()) }, { today: TODAY });
@@ -1366,5 +1404,64 @@ describe('trustworthy confidence and reasons (#159)', () => {
       closeReimport(s2);
       tree.close();
     }
+  });
+});
+
+describe('review of #221: media whose files were missing at import', () => {
+  const TWO_MISSING = ged(
+    '0 @I1@ INDI',
+    '1 NAME Ivo /Canary/',
+    '1 OBJE',
+    '2 FILE photos/untitled-a.jpg',
+    '1 OBJE',
+    '2 FILE photos/untitled-b.jpg',
+  );
+  const files = (tree: TreeStore) =>
+    rows<{ line: string }>(
+      tree,
+      `SELECT u.line FROM unmapped_line u JOIN media m ON m.id = u.owner_id
+        WHERE u.owner_type = 'media' ORDER BY u.line`,
+    ).map((r) => r.line);
+
+  it('keeps two untitled missing photos apart, each with its own path', async () => {
+    const tree = openMemoryTree();
+    await importGedcom({ bytes: TWO_MISSING }, tree, { today: TODAY });
+    expect(files(tree)).toEqual(['2 FILE photos/untitled-a.jpg', '2 FILE photos/untitled-b.jpg']);
+
+    const again = await prepareReimport(tree, { bytes: renumber(TWO_MISSING) }, { today: TODAY });
+    try {
+      expect(again.diff.counts).toMatchObject({ newPeople: 0, changes: 0 });
+      applyReimport(tree, again, defaults(again), 'Re-import');
+    } finally {
+      closeReimport(again);
+    }
+    expect(value(tree, 'SELECT count(*) FROM media')).toBe(2);
+    expect(files(tree)).toEqual(['2 FILE photos/untitled-a.jpg', '2 FILE photos/untitled-b.jpg']);
+    tree.close();
+  });
+
+  it('never merges two incoming media into one existing row', async () => {
+    const tree = openMemoryTree();
+    // An older tree: one untitled missing photo, keyed by title only.
+    await importGedcom(
+      {
+        bytes: ged('0 @I1@ INDI', '1 NAME Ivo /Canary/', '1 OBJE', '2 FILE photos/untitled-a.jpg'),
+      },
+      tree,
+      { today: TODAY },
+    );
+    tree.db.prepare("DELETE FROM unmapped_line WHERE owner_type = 'media'").run();
+    const again = await prepareReimport(tree, { bytes: renumber(TWO_MISSING) }, { today: TODAY });
+    try {
+      applyReimport(tree, again, defaults(again), 'Re-import');
+    } finally {
+      closeReimport(again);
+    }
+    const lines = rows<{ n: number }>(
+      tree,
+      `SELECT count(*) AS n FROM unmapped_line WHERE owner_type = 'media' GROUP BY owner_id`,
+    );
+    expect(lines.every((l) => l.n <= 1)).toBe(true);
+    tree.close();
   });
 });

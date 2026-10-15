@@ -42,9 +42,12 @@ export class ReimportSessions {
     return stored;
   }
 
+  /** A review by id; using it keeps it alive, so one in use isn't dropped mid-review. */
   get(id: string): StoredReimport | undefined {
     this.expire();
-    return this.sessions.get(id);
+    const stored = this.sessions.get(id);
+    if (stored) stored.at = Date.now();
+    return stored;
   }
 
   remove(id: string): void {

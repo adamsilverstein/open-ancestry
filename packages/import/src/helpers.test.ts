@@ -219,7 +219,8 @@ describe('media folder edge cases', () => {
       'media-missing',
     ]);
     expect(report.media.linked).toBe(0);
-    expect(report.unmapped.map((u) => u.path)).toEqual(['OBJE.FILE']);
+    // Reported under media and warnings, not again as unmapped tags (issue #121).
+    expect(report.unmapped.map((u) => u.path)).toEqual([]);
     expect(report.media.missing.map((m) => m.path)).toEqual([
       'odd/name.jpg',
       'D:\\nowhere\\gone.jpg',

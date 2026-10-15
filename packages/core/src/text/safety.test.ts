@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { foldForSearch, normalizeForSearch } from '../names/phonetic';
+import { foldForIndex, foldForSearch, normalizeForSearch } from '../names/phonetic';
 import { displayText, unsafeTextReason } from './safety';
 
 /* Names, places and dates: no control characters or bidi overrides (#190). */
@@ -83,5 +83,17 @@ describe('the search fold (#199), shared with re-import matching', () => {
   it('keeps apostrophes that are not inside a word, and other letters as they are', () => {
     expect(foldForSearch("'Ada'")).toBe("'Ada'");
     expect(foldForSearch('Zoë')).toBe('Zoë');
+  });
+});
+
+describe('the index fold', () => {
+  it('keeps a name with an apostrophe both joined and split', () => {
+    expect(foldForIndex("O'Brien Vale")).toBe('OBrien O Brien Vale');
+    expect(foldForIndex('Yılmaz')).toBe(foldForSearch('Yılmaz'));
+  });
+
+  it('folds Turkish dotted and dotless i to plain i', () => {
+    // ş is a Latin diacritic, left to the tokenizer like the others.
+    expect(foldForSearch('İnce Işık')).toBe('Ince Işik');
   });
 });

@@ -109,6 +109,9 @@ describe('searchPeople', () => {
       ["O'Brien", ['OBrien', 'Obrien', 'O’Brien']],
       ['OBrien', ["O'Brien"]],
       ['小明', ['小', '小明']],
+      ['İnce', ['ince', 'Ince', 'INCE']],
+      ['Ince', ['İnce']],
+      ['Işıklar', ['isiklar', 'IŞIKLAR']],
     ];
     const ids = pairs.map(
       ([surname]) =>
@@ -123,6 +126,16 @@ describe('searchPeople', () => {
         ).toContain(ids[i]);
       }
     });
+    // The part after an apostrophe is still a word of its own.
+    const apostrophes = ["O'Brien", 'O’Neill', "D'Angelo"].map(
+      (surname) =>
+        store.transact('add', (tx) => persons.create(tx, { names: [{ given: 'Apos', surname }] }))
+          .result.id,
+    );
+    expect(searchPeople(store, 'Brien').map((r) => r.person.id)).toContain(apostrophes[0]);
+    expect(searchPeople(store, 'Neill').map((r) => r.person.id)).toContain(apostrophes[1]);
+    expect(searchPeople(store, 'angelo').map((r) => r.person.id)).toContain(apostrophes[2]);
+    expect(searchPeople(store, 'oneill').map((r) => r.person.id)).toContain(apostrophes[1]);
     // A lone Latin letter still only matches exactly (an initial), not every name it starts.
     expect(searchPeople(store, 'Y').map((r) => r.person.id)).toEqual([]);
     store.close();

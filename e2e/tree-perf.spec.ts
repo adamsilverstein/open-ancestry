@@ -294,6 +294,8 @@ for (const tree of trees) {
     }
 
     test('re-focus after browsing 50 people stays as fast as at the start', async ({ page }) => {
+      // About 140 re-focuses, each waiting for its frame to settle.
+      test.setTimeout(240_000);
       // Seven generations down: each new focus merges a slice of up to 5,000
       // people, so 50 of them merge tens of thousands in the 100k tree.
       await page.goto(url(tree.wideId, '&down=7&up=1'));
@@ -320,20 +322,34 @@ for (const tree of trees) {
               .sort((x, y) => y.y - x.y)
               .map((c) => c.key),
           );
-      /** The cached round trip between two people: p95 and median of 40. */
-      const roundTrip = async (from: string) => {
-        const to = (await mountedKeys()).find((k) => k !== from)!;
-        await refocusOn(to);
-        await refocusOn(from);
+      /**
+       * The cached round trip from the focus person to a child (or parent) and
+       * back, by keyboard as in the re-focus checks (the relative is always on
+       * screen, unlike a card picked by position): p95 and median of 40.
+       */
+      const roundTrip = async (from: string, [there, back]: [string, string]) => {
+        await canvas(page).locator(`[data-key="${from}"]`).focus();
+        const step = async (key: string) => {
+          await page.keyboard.press(key);
+          const before = await refocusCount(page);
+          await page.keyboard.press('Enter');
+          await expect.poll(() => refocusCount(page)).toBeGreaterThan(before);
+          await ready(page);
+          await settled(page);
+          return lastRefocus(page);
+        };
+        // The first visit to the child fetches its neighborhood; then both are cached.
+        await step(there);
+        await step(back);
         const durations: number[] = [];
         for (let i = 0; i < 20; i++) {
-          durations.push(await refocusOn(to));
-          durations.push(await refocusOn(from));
+          durations.push(await step(there));
+          durations.push(await step(back));
         }
         return { p95: percentile(durations, 0.95), median: percentile(durations, 0.5) };
       };
 
-      const start = await roundTrip(tree.wideId);
+      const start = await roundTrip(tree.wideId, ['ArrowDown', 'ArrowUp']);
       // Browse: re-focus on 50 different people, each the lowest card on screen
       // not visited yet, so every visit reaches new descendants.
       const seen = new Set<string>([tree.wideId]);
@@ -346,7 +362,8 @@ for (const tree of trees) {
         await refocusOn(next!);
         current = next!;
       }
-      const end = await roundTrip(current);
+      // The last person visited may have no children; every one has a parent on screen.
+      const end = await roundTrip(current, ['ArrowUp', 'ArrowDown']);
 
       const budget = 50 * factor;
       // Laying out from everything merged made each re-focus slower as the

@@ -1,0 +1,176 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { Locator, Page } from '@playwright/test';
+import { zipSync } from 'fflate';
+import sharp from 'sharp';
+import { openTree, type MediaRow } from '@open-ancestry/db';
+import { importGedcom } from '../packages/import/src/index';
+import { expect, test } from './fixtures';
+
+/*
+ * #75: a later export whose photo has other bytes. Changed only in the
+ * export, the new file is offered ticked; changed in this tree too, it is an
+ * unticked conflict. Once applied, the person's gallery shows the new image.
+ */
+
+const REPLACE = /Use the new export's file for Wren portrait/;
+const RED = '#d02020';
+const BLUE = '#2020d0';
+const GREEN = '#20a020';
+
+const solid = (background: string) =>
+  sharp({ create: { width: 96, height: 96, channels: 3, background } })
+    .png()
+    .toBuffer();
+
+/** An invented person with one photo, known by its Ancestry _OID across exports. */
+const GED = [
+  '0 HEAD',
+  '1 GEDC',
+  '2 VERS 5.5.1',
+  '1 CHAR UTF-8',
+  '0 @I1@ INDI',
+  '1 NAME Wren /Halloway/',
+  '1 SEX F',
+  '1 BIRT',
+  '2 DATE 4 APR 1872',
+  '2 PLAC Brackenford, Westmere',
+  '1 OBJE @O1@',
+  '0 @O1@ OBJE',
+  '1 FILE photos/wren.png',
+  '2 TITL Wren portrait',
+  '1 _OID 9101',
+  '0 TRLR',
+  '',
+].join('\n');
+
+const exportZip = async (color: string) =>
+  Buffer.from(
+    zipSync({
+      'tree.ged': new TextEncoder().encode(GED),
+      'photos/wren.png': await solid(color),
+    }),
+  );
+
+const library = () =>
+  process.env.OA_E2E_LIBRARY ?? join(tmpdir(), `oa-e2e-library-${process.env.E2E_PORT}`);
+
+/** Imports the first export (a red photo) straight into the e2e library. */
+async function seed(label: string) {
+  const info = test.info();
+  const name = `Reimport media ${label} ${info.project.name} ${info.workerIndex}${info.retry} ${Date.now() % 1e6}`;
+  const dir = join(library(), `${name}.oatree`);
+  await importGedcom({ gedzip: await exportZip(RED) }, { dir, name });
+  const store = openTree(dir);
+  const person = store.db.prepare('SELECT id FROM person').pluck().get() as string;
+  store.close();
+  return { name, dir, person };
+}
+
+/** The user's own replacement of the photo in this tree (a logged edit, not an import). */
+async function replaceInTree(dir: string, color: string) {
+  const bytes = await solid(color);
+  mkdirSync(join(dir, 'media', 'photos'), { recursive: true });
+  writeFileSync(join(dir, 'media', 'photos', 'mine.png'), bytes);
+  const store = openTree(dir);
+  const media = store.db.prepare('SELECT * FROM media').get() as MediaRow;
+  store.transact('Replace photo', (tx) =>
+    tx.update('media', media.id, {
+      local_path: 'photos/mine.png',
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      byte_size: bytes.length,
+    }),
+  );
+  store.close();
+}
+
+async function startReimport(page: Page, tree: string, color: string) {
+  await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'File' }).click();
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('menuitem', { name: /Re-import updated export/ }).click();
+  await (
+    await chooser
+  ).setFiles({
+    name: 'Halloway 2026.zip',
+    mimeType: 'application/zip',
+    buffer: await exportZip(color),
+  });
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Review the updated export' }),
+  ).toBeVisible({ timeout: 30_000 });
+  return page
+    .getByRole('article', { name: 'Wren Halloway', exact: true })
+    .getByRole('checkbox', { name: REPLACE });
+}
+
+/** The colour the page drew for an image, read from its centre pixel. */
+async function shownColor(image: Locator): Promise<'red' | 'green' | 'blue'> {
+  await expect
+    .poll(() => image.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth))
+    .toBeGreaterThan(0);
+  const [r, g, b] = await image.evaluate((img: HTMLImageElement) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const context = canvas.getContext('2d')!;
+    context.drawImage(img, 0, 0);
+    return [...context.getImageData(img.naturalWidth >> 1, img.naturalHeight >> 1, 1, 1).data];
+  });
+  return r! > g! && r! > b! ? 'red' : g! > b! ? 'green' : 'blue';
+}
+
+async function galleryPhoto(page: Page, person: string) {
+  await page.goto(`/person/${person}?tab=gallery`);
+  await expect(page.getByRole('tab', { name: 'Gallery', selected: true })).toBeVisible();
+  return page
+    .getByRole('region', { name: 'Gallery' })
+    .getByRole('button', { name: /Wren portrait/ })
+    .locator('img');
+}
+
+test('a photo changed only in the export is offered ticked and shown once applied', async ({
+  page,
+}) => {
+  const { name, person } = await seed('export');
+  // Seen first, so the browser holds the old thumbnail.
+  await page.addInitScript((t) => localStorage.setItem('oa-tree', t), name);
+  expect(await shownColor(await galleryPhoto(page, person))).toBe('red');
+
+  const replace = await startReimport(page, name, BLUE);
+  await expect(replace).toBeChecked();
+  await page.getByRole('button', { name: /^Apply \d+ changes?$/ }).click();
+  await expect(
+    page
+      .getByRole('region', { name: /Notifications/ })
+      .getByRole('listitem')
+      .filter({ hasText: /Applied \d+ change/ }),
+  ).toBeVisible({ timeout: 30_000 });
+
+  const photo = await galleryPhoto(page, person);
+  await expect(photo).toHaveAttribute('src', /\/thumb\/sm$/);
+  await expect.poll(() => shownColor(photo)).toBe('blue');
+});
+
+test("a photo changed in both is an unticked conflict, and the tree's photo stays", async ({
+  page,
+}) => {
+  const { name, dir, person } = await seed('both');
+  await replaceInTree(dir, GREEN);
+
+  const replace = await startReimport(page, name, BLUE);
+  await expect(replace).not.toBeChecked();
+  const row = page
+    .getByRole('article', { name: 'Wren Halloway', exact: true })
+    .getByRole('listitem')
+    .filter({ has: page.getByRole('checkbox', { name: REPLACE }) });
+  await expect(row).toContainText('Conflict');
+  await expect(row).toContainText('Edited in this tree since the last import');
+
+  // Nothing is ticked by default, so the tree's own photo is what it keeps.
+  await expect(page.getByRole('button', { name: 'Apply 0 changes' })).toBeDisabled();
+  await expect.poll(async () => shownColor(await galleryPhoto(page, person))).toBe('green');
+});

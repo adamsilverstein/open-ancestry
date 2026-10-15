@@ -302,6 +302,42 @@ describe('cross-site navigation', () => {
     });
     expect(form.statusCode).toBe(403);
   });
+
+  it('refuses cross-site navigations to the API, so another site cannot start a download', async () => {
+    const base = await createTestTree(api, 'Cross-site export');
+    for (const format of ['json', 'ged', 'gdz']) {
+      for (const site of ['cross-site', 'same-site']) {
+        const res = await api.get(`${base}/export.${format}`, {
+          'sec-fetch-site': site,
+          'sec-fetch-mode': 'navigate',
+          'sec-fetch-dest': 'document',
+        });
+        expect(res.statusCode, `${format} ${site}`).toBe(403);
+        expect(res.headers['content-disposition']).toBeUndefined();
+      }
+    }
+    expect(
+      (
+        await api.get('/api/session', {
+          'sec-fetch-site': 'cross-site',
+          'sec-fetch-mode': 'navigate',
+        })
+      ).statusCode,
+    ).toBe(403);
+  });
+
+  it('serves the API to same-origin requests, typed URLs and non-browser clients', async () => {
+    const base = await createTestTree(api, 'Same-origin export');
+    const labels: Record<string, string>[] = [
+      { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'navigate' },
+      { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' },
+      { 'sec-fetch-site': 'none', 'sec-fetch-mode': 'navigate' },
+      {},
+    ];
+    for (const headers of labels) {
+      expect((await api.get(`${base}/export.json`, headers)).statusCode).toBe(200);
+    }
+  });
 });
 
 describe('framework errors', () => {

@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -16,6 +16,7 @@ describe('parseCliArgs', () => {
       library: join(homedir(), 'OpenAncestry'),
       open: false,
       staticDir: undefined,
+      sharedLibrary: false,
     });
   });
 
@@ -128,7 +129,14 @@ describe('import', () => {
   it('parses import options', () => {
     expect(
       parseCliArgs(['import', 'a.ged', '--media', 'pics', '--name', 'Vale', '--library', '/l'], {}),
-    ).toEqual({ command: 'import', file: 'a.ged', media: 'pics', name: 'Vale', library: '/l' });
+    ).toEqual({
+      command: 'import',
+      file: 'a.ged',
+      media: 'pics',
+      name: 'Vale',
+      library: '/l',
+      sharedLibrary: false,
+    });
     expect(() => parseCliArgs(['import'], {})).toThrow(/file/);
   });
 
@@ -184,6 +192,22 @@ describe('import', () => {
       run(['import', fixture, '--name', 'a/b', '--library', library], { log: () => {} }),
     ).rejects.toThrow(/path separator/);
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'refuses a library folder other accounts can write to, unless --shared-library',
+    async () => {
+      const library = await mkdtemp(join(tmpdir(), 'oa-cli-shared-'));
+      await writeFile(join(library, 'notes.txt'), 'not a tree');
+      await chmod(library, 0o775);
+      const args = ['import', fixture, '--name', 'Shared', '--library', library];
+      await expect(run(args, { log: () => {}, warn: () => {} })).rejects.toThrow(
+        /--shared-library/,
+      );
+      expect(existsSync(join(library, 'Shared.oatree'))).toBe(false);
+      await run([...args, '--shared-library'], { log: () => {}, warn: () => {} });
+      expect(existsSync(join(library, 'Shared.oatree'))).toBe(true);
+    },
+  );
 
   it('refuses a --media folder that does not exist', async () => {
     const library = await mkdtemp(join(tmpdir(), 'oa-cli-media-'));

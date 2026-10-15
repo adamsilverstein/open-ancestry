@@ -40,7 +40,11 @@ Options for serve:
 Options for import:
   --name <tree>        Tree name (default: the file name)
   --media <dir>        Folder holding the media files a .ged file refers to
-  --library <dir>      Folder holding your trees (default $OA_LIBRARY or ~/OpenAncestry)`;
+  --library <dir>      Folder holding your trees (default $OA_LIBRARY or ~/OpenAncestry)
+
+Both:
+  --shared-library     Open trees even if other accounts can write to the library folder
+                       (also OA_SHARED_LIBRARY=1); they could swap a tree while it is open`;
 
 export type CliCommand =
   | { command: 'help' }
@@ -51,6 +55,7 @@ export type CliCommand =
       library: string;
       open: boolean;
       staticDir: string | undefined;
+      sharedLibrary: boolean;
     }
   | {
       command: 'import';
@@ -58,6 +63,7 @@ export type CliCommand =
       name: string | undefined;
       media: string | undefined;
       library: string;
+      sharedLibrary: boolean;
     };
 
 export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliCommand {
@@ -72,8 +78,11 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
       'static-dir': { type: 'string' },
       name: { type: 'string' },
       media: { type: 'string' },
+      'shared-library': { type: 'boolean' },
     },
   });
+  // Opting in to a library folder other accounts can write to (issue #211).
+  const sharedLibrary = values['shared-library'] ?? env.OA_SHARED_LIBRARY === '1';
   if (positionals[0] === 'import') {
     const file = positionals[1];
     if (!file)
@@ -84,6 +93,7 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
       name: values.name,
       media: values.media,
       library: values.library ?? defaultLibraryRoot(env),
+      sharedLibrary,
     };
   }
   if (positionals[0] !== 'serve') return { command: 'help' };
@@ -99,6 +109,7 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     library: values.library ?? defaultLibraryRoot(env),
     open: values.open ?? false,
     staticDir: values['static-dir'],
+    sharedLibrary,
   };
 }
 
@@ -285,7 +296,7 @@ async function importCommand(
   const name = cli.name ?? basename(cli.file, extname(cli.file)).trim();
   const problem = treeNameProblem(name);
   if (problem) throw new Error(`${problem}: "${name}". Choose another with --name.`);
-  const library = new Library(cli.library);
+  const library = new Library(cli.library, { shared: cli.sharedLibrary });
   library.ensureRoot();
   const dir = library.dirOf(name);
   if (existsSync(dir)) {
@@ -360,6 +371,7 @@ export async function run(
     host: cli.host,
     port: cli.port,
     library: cli.library,
+    sharedLibrary: cli.sharedLibrary,
     staticDir: cli.staticDir ?? bundledStaticDir(),
     importer: importFile,
   });

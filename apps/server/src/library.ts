@@ -92,8 +92,20 @@ export class Library {
   /** Trees with an import queued or running, and how many. */
   private readonly busy = new Map<string, number>();
 
-  constructor(root: string) {
+  /** Trees may be opened from a folder other accounts can write to (--shared-library). */
+  readonly shared: boolean;
+  private readonly platform: NodeJS.Platform;
+
+  constructor(
+    root: string,
+    {
+      shared = false,
+      platform = process.platform,
+    }: { shared?: boolean; platform?: NodeJS.Platform } = {},
+  ) {
     this.root = resolve(root);
+    this.shared = shared;
+    this.platform = platform;
   }
 
   private rootChecked = false;
@@ -110,20 +122,46 @@ export class Library {
       this.rootChecked = true;
       return;
     }
-    if (this.rootChecked) return;
+    if (this.rootChecked) return this.assertRootSafe();
     this.rootChecked = true;
-    if (process.platform === 'win32' || (statSync(this.root).mode & 0o077) === 0) return;
+    if (this.platform === 'win32' || (statSync(this.root).mode & 0o077) === 0) return;
     const ours = (name: string) =>
       name.endsWith(TREE_EXTENSION) || name === TRASH_DIR || name === '.DS_Store';
     const entries = readdirSync(this.root);
     if (entries.length > 0 && entries.every(ours)) {
       ensurePrivateDir(this.root);
     } else {
+      this.assertRootSafe();
       console.warn(
         `Warning: other accounts can see the library folder ${this.root}; ` +
           'its trees are private, but consider a folder only you can open.',
       );
     }
+  }
+
+  /**
+   * Refuses a library folder other accounts can write to (issue #211): they
+   * could swap a tree folder between the app's checks and SQLite opening the
+   * database by path. --shared-library accepts the risk; on Windows these mode
+   * bits mean nothing.
+   */
+  private assertRootSafe(): void {
+    if (this.shared || this.platform === 'win32') return;
+    let mode: number;
+    try {
+      mode = statSync(this.root).mode;
+    } catch {
+      return; // Not there yet: ensureRoot creates it private.
+    }
+    if ((mode & 0o022) === 0) return;
+    throw new ApiError(
+      403,
+      'forbidden',
+      `The library folder ${this.root} is one other accounts can change ` +
+        `(mode ${(mode & 0o777).toString(8)}), so they could swap a tree while it is open. ` +
+        'Use a folder only you can write to, or pass --shared-library ' +
+        '(or set OA_SHARED_LIBRARY=1) if you trust everyone who can write to it.',
+    );
   }
 
   dirOf(id: string): string {
@@ -227,6 +265,7 @@ export class Library {
   open(id: string): TreeStore {
     const cached = this.stores.get(id);
     if (cached) return cached;
+    this.assertRootSafe();
     assertTreeName(id);
     if (!this.exists(id)) throw notFound(`Tree "${id}" not found`);
     let store: TreeStore;

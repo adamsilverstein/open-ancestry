@@ -32,7 +32,9 @@ Trees are folders in your library (`~/OpenAncestry`, or `--library` / `$OA_LIBRA
 Open Ancestry assumes the account that runs it is the only one that should see the library:
 
 - The library, its trees and everything in them are created readable by your account alone (folders `0700`, files `0600`), and existing trees are tightened when they open. A `--library` folder the app did not create keeps its permissions (so `--library ~` or a shared folder is not locked); the app warns if other accounts can see it.
-- On Windows there are no such modes: the app relies on your profile folder's permissions (ACLs), which other standard accounts cannot open, so keep the library inside it.
+- If other accounts can **write** to the library folder (group- or world-writable, such as `chmod 775`), the app refuses to open trees there. Another account could swap a tree folder between the app's checks and the database opening. To use such a folder anyway, for example one shared with someone you trust, pass `--shared-library` to `serve` or `import`, or set `OA_SHARED_LIBRARY=1`.
+- Tree folders and files that are symbolic links, have extra hard links, are special files, or belong to another account are refused.
+- On Windows there are no such modes: the app relies on your profile folder's permissions (ACLs), which other standard accounts cannot open, so keep the library inside it. The symlink and hard-link refusals still apply there; only the owner check is skipped.
 - While the server runs, any program on this computer can reach it at `127.0.0.1`, including programs run by other accounts. Binding to loopback keeps other machines out, not other users of this one. On a shared computer, stop the server (Ctrl+C) when you're done.
 
 ## Development

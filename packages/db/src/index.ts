@@ -27,6 +27,7 @@ export {
   PRIVATE_DIR_MODE,
   PRIVATE_FILE_MODE,
   TreeAccessError,
+  assertOwnTree,
   TREE_EXTENSION,
   createTree,
   ensurePrivateDir,

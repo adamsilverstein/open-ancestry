@@ -44,6 +44,8 @@ export interface ServerOptions {
   staticDir?: string | undefined;
   logger?: boolean;
   /** Library folder or instance (default OA_LIBRARY or ~/OpenAncestry). Created on first use. */
+  /** Open trees even when other accounts can write to the library folder (--shared-library). */
+  sharedLibrary?: boolean;
   library?: string | Library;
   /** GEDCOM importer; without one the import endpoint answers 501. */
   importer?: Importer;
@@ -127,7 +129,9 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   const library =
     options.library instanceof Library
       ? options.library
-      : new Library(options.library ?? defaultLibraryRoot());
+      : new Library(options.library ?? defaultLibraryRoot(), {
+          shared: options.sharedLibrary ?? false,
+        });
   const jobs = new JobManager({
     concurrency: options.importConcurrency,
     maxQueued: options.maxQueuedImports,

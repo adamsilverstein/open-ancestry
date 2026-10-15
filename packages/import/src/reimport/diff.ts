@@ -1,6 +1,6 @@
 import { formatDate } from '@open-ancestry/core';
 import type { FamilyRow, MediaRow, TableName, TreeStore } from '@open-ancestry/db';
-import { HIGH_CONFIDENCE, type PersonMatch } from './match';
+import { HIGH_CONFIDENCE, POSSIBLE_MATCH, type NearMiss, type PersonMatch } from './match';
 import {
   mediaKey,
   norm,
@@ -83,10 +83,24 @@ export type ReimportChange =
   /** A new person whose every link into the tree starts unticked: added alone, they'd have no family. */
   | { kind: 'unlinked-new' }
   /** An unmatched record that looks like someone already matched to another record. */
-  | { kind: 'possible-match'; existingId: string; existingName: string };
+  | {
+      kind: 'possible-match';
+      existingId: string;
+      existingName: string;
+      /** How close, 0..1. */
+      confidence: number;
+      /** That tree person is matched to another record in this export. */
+      taken: boolean;
+    };
 
 export type ReviewChange = ReimportChange & {
   id: string;
+  /**
+   * The same in every comparison of the same export while the change says
+   * the same thing, so choices can carry over when the review is compared
+   * again (#163). `id` is only unique within one comparison.
+   */
+  key: string;
   /** Applied unless the user unticks it. */
   defaultAccept: boolean;
   /** False for information only (missing people and facts): never applied. */
@@ -419,6 +433,15 @@ function foldMerged(
   }
 }
 
+/** The person, the kind and every row id a change refers to (see `ReviewChange.key`). */
+function changeKey(personKey: string, change: ReimportChange): string {
+  const ids = Object.entries(change)
+    .filter(([k, v]) => (k.endsWith('Id') || k === 'familyKey') && typeof v === 'string')
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([k, v]) => `${k}=${v as string}`);
+  return [personKey, change.kind, ...ids].join('|');
+}
+
 /** Whether the user removed something like this here: such changes are offered unticked. */
 interface Removed {
   fact(ownerId: string, type: string, date: string | null): boolean;
@@ -529,7 +552,7 @@ export function diffTrees(
   incoming: Snapshot,
   matches: Map<string, PersonMatch>,
   local: LocalHistory,
-  nearMisses: Map<string, string> = new Map(),
+  nearMisses: Map<string, NearMiss> = new Map(),
 ): ReimportDiff {
   const { edited } = local;
   const gone = local.removed;
@@ -562,6 +585,7 @@ export function diffTrees(
       const item = {
         ...change,
         id: `c${++seq}`,
+        key: changeKey(r.key, change),
         defaultAccept: true,
         applicable: true,
         ...defaults,
@@ -708,12 +732,20 @@ export function diffTrees(
     if (deletedHere) {
       adder(r, { applicable: false, defaultAccept: false })({ kind: 'deleted-here' });
     }
-    const lookalike = suspect ? undefined : nearMisses.get(i.row.id);
+    // Why there is no match: the closest tree person, if any. A close one may be a duplicate.
+    const near = nearMisses.get(i.row.id);
+    const nearName = near && displayName(existing.people.get(near.existingId)!);
+    r.reasons = near
+      ? [`closest: ${nearName}, ${Math.round(near.score * 100)}%`]
+      : ['no one with a similar name in your tree'];
+    const lookalike = !suspect && near && near.score >= POSSIBLE_MATCH ? near : undefined;
     if (lookalike) {
       adder(r, { applicable: false, defaultAccept: false })({
         kind: 'possible-match',
-        existingId: lookalike,
-        existingName: displayName(existing.people.get(lookalike)!),
+        existingId: lookalike.existingId,
+        existingName: nearName!,
+        confidence: lookalike.score,
+        taken: lookalike.taken,
       });
     }
     if (suspect) {

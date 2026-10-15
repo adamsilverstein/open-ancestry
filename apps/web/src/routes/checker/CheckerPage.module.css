@@ -90,3 +90,10 @@
 .lifespan {
   color: var(--oa-text-muted);
 }
+
+.mergeLink {
+  align-self: center;
+  font: var(--oa-text-sm);
+  font-weight: var(--oa-weight-medium);
+  white-space: nowrap;
+}

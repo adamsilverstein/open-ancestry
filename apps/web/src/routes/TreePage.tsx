@@ -85,7 +85,7 @@ export function TreePage() {
           <EmptyState
             level={2}
             title="No home person"
-            description="Choose a home person from someone's profile to open the tree there."
+            description="Open someone's profile and choose More actions, then Set as home person, to open the tree there."
           />
         </div>
       </div>

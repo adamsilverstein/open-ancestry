@@ -80,9 +80,14 @@ describe('JobManager', () => {
       async () => void cleaned.push('a'),
     );
     await vi.waitFor(() => expect(jobs.get(job.id)?.state).toBe('running'));
+    expect(jobs.get(job.id)?.cancelled).toBe(false);
     expect(jobs.cancel(job.id)).toBe(true);
     await vi.waitFor(() =>
-      expect(jobs.get(job.id)).toMatchObject({ state: 'failed', error: 'Import was cancelled' }),
+      expect(jobs.get(job.id)).toMatchObject({
+        state: 'failed',
+        error: 'Import was cancelled',
+        cancelled: true,
+      }),
     );
     expect(cleaned).toEqual(['a']);
     // Finished jobs cannot be cancelled; unknown ones neither.
@@ -103,11 +108,47 @@ describe('JobManager', () => {
     );
     expect(jobs.cancel(queued.id)).toBe(true);
     await vi.waitFor(() =>
-      expect(jobs.get(queued.id)).toMatchObject({ state: 'failed', error: 'Cancelled' }),
+      expect(jobs.get(queued.id)).toMatchObject({
+        state: 'failed',
+        error: 'Cancelled',
+        cancelled: true,
+      }),
     );
     expect(cleaned).toEqual(['q']);
     release();
     await vi.waitFor(() => expect(jobs.get(first.id)?.state).toBe('completed'));
     expect(ran).toBe(false);
+  });
+
+  it('does not report a cancel the work never observed', async () => {
+    const jobs = new JobManager();
+    let release!: () => void;
+    // Work past its last abort check: it finishes regardless of the signal.
+    const job = jobs.enqueue(meta, () => new Promise<string>((r) => (release = () => r('done'))));
+    await vi.waitFor(() => expect(jobs.get(job.id)?.state).toBe('running'));
+    expect(jobs.cancel(job.id)).toBe(true);
+    expect(jobs.get(job.id)?.cancelled).toBe(false);
+    release();
+    await vi.waitFor(() =>
+      expect(jobs.get(job.id)).toMatchObject({
+        state: 'completed',
+        cancelled: false,
+        result: 'done',
+      }),
+    );
+  });
+
+  it('refuses to cancel once the job reports a phase it cannot be stopped in', async () => {
+    const jobs = new JobManager();
+    let release!: () => void;
+    const job = jobs.enqueue(meta, (_signal, progress) => {
+      progress({ phase: 'commit', done: 0, total: 1 });
+      return new Promise<void>((r) => (release = r));
+    });
+    await vi.waitFor(() => expect(jobs.get(job.id)?.progress).toMatchObject({ phase: 'commit' }));
+    expect(jobs.cancellable(job.id)).toBe(false);
+    expect(jobs.cancel(job.id)).toBe(false);
+    release();
+    await vi.waitFor(() => expect(jobs.get(job.id)?.state).toBe('completed'));
   });
 });

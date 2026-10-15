@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState, type RefObject } from 'react';
 import { useQueries } from '@tanstack/react-query';
 import { Pencil, Plus, SlidersHorizontal, UserPlus } from 'lucide-react';
 import { personQuery } from '../../api/queries';
@@ -27,7 +27,9 @@ import {
   type TimelineEntry,
 } from '../../lib/timeline';
 import { AddRelativeDialog, RELATIVE_TITLES, type RelativeKind } from './edit/AddRelativeDialog';
+import { relationshipTypeLabel } from './edit/EditPersonDialog';
 import { EventDialog } from './edit/EventDialog';
+import { useRelationshipEdits } from './edit/RelationshipEdits';
 import styles from './PersonPage.module.css';
 
 const QUALITY = (q: number | null) =>
@@ -74,11 +76,13 @@ function TimelineColumn({
   detail,
   half,
   onEditEvent,
+  addEventRef,
 }: {
   detail: PersonDetail;
   half: ApiPersonSummary[];
   /** Opens the event dialog; no item means a new event. */
   onEditEvent: (item?: EventDetail) => void;
+  addEventRef: RefObject<HTMLButtonElement | null>;
 }) {
   const entries = useMemo(() => buildTimeline(detail, { halfSiblings: half }), [detail, half]);
   const eventsById = useMemo(
@@ -112,6 +116,7 @@ function TimelineColumn({
       actions={
         <>
           <Button
+            ref={addEventRef}
             size="sm"
             variant="ghost"
             iconStart={<Plus size={14} aria-hidden />}
@@ -198,7 +203,13 @@ function SourcesColumn({ detail }: { detail: PersonDetail }) {
   );
 }
 
-function relationshipGroups(detail: PersonDetail, half: ApiPersonSummary[]): RelationshipGroup[] {
+type GroupMenus = Pick<ReturnType<typeof useRelationshipEdits>, 'parentMenu' | 'partnerMenu'>;
+
+function relationshipGroups(
+  detail: PersonDetail,
+  half: ApiPersonSummary[],
+  menus: GroupMenus,
+): RelationshipGroup[] {
   const groups: RelationshipGroup[] = [];
   const seen = new Set<string>();
   detail.parentFamilies.forEach((family, index) => {
@@ -208,7 +219,12 @@ function relationshipGroups(detail: PersonDetail, half: ApiPersonSummary[]): Rel
         ? 'Parents'
         : `Parents (${rel !== 'biological' && rel !== 'unknown' ? rel : index + 1})`;
     const parents = [family.partner1, family.partner2].filter((p) => p !== null);
-    if (parents.length > 0) groups.push({ title, people: parents.map((p) => toPersonSummary(p)) });
+    if (parents.length > 0)
+      groups.push({
+        title,
+        people: parents.map((p) => toPersonSummary(p)),
+        actions: menus.parentMenu(title, family),
+      });
   });
   const siblings = detail.parentFamilies
     .flatMap((f) => f.siblings.map((s) => s.person))
@@ -228,29 +244,42 @@ function relationshipGroups(detail: PersonDetail, half: ApiPersonSummary[]): Rel
     });
   }
   const many = detail.partnerFamilies.length > 1;
-  for (const { family, partner, children } of detail.partnerFamilies) {
-    const title = many
+  for (const partnerFamily of detail.partnerFamilies) {
+    const { family, partner, children } = partnerFamily;
+    const name = many
       ? `Spouse and children: ${partner ? fullName(partner) : 'unknown partner'}`
       : 'Spouse and children';
+    const title = groups.some((g) => g.title === name) ? `${name} (${family.id.slice(-4)})` : name;
     groups.push({
-      title: groups.some((g) => g.title === title) ? `${title} (${family.id.slice(-4)})` : title,
+      title,
+      subtitle:
+        !partner && children.length === 0
+          ? // Kept because events, notes or sources are attached; the menu can remove it.
+            [relationshipTypeLabel(family.relationship_type), 'No partner or children recorded']
+              .filter(Boolean)
+              .join(' · ')
+          : relationshipTypeLabel(family.relationship_type),
       people: partner ? [toPersonSummary(partner)] : [],
       nested: children.map((c) => toPersonSummary(c.person)),
+      actions: menus.partnerMenu(title, partnerFamily),
     });
   }
   return groups;
 }
 
 function RelationshipsColumn({
+  tree,
   detail,
   half,
   onAdd,
 }: {
+  tree: string;
   detail: PersonDetail;
   half: ApiPersonSummary[];
   onAdd: (kind: RelativeKind) => void;
 }) {
-  const groups = useMemo(() => relationshipGroups(detail, half), [detail, half]);
+  const { parentMenu, partnerMenu, dialogs } = useRelationshipEdits(tree, detail);
+  const groups = relationshipGroups(detail, half, { parentMenu, partnerMenu });
   return (
     <Panel
       title="Relationships"
@@ -258,7 +287,12 @@ function RelationshipsColumn({
       actions={
         <Menu>
           <MenuTrigger asChild>
-            <Button size="sm" variant="ghost" iconStart={<UserPlus size={14} aria-hidden />}>
+            <Button
+              size="sm"
+              variant="ghost"
+              iconStart={<UserPlus size={14} aria-hidden />}
+              data-relationships-add=""
+            >
               Add family member
             </Button>
           </MenuTrigger>
@@ -277,6 +311,7 @@ function RelationshipsColumn({
       ) : (
         <RelationshipList groups={groups} />
       )}
+      {dialogs}
     </Panel>
   );
 }
@@ -305,15 +340,18 @@ export function FactsTab({ tree, detail }: { tree: string; detail: PersonDetail 
   // Dialogs mount only while open, so each opening starts from fresh values.
   const [eventDialog, setEventDialog] = useState<{ item?: EventDetail | undefined } | null>(null);
   const [relative, setRelative] = useState<RelativeKind | null>(null);
+  // Focus lands here when an edited event is deleted and its Edit button goes with it.
+  const addEventRef = useRef<HTMLButtonElement>(null);
   return (
     <div className={styles.facts}>
       <TimelineColumn
         detail={detail}
         half={half}
         onEditEvent={(item) => setEventDialog({ item })}
+        addEventRef={addEventRef}
       />
       <SourcesColumn detail={detail} />
-      <RelationshipsColumn detail={detail} half={half} onAdd={setRelative} />
+      <RelationshipsColumn tree={tree} detail={detail} half={half} onAdd={setRelative} />
       {eventDialog && (
         <EventDialog
           tree={tree}
@@ -321,6 +359,7 @@ export function FactsTab({ tree, detail }: { tree: string; detail: PersonDetail 
           item={eventDialog.item}
           open
           onOpenChange={(open) => !open && setEventDialog(null)}
+          returnFocusFallback={() => addEventRef.current}
         />
       )}
       {relative && (

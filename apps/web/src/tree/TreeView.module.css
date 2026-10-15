@@ -145,6 +145,11 @@
   background: color-mix(in oklab, var(--oa-canvas) 85%, transparent);
 }
 
+/* Too tall for the gap it sits in: out of sight, still read by screen readers. */
+.labelGutter[data-thin] {
+  opacity: 0;
+}
+
 .labelColumn {
   transform: translate(0, -100%);
   /* Clear of the expand chevrons that sit on the top cards' edges. */
@@ -244,6 +249,12 @@
   bottom: var(--oa-space-4);
   left: var(--oa-space-4);
   z-index: 2;
+}
+
+/* Moved out of the way of a row label or the active card (see useMinimapCorner). */
+.minimap[data-corner='right'] {
+  right: var(--oa-space-4);
+  left: auto;
 }
 
 .empty {

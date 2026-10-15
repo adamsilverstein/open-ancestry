@@ -1,7 +1,13 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { compareDates, parseDate, UNDATED_SORT_KEY, yearOf } from './index';
-import { arbDateText, arbPoint, pointText } from './test-arbitraries';
+import {
+  arbCalendarText,
+  arbDateText,
+  arbMixedRange,
+  arbPoint,
+  pointText,
+} from './test-arbitraries';
 
 // Property tests run hundreds of cases; under coverage on a shared CI runner that can
 // pass Vitest's 5s default, so they get room. A hang still fails.
@@ -45,15 +51,45 @@ describe('sortKey', () => {
     expect(parseDate('1941').sortKeyEnd).toBeUndefined();
   });
 
-  it('approximates Hebrew and French Republican dates onto the Gregorian timeline', () => {
-    const hebrew = parseDate('@#DHEBREW@ 1 TSH 5700').sortKey;
-    expect(hebrew).toBeGreaterThan(19390800);
-    expect(hebrew).toBeLessThan(19391100);
-    const french = parseDate('@#DFRENCH R@ 1 VEND 1').sortKey;
-    expect(french).toBeGreaterThan(17920800);
-    expect(french).toBeLessThan(17921100);
-    expect(parseDate('@#DFRENCH R@ 1 PLUV 1').sortKey).toBeGreaterThan(17930100);
-    expect(parseDate('@#DHEBREW@ 5700').sortKey).toBeGreaterThan(19390000);
+  it.each([
+    // Hebrew, checked against published calendars.
+    ['@#DHEBREW@ 1 TSH 5700', 19390914],
+    ['@#DHEBREW@ 1 TSH 5780', 20190930],
+    ['@#DHEBREW@ 25 KSL 5784', 20231208],
+    ['@#DHEBREW@ 14 ADR 5783', 20230307],
+    ['@#DHEBREW@ 14 ADS 5783', 20230307],
+    ['@#DHEBREW@ 14 ADR 5784', 20240223],
+    ['@#DHEBREW@ 14 ADS 5784', 20240324],
+    ['@#DHEBREW@ 15 NSN 5785', 20250413],
+    ['@#DHEBREW@ 9 AAV 5784', 20240813],
+    ['@#DHEBREW@ 29 ELL 5784', 20241002],
+    ['@#DHEBREW@ 1 TSH 5785', 20241003],
+    // French Republican, including the sextile years III, VII and XI.
+    ['@#DFRENCH R@ 1 VEND 1', 17920922],
+    ['@#DFRENCH R@ 1 VEND 2', 17930922],
+    ['@#DFRENCH R@ 9 THER 2', 17940727],
+    ['@#DFRENCH R@ 6 COMP 3', 17950922],
+    ['@#DFRENCH R@ 1 VEND 4', 17950923],
+    ['@#DFRENCH R@ 18 BRUM 8', 17991109],
+    ['@#DFRENCH R@ 11 FRIM 13', 18041202],
+    ['@#DFRENCH R@ 1 VEND 14', 18050923],
+  ])('converts %s exactly -> %i', (input, key) => {
+    expect(parseDate(input).sortKey).toBe(key);
+  });
+
+  it('bounds Hebrew and French years and months by their real lengths', () => {
+    expect(parseDate('BET @#DHEBREW@ 5784 AND @#DHEBREW@ 5784')).toMatchObject({
+      sortKey: 20230916,
+      sortKeyEnd: 20241002,
+    });
+    expect(parseDate('AFT @#DHEBREW@ ELL 5784').sortKey).toBe(20241003);
+    expect(parseDate('BEF @#DHEBREW@ TSH 5785').sortKey).toBe(20241002);
+    expect(parseDate('BET @#DFRENCH R@ COMP 2 AND @#DFRENCH R@ COMP 2')).toMatchObject({
+      sortKey: 17940917,
+      sortKeyEnd: 17940921,
+    });
+    expect(parseDate('@#DHEBREW@ 5700').sortKey).toBeGreaterThan(19390914);
+    expect(parseDate('@#DHEBREW@ 5700').sortKey).toBeLessThan(19400902);
   });
 
   it('uses the undated key for text', () => {
@@ -108,6 +144,38 @@ describe('sortKey properties', { timeout: PROPERTY_TIMEOUT }, () => {
         const da = Date.UTC(a.getUTCFullYear(), a.getUTCMonth(), a.getUTCDate());
         const db = Date.UTC(b.getUTCFullYear(), b.getUTCMonth(), b.getUTCDate());
         expect(Math.sign(compareDates(text(a), text(b)))).toBe(Math.sign(da - db));
+      }),
+    );
+  });
+
+  it('orders BEF X < X < AFT X for Hebrew and French dates, inside their month and year', () => {
+    fc.assert(
+      fc.property(arbCalendarText, (text) => {
+        const exact = parseDate(text);
+        expect(exact.valid).toBe(true);
+        expect(parseDate(`BEF ${text}`).sortKey).toBeLessThan(exact.sortKey);
+        expect(parseDate(`AFT ${text}`).sortKey).toBeGreaterThan(exact.sortKey);
+        // A day sorts within its month's and year's range.
+        const day = /^(@#D[A-Z ]+@) \d+ (\S+) (\d+)$/.exec(text);
+        if (day) {
+          const [, escape, month, year] = day;
+          for (const outer of [`${escape} ${month} ${year}`, `${escape} ${year}`]) {
+            const range = parseDate(`BET ${outer} AND ${outer}`);
+            expect(exact.sortKey).toBeGreaterThanOrEqual(range.sortKey);
+            expect(exact.sortKey).toBeLessThanOrEqual(range.sortKeyEnd!);
+          }
+        }
+      }),
+    );
+  });
+
+  it('keeps mixed-calendar ranges valid and ordered', () => {
+    fc.assert(
+      fc.property(arbMixedRange, (text) => {
+        const parsed = parseDate(text);
+        expect(parsed.valid).toBe(true);
+        expect(parsed.endCalendar).toBeDefined();
+        expect(parsed.sortKey).toBeLessThanOrEqual(parsed.sortKeyEnd!);
       }),
     );
   });

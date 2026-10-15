@@ -77,7 +77,9 @@ export function describeChange(change: ReviewChange, personName: string): string
     case 'unlinked-new':
       return 'New child of a partnership not in this tree; tick to add';
     case 'possible-match':
-      return `Looks like ${change.existingName}, who is already matched; not added unless you tick it`;
+      return change.taken
+        ? `Looks like ${change.existingName} (${Math.round(change.confidence * 100)}%), who is already matched; not added unless you tick it`
+        : `Possibly ${change.existingName} (${Math.round(change.confidence * 100)}% match); not added unless you tick it`;
     case 'possibly-merged':
       return `Possibly merged into ${change.existingName} earlier (shares a relative); not added unless you tick it`;
     case 'merged':

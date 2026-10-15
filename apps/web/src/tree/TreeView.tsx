@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type RefObject,
+} from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
@@ -22,8 +31,8 @@ import { useToast } from '../components/Toast/Toast';
 import type { PersonSummary } from '../lib/person';
 import { TreeToolbar, type TreeLayout as LayoutKind } from '../components/TreeToolbar/TreeToolbar';
 import { Skeleton } from '../components/Skeleton/Skeleton';
+import { isMissingPerson } from '../api/client';
 import {
-  ApiError,
   fetchHome,
   fetchNeighborhood,
   MAX_GENERATIONS,
@@ -32,6 +41,7 @@ import {
   type NeighborhoodRequest,
 } from './api';
 import { usePalette } from '../app/palette';
+import { FAN_RING_WIDTH } from './fanLabels';
 import { lifeEvent, toPersonSummary } from './format';
 import { onTreeChanged } from '../api/edits';
 import { GraphCache } from './graphCache';
@@ -130,16 +140,97 @@ function TreeMinimap({
     }),
     [layout],
   );
+  const ref = useRef<HTMLDivElement>(null);
+  const corner = useMinimapCorner(ref, viewport);
   return (
-    <Minimap
+    <div
+      ref={ref}
       className={styles.minimap}
-      nodes={nodes}
-      bounds={bounds}
-      viewport={viewport}
-      onNavigate={onNavigate}
-      onDismiss={onDismiss}
-    />
+      data-testid="tree-minimap"
+      data-corner={corner}
+      hidden={corner === 'collapsed'}
+    >
+      <Minimap
+        nodes={nodes}
+        bounds={bounds}
+        viewport={viewport}
+        onNavigate={onNavigate}
+        onDismiss={onDismiss}
+      />
+    </div>
   );
+}
+
+type Corner = 'left' | 'right' | 'collapsed';
+
+/** Screen gap between the minimap and the canvas edges. */
+const MINIMAP_INSET = 16;
+
+/** How long the view must rest before the minimap re-checks its corner. */
+const MINIMAP_SETTLE_MS = 150;
+
+/**
+ * Where the minimap may sit: its bottom-left corner, else bottom-right, else
+ * nowhere, so it never covers a row label or the keyboard's active card.
+ * Re-checked once a pan, zoom or re-focus settles (`viewport` stops changing),
+ * and it stays in its corner while that corner is free, so it never flips
+ * back and forth mid-gesture.
+ */
+function useMinimapCorner(ref: RefObject<HTMLDivElement | null>, viewport: Rect): Corner {
+  const size = useRef({ width: 0, height: 0 });
+  const [value, setValue] = useState<Corner>('left');
+  const current = useRef(value);
+  // `data-settling` marks a pending check, so tests (and screenshots) can wait
+  // for the final corner. Written to the DOM: no re-render per pan frame.
+  useLayoutEffect(() => {
+    if (ref.current) ref.current.dataset.settling = '';
+  }, [ref, viewport]);
+  useEffect(() => {
+    const el = ref.current;
+    const container = el?.parentElement;
+    if (!el || !container) return;
+    const timer = setTimeout(() => {
+      delete el.dataset.settling;
+      if (!el.hidden) {
+        const own = el.getBoundingClientRect();
+        if (own.width) size.current = { width: own.width, height: own.height };
+      }
+      const { width, height } = size.current;
+      if (!width) return;
+      const box = container.getBoundingClientRect();
+      const obstacles = [
+        ...container.querySelectorAll<HTMLElement>(
+          '[data-testid="tree-row-label"]:not([data-thin]), [data-key][tabindex="0"]',
+        ),
+      ]
+        .filter((o) => !o.closest('[hidden]'))
+        .map((o) => o.getBoundingClientRect())
+        .filter((r) => r.width > 0);
+      const top = box.bottom - MINIMAP_INSET - height;
+      const leftOf: Record<'left' | 'right', number> = {
+        left: box.left + MINIMAP_INSET,
+        right: box.right - MINIMAP_INSET - width,
+      };
+      const free = (corner: 'left' | 'right') =>
+        !obstacles.some(
+          (r) =>
+            r.left < leftOf[corner] + width &&
+            leftOf[corner] < r.right &&
+            r.top < top + height &&
+            top < r.bottom,
+        );
+      const was = current.current;
+      // The corner it is in first, then the left, then the right.
+      const order = was === 'right' ? (['right', 'left'] as const) : (['left', 'right'] as const);
+      // Never hide the minimap while it has keyboard focus (arrow keys pan from it).
+      const focused = el.contains(document.activeElement);
+      const next = order.find(free) ?? (focused && was !== 'collapsed' ? was : 'collapsed');
+      current.current = next;
+      setValue(next);
+    }, MINIMAP_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [ref, viewport]);
+  return value;
 }
 
 interface Result {
@@ -159,7 +250,12 @@ function layoutOptions(
   view: Pick<ViewState, 'expanded' | 'collapsed' | 'parents'>,
 ): LayoutRequest['options'] {
   return kind === 'fan'
-    ? { generations: up + 1, collapsed: view.collapsed, selectedParentFamilies: view.parents }
+    ? {
+        generations: up + 1,
+        ringWidth: FAN_RING_WIDTH,
+        collapsed: view.collapsed,
+        selectedParentFamilies: view.parents,
+      }
     : {
         ancestorsDepth: up,
         descendantsDepth: down,
@@ -194,7 +290,9 @@ export function TreeView({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const kind: LayoutKind = search.layout ?? 'family';
+  // Only a known layout: never trust an inherited key like `toString`.
+  const kind: LayoutKind =
+    search.layout && Object.hasOwn(DEFAULT_DEPTH, search.layout) ? search.layout : 'family';
   // Hand-edited URLs can hold anything: clamp to what the server serves.
   const requestedUp = parseGenerations(search.up) ?? DEFAULT_DEPTH[kind].up;
   const fanCapped = kind === 'fan' && requestedUp > MAX_FAN_GENERATIONS;
@@ -321,7 +419,7 @@ export function TreeView({
         if (cancelled) return;
         setFailure({
           focus: personId,
-          notFound: error instanceof ApiError && error.status === 404,
+          notFound: isMissingPerson(error, personId),
         });
       }
     })();

@@ -50,19 +50,32 @@ async function seed(
   const { token } = (await (await request.get('/api/session')).json()) as { token: string };
   const headers = { origin: new URL(baseURL).origin, 'x-oa-token': token };
   const name = `Reimport ${testInfo.project.name} ${testInfo.workerIndex}${testInfo.retry} ${Date.now() % 1e6}`;
-  const started = await request.post('/api/import', {
-    headers,
-    multipart: {
-      file: {
-        name: `${name}.ged`,
-        mimeType: 'application/octet-stream',
-        buffer: Buffer.from(SAMPLE),
-      },
-    },
-  });
-  const { jobId } = (await started.json()) as { jobId: string };
+  // The e2e server runs one import at a time with a short queue, shared with
+  // other specs' large imports: retry a full queue (429) and allow for waiting.
+  let jobId: string | undefined;
   await expect
-    .poll(async () => (await (await request.get(`/api/jobs/${jobId}`)).json()).state)
+    .poll(
+      async () => {
+        const started = await request.post('/api/import', {
+          headers,
+          multipart: {
+            file: {
+              name: `${name}.ged`,
+              mimeType: 'application/octet-stream',
+              buffer: Buffer.from(SAMPLE),
+            },
+          },
+        });
+        if (started.status() === 202) jobId = ((await started.json()) as { jobId: string }).jobId;
+        return started.status();
+      },
+      { timeout: 60_000, intervals: [500, 1000, 2000] },
+    )
+    .toBe(202);
+  await expect
+    .poll(async () => (await (await request.get(`/api/jobs/${jobId}`)).json()).state, {
+      timeout: 60_000,
+    })
     .toBe('completed');
   const job = (await (await request.get(`/api/jobs/${jobId}`)).json()) as { tree: string };
   return { tree: job.tree, headers };
@@ -279,6 +292,139 @@ test('a partner dropped from the export adds no parent family by default', async
   ).toBeVisible({ timeout: 30_000 });
   expect(await parentFamilies('George')).toBe(before.george);
   expect(await parentFamilies('Iris')).toBe(before.iris);
+});
+
+test('a review the tree moved past offers Compare again, keeping the choices made', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const thaddeus = (await personByName(request, seeded.tree, 'Thaddeus'))!;
+  const josiah = (await personByName(request, seeded.tree, 'Josiah'))!;
+  await startReimport(page, seeded);
+  const birth = card(page, 'Thaddeus Ashgrove').getByRole('checkbox', { name: /Birth:/ });
+  await birth.uncheck();
+  // Someone edits the tree (another tab) while the review is open.
+  const death = await eventDate(request, seeded.tree, josiah, 'DEAT');
+  await request.patch(`/api/trees/${encodeURIComponent(seeded.tree)}/events/${death.id}`, {
+    headers: seeded.headers,
+    data: { date_text: '3 MAY 1939' },
+  });
+  // Coming back to the page notices it.
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  const banner = page.getByRole('alert').filter({ hasText: 'Your tree changed' });
+  await expect(banner).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Apply \d+ changes?$/ })).toBeDisabled();
+  await banner.getByRole('button', { name: 'Compare again' }).click();
+  await expect(banner).toBeHidden();
+  // The choice made before is kept; the edited death is now a local edit, unticked.
+  await expect(birth).not.toBeChecked();
+  await expect(
+    card(page, 'Josiah Ashgrove').getByRole('checkbox', { name: /Death: 3 May 1939 → 1940/ }),
+  ).not.toBeChecked();
+  await page.getByRole('button', { name: /^Apply \d+ changes?$/ }).click();
+  await expect(
+    page
+      .getByRole('region', { name: /Notifications/ })
+      .getByRole('listitem')
+      .filter({ hasText: /Applied \d+ change/ }),
+  ).toBeVisible({ timeout: 30_000 });
+  expect((await eventDate(request, seeded.tree, thaddeus, 'BIRT')).date_text).toBe('Abt. 1842');
+  expect((await eventDate(request, seeded.tree, josiah, 'DEAT')).date_text).toBe('3 MAY 1939');
+});
+
+test('applying a review the tree moved past shows Compare again instead', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const josiah = (await personByName(request, seeded.tree, 'Josiah'))!;
+  await startReimport(page, seeded);
+  const death = await eventDate(request, seeded.tree, josiah, 'DEAT');
+  await request.patch(`/api/trees/${encodeURIComponent(seeded.tree)}/events/${death.id}`, {
+    headers: seeded.headers,
+    data: { date_text: '3 MAY 1939' },
+  });
+  await page.getByRole('button', { name: /^Apply \d+ changes?$/ }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'Your tree changed' })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Apply \d+ changes?$/ })).toBeDisabled();
+});
+
+test('an override is not carried onto a newer local value, and a refused compare says why', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const josiah = (await personByName(request, seeded.tree, 'Josiah'))!;
+  const death = await eventDate(request, seeded.tree, josiah, 'DEAT');
+  const edit = (date: string) =>
+    request.patch(`/api/trees/${encodeURIComponent(seeded.tree)}/events/${death.id}`, {
+      headers: seeded.headers,
+      data: { date_text: date },
+    });
+  await edit('3 MAY 1939');
+  await startReimport(page, seeded);
+  // The user overrides their own edit...
+  await card(page, 'Josiah Ashgrove')
+    .getByRole('checkbox', { name: /Death: 3 May 1939 → 1940/ })
+    .check();
+  // ...then the date is edited again elsewhere.
+  await edit('4 MAY 1939');
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  const banner = page.getByRole('alert').filter({ hasText: 'Your tree changed' });
+  // A refused comparison (the tree is busy) explains itself and keeps the review.
+  await page.route('**/api/reimports/*/refresh', (route) =>
+    route.fulfill({
+      status: 409,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        error: { code: 'conflict', message: 'Tree is busy (an import is running)' },
+      }),
+    }),
+  );
+  await banner.getByRole('button', { name: 'Compare again' }).click();
+  await expect(
+    page
+      .getByRole('region', { name: /Notifications/ })
+      .getByRole('listitem')
+      .filter({ hasText: 'Tree is busy (an import is running)' }),
+  ).toBeVisible();
+  await expect(banner).toBeVisible();
+  await page.unroute('**/api/reimports/*/refresh');
+  await banner.getByRole('button', { name: 'Compare again' }).click();
+  await expect(banner).toBeHidden();
+  // The override was for 3 May; the user hasn't seen 4 May, so it starts unticked again.
+  await expect(
+    card(page, 'Josiah Ashgrove').getByRole('checkbox', { name: /Death: 4 May 1939 → 1940/ }),
+  ).not.toBeChecked();
+});
+
+test('match percent and reasons say what differs, and why a new person is new', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const edyth = '0 @I90@ INDI\n1 NAME Edyth /Ashgrove/\n1 SEX F\n1 BIRT\n2 DATE 1897\n';
+  await startReimport(page, seeded, laterExport().replace('0 TRLR', `${edyth}0 TRLR`));
+  // Thaddeus's birth date was refined: not a 100% match, and it says why.
+  const thaddeus = card(page, 'Thaddeus Ashgrove');
+  await expect(thaddeus.getByText(/different birth date/)).toBeVisible();
+  await expect(thaddeus.getByText(/100% match/)).toHaveCount(0);
+  // Edyth names her closest tree person and is not added by default, even in bulk.
+  const card90 = card(page, 'Edyth Ashgrove');
+  await expect(card90.getByText(/closest: Edith Ashgrove, \d+%/)).toBeVisible();
+  const add = card90.getByRole('checkbox', { name: 'Add Edyth Ashgrove' });
+  await expect(add).not.toBeChecked();
+  await page.getByRole('button', { name: 'Accept all high-confidence' }).click();
+  await expect(add).not.toBeChecked();
+  // A genuinely new person says so.
+  await expect(
+    card(page, 'Noah Ashgrove').getByText(/closest:|no one with a similar name/),
+  ).toBeVisible();
 });
 
 test('the review lists what needs a decision first, filters by group, and formats dates', async ({

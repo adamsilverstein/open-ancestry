@@ -321,6 +321,9 @@ const unparseable = [
   '(no closing paren',
   'INT 1941 (unbalanced',
   'abt abt 1890',
+  '@#DHEBREW@ 5700 B.C.',
+  '@#DFRENCH R@ 5 BCE',
+  'HEBREW 1 TSH 5700 BCE',
   'BET @#DKLINGON@ 1700 AND 1701',
   'BET 1890 AND 1895 (a range with a note)',
 ];
@@ -383,5 +386,17 @@ describe('parseDate', () => {
     expect(parseDate('05/05/1960').ambiguous).toBeUndefined();
     expect(parseDate('05/28/1960').ambiguous).toBeUndefined();
     expect(parseDate('5 SEP 1941').ambiguous).toBeUndefined();
+  });
+
+  it('keeps the calendar of each end of a mixed-calendar range', () => {
+    const parsed = parseDate('BET @#DJULIAN@ 1 JAN 1751 AND 1 JAN 1753');
+    expect(parsed).toMatchObject({ calendar: 'julian', endCalendar: 'gregorian' });
+    expect(parsed.sortKey).toBe(17510112);
+    expect(parsed.sortKeyEnd).toBe(17530101);
+    expect(parseDate('FROM 1700 TO @#DJULIAN@ 1710')).toMatchObject({
+      calendar: 'gregorian',
+      endCalendar: 'julian',
+    });
+    expect(parseDate('BET @#DJULIAN@ 1700 AND @#DJULIAN@ 1701').endCalendar).toBeUndefined();
   });
 });

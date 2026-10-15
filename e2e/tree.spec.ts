@@ -44,6 +44,12 @@ async function focusedOn(page: Page, name: string) {
   await settled(page);
 }
 
+/** Waits for the minimap's pending corner check, so it is in its final corner. */
+async function minimapRested(page: Page) {
+  const minimap = page.getByTestId('tree-minimap');
+  if (await minimap.count()) await expect(minimap).not.toHaveAttribute('data-settling');
+}
+
 /** Waits for pan/zoom animations to finish. */
 async function settled(page: Page) {
   await expect(world(page)).not.toHaveAttribute('data-animating');
@@ -371,7 +377,8 @@ test.describe('family view', () => {
   test('a click on empty canvas keeps the tree shortcuts working', async ({ page }) => {
     await open(page);
     const viewport = await box(canvas(page));
-    await page.mouse.click(viewport.x + viewport.width - 40, viewport.y + viewport.height - 40);
+    // Top right: the bottom corners can hold the minimap, which moves to stay off labels.
+    await page.mouse.click(viewport.x + viewport.width - 40, viewport.y + 40);
     await expect(canvas(page)).toBeFocused();
     const before = await transform(page);
     await page.keyboard.press('+');
@@ -529,14 +536,59 @@ test.describe('family view', () => {
     await expect(canvas(page).getByText('Ada’s grandparents')).toBeInViewport();
   });
 
+  test('the minimap settles before it moves, and does not flip back and forth', async ({
+    page,
+  }) => {
+    await open(page);
+    await settled(page);
+    const minimap = page.getByTestId('tree-minimap');
+    await expect(minimap).toBeVisible();
+    await minimap.evaluate((el) => {
+      const w = window as unknown as { __cornerChanges: number };
+      w.__cornerChanges = 0;
+      new MutationObserver((records) => (w.__cornerChanges += records.length)).observe(el, {
+        attributes: true,
+        attributeFilter: ['data-corner', 'hidden'],
+      });
+    });
+    // A slow pan that carries row labels and cards across the bottom corners and back.
+    const v = await box(canvas(page));
+    const at = (fx: number, fy: number) => [v.x + v.width * fx, v.y + v.height * fy] as const;
+    await page.mouse.move(...at(0.5, 0.3));
+    await page.mouse.down();
+    for (const [fx, fy] of [
+      [0.3, 0.8],
+      [0.7, 0.9],
+      [0.5, 0.6],
+      [0.2, 0.9],
+      [0.6, 0.5],
+    ] as const) {
+      await page.mouse.move(...at(fx, fy), { steps: 20 });
+    }
+    await page.mouse.up();
+    await settled(page);
+    await page.waitForTimeout(400);
+    const changes = await page.evaluate(
+      () => (window as unknown as { __cornerChanges: number }).__cornerChanges,
+    );
+    expect(changes).toBeLessThanOrEqual(1);
+  });
+
   test('the minimap shows the viewport and navigates on click and drag', async ({ page }) => {
     await open(page);
     const minimap = page.getByRole('application', { name: 'Minimap' });
     await expect(minimap).toBeVisible();
-    const m = await box(minimap);
+    // The minimap may change corners once the view rests (150ms): measure it after.
+    const rested = async () => {
+      await minimapRested(page);
+      return box(minimap);
+    };
+    let m = await rested();
     const start = await transform(page);
     await page.mouse.click(m.x + 10, m.y + 10);
     await expect.poll(async () => (await transform(page)).x).not.toBe(start.x);
+    await settled(page);
+    m = await rested();
     const clicked = await transform(page);
     await page.mouse.move(m.x + 20, m.y + 20);
     await page.mouse.down();
@@ -681,6 +733,12 @@ test.describe('family view', () => {
     await expect(card(page, 'Fenn Vale')).toBeAttached();
   });
 
+  test('an id that cannot exist shows Person not found (#143)', async ({ page }) => {
+    await page.goto(`/tree/x'y?tree=${encodeURIComponent(tree)}`);
+    await expect(page.getByRole('heading', { name: 'Person not found' })).toBeVisible();
+    await expect(page.getByText('Could not load the tree')).toHaveCount(0);
+  });
+
   test('a person with no tree data shows an empty state', async ({ page }) => {
     await page.goto(`/tree/nobody?tree=${encodeURIComponent(tree)}`);
     await expect(page.getByRole('heading', { name: 'Person not found' })).toBeVisible();
@@ -820,6 +878,20 @@ test.describe('pedigree, descendant and fan views', () => {
     await expect(empty).not.toHaveCount(0);
     await expect(empty.first()).toHaveAttribute('aria-hidden', 'true');
   });
+});
+
+test.describe('hand-edited layouts (#146)', () => {
+  for (const layout of ['bogus', 'descendant', 'toString', '__proto__']) {
+    test(`layout=${layout} opens the family view`, async ({ page }) => {
+      await open(page, 'ada', `&layout=${layout}`);
+      await expect(page.getByRole('heading', { name: 'Something went wrong' })).toHaveCount(0);
+      await expect(page.getByText('Could not load the tree')).toHaveCount(0);
+      await expect(card(page, 'Ada Vale')).toBeAttached();
+      await expect(
+        page.getByRole('toolbar', { name: 'Tree tools' }).getByRole('button', { name: /Layout/ }),
+      ).toHaveAccessibleName('Layout: Family view');
+    });
+  }
 });
 
 test.describe('generation depth in the URL', () => {
@@ -980,6 +1052,252 @@ test.describe('far zoom', () => {
   });
 });
 
+test.describe('step and adoptive kinship (#138)', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+  const sample = seed.sample;
+  const openSample = async (page: Page, given: string) => {
+    await page.goto(`/tree/${sample.ids[given]}?tree=${encodeURIComponent(sample.tree)}`);
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+  };
+
+  test('a stepfather and half-sister keep their words in either parent set', async ({ page }) => {
+    await openSample(page, 'George');
+    await expect(card(page, 'Iris Hollowell')).toHaveAccessibleName(
+      /half-sister of George Eldermoor$/,
+    );
+    await canvas(page)
+      .getByRole('button', { name: /^Switch parents of George Eldermoor/ })
+      .click();
+    await expect(card(page, 'Leopold Hollowell')).toHaveAccessibleName(
+      /, stepfather of George Eldermoor$/,
+    );
+    await expect(card(page, 'Iris Hollowell')).toHaveAccessibleName(
+      /, half-sister of George Eldermoor$/,
+    );
+  });
+
+  test('adoptive parents are named as such', async ({ page }) => {
+    await openSample(page, 'Peter');
+    await expect(card(page, 'Harold Ashgrove')).toHaveAccessibleName(
+      /, adoptive father of Peter Ashgrove$/,
+    );
+    await expect(card(page, 'Dorothy Ingleby')).toHaveAccessibleName(
+      /, adoptive mother of Peter Ashgrove$/,
+    );
+    await expect(card(page, 'Thomas Ashgrove')).toHaveAccessibleName(
+      /, adopted brother of Peter Ashgrove$/,
+    );
+  });
+});
+
+test.describe('wide descendant charts (#74)', () => {
+  test.use({ viewport: { width: 900, height: 700 } });
+
+  type Box = { x: number; y: number; width: number; height: number };
+  const intersects = (a: Box, b: Box) =>
+    a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+
+  async function visibleBoxes(locator: Locator) {
+    const out: Box[] = [];
+    for (const el of await locator.all()) {
+      if (!(await el.isVisible())) continue;
+      // Thin gaps fade a label out but keep it in the reading order.
+      if ((await el.getAttribute('data-thin')) !== null) continue;
+      const b = await el.boundingBox();
+      if (b) out.push(b);
+    }
+    return out;
+  }
+
+  const labels = (page: Page) => page.getByTestId('tree-row-label');
+  const cards = (page: Page) => canvas(page).getByRole('button', { name: /, (male|female)/ });
+
+  async function expectLabelsClear(page: Page) {
+    const cardBoxes = await visibleBoxes(cards(page));
+    for (const l of await visibleBoxes(labels(page))) {
+      for (const c of cardBoxes) expect(intersects(l, c)).toBe(false);
+    }
+  }
+
+  async function drag(page: Page, dx: number, dy: number) {
+    await page.mouse.move(450, 350);
+    await page.mouse.down();
+    await page.mouse.move(450 + dx, 350 + dy, { steps: 5 });
+    await page.mouse.up();
+    await settled(page);
+  }
+
+  test('row labels never cover a card, at fit, 100% and zoomed out', async ({ page }) => {
+    await open(page, 'bram', '&layout=descendants');
+    await settled(page);
+    await expectLabelsClear(page);
+    await drag(page, 300, 0);
+    await expectLabelsClear(page);
+    // 100%, then zoomed out to just above the canvas level of detail.
+    await page.getByRole('button', { name: 'Fit to screen' }).click();
+    await settled(page);
+    while ((await transform(page)).scale < 1) {
+      await page.getByRole('button', { name: 'Zoom in' }).click();
+      await settled(page);
+    }
+    await drag(page, 250, 0);
+    await expectLabelsClear(page);
+    for (let i = 0; i < 4 && (await transform(page)).scale > 0.45; i++) {
+      await page.getByRole('button', { name: 'Zoom out' }).click();
+      await settled(page);
+      await expectLabelsClear(page);
+    }
+    // Slide the rows under the gutter: their gaps are now thinner than a label,
+    // which fades out but stays in the reading order.
+    await drag(page, -200, 0);
+    await expectLabelsClear(page);
+    await expect(page.locator('[data-testid="tree-row-label"][data-thin]')).not.toHaveCount(0);
+    await expect(page.locator('[data-testid="tree-row-label"][hidden]')).toHaveCount(0);
+  });
+
+  test('row labels stay clear of cards after the text size changes', async ({ page }) => {
+    await open(page, 'bram', '&layout=descendants');
+    await settled(page);
+    await page.getByRole('button', { name: 'Fit to screen' }).click();
+    await settled(page);
+    while ((await transform(page)).scale < 1) {
+      await page.getByRole('button', { name: 'Zoom in' }).click();
+      await settled(page);
+    }
+    // Clear every row of its label, then slide left until one row reaches its
+    // label and back one step: that label sits just beside its row.
+    const above = page.locator('[data-testid="tree-row-label"][data-above]');
+    for (let i = 0; i < 15 && (await above.count()) > 0; i++) await drag(page, 100, 0);
+    await expect(above).toHaveCount(0);
+    for (let i = 0; i < 100 && (await above.count()) === 0; i++) await drag(page, -8, 0);
+    await expect(above).not.toHaveCount(0);
+    await drag(page, 8, 0);
+    await expect(above).toHaveCount(0);
+    // Like a minimum font size setting or a late web font: the labels grow,
+    // and now reach into their rows unless they move up into the gap.
+    await labels(page).evaluateAll((els) => {
+      for (const el of els.flatMap((l) => [...l.querySelectorAll<HTMLElement>('*')])) {
+        el.style.fontSize = '26px';
+      }
+    });
+    await drag(page, 6, 0);
+    await expectLabelsClear(page);
+  });
+
+  test('the minimap moves or collapses rather than cover a label or the active card', async ({
+    page,
+  }) => {
+    await open(page, 'bram', '&layout=descendants');
+    await settled(page);
+    const minimap = page.getByTestId('tree-minimap');
+    // Shown at the start (bottom-left unless something is already there).
+    await expect(minimap).toBeVisible();
+    const check = async () => {
+      const m = await visibleBoxes(minimap);
+      if (!m.length) return; // collapsed
+      for (const l of await visibleBoxes(labels(page))) expect(intersects(m[0]!, l)).toBe(false);
+      const active = canvas(page).locator('[data-key][tabindex="0"]');
+      for (const a of await visibleBoxes(active)) expect(intersects(m[0]!, a)).toBe(false);
+    };
+    // The minimap re-checks its corner 150ms after each pan settles.
+    await expect(check).toPass({ timeout: 2000 });
+    // Bring the focus card and the lowest rows down to the bottom-left corner:
+    // the minimap gets out of the way.
+    await drag(page, -150, 250);
+    // The minimap re-checks its corner 150ms after each pan settles.
+    await expect(check).toPass({ timeout: 2000 });
+    await expect(minimap).not.toHaveAttribute('data-corner', 'left');
+    await drag(page, 300, 0);
+    // The minimap re-checks its corner 150ms after each pan settles.
+    await expect(check).toPass({ timeout: 2000 });
+  });
+});
+
+test.describe('fan labels (#137)', () => {
+  const sample = seed.sample;
+  async function openFan(page: Page) {
+    await page.goto(`/tree/${sample.ids.Lily}?tree=${encodeURIComponent(sample.tree)}&layout=fan`);
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    await page.evaluate(() => document.fonts.ready);
+  }
+
+  /** Each segment's label: its text, and whether all four corners lie in the segment. */
+  function labels(page: Page) {
+    return page.getByTestId('tree-fan').evaluate((svg) =>
+      [...svg.querySelectorAll<SVGGElement>('g[role="button"]')].map((g) => {
+        const text = g.querySelector('text');
+        const path = g.querySelector('path')!;
+        if (!text) return { text: null, inside: true, fontSize: 0 };
+        const box = text.getBBox();
+        const matrix = text.transform.baseVal.consolidate()?.matrix ?? new DOMMatrix();
+        const corners = [
+          [box.x, box.y],
+          [box.x + box.width, box.y],
+          [box.x, box.y + box.height],
+          [box.x + box.width, box.y + box.height],
+        ];
+        return {
+          text: [...text.querySelectorAll('tspan')].map((t) => t.textContent).join(' | '),
+          inside: corners.every(([x, y]) =>
+            path.isPointInFill(new DOMPoint(x, y).matrixTransform(matrix)),
+          ),
+          fontSize: parseFloat(getComputedStyle(text).fontSize),
+        };
+      }),
+    );
+  }
+
+  test('names stay inside their segments, with years where they fit', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openFan(page);
+    const all = await labels(page);
+    expect(all.filter((l) => !l.inside).map((l) => l.text)).toEqual([]);
+    // Nearly every ancestor is named, and the inner rings with their years.
+    expect(all.filter((l) => l.text).length).toBeGreaterThanOrEqual(all.length - 2);
+    const withYears = all.filter((l) => l.text && /\d{4}/.test(l.text));
+    expect(withYears.length).toBeGreaterThanOrEqual(3);
+  });
+
+  for (const [width, height] of [
+    [1440, 900],
+    [390, 844],
+  ] as const) {
+    test(`hard names fit, whole, at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height });
+      const { tree, focusId } = seed.fanNames;
+      await page.goto(`/tree/${focusId}?tree=${encodeURIComponent(tree)}&layout=fan`);
+      await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+      await page.evaluate(() => document.fonts.ready);
+      await page.getByRole('button', { name: 'Fit to screen' }).click();
+      await settled(page);
+      const all = await labels(page);
+      expect(all.filter((l) => !l.inside).map((l) => l.text)).toEqual([]);
+      const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+      for (const l of all) expect(l.text ?? '').not.toMatch(lone);
+      // The father's long name, in the widest ring, keeps his first name
+      // (and at least the surname's initial), never initials alone.
+      const father = all[1]!.text ?? '';
+      expect(father).toMatch(/^Johann .*(v\.|von)/);
+      // The single-word name is shown, whole or shortened, in every ring.
+      expect(all.filter((l) => l.text?.startsWith('山田')).length).toBeGreaterThan(0);
+    });
+  }
+
+  test('Fit on a phone keeps names readable', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openFan(page);
+    await page.getByRole('button', { name: 'Fit to screen' }).click();
+    await settled(page);
+    const { scale } = await transform(page);
+    const all = await labels(page);
+    expect(all.filter((l) => !l.inside).map((l) => l.text)).toEqual([]);
+    for (const l of all.filter((l) => l.text))
+      expect(l.fontSize * scale).toBeGreaterThanOrEqual(10);
+    // The focus person stays on screen.
+    await expect(canvas(page).getByRole('button', { name: /^Lily Mosswood/ })).toBeInViewport();
+  });
+});
+
 test.describe('visual snapshots', () => {
   // Baselines are Linux Chromium only, like design.spec.ts.
   test.skip(
@@ -987,11 +1305,30 @@ test.describe('visual snapshots', () => {
     'Linux Chromium baselines only',
   );
 
+  for (const zoom of ['fit', '100'] as const) {
+    test(`wide descendant chart at ${zoom === 'fit' ? 'fit' : '100%'}`, async ({ page }) => {
+      await page.setViewportSize({ width: 900, height: 700 });
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await open(page, 'bram', '&layout=descendants');
+      await settled(page);
+      if (zoom === '100') {
+        while ((await transform(page)).scale < 1) {
+          await page.getByRole('button', { name: 'Zoom in' }).click();
+          await settled(page);
+        }
+      }
+      await minimapRested(page);
+      await page.evaluate(() => document.fonts.ready);
+      await expect(canvas(page)).toHaveScreenshot(`tree-descendants-wide-${zoom}.png`);
+    });
+  }
+
   for (const colorScheme of ['light', 'dark'] as const) {
     test(`family view canvas (${colorScheme})`, async ({ page }) => {
       await page.setViewportSize({ width: 1280, height: 800 });
       await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
       await open(page);
+      await minimapRested(page);
       await page.evaluate(() => document.fonts.ready);
       await expect(canvas(page)).toHaveScreenshot(`tree-family-${colorScheme}.png`);
     });

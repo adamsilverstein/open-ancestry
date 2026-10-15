@@ -1,5 +1,6 @@
 import type { Database, Statement } from 'better-sqlite3';
-import { migrate } from './migrations/index';
+import { MIGRATIONS, migrate, type Migration } from './migrations/index';
+import { nfcRow } from './nfc';
 import { markSearchDirty, refreshSearch } from './search';
 import { assertDataTable } from './tables';
 import type { InsertRow, PatchRow, TableName, TableRows } from './types';
@@ -34,6 +35,8 @@ export interface TablePlan {
   /** Per column: how to fill it when the input leaves it out. */
   fill: readonly ('id' | 'now' | 'default')[];
   defaultValues: readonly unknown[];
+  /** NOT NULL columns without a DEFAULT: a row image must supply them. */
+  required: ReadonlySet<string>;
   insert?: Statement;
 }
 
@@ -41,6 +44,15 @@ export interface StoreOptions {
   /** ISO-8601 timestamp source; injectable for deterministic tests. */
   clock?: () => string;
   newId?: () => string;
+  /** How long to wait for another connection's lock before SQLITE_BUSY (default 5000ms). */
+  busyTimeoutMs?: number;
+  /**
+   * The migration chain to apply (default MIGRATIONS). Tests pass a longer
+   * chain to simulate a future schema version.
+   */
+  migrations?: readonly Migration[];
+  /** Maintenance messages, such as derived columns being recomputed (default console.info). */
+  log?: (message: string) => void;
 }
 
 const TIMESTAMP_COLUMNS = new Set(['created_at', 'updated_at', 'started_at']);
@@ -58,6 +70,10 @@ export class TreeStore {
   readonly dir: string | null;
   readonly clock: () => string;
   readonly newId: () => string;
+  readonly migrations: readonly Migration[];
+  /** The schema version this store migrated to and writes change_log images under. */
+  readonly schemaVersion: number;
+  readonly log: (message: string) => void;
   private readonly statements = new Map<string, Statement>();
   private readonly plans = new Map<string, TablePlan>();
 
@@ -74,8 +90,11 @@ export class TreeStore {
     db.pragma('synchronous = NORMAL');
     db.pragma('temp_store = MEMORY');
     db.pragma('cache_size = -65536');
-    db.pragma('busy_timeout = 5000');
-    migrate(db);
+    db.pragma(`busy_timeout = ${Math.max(0, Math.floor(options.busyTimeoutMs ?? 5000))}`);
+    this.log = options.log ?? ((message) => console.info(message));
+    this.migrations = options.migrations ?? MIGRATIONS;
+    this.schemaVersion = this.migrations.length;
+    migrate(db, { migrations: this.migrations });
   }
 
   /** Cached prepared statement. */
@@ -92,11 +111,12 @@ export class TreeStore {
     let plan = this.plans.get(table);
     if (!plan) {
       const info = this.db
-        .prepare('SELECT name, dflt_value, pk FROM pragma_table_info(?)')
+        .prepare('SELECT name, dflt_value, pk, "notnull" FROM pragma_table_info(?)')
         .all(table) as {
         name: string;
         dflt_value: string | null;
         pk: number;
+        notnull: number;
       }[];
       if (info.length === 0) throw new Error(`Unknown table ${table}`);
       const key = info.find((c) => c.pk === 1)?.name ?? 'id';
@@ -111,6 +131,11 @@ export class TreeStore {
           c === key && c === 'id' ? 'id' : TIMESTAMP_COLUMNS.has(c) ? 'now' : 'default',
         ),
         defaultValues: info.map((c) => parseDefault(c.dflt_value)),
+        required: new Set(
+          info
+            .filter((c) => (c.notnull || c.pk) && parseDefault(c.dflt_value) === null)
+            .map((c) => c.name),
+        ),
       };
       this.plans.set(table, plan);
     }
@@ -171,12 +196,11 @@ export class TreeStore {
     const now = this.clock();
     const tx = new Tx(this, batchId, now, true);
     const run = this.db.transaction(() => {
-      this.stmt('INSERT INTO change_batch (id, label, state, created_at) VALUES (?, ?, ?, ?)').run(
-        batchId,
-        label,
-        'applied',
-        now,
-      );
+      // seq is max + 1 inside this write transaction: commit order, whatever the clock says.
+      this.stmt(
+        `INSERT INTO change_batch (id, label, state, created_at, seq)
+         VALUES (?, ?, ?, ?, (SELECT coalesce(max(seq), 0) + 1 FROM change_batch))`,
+      ).run(batchId, label, 'applied', now);
       const result = fn(tx);
       tx.flush();
       if (tx.changes === 0) {
@@ -223,7 +247,11 @@ export class Tx {
 
   insert<T extends TableName>(table: T, input: InsertRow<T>): TableRows[T] {
     assertDataTable(table);
-    const row = this.store.completeRow(table, input as Record<string, unknown>, this.now);
+    const row = this.store.completeRow(
+      table,
+      nfcRow(table, input as Record<string, unknown>),
+      this.now,
+    );
     this.store.insertStatement(table).run(Object.values(row));
     this.record(table, null, row);
     return row as unknown as TableRows[T];
@@ -238,7 +266,7 @@ export class Tx {
     }
     const before = this.store.getRow(table, id) as Record<string, unknown> | undefined;
     if (!before) throw new NotFoundError(table, id);
-    const changed = Object.entries(patch).filter(
+    const changed = Object.entries(nfcRow(table, patch as Record<string, unknown>)).filter(
       ([column, value]) => value !== undefined && before[column] !== value,
     );
     if (changed.length === 0) return before as unknown as TableRows[T];
@@ -297,7 +325,7 @@ export class Tx {
     const { key } = this.store.plan(table);
     this.store
       .stmt(
-        'INSERT INTO change_log (batch_id, ts, entity, entity_id, op, before_json, after_json) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO change_log (batch_id, ts, entity, entity_id, op, before_json, after_json, schema_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       )
       .run(
         this.batchId,
@@ -307,6 +335,7 @@ export class Tx {
         before === null ? 'insert' : after === null ? 'delete' : 'update',
         before === null ? null : JSON.stringify(before),
         after === null ? null : JSON.stringify(after),
+        this.store.schemaVersion,
       );
   }
 

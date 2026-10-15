@@ -4,12 +4,14 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "dump-schema": "tsx scripts/dump-schema.ts",
-    "generate:json-schema": "tsx scripts/generate-json-schema.ts && prettier --write schema/oa-json.schema.json"
+    "generate:json-schema": "tsx scripts/generate-json-schema.ts && prettier --write schema/oa-json.schema.json",
+    "freeze-history-fixture": "tsx scripts/freeze-history-fixture.ts"
   },
   "dependencies": {
     "@open-ancestry/core": "*",

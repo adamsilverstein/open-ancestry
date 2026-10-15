@@ -5,10 +5,11 @@ import {
   lazyRouteComponent,
   notFound,
 } from '@tanstack/react-router';
-import { isNotFound } from '../api/client';
+import { isNotFound, isValidId } from '../api/client';
 import { currentTreeQuery, personQuery } from '../api/queries';
 import { PersonNotFound } from '../routes/person/PersonNotFound';
 import { PersonSkeleton } from '../routes/person/PersonSkeleton';
+import { validateMergeSearch } from '../routes/merge/search';
 import { validatePersonSearch } from '../routes/person/search';
 import { queryClient } from './queryClient';
 import { AppShell } from './AppShell';
@@ -48,18 +49,16 @@ const treeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/tree/$personId',
   // Shareable view state: which tree, which layout, how many generations.
-  validateSearch: (search: Record<string, unknown>): TreeSearch => {
-    const valid: TreeSearch = {};
-    if (typeof search.tree === 'string' && search.tree) valid.tree = search.tree;
-    if (treeLayouts.includes(search.layout as TreeLayoutKind)) {
-      valid.layout = search.layout as TreeLayoutKind;
-    }
-    // Set even when undefined: the root route passes the raw search through,
-    // so an unset key would let `up=abc` reach the view as a string.
-    valid.up = parseGenerations(search.up);
-    valid.down = parseGenerations(search.down);
-    return valid;
-  },
+  // Every key is set, undefined when invalid: TanStack Router merges this over
+  // the raw search, so an unset key would let `?layout=bogus` through.
+  validateSearch: (search: Record<string, unknown>): TreeSearch => ({
+    tree: typeof search.tree === 'string' && search.tree ? search.tree : undefined,
+    layout: treeLayouts.includes(search.layout as TreeLayoutKind)
+      ? (search.layout as TreeLayoutKind)
+      : undefined,
+    up: parseGenerations(search.up),
+    down: parseGenerations(search.down),
+  }),
   component: lazyRouteComponent(() => import('../routes/TreePage'), 'TreePage'),
 });
 
@@ -71,6 +70,8 @@ const personRoute = createRoute({
   loader: async ({ params }) => {
     const tree = await queryClient.ensureQueryData(currentTreeQuery);
     if (!tree) throw notFound({ data: { reason: 'no-tree' } });
+    // An id that cannot exist (from a hand-typed or mangled URL) is simply not found.
+    if (!isValidId(params.personId)) throw notFound();
     try {
       await queryClient.ensureQueryData(personQuery(tree, params.personId));
     } catch (error) {
@@ -99,6 +100,13 @@ const checkerRoute = createRoute({
   component: lazyRouteComponent(() => import('../routes/checker/CheckerPage'), 'CheckerPage'),
 });
 
+const mergeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/merge',
+  validateSearch: validateMergeSearch,
+  component: lazyRouteComponent(() => import('../routes/merge/MergePage'), 'MergePage'),
+});
+
 const importRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/import/$jobId',
@@ -120,6 +128,7 @@ const routeTree = rootRoute.addChildren([
   importRoute,
   reimportRoute,
   checkerRoute,
+  mergeRoute,
 ]);
 
 export const router = createRouter({

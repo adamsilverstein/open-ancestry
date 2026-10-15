@@ -108,6 +108,60 @@ describe('NameScrubber', () => {
     }
   });
 
+  // Security re-review of #212.
+  it('splits camel case in one pass, however many combining marks a word carries', () => {
+    const notes = [
+      `a${'\u0301'.repeat(20_000)}B`,
+      'aB'.repeat(25_000),
+      `${'a\u0301'.repeat(25_000)}Zedekiah`,
+    ];
+    for (const note of notes) {
+      const start = performance.now();
+      text(note);
+      expect(performance.now() - start).toBeLessThan(500);
+    }
+    expect(text('ZedekiahLivingson')).toBe('PrivatePrivate');
+  });
+
+  it('ignores invisible format characters inside a name', () => {
+    expect(text('Zede\u00ADkiah, Zede\u200Bkiah and Zede\u200Dkiah')).toBe(
+      'Private, Private and Private',
+    );
+  });
+
+  it('decodes HTML entities before matching', () => {
+    expect(text('Zo&euml; M&uuml;ller')).toBe('Private Private');
+    expect(text('&#90;edekiah and &#x5A;edekiah &amp; co')).toBe('Private and Private &amp; co');
+  });
+
+  it('treats a bare domain in prose as a link', () => {
+    expect(text('See zedekiahlivingson.com.')).toBe('See PrivatePrivate.com.');
+    expect(text('e.g. Mr. Lee')).toBe('e.g. Mr. Lee');
+  });
+
+  it('scrubs thousands of file paths quickly with tens of thousands of withheld people', () => {
+    const syllables = ['ka', 'lo', 'mi', 'ren', 'sa', 'tu', 'vel', 'dor', 'an', 'is'];
+    // 27k distinct five-syllable names (given and surname), like a large real tree.
+    const word = (n: number) =>
+      [0, 1, 2, 3, 4].map((k) => syllables[Math.floor(n / 10 ** k) % 10]).join('');
+    const many = new NameScrubber(
+      Array.from({ length: 27_000 }, (_, i) => ({
+        given: word(i),
+        surname: word(99_999 - i),
+        nickname: null,
+        full_text: null,
+      })),
+    );
+    const start = performance.now();
+    for (let i = 0; i < 15_000; i++) {
+      many.scrub(`photos/Family reunion ${i}/IMG_${i}_${word(30_000 + i)}_portrait.jpg`, 'file');
+    }
+    expect(performance.now() - start).toBeLessThan(3000);
+    const out = many.scrub(`photos/${word(5)}${word(99_999 - 12)}.jpg`, 'file');
+    expect(out).not.toContain(word(5));
+    expect(out).not.toContain(word(99_999 - 12));
+  });
+
   it('leaves text without withheld names untouched', () => {
     expect(text('Born at Rose Hill in 1850')).toBe('Born at Rose Hill in 1850');
     expect(new NameScrubber([]).scrub('Zedekiah', 'text')).toBe('Zedekiah');

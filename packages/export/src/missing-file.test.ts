@@ -58,19 +58,58 @@ describe('media missing at import (#196)', () => {
     expect(out.warnings.filter((w) => /FILE/.test(w))).toEqual([]);
   });
 
-  it('leaves out media it has no path for, with a warning, rather than an empty FILE', async () => {
+  it('finds the path of a tree imported before the FILE line was kept with its media', async () => {
     const store = await importInto(FILE);
-    // A tree imported before the FILE line was kept with its media.
     store.db
       .prepare(
         "UPDATE unmapped_line SET owner_type = 'person', owner_id = (SELECT id FROM person) WHERE owner_type = 'media' AND path LIKE 'INDI.%'",
       )
       .run();
+    for (const version of ['7', '5.5.1'] as const) {
+      const out = buildGedcomExport(store, { version, privatizeLiving: true, now: TODAY });
+      expect(fileProblems(out.text)).toEqual([]);
+      expect(fileLines(out.text)).toEqual([
+        '1 FILE scans/rec.jpg',
+        version === '7' ? '1 FILE photos/liv%20%C3%ABa.jpg' : '1 FILE photos/liv ëa.jpg',
+      ]);
+    }
+  });
+
+  it('leaves out media it has no path for, with a warning, rather than an empty FILE', async () => {
+    const store = await importInto(FILE);
+    store.db.prepare("DELETE FROM unmapped_line WHERE path LIKE 'INDI.%FILE'").run();
     const out = buildGedcomExport(store, { version: '7', now: TODAY });
     expect(fileProblems(out.text)).toEqual([]);
     expect(gedcom7Problems(out.text)).toEqual([]);
     expect(fileLines(out.text)).toEqual(['1 FILE scans/rec.jpg']);
     expect(out.warnings).toContainEqual(expect.stringMatching(/has no file path and was left out/));
+  });
+});
+
+describe('review of #221', () => {
+  it.each([
+    ['GEDCOM 7', { version: '7' }],
+    ['GEDCOM 5.5.1, privatized', { version: '5.5.1', privatizeLiving: true }],
+  ] as const)('%s keeps every FILE of an OBJE record', async (_, options) => {
+    const store = await importInto(
+      ged(
+        '0 @I1@ INDI',
+        '1 NAME Ada /Vale/',
+        '1 DEAT',
+        '2 DATE 1950',
+        '1 OBJE @O1@',
+        '0 @O1@ OBJE',
+        '1 FILE scans/front.jpg',
+        '2 FORM jpg',
+        '1 FILE scans/back.png',
+        '2 FORM png',
+        '1 TITL Letter',
+      ),
+    );
+    const out = buildGedcomExport(store, { ...options, now: TODAY });
+    expect(fileLines(out.text)).toEqual(['1 FILE scans/front.jpg', '1 FILE scans/back.png']);
+    expect(out.text).toMatch(/1 FILE scans\/back\.png\n2 FORM png/);
+    expect(out.warnings.filter((w) => /FILE/.test(w))).toEqual([]);
   });
 });
 

@@ -162,9 +162,48 @@ const orphanCleanup: DerivedStep = {
         }
       }
     }
+    // Import reports stored before they dropped quoted text (example lines and warning
+    // messages name files and people that may since have been deleted).
+    const batches = store.db
+      .prepare('SELECT id, counts_json, warnings_json FROM import_batch')
+      .all() as { id: string; counts_json: string; warnings_json: string }[];
+    for (const batch of batches) {
+      const scrubbed = scrubReport(batch.counts_json, batch.warnings_json);
+      if (!scrubbed) continue;
+      store.db
+        .prepare('UPDATE import_batch SET counts_json = ?, warnings_json = ? WHERE id = ?')
+        .run(scrubbed.counts, scrubbed.warnings, batch.id);
+      removed++;
+    }
     return removed;
   },
 };
+
+/** An import report without quoted lines, or null when it has none. */
+function scrubReport(
+  countsJson: string,
+  warningsJson: string,
+): { counts: string; warnings: string } | null {
+  try {
+    const counts = JSON.parse(countsJson) as { unmapped?: Record<string, unknown>[] };
+    const warnings = JSON.parse(warningsJson) as Record<string, unknown>[];
+    const quoted =
+      counts.unmapped?.some((u) => 'example' in u) ||
+      (Array.isArray(warnings) && warnings.some((w) => 'message' in w));
+    if (!quoted) return null;
+    if (counts.unmapped) {
+      counts.unmapped = counts.unmapped.map(({ path, tag, count }) => ({ path, tag, count }));
+    }
+    return {
+      counts: JSON.stringify(counts),
+      warnings: JSON.stringify(
+        Array.isArray(warnings) ? warnings.map(({ code, line }) => ({ code, line })) : [],
+      ),
+    };
+  } catch {
+    return null;
+  }
+}
 
 export const DERIVED_STEPS: readonly DerivedStep[] = [eventDateSort, orphanCleanup];
 

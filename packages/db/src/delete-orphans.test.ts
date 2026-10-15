@@ -162,4 +162,33 @@ describe('cleaning up orphans left by earlier deletes (#226)', () => {
     expect(count(store, 'change_batch')).toBe(0);
     store.close();
   });
+
+  it('drops quoted lines from stored import reports', () => {
+    const store = memoryTree();
+    const w = new BulkWriter(store);
+    w.insert('import_batch', {
+      file_name: 'tree.ged',
+      counts_json: JSON.stringify({
+        persons: 1,
+        unmapped: [
+          { path: 'OBJE.FILE', tag: 'FILE', count: 1, example: { line: 9, text: '2 FILE x.jpg' } },
+        ],
+      }),
+      warnings_json: JSON.stringify([{ code: 'bad_date', line: 4, message: 'Odd date for Ivo' }]),
+    });
+    w.commit();
+    store.db.prepare('DELETE FROM derived_state').run();
+
+    refreshDerivedColumns(store);
+    const row = store.db.prepare('SELECT counts_json, warnings_json FROM import_batch').get() as {
+      counts_json: string;
+      warnings_json: string;
+    };
+    expect(JSON.parse(row.counts_json)).toEqual({
+      persons: 1,
+      unmapped: [{ path: 'OBJE.FILE', tag: 'FILE', count: 1 }],
+    });
+    expect(JSON.parse(row.warnings_json)).toEqual([{ code: 'bad_date', line: 4 }]);
+    store.close();
+  });
 });

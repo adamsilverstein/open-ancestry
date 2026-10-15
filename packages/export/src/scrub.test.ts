@@ -74,6 +74,40 @@ describe('NameScrubber', () => {
     expect(file('https://x.org/%E6%9D%8E%E6%98%8E.png')).toBe('https://x.org/Private.png');
   });
 
+  // Security review of #212.
+  it('decodes every layer of percent-encoding before matching', () => {
+    // %255A is %5A encoded again, which is Z: a reader that decodes twice sees the name.
+    expect(file('https://x.org/%255Aedekiah.jpg')).not.toMatch(/edekiah/i);
+    expect(file('https://x.org/Zedekiah%2520Livingson')).toBe('https://x.org/Private%2520Private');
+    expect(text('see x.org/%25255Aedekiah')).not.toMatch(/edekiah/i);
+  });
+
+  it('matches compatibility and case variants of a name (fullwidth, ligatures, ß)', () => {
+    expect(text('Ｚｅｄｅｋｉａｈ ＬＩＶＩＮＧＳＯＮ')).toBe('Private Private');
+    expect(text('Ze\u0301dekiah')).not.toMatch(/dekiah/);
+    const strauss = new NameScrubber([
+      { given: 'Effie', surname: 'Strauß', nickname: null, full_text: null },
+    ]);
+    expect(strauss.scrub('Letter from STRAUSS and E\uFB00ie', 'text')).toBe(
+      'Letter from Private and Private',
+    );
+  });
+
+  it('scrubs a long adversarial note in linear time', () => {
+    const notes = [
+      'a-'.repeat(100_000),
+      'a'.repeat(200_000),
+      'a.'.repeat(100_000),
+      'x@'.repeat(100_000),
+      `${'a.'.repeat(50_000)}/zedekiah`,
+    ];
+    for (const note of notes) {
+      const start = performance.now();
+      text(note);
+      expect(performance.now() - start, note.slice(0, 8)).toBeLessThan(1000);
+    }
+  });
+
   it('leaves text without withheld names untouched', () => {
     expect(text('Born at Rose Hill in 1850')).toBe('Born at Rose Hill in 1850');
     expect(new NameScrubber([]).scrub('Zedekiah', 'text')).toBe('Zedekiah');

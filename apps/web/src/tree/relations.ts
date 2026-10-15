@@ -1,4 +1,11 @@
-import type { ChildRelation, LayoutNode, TreeGraph, TreeLayout } from '@open-ancestry/core';
+import type {
+  ChildRelation,
+  LayoutNode,
+  TreeFamily,
+  TreeFamilyChild,
+  TreeGraph,
+  TreeLayout,
+} from '@open-ancestry/core';
 
 /**
  * Who is related to whom among the laid-out cards, read back from the layout's
@@ -10,7 +17,12 @@ export interface Relations {
   parents: Map<string, string[]>;
   children: Map<string, string[]>;
   partners: Map<string, string[]>;
-  siblings: Map<string, string[]>;
+  /**
+   * Each card's brothers and sisters, the card itself included: one list per
+   * sibling group, shared by every member, so a family of k children costs k
+   * rather than k² entries.
+   */
+  siblings: Map<string, readonly string[]>;
   /** Cards sharing a row, left to right. */
   rows: Map<string, LayoutNode[]>;
   /**
@@ -23,54 +35,78 @@ export interface Relations {
 export type Direction = 'up' | 'down' | 'left' | 'right';
 type Sex = 'M' | 'F' | 'U' | 'X';
 
-function push(map: Map<string, string[]>, key: string, value: string) {
-  const list = map.get(key);
-  if (!list) map.set(key, [value]);
-  else if (!list.includes(value)) list.push(value);
+/** Adds `value` to `key`'s list once; the sets make the check O(1). */
+function linker() {
+  const lists = new Map<string, string[]>();
+  const seen = new Map<string, Set<string>>();
+  const push = (key: string, value: string) => {
+    const set = seen.get(key);
+    if (!set) {
+      seen.set(key, new Set([value]));
+      lists.set(key, [value]);
+    } else if (!set.has(value)) {
+      set.add(value);
+      lists.get(key)!.push(value);
+    }
+  };
+  return { lists, push };
 }
 
 const rowKey = (n: LayoutNode) => `${n.generation}:${n.y}`;
 
 export function buildRelations(layout: TreeLayout, graph?: TreeGraph): Relations {
   const nodes = new Map(layout.nodes.map((n) => [n.key, n]));
-  const parents = new Map<string, string[]>();
-  const children = new Map<string, string[]>();
-  const partners = new Map<string, string[]>();
-  const siblings = new Map<string, string[]>();
+  const parents = linker();
+  const children = linker();
+  const partners = linker();
+  const siblings = new Map<string, readonly string[]>();
   const links = new Map<string, ChildRelation>();
-  const groupParents = new Map<string, string[]>();
-  const groupChildren = new Map<string, string[]>();
+  const groupParents = linker();
+  const groupChildren = linker();
   /** The family each child drop comes from (`group\nchild`). */
   const childFamily = new Map<string, string>();
 
   for (const edge of layout.edges) {
     if (edge.kind === 'couple' && edge.parents?.length === 2) {
       const [a, b] = edge.parents as [string, string];
-      push(partners, a, b);
-      push(partners, b, a);
+      partners.push(a, b);
+      partners.push(b, a);
     } else if (edge.kind === 'parent-child') {
       // The pedigree draws one edge per parent: gather them.
-      for (const p of edge.parents ?? []) push(groupParents, edge.group, p);
+      for (const p of edge.parents ?? []) groupParents.push(edge.group, p);
       if (edge.child) {
-        push(groupChildren, edge.group, edge.child);
+        groupChildren.push(edge.group, edge.child);
         childFamily.set(`${edge.group}\n${edge.child}`, edge.familyId);
       }
     }
   }
   const families = new Map(graph?.families.map((f) => [f.id, f]));
-  for (const [group, kids] of groupChildren) {
-    const ps = groupParents.get(group) ?? [];
+  // Each family's child entries by person, built once (a scan per child would be k²).
+  const entries = new Map<string, Map<string, TreeFamilyChild>>();
+  const entryOf = (family: TreeFamily, personId: string | undefined) => {
+    let byId = entries.get(family.id);
+    if (!byId) {
+      byId = new Map();
+      for (const c of family.children) if (!byId.has(c.id)) byId.set(c.id, c);
+      entries.set(family.id, byId);
+    }
+    return personId === undefined ? undefined : byId.get(personId);
+  };
+  for (const [group, kids] of groupChildren.lists) {
+    const ps = groupParents.lists.get(group) ?? [];
     for (const kid of kids) {
       const family = families.get(childFamily.get(`${group}\n${kid}`)!);
-      const entry = family?.children.find((c) => c.id === nodes.get(kid)?.personId);
+      const entry = family && entryOf(family, nodes.get(kid)?.personId);
       for (const p of ps) {
-        push(parents, kid, p);
-        push(children, p, kid);
+        parents.push(kid, p);
+        children.push(p, kid);
         const side = family?.partners.indexOf(nodes.get(p)?.personId ?? null);
         const rel = side === 0 ? entry?.rel1 : side === 1 ? entry?.rel2 : undefined;
         if (rel && rel !== 'biological' && rel !== 'unknown') links.set(`${kid}\n${p}`, rel);
       }
-      for (const other of kids) if (other !== kid) push(siblings, kid, other);
+      const other = siblings.get(kid);
+      // In two sibling groups (rare): a list of its own, merging both.
+      siblings.set(kid, other ? [...new Set([...other, ...kids])] : kids);
     }
   }
 
@@ -82,7 +118,15 @@ export function buildRelations(layout: TreeLayout, graph?: TreeGraph): Relations
   }
   for (const list of rows.values()) list.sort((a, b) => a.x - b.x);
 
-  return { nodes, parents, children, partners, siblings, rows, links };
+  return {
+    nodes,
+    parents: parents.lists,
+    children: children.lists,
+    partners: partners.lists,
+    siblings,
+    rows,
+    links,
+  };
 }
 
 /**
@@ -206,20 +250,25 @@ interface KinPath {
 
 function kinshipPaths(rel: Relations, focusKey: string, stopAt?: string): Map<string, KinPath> {
   const paths = new Map<string, KinPath>([[focusKey, { path: '' }]]);
+  // Sibling lists are shared by the whole group: the first member to reach one
+  // (the nearest, as the walk is breadth-first) labels all the others.
+  const walked = new Set<readonly string[]>();
   let frontier = [focusKey];
   while (frontier.length > 0 && !(stopAt && paths.has(stopAt))) {
     const next: string[] = [];
     for (const from of frontier) {
       const here = paths.get(from)!;
       if (here.path.length >= 4) continue;
-      const steps: [string, string[] | undefined][] = [
+      const steps: [string, readonly string[] | undefined][] = [
         ['B', rel.siblings.get(from)],
         ['U', rel.parents.get(from)],
         ['D', rel.children.get(from)],
         ['S', rel.partners.get(from)],
       ];
       for (const [step, keys] of steps) {
-        for (const to of keys ?? []) {
+        if (!keys || walked.has(keys)) continue;
+        if (step === 'B') walked.add(keys);
+        for (const to of keys) {
           if (paths.has(to)) continue;
           const path = here.path + step;
           let qualifier: Qualifier | undefined;

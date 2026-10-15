@@ -31,8 +31,8 @@ await importGedcom({ bytes }, openMemoryTree());
 | `mediaDir` | none | Folder of media files for a plain GEDCOM. Walked without following symlinks. |
 | `onProgress(phase, done, total)` | none | Phases: `read`, `parse`, `map` (records, every 500), `finalize`, `commit`, `done`. |
 | `signal` | none | Aborting rolls back and removes a tree folder the import created. |
-| `maxBytes` | 256 MiB | Largest GEDCOM or GEDZIP accepted. |
-| `maxMediaBytes` | 256 MiB | Largest media file copied. |
+| `limits` | `IMPORT_LIMITS` | Caps; any left out keep the default (`resolveImportLimits`). `maxBytes` (64 MiB): the GEDCOM text, a plain file or the one inflated from a GEDZIP. `maxArchiveBytes` (1 GiB): a GEDZIP as a whole. `maxMediaBytes` (256 MiB): one media file. `maxMediaTotalBytes` (1 GiB): all media in a GEDZIP. `maxLineLength` (64 KiB), `maxRecords` (2M) and `maxContinuations` (100k CONT/CONC lines per record), checked after decoding UTF-16. |
+| `maxBytes`, `maxMediaBytes` | | Shorthands for the same `limits`. |
 | `maxWarnings` | 1000 | Warnings kept in the report (`warningCount` has the total). |
 | `today` | now | Reference date for living inference. |
 

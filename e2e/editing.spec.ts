@@ -216,14 +216,15 @@ test.describe('person', () => {
     await expect(confirm).toBeHidden();
     await dialog.getByRole('button', { name: 'Delete person' }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Delete person' }).click();
-    await expect(page).toHaveURL(/\/$/);
+    // Lands on a parent (#107); e2e/delete-person.spec.ts covers the other cases.
+    await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}$`));
     await expect(toasts(page).filter({ hasText: 'Deleted Rowan Ashdown' })).toBeVisible();
 
     await page.keyboard.press(`${mod}+z`);
     await expect(
       toasts(page).filter({ hasText: 'Undid Delete person: Rowan Ashdown' }),
     ).toBeVisible();
-    await page.goto(`/person/${seeded.rowan}`);
+    await expect(page).toHaveURL(new RegExp(`/person/${seeded.rowan}$`));
     await expect(h1(page)).toHaveText('Rowan Ashdown');
   });
 });

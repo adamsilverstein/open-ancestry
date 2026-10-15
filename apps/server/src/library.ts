@@ -28,6 +28,12 @@ export const TRASH_DIR = '.trash';
  */
 export const IMPORT_PENDING_KEY = 'import_pending';
 export const MAX_TREE_NAME_LENGTH = 100;
+/**
+ * How long a server connection waits for another connection's write lock (an
+ * import worker's) before SQLITE_BUSY, which the API answers with 409. Short,
+ * since the wait blocks the event loop.
+ */
+export const LIBRARY_BUSY_TIMEOUT_MS = 50;
 
 /** `~/OpenAncestry`, or OA_LIBRARY when set. */
 export function defaultLibraryRoot(env: NodeJS.ProcessEnv = process.env): string {
@@ -126,13 +132,45 @@ export class Library {
     }
   }
 
+  /**
+   * The folder name (without extension) on disk for tree `id`: the entry
+   * spelled `id` up to Unicode normalization, or null when there is none.
+   * Case is never folded, so on a case-insensitive file system `combo` is not
+   * `Combo`; an NFD spelling of an id is the same tree, with the same
+   * connection and busy state, rather than a second connection to one file.
+   */
+  private onDisk(id: string): string | null {
+    const wanted = `${id.normalize('NFC')}${TREE_EXTENSION}`;
+    let entries: string[];
+    try {
+      entries = readdirSync(this.root);
+    } catch {
+      return null;
+    }
+    const entry = entries.includes(wanted)
+      ? wanted
+      : entries.find((name) => name.normalize('NFC') === wanted);
+    return entry ? entry.slice(0, -TREE_EXTENSION.length) : null;
+  }
+
+  /** The tree id as spelled on disk, or in NFC for a tree that does not exist yet. */
+  canonical(id: string): string {
+    return this.onDisk(id) ?? id.normalize('NFC');
+  }
+
   dirOf(id: string): string {
     assertTreeName(id);
-    return join(this.root, `${id}${TREE_EXTENSION}`);
+    return join(this.root, `${this.canonical(id)}${TREE_EXTENSION}`);
   }
 
   exists(id: string): boolean {
-    return treeNameProblem(id) === null && existsSync(treePaths(this.dirOf(id)).database);
+    if (treeNameProblem(id) !== null) return false;
+    // Not existsSync on the id: that folds case on case-insensitive file systems.
+    const canonical = this.onDisk(id);
+    return (
+      canonical !== null &&
+      existsSync(treePaths(join(this.root, `${canonical}${TREE_EXTENSION}`)).database)
+    );
   }
 
   list(): TreeInfo[] {
@@ -140,7 +178,11 @@ export class Library {
     return readdirSync(this.root, { withFileTypes: true })
       .filter((d) => d.isDirectory() && d.name.endsWith(TREE_EXTENSION) && !d.name.startsWith('.'))
       .map((d) => d.name.slice(0, -TREE_EXTENSION.length))
-      .filter((id) => this.exists(id))
+      .filter(
+        (id) =>
+          treeNameProblem(id) === null &&
+          existsSync(treePaths(join(this.root, `${id}${TREE_EXTENSION}`)).database),
+      )
       .map((id) => this.info(id))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -157,8 +199,11 @@ export class Library {
     assertTreeName(name);
     this.ensureRoot();
     if (existsSync(this.dirOf(name))) throw conflict(`A tree named "${name}" already exists`);
-    const store = createTree(this.dirOf(name), { name });
-    this.stores.set(name, store);
+    const store = createTree(this.dirOf(name), {
+      name,
+      busyTimeoutMs: LIBRARY_BUSY_TIMEOUT_MS,
+    });
+    this.stores.set(this.canonical(name), store);
     return store;
   }
 
@@ -225,19 +270,23 @@ export class Library {
 
   /** The open store for a tree, opening (and caching) it on first use. */
   open(id: string): TreeStore {
+    // Cache keys are on-disk spellings, so an exact hit needs no lookup.
     const cached = this.stores.get(id);
     if (cached) return cached;
     assertTreeName(id);
     if (!this.exists(id)) throw notFound(`Tree "${id}" not found`);
+    const canonical = this.canonical(id);
+    const existing = this.stores.get(canonical);
+    if (existing) return existing;
     let store: TreeStore;
     try {
-      store = openTree(this.dirOf(id));
+      store = openTree(this.dirOf(canonical), { busyTimeoutMs: LIBRARY_BUSY_TIMEOUT_MS });
     } catch (error) {
       // A planted link or another account's file: say why, not a bare 500.
       if (error instanceof TreeAccessError) throw new ApiError(403, 'forbidden', error.message);
       throw error;
     }
-    this.stores.set(id, store);
+    this.stores.set(canonical, store);
     return store;
   }
 
@@ -270,7 +319,8 @@ export class Library {
    * Marks a tree busy (an import is queued or running) until the returned
    * release is called: every write to it, rename and delete are refused.
    */
-  markBusy(id: string): () => void {
+  markBusy(tree: string): () => void {
+    const id = this.canonical(tree);
     this.busy.set(id, (this.busy.get(id) ?? 0) + 1);
     let released = false;
     return () => {
@@ -293,15 +343,16 @@ export class Library {
   }
 
   isBusy(id: string): boolean {
-    return this.busy.has(id);
+    return this.busy.size > 0 && (this.busy.has(id) || this.busy.has(this.canonical(id)));
   }
 
   /** Throws 409 while the tree is importing. */
   assertIdle(id: string): void {
-    if (this.busy.has(id)) throw conflict(`Tree "${id}" is busy (an import is running)`);
+    if (this.isBusy(id)) throw conflict(`Tree "${id}" is busy (an import is running)`);
   }
 
-  private close(id: string): void {
+  private close(tree: string): void {
+    const id = this.stores.has(tree) ? tree : this.canonical(tree);
     this.stores.get(id)?.close();
     this.stores.delete(id);
   }

@@ -42,7 +42,12 @@ test('imports the Ancestry sample through the file picker and opens the tree', a
   await expect(report.getByRole('group', { name: 'Families' })).toContainText('10');
   await expect(report.getByRole('group', { name: 'Sources' })).toContainText('5');
   await expect(report.getByRole('group', { name: 'Media' })).toContainText('2');
-  await expect(report.getByText('Every line of the file was mapped')).toBeVisible();
+  // One sentence that doesn't contradict the counts before it (#279).
+  await expect(
+    report.getByText(
+      /Every line was mapped except the \d+ header lines, which are kept verbatim for export\./,
+    ),
+  ).toBeVisible();
   await expect(
     page.getByRole('region', { name: 'Warnings' }).getByText('No warnings'),
   ).toBeVisible();

@@ -1,4 +1,5 @@
 import { expect, test } from './fixtures';
+import { readSeed } from './tree-view-fixtures';
 
 /*
  * Lazy chunks can fail to load: the server is unreachable, or it restarted
@@ -43,4 +44,33 @@ test('the shell keeps working when the palette chunk cannot load', async ({ page
   await page.waitForTimeout(500);
   await expect(page.getByRole('banner')).toBeVisible();
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
+});
+
+test('a tree busy in another process gets its own page, and Try again recovers', async ({
+  page,
+}) => {
+  // `open-ancestry import` or another server's upgrade holds the tree's lock.
+  let busy = true;
+  await page.route(/\/api\/trees$/, (route) =>
+    busy
+      ? route.fulfill({
+          status: 409,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            error: {
+              code: 'busy',
+              message: 'The tree is busy (an import is running); try again when it finishes',
+            },
+          }),
+        })
+      : route.fallback(),
+  );
+  const { tree, ids } = readSeed().family;
+  await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+  await page.goto(`/person/${Object.values(ids)[0]}`);
+  await expect(page.getByRole('heading', { level: 1, name: 'This tree is busy' })).toBeVisible();
+  await expect(page.getByText('Something went wrong')).toHaveCount(0);
+  busy = false;
+  await page.getByRole('button', { name: 'Try again' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'This tree is busy' })).toHaveCount(0);
 });

@@ -417,7 +417,7 @@ test('an override is not carried onto a newer local value, and a refused compare
       status: 409,
       contentType: 'application/json',
       body: JSON.stringify({
-        error: { code: 'conflict', message: 'Tree is busy (an import is running)' },
+        error: { code: 'busy', message: 'Tree is busy (an import is running)' },
       }),
     }),
   );

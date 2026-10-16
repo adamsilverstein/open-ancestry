@@ -73,12 +73,12 @@ export function AddRelativeDialog({
 
   const q = useDeferredValue(query.trim());
   const searching = mode === 'existing' && /[\p{L}\p{N}]/u.test(q);
-  const { data: hits = [] } = useQuery({
+  const { data } = useQuery({
     ...searchQuery(tree, q, 10),
     enabled: searching,
     placeholderData: keepPreviousData,
   });
-  const results = hits.map((hit) => hit.person);
+  const results = (data?.items ?? []).map((hit) => hit.person);
   const options = (searching ? results : [])
     .filter((p) => p.id !== id)
     .map((p) => ({ value: p.id, label: describe(p) }));

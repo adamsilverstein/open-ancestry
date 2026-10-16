@@ -26,6 +26,8 @@ export interface PaletteAction {
   onAltSelect?: () => void | Promise<unknown>;
   /** Shown dimmed and skipped by the keyboard, e.g. results for an older query. */
   disabled?: boolean;
+  /** Leave the palette open and the query as it is, e.g. to show more results. */
+  keepOpen?: boolean;
 }
 
 export interface PaletteGroup {
@@ -151,6 +153,10 @@ export function CommandPalette({
   // Set when the chosen action moves focus itself, so closing does not send it back.
   const focusMoved = useRef(false);
   const run = (item: PaletteAction, alt: boolean) => {
+    if (item.keepOpen) {
+      void item.onSelect();
+      return;
+    }
     close();
     const result = (alt && item.onAltSelect ? item.onAltSelect : item.onSelect)();
     if (result instanceof Promise) focusMoved.current = true;

@@ -19,16 +19,23 @@ export interface SearchHit {
 /** Results shown in the command palette. */
 export const PALETTE_RESULTS = 8;
 
+/** Results the palette shows after "Show all N people" (the server's maximum). */
+export const PALETTE_ALL_RESULTS = 100;
+
+/** A page of search results, and how many people match in all. */
+export interface SearchPage {
+  items: SearchHit[];
+  total: number;
+}
+
 export const searchQuery = (tree: string, q: string, limit = PALETTE_RESULTS) =>
   queryOptions({
     queryKey: ['search', tree, q, limit],
-    queryFn: async ({ signal }) =>
-      (
-        await apiGet<{ items: SearchHit[] }>(
-          `/trees/${seg(tree)}/search?q=${encodeURIComponent(q)}&limit=${limit}`,
-          signal,
-        )
-      ).items,
+    queryFn: ({ signal }) =>
+      apiGet<SearchPage>(
+        `/trees/${seg(tree)}/search?q=${encodeURIComponent(q)}&limit=${limit}`,
+        signal,
+      ),
     staleTime: 60_000,
   });
 
@@ -75,7 +82,9 @@ export function useSearchPeople(query: string, limit = PALETTE_RESULTS) {
     wanted && requested === current && result.data !== undefined && !result.isPlaceholderData;
   return {
     tree,
-    hits: wanted ? (result.data ?? []) : [],
+    hits: wanted ? (result.data?.items ?? []) : [],
+    /** Everyone who matches, for "Show all N people"; 0 until known. */
+    total: wanted ? (result.data?.total ?? 0) : 0,
     stale: wanted && !fresh,
     pending: wanted && !fresh && !result.isError,
   };

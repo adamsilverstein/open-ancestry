@@ -140,11 +140,8 @@ function wordMatch(word: string, tier: SearchMatch, keys: string[]): string {
  * surnames matched by sound. Within a tier, BM25 ranks names 10, phonetic
  * keys 5, places and years 1.
  */
-export function searchPeople(
-  store: TreeStore,
-  query: string,
-  { limit = 20, phoneticKeys = [] }: SearchOptions = {},
-): SearchResult[] {
+/** Query words and their phonetic keys, or null when nothing can match. */
+function parseQuery(query: string, phoneticKeys: SearchOptions['phoneticKeys'] = []) {
   // NFC so decomposed input (pasted from PDFs, macOS) tokenizes like typed text;
   // distinct and capped so a long repetitive query cannot stall the server.
   const words = [
@@ -157,7 +154,7 @@ export function searchPeople(
       ).map((w) => w.toLowerCase()),
     ),
   ].slice(0, MAX_SEARCH_WORDS);
-  if (words.length === 0 || limit < 1) return [];
+  if (words.length === 0) return null;
   const keysFor = (word: string, index: number): string[] => {
     const keys =
       typeof phoneticKeys === 'function'
@@ -171,17 +168,53 @@ export function searchPeople(
   };
   const keys = words.map(keysFor);
   const hasPhonetic = keys.some((k) => k.length > 0);
+  const match = (tier: SearchMatch) =>
+    words.map((w, i) => wordMatch(w, tier, keys[i]!)).join(' AND ');
+  return { match, hasPhonetic };
+}
+
+/**
+ * How many people match `query` at all: the loosest tier, which every
+ * stricter one is inside. The palette says "Show all N" with it.
+ */
+export function countPeople(
+  store: TreeStore,
+  query: string,
+  { phoneticKeys = [] }: Omit<SearchOptions, 'limit'> = {},
+): number {
+  const parsed = parseQuery(query, phoneticKeys);
+  if (!parsed) return 0;
+  return store
+    .stmt('SELECT count(*) FROM person_search WHERE person_search MATCH ?')
+    .pluck()
+    .get(parsed.match(parsed.hasPhonetic ? 'phonetic' : 'prefix')) as number;
+}
+
+export function searchPeople(
+  store: TreeStore,
+  query: string,
+  { limit = 20, phoneticKeys = [] }: SearchOptions = {},
+): SearchResult[] {
+  const parsed = parseQuery(query, phoneticKeys);
+  if (!parsed || limit < 1) return [];
+  const { hasPhonetic } = parsed;
 
   const seen = new Set<string>();
   const hits: { id: string; match: SearchMatch; score: number }[] = [];
+  // Scores within a tenth of each other are the same match to a reader (a longer
+  // document scores a little lower), so those go by name: predictable, not by
+  // when each person was added (#280).
   const statement = store.stmt(
     `SELECT d.person_id AS id, -bm25(person_search, 10.0, 5.0, 1.0, 1.0) AS score
      FROM person_search JOIN search_doc d ON d.doc_id = person_search.rowid
-     WHERE person_search MATCH ? ORDER BY score DESC, d.person_id LIMIT ?`,
+     LEFT JOIN person_sort ps ON ps.person_id = d.person_id
+     WHERE person_search MATCH ?
+     ORDER BY round(score, 1) DESC, ps.surname COLLATE NOCASE, ps.given COLLATE NOCASE, d.person_id
+     LIMIT ?`,
   );
   TIERS.forEach((tier, rank) => {
     if (hits.length >= limit || (tier === 'phonetic' && !hasPhonetic)) return;
-    const match = words.map((w, i) => wordMatch(w, tier, keys[i]!)).join(' AND ');
+    const match = parsed.match(tier);
     // Ask for enough rows to fill the limit after skipping earlier tiers' hits.
     for (const row of statement.all(match, limit + seen.size) as { id: string; score: number }[]) {
       if (hits.length >= limit) break;

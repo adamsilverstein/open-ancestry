@@ -233,11 +233,13 @@ describe('metadata strippers', () => {
   });
 
   it('keep a JPEG upright: Orientation survives, alone, in a new EXIF segment', async () => {
+    // sharp writes Orientation through withMetadata; withExif's own Orientation is replaced.
     const rotated = await sharp({
       create: { width: 6, height: 4, channels: 3, background: '#123' },
     })
       .jpeg()
-      .withExif({ IFD0: { Orientation: '6', Artist: SECRET, ImageDescription: GPS_TEXT } })
+      .withMetadata({ orientation: 6 })
+      .withExifMerge({ IFD0: { Artist: SECRET, ImageDescription: GPS_TEXT } })
       .toBuffer();
     expect((await sharp(rotated).metadata()).orientation).toBe(6);
     const out = Buffer.from(stripBytes('jpeg', rotated));
@@ -251,7 +253,8 @@ describe('metadata strippers', () => {
       create: { width: 6, height: 4, channels: 3, background: '#123' },
     })
       .jpeg()
-      .withExif({ IFD0: { Orientation: '1', Artist: SECRET } })
+      .withMetadata({ orientation: 1 })
+      .withExifMerge({ IFD0: { Artist: SECRET } })
       .toBuffer();
     expect((await sharp(Buffer.from(stripBytes('jpeg', upright))).metadata()).exif).toBeUndefined();
   });

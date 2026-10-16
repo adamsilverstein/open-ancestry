@@ -235,7 +235,19 @@ async function* gedzipChunks(plan: GedzipPlan): AsyncGenerator<Uint8Array> {
                 })
               : 0;
           stripper = createStripper(file.strip, removed);
+          // A first pass, writing nothing, so a file that is cut short or not what it
+          // starts as is left out whole rather than written half (bytes cannot be taken back).
+          const check = createStripper(file.strip, removed);
+          const probe = Buffer.alloc(Math.min(CHUNK, Math.max(1, file.size)));
+          for (let at = 0; ;) {
+            const { bytesRead } = await handle.read(probe, 0, probe.length, at);
+            if (bytesRead === 0) break;
+            check.push(probe.subarray(0, bytesRead));
+            at += bytesRead;
+          }
+          check.end();
         } catch {
+          // Not the format it starts as, cut short, or unreadable: nothing of it goes in.
           late.push(`Media file ${file.entry} was left out (its metadata could not be removed)`);
           continue;
         }

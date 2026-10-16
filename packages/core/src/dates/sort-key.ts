@@ -8,7 +8,9 @@
  *   before < exact < after. The out-of-range days are never real dates.
  * - `ABT`, `CAL`, `EST`, `INT`, `FROM` and `TO` sort at the midpoint like exact dates.
  * - `BET` and `FROM .. TO` sort by their earliest day; `sortKeyEnd` is the latest.
- * - Dual years sort by the new-style year (`1750/51` as 1751).
+ * - Dual years sort by the new-style year (`1750/51` as 1751), and a full dual
+ *   date is converted as the Julian (Old Style) date it is: `29 FEB 1751/52`
+ *   sorts with `@#DJULIAN@ 29 FEB 1752`.
  * - Julian full dates are converted exactly. Partial Julian dates keep their
  *   Julian year/month (up to ~13 days off), since a month or year has no single
  *   Gregorian equivalent.
@@ -54,6 +56,8 @@ export function pointKey(point: DatePoint, calendar: Calendar, bound: Bound): nu
         : encode(year, 7, 1);
   if (day === undefined)
     return encode(year, month, bound === 'low' ? 1 : bound === 'high' ? 31 : 15);
-  const g = toGregorian(calendar, year, month, day);
+  // A dual date is Old Style, a Julian date in its new-style year (#298).
+  const rules = point.dualYear !== undefined && calendar === 'gregorian' ? 'julian' : calendar;
+  const g = toGregorian(rules, year, month, day);
   return encode(g.year, g.month, g.day);
 }

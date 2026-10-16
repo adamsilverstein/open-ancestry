@@ -27,7 +27,13 @@ const DATE_PROBES = [
   '@#DJULIAN@ 1 JAN 1700',
   '@#DJULIAN@ 11 FEB 1731/32',
   'ABT @#DJULIAN@ 1066',
+  // Unmarked dual dates are Old Style and convert like Julian ones (#298).
+  '29 FEB 1751/52',
+  'BET 11 FEB 1731/32 AND 1 MAR 1740/41',
 ];
+
+/** An unmarked dual (Old Style) date: `11 FEB 1731/32`. */
+const DUAL = /\d\/\d/;
 
 /** event.date_sort and date_sort_end for a date as written, as the importer computes them. */
 export function deriveDateSort(dateText: string): {
@@ -40,15 +46,16 @@ export function deriveDateSort(dateText: string): {
     : { date_sort: null, date_sort_end: null };
 }
 
-/** Whether an event row's sort keys are derived through calendar conversion. */
+/**
+ * Whether an event row's sort keys are derived through calendar conversion:
+ * a converted calendar, or a dual date, which converts as Julian.
+ */
 export function hasConvertedDate(row: Record<string, unknown>): row is Record<string, unknown> & {
   date_text: string;
 } {
-  return (
-    typeof row.date_text === 'string' &&
-    typeof row.calendar === 'string' &&
-    CONVERTED_CALENDARS.includes(row.calendar)
-  );
+  if (typeof row.date_text !== 'string') return false;
+  if (typeof row.calendar === 'string' && CONVERTED_CALENDARS.includes(row.calendar)) return true;
+  return DUAL.test(row.date_text) && parseDate(row.date_text).start?.dualYear !== undefined;
 }
 
 interface DerivedStep {
@@ -70,10 +77,16 @@ const eventDateSort: DerivedStep = {
   recompute(store) {
     const rows = store.db
       .prepare(
-        // Matches the partial index event_converted_calendar_idx exactly.
+        // Converted calendars, through the partial index event_converted_calendar_idx,
+        // plus dual dates, which can be in any row; recompute runs only when the
+        // date parser changes, so the scan is rare.
         `SELECT id, date_text, calendar, date_sort, date_sort_end FROM event
          WHERE calendar IN (${CONVERTED_CALENDARS.map((c) => `'${c}'`).join(', ')})
-           AND date_text IS NOT NULL`,
+           AND date_text IS NOT NULL
+         UNION ALL
+         SELECT id, date_text, calendar, date_sort, date_sort_end FROM event
+         WHERE (calendar IS NULL OR calendar NOT IN (${CONVERTED_CALENDARS.map((c) => `'${c}'`).join(', ')}))
+           AND date_text LIKE '%/%'`,
       )
       .all() as {
       id: string;

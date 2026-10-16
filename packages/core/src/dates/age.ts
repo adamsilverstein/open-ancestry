@@ -36,7 +36,9 @@ function reference(date: ParsedDate): Reference | undefined {
   const approximate = qualifier !== 'exact' && qualifier !== 'interpreted';
   const year = start.dualYear ?? start.year;
   if (start.month !== undefined && start.day !== undefined) {
-    const g = toGregorian(calendar, year, start.month, start.day);
+    // A dual date is Old Style: a Julian date in its new-style year (#298).
+    const rules = start.dualYear !== undefined && calendar === 'gregorian' ? 'julian' : calendar;
+    const g = toGregorian(rules, year, start.month, start.day);
     return { year: astronomical(g.year), month: g.month, day: g.day, approximate };
   }
   return { year: astronomical(year), month: start.month, approximate };

@@ -32,6 +32,9 @@ describe('lifeDate', () => {
     ['TO 1890', { year: 1890, qualifier: 'bef' }],
     ['1750/51', { year: 1750, dualYear: 1751 }],
     ['ABT 11 FEB 1731/32', { year: 1731, dualYear: 1732, qualifier: 'abt' }],
+    // A note after the date keeps its qualifier (#272).
+    ['ABT 1842 (per census)', { year: 1842, qualifier: 'abt' }],
+    ['BEF 1920 (family story)', { year: 1920, qualifier: 'bef' }],
     ['05/28/1960', { year: 1960 }],
     ['44 B.C.', { year: -44 }],
   ])('%s -> %j', (text, date) => {
@@ -74,6 +77,7 @@ describe('formatLifespan', () => {
     [life('BET 1800 AND 1850', '1900'), 'aft. 1800–1900'],
     [life('BET JAN 1871 AND DEC 1871', '1940'), '1871–1940'],
     [life('1850s', 'ABT 1920'), '1850s–abt. 1920'],
+    [life('ABT 1842 (per census)', 'BEF 1920 (family story)'), 'abt. 1842–bef. 1920'],
     [life('1750/51', '11 FEB 1801/02'), '1750/51–1801/02'],
     [life('1699/00', '1760'), '1699/00–1760'],
     [life(), ''],

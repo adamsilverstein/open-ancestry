@@ -232,7 +232,10 @@ export function galleryRoutes(
 
   app.post('/api/trees/:tree/media', { schema: { params: TreeParams } }, async (request, reply) => {
     const { tree } = request.params;
-    const store = library.open(tree);
+    // Opened again after the upload has streamed: the tree may have been
+    // deleted or renamed meanwhile, which is a 404, not a closed database
+    // (500) or a media folder recreated where the tree was (#275 L7).
+    library.open(tree);
     if (!request.isMultipart()) {
       throw new ApiError(415, 'unsupported_media_type', 'Upload the file as multipart/form-data');
     }
@@ -240,7 +243,7 @@ export function galleryRoutes(
       const ownerType = fields.owner_type as (typeof OWNER_TYPES)[number];
       if (!OWNER_TYPES.includes(ownerType)) throw badRequest('owner_type must be person or event');
       const ownerId = fields.owner_id ?? '';
-      requireRow(store, ownerType, ownerId);
+      requireRow(library.open(tree), ownerType, ownerId);
       return { ownerType, ownerId };
     };
     if (attaching >= maxConcurrentAttaches) {
@@ -290,6 +293,7 @@ export function galleryRoutes(
       // One attach per tree at a time, so two uploads of the same bytes cannot
       // both miss the sha256 lookup and store the file twice.
       const mediaId = await attachLocks.run(tree, async () => {
+        const store = library.open(tree);
         const mediaRoot = treePaths(library.dirOf(tree)).media;
         // Same bytes already in the tree: link the existing media instead of a second copy.
         let existing = store
@@ -305,6 +309,9 @@ export function galleryRoutes(
           const name = safeFileName(upload.name);
           const localPath = `${ATTACHED_DIR}/${upload.sha256.slice(0, 12)}-${name}`;
           const target = join(mediaRoot, ATTACHED_DIR, `${upload.sha256.slice(0, 12)}-${name}`);
+          // Checked again after the awaits above: mkdir must not recreate a
+          // folder for a tree deleted or renamed meanwhile.
+          if (!library.exists(tree)) throw notFound(`Tree "${tree}" not found`);
           await mkdir(join(mediaRoot, ATTACHED_DIR), { recursive: true });
           // A symlinked attached/ (or media/) folder must not carry the copy out of the tree.
           if (!(await insideTree(library.dirOf(tree), join(mediaRoot, ATTACHED_DIR)))) {
@@ -369,7 +376,7 @@ export function galleryRoutes(
         });
         return { batchId, mediaId };
       });
-      const media = store.getRow('media', mediaId.mediaId)!;
+      const media = library.open(tree).getRow('media', mediaId.mediaId)!;
       thumbnails.enqueue(library.dirOf(tree), media.id, media.local_path);
       return reply.code(201).send({ media, batchId: mediaId.batchId });
     } finally {

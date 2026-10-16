@@ -211,10 +211,11 @@ export function treeRoutes(app: Api, deps: Deps): void {
       const { tree } = request.params;
       // Mid-import the tree is not the user's yet: export it once the import ends (#186).
       library.assertIdle(tree);
-      // A full backup keeps the edit history (undo, and the text of deleted rows) unless asked not to.
+      // The edit history (undo, and the text of deleted rows) only when asked for:
+      // a JSON file is often shared, so the default matches the export dialog.
       const { history } = request.query;
       const store = library.open(tree);
-      const keep = history !== '0' && history !== 'false';
+      const keep = history === '1' || history === 'true';
       // Without the history, deleted and edited-away text must not survive elsewhere either.
       const json = exportJsonString(store, {
         history: keep,

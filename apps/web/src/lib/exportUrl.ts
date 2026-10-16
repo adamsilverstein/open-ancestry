@@ -12,19 +12,20 @@ export const canPrivatize = (format: ExportFormat) => format !== 'json';
 
 /**
  * Download URL of a tree export (see docs/api.md). `history` is for JSON: the
- * edit history (undo, and the text of anything deleted) is left out when false.
+ * edit history (undo, and the text of anything deleted) is included only when
+ * true, as the API leaves it out by default.
  */
 export function exportUrl(
   tree: string,
   format: ExportFormat,
   privatize: boolean,
-  history = true,
+  history = false,
 ): string {
   const base = `/api/trees/${encodeURIComponent(tree)}`;
   const query = new URLSearchParams();
   if (format === 'gedcom-7') query.set('version', '7');
   if (privatize && canPrivatize(format)) query.set('privatize', 'true');
-  if (format === 'json' && !history) query.set('history', '0');
+  if (format === 'json' && history) query.set('history', '1');
   const path =
     format === 'json' ? 'export.json' : format === 'gedzip' ? 'export.gdz' : 'export.ged';
   const search = query.toString();

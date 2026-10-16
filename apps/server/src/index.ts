@@ -81,7 +81,9 @@ export interface ServerOptions {
   mediaUploadLimit?: number;
   /** Concurrent imports (default 1) and how many may wait (default 4). */
   importConcurrency?: number;
-  maxQueuedImports?: number;
+  maxQueuedImports?: number | undefined;
+  /** Re-import reviews held in memory at once, each with its parsed export (default 4). */
+  maxReimports?: number | undefined;
 }
 
 export interface StartOptions extends ServerOptions {
@@ -182,7 +184,10 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     archiveUploadLimit: options.archiveUploadLimit ?? importLimits.maxArchiveBytes,
     mediaUploadLimit: options.mediaUploadLimit ?? DEFAULT_MEDIA_UPLOAD_LIMIT,
     thumbnails: new ThumbnailQueue(),
-    reimports: new ReimportSessions({ folders: reimportFolders }),
+    reimports: new ReimportSessions({
+      maxSessions: options.maxReimports,
+      folders: reimportFolders,
+    }),
     reimportFolders,
   };
 

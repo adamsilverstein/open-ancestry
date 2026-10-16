@@ -29,8 +29,41 @@ describe('parseCliArgs', () => {
       staticDir: undefined,
       importLimits: {},
       importHeapMb: undefined,
+      maxReimports: undefined,
       sharedLibrary: false,
     });
+  });
+
+  it('reads how many re-import reviews to hold from OA_MAX_REIMPORTS', () => {
+    expect(parseCliArgs(['serve'], { OA_MAX_REIMPORTS: '64' })).toMatchObject({
+      maxReimports: 64,
+    });
+    expect(() => parseCliArgs(['serve'], { OA_MAX_REIMPORTS: '0' })).toThrow(/OA_MAX_REIMPORTS/);
+    // One review would let a finishing comparison push out the review being applied.
+    expect(() => parseCliArgs(['serve'], { OA_MAX_REIMPORTS: '1' })).toThrow(/2 to 1000/);
+    expect(parseCliArgs(['serve'], { OA_MAX_REIMPORTS: '2' })).toMatchObject({ maxReimports: 2 });
+    expect(parseCliArgs(['serve'], { OA_MAX_REIMPORTS: '1000' })).toMatchObject({
+      maxReimports: 1000,
+    });
+    // A typo'd extra digit or two is refused, not taken as room for 10,000 parsed exports.
+    expect(() => parseCliArgs(['serve'], { OA_MAX_REIMPORTS: '1001' })).toThrow(/2 to 1000/);
+  });
+
+  it('reads how many imports may wait from OA_MAX_QUEUED_IMPORTS', () => {
+    expect(parseCliArgs(['serve'], {})).toMatchObject({ maxQueuedImports: undefined });
+    expect(parseCliArgs(['serve'], { OA_MAX_QUEUED_IMPORTS: '32' })).toMatchObject({
+      maxQueuedImports: 32,
+    });
+    expect(() => parseCliArgs(['serve'], { OA_MAX_QUEUED_IMPORTS: 'many' })).toThrow(
+      /OA_MAX_QUEUED_IMPORTS/,
+    );
+    expect(parseCliArgs(['serve'], { OA_MAX_QUEUED_IMPORTS: '1' })).toMatchObject({
+      maxQueuedImports: 1,
+    });
+    expect(parseCliArgs(['serve'], { OA_MAX_QUEUED_IMPORTS: '1000' })).toMatchObject({
+      maxQueuedImports: 1000,
+    });
+    expect(() => parseCliArgs(['serve'], { OA_MAX_QUEUED_IMPORTS: '1001' })).toThrow(/1 to 1000/);
   });
 
   it('reads import size and heap limits from flags, then OA_ variables', () => {

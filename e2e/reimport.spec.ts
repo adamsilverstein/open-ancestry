@@ -730,3 +730,34 @@ test('a review with nothing in a group offers no filter for it', async ({
   const filters = page.getByRole('group', { name: 'Filter the review' });
   await expect(filters.getByRole('button')).toHaveText(['All 1', 'New people 1']);
 });
+
+test('a corrected marriage date is offered as a change, not a second marriage (#268)', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const corrected = SAMPLE.replace('2 DATE 14 OCT 1895', '2 DATE 15 OCT 1895').replace(
+    /@([A-Z]+)(\d+)@/g,
+    (_, p: string, n: string) => `@${p}${Number(n) + 100}@`,
+  );
+  await startReimport(page, seeded, corrected);
+  const silas = card(page, 'Silas Corran');
+  await expect(
+    silas.getByRole('checkbox', { name: /Marriage: 14 Oct 1895 → 15 Oct 1895/ }),
+  ).toBeChecked();
+  await expect(silas.getByRole('checkbox', { name: /Add family fact/ })).toHaveCount(0);
+
+  await page.getByRole('button', { name: /^Apply \d+ changes?$/ }).click();
+  await expect(page.getByRole('region', { name: 'Re-import applied' })).toBeVisible({
+    timeout: 30_000,
+  });
+  const id = (await personByName(request, seeded.tree, 'Silas'))!;
+  const detail = (await (
+    await request.get(`/api/trees/${encodeURIComponent(seeded.tree)}/people/${id}`)
+  ).json()) as { partnerFamilies: { events: { event: { type: string; date_text: string } }[] }[] };
+  const marriages = detail.partnerFamilies
+    .flatMap((f) => f.events)
+    .filter((e) => e.event.type === 'MARR');
+  expect(marriages.map((e) => e.event.date_text)).toEqual(['15 OCT 1895']);
+});

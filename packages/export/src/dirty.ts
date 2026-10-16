@@ -113,6 +113,10 @@ export function dirtyRecords(store: TreeStore, data: TreeData): Set<string> {
         (c) => !IGNORED_COLUMNS.has(c) && !sameValue(before[c], after[c]),
       );
       if (changed.length === 0) continue;
+      // A partner's sex picks the family's HUSB and WIFE tags.
+      if (row.entity === 'person' && changed.includes('sex')) {
+        for (const f of data.familiesByPartner.get(row.entity_id) ?? []) mark('family', f.id);
+      }
     }
     mark(row.entity, row.entity_id);
     for (const image of [before, after]) {

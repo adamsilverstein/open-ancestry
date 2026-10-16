@@ -325,7 +325,6 @@ const unparseable = [
   '@#DFRENCH R@ 5 BCE',
   'HEBREW 1 TSH 5700 BCE',
   'BET @#DKLINGON@ 1700 AND 1701',
-  'BET 1890 AND 1895 (a range with a note)',
 ];
 
 describe('parseDate', () => {

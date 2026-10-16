@@ -113,8 +113,18 @@ function parseNormalized(
   }
 
   let match = INT.exec(s);
-  if (match || phrase !== undefined) {
-    let inner = match ? match[1]! : s;
+  if (!match && phrase !== undefined) {
+    // A note after a date keeps everything the date says: "BEF 1850 (per
+    // census)" is still before 1850, "BET 1890 AND 1895 (note)" still a range.
+    // Only a plain date with a note reads as interpreted.
+    const date = parseNormalized(original, input, undefined);
+    if (!date) return undefined;
+    if (date.qualifier === 'exact') date.qualifier = 'interpreted';
+    if (phrase) date.phrase = phrase;
+    return date;
+  }
+  if (match) {
+    let inner = match[1]!;
     const simple = SIMPLE.exec(inner);
     if (simple) inner = simple[2]!;
     const p = parsePoint(inner, calendar);
@@ -355,11 +365,6 @@ function validPoint(
     // Adar II (ADS) only exists in leap years; elsewhere it can only mean Adar.
     point.month = calendar === 'hebrew' && month === 7 && !isHebrewLeap(year) ? 6 : month;
   }
-  if (day !== undefined) {
-    if (month === undefined || !(day >= 1 && day <= daysInMonth(calendar, point.year, month)))
-      return undefined;
-    point.day = day;
-  }
   if (dual !== undefined) {
     // Dual dating (Old Style / New Style) only exists for Gregorian and Julian years.
     if (bc || year < 100 || (calendar !== 'gregorian' && calendar !== 'julian')) return undefined;
@@ -368,6 +373,15 @@ function validPoint(
     if (next <= year) next += size;
     if (next !== year + 1) return undefined;
     point.dualYear = next;
+  }
+  if (day !== undefined) {
+    // A dual-dated day falls in the new-style year and in the Julian calendar
+    // (Old Style), so 29 FEB 1751/52 and 29 FEB 1699/1700 are real days.
+    const inYear = point.dualYear ?? point.year;
+    const rules = point.dualYear === undefined ? calendar : 'julian';
+    if (month === undefined || !(day >= 1 && day <= daysInMonth(rules, inYear, month)))
+      return undefined;
+    point.day = day;
   }
   return { point, calendar };
 }

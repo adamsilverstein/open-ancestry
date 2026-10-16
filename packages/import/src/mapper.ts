@@ -1063,8 +1063,9 @@ export class Mapper {
         case '_SIZE': {
           const n = /^\s*\d+\s*$/.test(c.value ?? '') ? Number(c.value) : undefined;
           const column = c.tag === '_WDTH' ? 'width' : c.tag === '_HGHT' ? 'height' : 'byte_size';
-          if (n === undefined || row[column] != null) break;
-          row[column] = n;
+          if (n === undefined) break;
+          // A copied file's own size wins; the tag is still read, so not unmapped (#279).
+          row[column] ??= n;
           this.use(c);
           break;
         }

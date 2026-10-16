@@ -716,6 +716,12 @@ interface Removed {
   fact(
     ownerId: string,
     incoming: FactImage,
+    /**
+     * The incoming fact is the only unpaired one of its kind, and the tree has
+     * none of that kind left: the only deleted one of that kind is its earlier
+     * version, whatever changed (see `lone` in diffFacts).
+     */
+    lone?: boolean,
   ): { state: 'same' | 'changed'; eventId: string } | false;
   citation(ownerId: string, c: SnapCitation): boolean;
   /**
@@ -770,50 +776,81 @@ const DELETED: Partial<ReviewChange> = { conflict: 'local-delete', defaultAccept
 const factKey = (f: FactView) =>
   `fact|${f.type}|${norm(f.customType)}|${dateKey(f.date)}|${norm(f.place)}|${norm(f.value)}`;
 
-/** Pairs the incoming person's events with the existing person's. */
+/** Whose facts `diffFacts` pairs: a person's, or a family's (marriage, divorce; #268). */
+interface FactOwner {
+  existing: SnapEvent[];
+  incoming: SnapEvent[];
+  /** The tree person or family, as `removed` knows its deleted facts. */
+  id: string;
+  /** What a change held back by the user's own edit is listed under. */
+  hold: string;
+  /** How a new fact is attached. */
+  addAs: { owner: 'person' } | { owner: 'family'; familyKey: string };
+  /** List imported facts the export no longer has (person facts only, as before). */
+  listMissing: boolean;
+  /** Pair the only unpaired fact of a kind on each side (family facts; see `lone`). */
+  pairLoneByKind: boolean;
+}
+
+/** Pairs the incoming owner's events with the existing owner's. */
 function diffFacts(
-  e: SnapPerson,
-  i: SnapPerson,
-  edited: Set<string>,
+  o: FactOwner,
   add: (change: ReimportChange, extra?: Partial<ReviewChange>) => void,
   removed: Removed,
 ) {
   const used = new Set<string>();
   const findSame = (ie: SnapEvent) =>
-    e.events.find((ee) => !used.has(ee.row.id) && sameFact(ee, ie));
+    o.existing.find((ee) => !used.has(ee.row.id) && sameFact(ee, ie));
   const pending: SnapEvent[] = [];
-  for (const ie of i.events) {
+  for (const ie of o.incoming) {
     const same = findSame(ie);
     if (same) {
       used.add(same.row.id);
-      diffCitations(same, ie, add, undefined, removed, e.row.id);
+      diffCitations(same, ie, add, undefined, removed, o.id);
     } else {
       pending.push(ie);
     }
   }
+  const sameKind = (a: SnapEvent, b: SnapEvent) =>
+    a.row.type === b.row.type && sameText(a.row.custom_type, b.row.custom_type);
+  /**
+   * A family's facts (marriage, divorce) are rarely more than one of a kind,
+   * and Ancestry often corrects date and place together ("MARR 1918" to
+   * "12 JUN 1918, Wexmoor"). So the only unpaired one of its kind on each side
+   * is the same fact, if the tree's came from an import (one the user typed in
+   * is theirs, not an earlier version of the export's).
+   */
+  /** The only unpaired incoming fact of its kind, for a family (see `lone`). */
+  const onlyOfKind = (ie: SnapEvent) =>
+    o.pairLoneByKind && pending.filter((x) => sameKind(x, ie)).length === 1;
+  const lone = (ie: SnapEvent): SnapEvent | undefined => {
+    if (!onlyOfKind(ie)) return undefined;
+    const left = o.existing.filter((ee) => !used.has(ee.row.id) && sameKind(ee, ie));
+    return left.length === 1 && left[0]!.row.import_batch_id ? left[0] : undefined;
+  };
   for (const ie of pending) {
     const counterpart = SINGULAR.has(ie.row.type)
-      ? e.events.find(
+      ? o.existing.find(
           (ee) =>
             !used.has(ee.row.id) &&
             ee.row.type === ie.row.type &&
             ee.isPreferred === ie.isPreferred,
         )
-      : e.events.find(
+      : (o.existing.find(
           (ee) =>
             !used.has(ee.row.id) &&
             ee.row.type === ie.row.type &&
             sameText(ee.row.custom_type, ie.row.custom_type) &&
             (sameDate(ee.row.date_text, ie.row.date_text) ||
               (sameText(ee.place, ie.place) && sameText(ee.row.value, ie.row.value))),
-        );
+        ) ?? lone(ie));
     if (counterpart) {
       used.add(counterpart.row.id);
       // Three-way (#185): base = what the export last said for this fact.
       const was = removed.baseOf(counterpart);
       // The export still says what it said then: whatever the user did stands.
       if (was && sameImage(was, imageOf(ie))) {
-        removed.hold(`person|${e.row.id}`);
+        removed.hold(o.hold);
         continue;
       }
       // The user renamed its place (#259). If the export still has the old name, the
@@ -824,7 +861,7 @@ function diffFacts(
         ? { ...imageOf(counterpart), place_name: ie.place }
         : imageOf(counterpart);
       if (keepPlace && sameImage(mine, imageOf(ie))) {
-        removed.hold(`person|${e.row.id}`);
+        removed.hold(o.hold);
         continue;
       }
       // A conflict only if the user's value differs from it (an edit undone by hand is none).
@@ -845,11 +882,16 @@ function diffFacts(
         },
         conflict ? { conflict, defaultAccept: false } : {},
       );
-      diffCitations(counterpart, ie, add, undefined, removed, e.row.id);
+      diffCitations(counterpart, ie, add, undefined, removed, o.id);
     } else {
-      const deleted = removed.fact(e.row.id, imageOf(ie));
+      // Nothing of its kind left in the tree: a deleted one may be its earlier version.
+      const deleted = removed.fact(
+        o.id,
+        imageOf(ie),
+        onlyOfKind(ie) && !o.existing.some((ee) => !used.has(ee.row.id) && sameKind(ee, ie)),
+      );
       if (deleted && deleted.state === 'same') {
-        removed.hold(`person|${e.row.id}`);
+        removed.hold(o.hold);
         continue;
       }
       add(
@@ -857,14 +899,14 @@ function diffFacts(
           kind: 'fact.add',
           incomingEventId: ie.row.id,
           fact: factOf(ie),
-          owner: 'person',
+          ...o.addAs,
           ...(deleted ? { deletedEventId: deleted.eventId } : {}),
         },
         deleted ? DELETED : {},
       );
     }
   }
-  for (const ee of e.events) {
+  for (const ee of o.listMissing ? o.existing : []) {
     // Facts the user added never came from an export, so they are not "missing" from it.
     if (used.has(ee.row.id) || !ee.row.import_batch_id) continue;
     add(
@@ -934,13 +976,15 @@ export function diffTrees(
     // whose date and place both changed (and has no value) shares nothing with the deleted
     // fact, so it comes back as a plain addition. Family events carry no place name here,
     // so for them only the date or value can tie the two together.
-    fact: (owner, incoming) => {
+    fact: (owner, incoming, lone = false) => {
       let changed: string | undefined;
+      const ofKind: string[] = [];
       for (const f of gone.facts.get(owner) ?? []) {
         if (f.type !== incoming.type) continue;
         const was = local.base.get(`event|${f.eventId}`) as Partial<FactImage> | undefined;
         if (!was) continue;
         if (sameImage(was, incoming)) return { state: 'same', eventId: f.eventId };
+        if (sameText(was.custom_type ?? null, incoming.custom_type)) ofKind.push(f.eventId);
         const related =
           SINGULAR.has(incoming.type) ||
           sameDate(was.date_text ?? null, incoming.date_text) ||
@@ -948,6 +992,7 @@ export function diffTrees(
           (!!incoming.value && sameText(was.value ?? null, incoming.value));
         if (related) changed ??= f.eventId;
       }
+      if (!changed && lone && ofKind.length === 1) changed = ofKind[0];
       return changed ? { state: 'changed', eventId: changed } : false;
     },
     citation: (owner, c) => gone.citations.has(`${owner}|${c.sourceKey}|${norm(c.page)}`),
@@ -1148,7 +1193,19 @@ export function diffTrees(
         bothRenamed ? { conflict: 'local-edit', defaultAccept: false } : {},
       );
     }
-    diffFacts(e, i, edited, add, removed);
+    diffFacts(
+      {
+        existing: e.events,
+        incoming: i.events,
+        id: e.row.id,
+        hold: `person|${e.row.id}`,
+        addAs: { owner: 'person' },
+        listMissing: true,
+        pairLoneByKind: false,
+      },
+      add,
+      removed,
+    );
     diffCitations(
       null,
       null,
@@ -1373,40 +1430,26 @@ export function diffTrees(
       );
     }
     if (existingFamily) {
-      // Family facts (marriage, divorce) new in the export.
-      const have = new Set(
-        existing.familyEvents
-          .get(existingFamily)
-          ?.map((e) => `${e.type}|${dateKey(e.date_text)}`) ?? [],
+      // Family facts (marriage, divorce), paired as a person's are (#268): a corrected
+      // date is a change, not a second marriage, and the user's own edits stand.
+      diffFacts(
+        {
+          existing: existing.familyEvents.get(existingFamily) ?? [],
+          incoming: incoming.familyEvents.get(f.id) ?? [],
+          id: existingFamily,
+          hold: `family|${existingFamily}`,
+          addAs: { owner: 'family', familyKey: existingFamily },
+          listMissing: false,
+          pairLoneByKind: true,
+        },
+        // Only a change opens a review for the owner (reviewFor lists the person).
+        (change, extra) =>
+          adder(reviewFor(owner), lowConfidence(partners) ? { defaultAccept: false } : {})(
+            change,
+            extra,
+          ),
+        removed,
       );
-      for (const fe of incoming.familyEvents.get(f.id) ?? []) {
-        if (have.has(`${fe.type}|${dateKey(fe.date_text)}`)) continue;
-        const deleted = removed.fact(existingFamily, {
-          type: fe.type,
-          custom_type: fe.custom_type,
-          date_text: fe.date_text,
-          place_name: null,
-          value: fe.value,
-        });
-        if (deleted && deleted.state === 'same') continue;
-        adder(reviewFor(owner), lowConfidence(partners) ? { defaultAccept: false } : {})(
-          {
-            kind: 'fact.add',
-            incomingEventId: fe.id,
-            fact: {
-              type: fe.type,
-              customType: fe.custom_type,
-              date: fe.date_text,
-              place: null,
-              value: fe.value,
-            },
-            owner: 'family',
-            familyKey: existingFamily,
-            ...(deleted ? { deletedEventId: deleted.eventId } : {}),
-          },
-          deleted ? DELETED : {},
-        );
-      }
     }
     for (const child of incomingChildren.get(f.id) ?? []) {
       const mappedChild = mapPerson(child)!;

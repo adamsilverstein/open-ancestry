@@ -1368,7 +1368,7 @@ describe('trustworthy confidence and reasons (#159)', () => {
       expect(mary.reasons.some((r) => /^closest: Mary Brown, \d+%$/.test(r))).toBe(true);
       const quill = fresh.find((p) => p.name === 'Quill Vexbury')!;
       expect(quill.changes.map((c) => [c.kind, c.defaultAccept])).toEqual([['person.new', true]]);
-      expect(quill.reasons).toEqual(['no one with a similar name in your tree']);
+      expect(quill.reasons).toEqual(['no close match in your tree']);
     } finally {
       closeReimport(s2);
       tree.close();
@@ -1760,5 +1760,40 @@ describe('dates compared by meaning (#194)', () => {
     } finally {
       closeReimport(s2);
     }
+  });
+});
+
+describe('why a new person is new, truthfully (#192 review)', () => {
+  const reasonsOf = async (tree: TreeStore, text: string, name: string) => {
+    const s2 = await prepareReimport(tree, { bytes: text }, { today: TODAY });
+    try {
+      return s2.diff.people.find((p) => p.status === 'new' && p.name === name)!.reasons;
+    } finally {
+      closeReimport(s2);
+    }
+  };
+
+  it('finds a tree person by an alternate given name', async () => {
+    const joseph = [
+      '0 @I1@ INDI',
+      '1 NAME Joseph /Ashgrove/',
+      '1 NAME Joe /Ashgrove/',
+      '2 TYPE aka',
+      '1 BIRT',
+      '2 DATE 1900',
+    ];
+    const tree = openMemoryTree();
+    await importGedcom({ bytes: ged(...joseph) }, tree, { today: TODAY });
+    const later = ged(...joseph, '0 @I2@ INDI', '1 NAME Joe /Ashgrove/', '1 BIRT', '2 DATE 1990');
+    const reasons = await reasonsOf(tree, later, 'Joe Ashgrove');
+    expect(reasons[0]).toMatch(/^closest: Joseph Ashgrove, \d+%$/);
+    tree.close();
+  });
+
+  it('does not claim nobody has a similar name when people share the surname', async () => {
+    const text = renumber(
+      SAMPLE.replace('0 TRLR', '0 @I90@ INDI\n1 NAME John /Ashgrove/\n1 BIRT\n2 DATE 2001\n0 TRLR'),
+    );
+    expect(await reasonsOf(store, text, 'John Ashgrove')).toEqual(['no close match in your tree']);
   });
 });

@@ -640,6 +640,45 @@ test('discarding a review changes nothing', async ({ page, request, baseURL }, t
   expect(history.items).toEqual([]);
 });
 
+test('cancelling a comparison that already stopped sends no cancel (#308)', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  await page.route('**/api/jobs/*/events', () => {});
+  await page.addInitScript((tree) => localStorage.setItem('oa-tree', tree), seeded.tree);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'File' }).click();
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('menuitem', { name: /Re-import updated export/ }).click();
+  await (
+    await chooser
+  ).setFiles({
+    name: 'Ashgrove 2026.ged',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from(laterExport()),
+  });
+  await expect(page.getByRole('heading', { name: 'Starting the comparison' })).toBeVisible();
+  // The job failed (or was cancelled elsewhere) before Cancel: it has no review to discard.
+  await page.route('**/api/jobs/*', (route) => {
+    if (route.request().method() === 'GET') {
+      const id = /jobs\/([^/?#]+)/.exec(route.request().url())![1]!;
+      return route.fulfill({
+        json: { id, kind: 'reimport', tree: seeded.tree, state: 'failed', result: null },
+      });
+    }
+    return route.continue();
+  });
+  const cancels: string[] = [];
+  page.on('request', (r) => {
+    if (r.method() === 'DELETE' && /\/api\/jobs\//.test(r.url())) cancels.push(r.url());
+  });
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page).toHaveURL(/\/tree\/(?!home)[^/?#]+/);
+  expect(cancels).toEqual([]);
+});
+
 test('cancelling the comparison keeps nothing and changes nothing', async ({
   page,
   request,

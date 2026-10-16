@@ -1,3 +1,4 @@
+import { isolate } from '@open-ancestry/core';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Tags } from 'lucide-react';
@@ -47,12 +48,12 @@ export function TagsEditor({ tree, detail }: { tree: string; detail: PersonDetai
     edit.mutate(
       attach
         ? {
-            label: `Tag ${tag.name}`,
+            label: `Tag ${isolate(tag.name)}`,
             optimistic: { personId: id, update: (d) => ({ ...d, tags: [...d.tags, tag] }) },
             send: () => apiSend('POST', `${base}/people/${id}/tags`, { tagId: tag.id }),
           }
         : {
-            label: `Untag ${tag.name}`,
+            label: `Untag ${isolate(tag.name)}`,
             optimistic: { personId: id, update: (d) => removeTag(d, tag.id) },
             send: () => apiSend('DELETE', `${base}/people/${id}/tags/${tag.id}`),
           },
@@ -64,11 +65,11 @@ export function TagsEditor({ tree, detail }: { tree: string; detail: PersonDetai
     if (!tagName) return;
     setName('');
     edit.mutate({
-      label: `Create tag ${tagName}`,
+      label: `Create tag ${isolate(tagName)}`,
       // Created and attached in one batch, so one undo removes both.
       send: async () => {
         const { results } = await apiSend<{ results: [TagRow] }>('POST', `${base}/batch`, {
-          label: `Tag ${fullName(detail.summary)}: ${tagName}`,
+          label: `Tag ${isolate(fullName(detail.summary))}: ${isolate(tagName)}`,
           operations: [{ op: 'tag.create', tag: { name: tagName }, attachTo: id }],
         });
         remember(results[0]);

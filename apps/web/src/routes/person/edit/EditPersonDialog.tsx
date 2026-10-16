@@ -1,3 +1,4 @@
+import { isolate } from '@open-ancestry/core';
 import { useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
@@ -220,7 +221,7 @@ export function EditPersonDialog({
     });
 
     if (operations.length === 0) return onOpenChange(false);
-    const label = `Edit person: ${name}`;
+    const label = `Edit person: ${isolate(name)}`;
     edit.mutate({
       label,
       optimistic: {
@@ -317,7 +318,7 @@ export function EditPersonDialog({
           : navigate({ to: '/people' }));
         queryClient.removeQueries({ queryKey: personQuery(tree, id).queryKey });
         toast({
-          title: `Deleted ${name}`,
+          title: `Deleted ${isolate(name)}`,
           description: 'Press Ctrl+Z (⌘Z on a Mac) to undo.',
           duration: 8000,
           action: {
@@ -539,7 +540,7 @@ export function EditPersonDialog({
       <ConfirmDialog
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
-        title={`Delete ${name}?`}
+        title={`Delete ${isolate(name)}?`}
         description="Their names, events and links to family are removed. You can undo this."
         confirmLabel="Delete person"
         onConfirm={deletePerson}

@@ -3,6 +3,7 @@ import { CircleAlert, Info, X } from 'lucide-react';
 import { cx } from '../../lib/cx';
 import type { ToastItem } from './Toast';
 import styles from './Toast.module.css';
+import { withIsolates } from '../../lib/isolates';
 
 /** The toasts on screen. Loaded with the first toast, so Radix Toast stays out of the initial bundle. */
 export default function ToastStack({
@@ -27,10 +28,10 @@ export default function ToastStack({
             <Info className={styles.icon} size={18} aria-hidden />
           )}
           <div className={styles.body}>
-            <RadixToast.Title className={styles.title}>{title}</RadixToast.Title>
+            <RadixToast.Title className={styles.title}>{withIsolates(title)}</RadixToast.Title>
             {description && (
               <RadixToast.Description className={styles.description}>
-                {description}
+                {withIsolates(description)}
               </RadixToast.Description>
             )}
           </div>

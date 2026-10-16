@@ -38,8 +38,13 @@ describe('the after-apply summary', () => {
     const summary = summarizeApply(people, new Set(['c1', 'c3']), { i9: 'p9' });
     expect(summary.applied).toEqual([
       // Only Bo was created by the re-import; undo removes him, not Ada.
-      { name: 'Ada Fen', personId: 'p1', created: false, changes: ['Add tag: Research'] },
-      { name: 'Bo Fen', personId: 'p9', created: true, changes: ['Add Bo Fen'] },
+      {
+        name: 'Ada Fen',
+        personId: 'p1',
+        created: false,
+        changes: ['Add tag: \u2068Research\u2069'],
+      },
+      { name: 'Bo Fen', personId: 'p9', created: true, changes: ['Add \u2068Bo Fen\u2069'] },
     ]);
     expect(summary.skipped).toEqual([
       { name: 'Ada Fen', personId: 'p1', created: false, changes: ['Sex: unknown → female'] },

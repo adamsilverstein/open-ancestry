@@ -8,6 +8,7 @@ import { Button } from '../components/Button/Button';
 import { Dialog } from '../components/Dialog/Dialog';
 import { useDismissToasts, useToast } from '../components/Toast/Toast';
 import styles from './HistoryPanel.module.css';
+import { withIsolates } from '../lib/isolates';
 
 const relative = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
 
@@ -103,7 +104,7 @@ export default function HistoryPanel({ open, onOpenChange }: HistoryPanelProps) 
         <ol className={styles.list} aria-label="Changes" tabIndex={0}>
           {history.items.map((batch) => (
             <li key={batch.id} className={batch.state === 'undone' ? styles.undone : undefined}>
-              <span className={styles.label}>{batch.label}</span>
+              <span className={styles.label}>{withIsolates(batch.label)}</span>
               {batch.state === 'undone' && <span className={styles.chip}>undone</span>}
               <time className={styles.time} dateTime={batch.created_at}>
                 {timeAgo(batch.created_at)}

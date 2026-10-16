@@ -5,6 +5,7 @@ import dialogStyles from '../Dialog/Dialog.module.css';
 import { cx } from '../../lib/cx';
 import { captureOpener, lastControlOutside, returnFocus } from '../../lib/returnFocus';
 import styles from './ConfirmDialog.module.css';
+import { shownText, withIsolates } from '../../lib/isolates';
 
 export interface ConfirmDialogProps {
   open: boolean;
@@ -55,10 +56,12 @@ export function ConfirmDialog({
           className={cx(dialogStyles.content, dialogStyles.sm, styles.content)}
           {...(description ? {} : { 'aria-describedby': undefined })}
         >
-          <RadixDialog.Title className={dialogStyles.title}>{title}</RadixDialog.Title>
+          <RadixDialog.Title className={dialogStyles.title}>
+            {withIsolates(title)}
+          </RadixDialog.Title>
           {description && (
             <RadixDialog.Description className={dialogStyles.description}>
-              {description}
+              {shownText(description)}
             </RadixDialog.Description>
           )}
           <div className={dialogStyles.footer}>

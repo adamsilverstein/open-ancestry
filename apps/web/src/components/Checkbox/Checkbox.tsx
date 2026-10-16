@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, type ComponentProps, type ReactNode } from 'react';
 import { cx } from '../../lib/cx';
 import styles from './Checkbox.module.css';
+import { shownText, withIsolates } from '../../lib/isolates';
 
 export interface CheckboxProps extends Omit<ComponentProps<'input'>, 'type' | 'id'> {
   label: string;
@@ -34,11 +35,11 @@ export function Checkbox({
       />
       <div>
         <label htmlFor={id} className={styles.label}>
-          {label}
+          {withIsolates(label)}
         </label>
         {description && (
           <p id={`${id}-desc`} className={styles.description}>
-            {description}
+            {shownText(description)}
           </p>
         )}
       </div>

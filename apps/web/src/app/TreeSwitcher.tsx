@@ -1,3 +1,4 @@
+import { isolate } from '@open-ancestry/core';
 import { useRef, useState, type FormEvent } from 'react';
 import { useLocation, useNavigate } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -115,7 +116,7 @@ export default function TreeSwitcher() {
         const rest = trees.filter((t) => t.id !== current);
         await setCurrentTree(queryClient, rest[0]?.id ?? null);
         toast({
-          title: `Deleted “${currentName}”`,
+          title: `Deleted “${isolate(currentName ?? '')}”`,
           description: 'Moved to the library .trash folder.',
         });
         await navigate({ to: '/' });
@@ -201,7 +202,7 @@ export default function TreeSwitcher() {
       <Dialog
         open={mode === 'delete'}
         onOpenChange={(isOpen) => !isOpen && setMode(null)}
-        title={`Delete “${currentName}”?`}
+        title={`Delete “${isolate(currentName ?? '')}”?`}
         description="The tree folder moves to the library's .trash folder, so it can be recovered by hand. It disappears from open-ancestry."
         size="sm"
         footer={

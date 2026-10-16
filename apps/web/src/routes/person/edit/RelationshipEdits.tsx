@@ -1,3 +1,4 @@
+import { isolate } from '@open-ancestry/core';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { RelationshipType } from '@open-ancestry/db';
 import { MoreHorizontal } from 'lucide-react';
@@ -34,7 +35,7 @@ interface Confirm {
 const names = (people: (ApiPersonSummary | null)[]) =>
   people
     .filter((p) => p !== null)
-    .map((p) => fullName(p))
+    .map((p) => isolate(fullName(p)))
     .join(' and ');
 
 function GroupMenu({ group, children }: { group: string; children: ReactNode }) {
@@ -63,7 +64,7 @@ function RelationshipTypeDialog({
 }) {
   const edit = useEdit(tree);
   const [type, setType] = useState<RelationshipType>(family.family.relationship_type);
-  const partner = family.partner ? fullName(family.partner) : 'an unknown partner';
+  const partner = family.partner ? isolate(fullName(family.partner)) : 'an unknown partner';
 
   function save() {
     onClose();
@@ -139,7 +140,7 @@ export function useRelationshipEdits(tree: string, detail: PersonDetail) {
       document.querySelector<HTMLElement>('[data-relationships-add]')?.focus();
     }
   }, [detail]);
-  const self = fullName(detail.summary);
+  const self = isolate(fullName(detail.summary));
   const base = `/trees/${seg(tree)}`;
 
   const removeChildLink = (child: string, parents: string, linkId: string): Confirm => ({
@@ -165,7 +166,7 @@ export function useRelationshipEdits(tree: string, detail: PersonDetail) {
     const { partner, children } = family;
     const parents = names([detail.summary, partner]);
     const removePartner = (): Confirm => {
-      const name = partner ? fullName(partner) : 'the unknown partner';
+      const name = partner ? isolate(fullName(partner)) : 'the unknown partner';
       if (children.length === 0) {
         return {
           title: `Remove ${name} as partner?`,
@@ -210,7 +211,9 @@ export function useRelationshipEdits(tree: string, detail: PersonDetail) {
         {children.map(({ person, link }) => (
           <MenuItem
             key={link.id}
-            onSelect={() => setConfirm(removeChildLink(fullName(person), parents, link.id))}
+            onSelect={() =>
+              setConfirm(removeChildLink(isolate(fullName(person)), parents, link.id))
+            }
           >
             Remove child {fullName(person)}…
           </MenuItem>

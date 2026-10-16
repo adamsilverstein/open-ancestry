@@ -1,3 +1,4 @@
+import { isolate } from '@open-ancestry/core';
 import { useEffect, useRef } from 'react';
 import { useQueryClient, useSuspenseQuery } from '@tanstack/react-query';
 import { getRouteApi, useRouter } from '@tanstack/react-router';
@@ -57,7 +58,7 @@ function useLeaveWhenGone(tree: string, detail: PersonDetail, error: unknown) {
         ? 'Your unsaved changes were discarded.'
         : null;
     toast({
-      title: `${name} was deleted (in another window or by undo)`,
+      title: `${isolate(name)} was deleted (in another window or by undo)`,
       ...(lost ? { description: lost } : {}),
     });
     void (nearby

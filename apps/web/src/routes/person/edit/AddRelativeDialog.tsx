@@ -1,3 +1,4 @@
+import { isolate } from '@open-ancestry/core';
 import { useDeferredValue, useId, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import type { ChildRelationship, RelationshipType } from '@open-ancestry/db';
@@ -118,7 +119,7 @@ export function AddRelativeDialog({
         event.preventDefault();
         first.focus();
       }}
-      description={`Of ${fullName(detail.summary)}`}
+      description={`Of ${isolate(fullName(detail.summary))}`}
       footer={
         <>
           <DialogClose asChild>

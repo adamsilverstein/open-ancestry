@@ -2,8 +2,10 @@ import { openTree, treePaths } from '@open-ancestry/db';
 import { importGedcom } from '@open-ancestry/import';
 import { unzipSync, zipSync } from 'fflate';
 import {
+  closeSync,
   linkSync,
   mkdirSync,
+  openSync,
   readdirSync,
   renameSync,
   statSync,
@@ -11,6 +13,7 @@ import {
   truncateSync,
   utimesSync,
   writeFileSync,
+  writeSync,
 } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { finished } from 'node:stream/promises';
@@ -173,6 +176,31 @@ describe('streamed GEDZIP export', () => {
     symlinkSync(join(real, 'm'), media);
     const files = unzipSync(await buffer(streamGedzip(plan)));
     expect(Object.keys(files).sort()).toEqual(['gedcom.ged', 'warnings.txt']);
+    store.close();
+  });
+
+  it('warns about a file rewritten in place, at the same length, while it streamed', async () => {
+    const { store, dir } = await tree();
+    const path = join(treePaths(dir).media, 'photos', 'portrait.jpg');
+    truncateSync(path, 3 * 1024 * 1024);
+    const plan = planGedzipExport(store, { now: TODAY });
+    const chunks: Uint8Array[] = [];
+    let rewritten = false;
+    for await (const chunk of streamGedzip(plan)) {
+      chunks.push(chunk as Uint8Array);
+      const read = chunks.reduce((sum, c) => sum + c.byteLength, 0);
+      if (!rewritten && read > 1024 * 1024) {
+        // Same inode and length, new bytes and time: only a look after reading shows it.
+        const fd = openSync(path, 'r+');
+        writeSync(fd, randomBytes(1024), 0, 1024, 2 * 1024 * 1024);
+        closeSync(fd);
+        utimesSync(path, new Date(2000, 0, 1), new Date(2000, 0, 1));
+        rewritten = true;
+      }
+    }
+    expect(rewritten).toBe(true);
+    const files = unzipSync(Buffer.concat(chunks));
+    expect(new TextDecoder().decode(files['warnings.txt'])).toContain('photos/portrait.jpg');
     store.close();
   });
 

@@ -134,6 +134,37 @@ test('JSON export is a full backup, so privatize is not offered', async ({ page 
   await expect(page.getByRole('button', { name: 'File' })).toBeFocused();
 });
 
+test('a JSON export has edit history only when the box is checked', async ({
+  page,
+  request,
+  baseURL,
+}, info) => {
+  const tree = treeName(info.title, info.project.name);
+  await seedTree(request, baseURL!, tree);
+  const exportJson = async (withHistory: boolean) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: 'File' }).click();
+    await page.getByRole('menuitem', { name: /Export/ }).click();
+    const dialog = page.getByRole('dialog', { name: 'Export tree' });
+    await dialog.getByRole('combobox', { name: 'Tree' }).click();
+    await page.getByRole('option', { name: tree, exact: true }).click();
+    await dialog.getByRole('combobox', { name: 'Format' }).click();
+    await page.getByRole('option', { name: 'JSON (full backup)' }).click();
+    await dialog.getByRole('checkbox', { name: /^Include edit history/ }).setChecked(withHistory);
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      dialog.getByRole('button', { name: 'Export' }).click(),
+    ]);
+    const doc = JSON.parse(await readFile((await download.path())!, 'utf8')) as {
+      tables: Record<string, unknown[]>;
+    };
+    return Object.keys(doc.tables);
+  };
+  // The API leaves history out by default too; the dialog asks for it only when checked.
+  expect(await exportJson(false)).not.toContain('change_log');
+  expect(await exportJson(true)).toContain('change_log');
+});
+
 test('shows what an export could not carry over', async ({ page }, info) => {
   // An imported tree (written straight into the e2e library) whose person points at a
   // family that is not in the file: a GEDCOM 7 export cannot keep that line.

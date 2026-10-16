@@ -4,9 +4,11 @@ import {
   cpSync,
   existsSync,
   mkdirSync,
+  readFileSync,
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { readdir } from 'node:fs/promises';
@@ -71,6 +73,85 @@ describe('a tree busy in another server on the same library (#275 P3)', () => {
     second.rename('Shared', 'Moved');
     expect(second.list().map((t) => t.id)).toEqual(['Moved']);
     second.closeAll();
+  });
+
+  it('lets only one server hold the lock when two mark the tree busy (#289 c)', () => {
+    const root = makeTempDir('oa-lock-race-');
+    const first = new Library(root);
+    const second = new Library(root);
+    const third = new Library(root);
+    first.create('Race');
+    first.closeAll();
+    // Both passed assertIdle before either marked: markBusy itself must decide.
+    const release = first.markBusy('Race');
+    expect(() => second.markBusy('Race')).toThrow(expect.objectContaining({ statusCode: 409 }));
+    expect(second.isBusy('Race')).toBe(false);
+    // The loser's refusal left the winner's lock in place.
+    expect(() => third.assertIdle('Race')).toThrow(/busy in another/);
+    release();
+    second.markBusy('Race')();
+    for (const library of [first, second, third]) library.closeAll();
+  });
+
+  describe('lock liveness: a heartbeat, not the host or a day (#289 a)', () => {
+    const lockOf = (root: string, tree: string) => join(root, `${tree}.oatree`, 'busy.lock');
+    const plant = (root: string, tree: string, lock: object, ageMs: number) => {
+      writeFileSync(lockOf(root, tree), JSON.stringify({ owner: 'other', at: '', ...lock }));
+      const then = new Date(Date.now() - ageMs);
+      utimesSync(lockOf(root, tree), then, then);
+    };
+    const tree = () => {
+      const root = makeTempDir('oa-lock-live-');
+      const library = new Library(root);
+      library.create('T');
+      library.closeAll();
+      return { root, library };
+    };
+
+    it('trusts a fresh lock from any host, and takes over one silent for minutes', () => {
+      const { root, library } = tree();
+      plant(root, 'T', { pid: 4242, host: 'renamed-container' }, 10_000);
+      expect(() => library.markBusy('T')).toThrow(/busy in another/);
+      plant(root, 'T', { pid: 4242, host: 'renamed-container' }, 6 * 60_000);
+      const release = library.markBusy('T');
+      expect(JSON.parse(readFileSync(lockOf(root, 'T'), 'utf8')).owner).not.toBe('other');
+      release();
+      library.closeAll();
+    });
+
+    it('does not let a reused pid on this host keep a silent lock alive', () => {
+      // A container restarts as pid 1 every time: the old lock names a live pid.
+      const { root, library } = tree();
+      plant(root, 'T', { pid: process.pid, host: hostname() }, 6 * 60_000);
+      expect(() => library.assertIdle('T')).not.toThrow();
+      library.markBusy('T')();
+      library.closeAll();
+    });
+
+    it('frees at once a lock whose process on this host is gone', () => {
+      const { root, library } = tree();
+      const dead = spawnSync(process.execPath, ['-e', '0']).pid!;
+      plant(root, 'T', { pid: dead, host: hostname() }, 0);
+      expect(() => library.assertIdle('T')).not.toThrow();
+      library.closeAll();
+    });
+
+    it('keeps its own lock fresh with a heartbeat while busy', () => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+      try {
+        const { root, library } = tree();
+        const release = library.markBusy('T');
+        const old = new Date(Date.now() - 4 * 60_000);
+        utimesSync(lockOf(root, 'T'), old, old);
+        vi.advanceTimersByTime(30_000);
+        expect(Date.now() - statSync(lockOf(root, 'T')).mtimeMs).toBeLessThan(60_000);
+        release();
+        library.closeAll();
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   it('ignores a lock left by a server process that has exited', () => {

@@ -242,6 +242,17 @@ describe('treeNameProblem', () => {
     expect(newTreeNameProblem(name)).not.toBeNull();
   });
 
+  it('keeps a long uploaded file name with an isolate acceptable after shortening (#215)', () => {
+    // Wherever the cut falls, inside the isolate or not, the name the server picks must pass.
+    for (let before = 0; before <= 120; before += 7) {
+      for (const inside of [1, 30, 90]) {
+        const file = `${'A'.repeat(before)}\u2068${'ב'.repeat(inside)}\u2069 tree.ged`;
+        const name = treeNameFromFile(file);
+        expect(newTreeNameProblem(name), JSON.stringify([before, inside, name])).toBeNull();
+      }
+    }
+  });
+
   it('cleans direction overrides out of a name taken from an uploaded file (#190)', () => {
     expect(treeNameFromFile('Family\u202e.ged')).toBe('Family');
     expect(newTreeNameProblem(treeNameFromFile('Fam\u202eily\u2028Tree.ged'))).toBeNull();

@@ -122,6 +122,79 @@
   outline-offset: 2px;
 }
 
+/*
+ * Touch: a larger invisible target around the small chevrons and switcher,
+ * 48px wide on screen at any zoom (44px with room for rounding;
+ * --oa-tree-scale is set on touch screens). Zoomed out, the rows come close:
+ * a target reaches at most 46px of tree out from its chevron, short of the
+ * next row's card (a 64px gap), so it is wider than it is tall there. Into
+ * its own card it reaches 8px on screen up to 100% zoom (8px of tree beyond),
+ * and never more than 14px of tree, so a tap on a zoomed-out card's top
+ * quarter opens the card. At the lowest zoom a chevron's side reaches about
+ * 2px on screen into a spouse card, only in that top band; the switcher's
+ * stops at its pill (see below).
+ */
+@media (pointer: coarse) {
+  .chevron,
+  .switcher {
+    --out: max(18px, min(48px / var(--oa-tree-scale, 1) - 32px, 46px));
+    --side: max(18px, 24px / var(--oa-tree-scale, 1) - 12px);
+    --in: calc(-1 * min(14px, 8px / min(1, var(--oa-tree-scale, 1))));
+  }
+
+  .chevron::before,
+  .switcher::before {
+    position: absolute;
+    inset: calc(-1 * var(--out)) calc(-1 * var(--side)) var(--in);
+    content: '';
+  }
+
+  .chevron[data-chevron='down']::before {
+    inset: var(--in) calc(-1 * var(--side)) calc(-1 * var(--out));
+  }
+
+  /* On the card's left edge: out to the left. */
+  .chevron[data-chevron='siblings']::before {
+    inset: calc(-1 * var(--side)) var(--in) calc(-1 * var(--side)) calc(-1 * var(--out));
+  }
+
+  /*
+   * Where a chevron's target meets the switcher's (narrower pedigree cards,
+   * the switcher's strip above a spouse's up chevron), the chevron wins: the
+   * switcher's target is wide enough to lose those slivers.
+   */
+  .chevron {
+    z-index: 2;
+  }
+
+  /*
+   * The pill stays on the card's corner. Its target grows with the zoom like
+   * the up chevron's, so it moves right by as much as they would overlap: it
+   * starts where the chevron's 48px ends.
+   */
+  .switcher {
+    --shift: max(0px, 48px / var(--oa-tree-scale, 1) - 62px);
+
+    translate: 22px 0;
+  }
+
+  /*
+   * The spouse card starts 16px past the card, under the pill's right end: the
+   * target stops at the pill there, and takes its width in the free space
+   * above the row instead (::after), out to where the chevron's would reach.
+   */
+  .switcher::before {
+    inset: calc(-1 * var(--out)) 0 var(--in) calc(var(--shift) - var(--side));
+  }
+
+  .switcher::after {
+    position: absolute;
+    inset: calc(-1 * var(--out)) calc(-1 * var(--side) - var(--shift)) 100%
+      calc(var(--shift) - var(--side));
+    content: '';
+  }
+}
+
 .labelGutter,
 .labelColumn {
   position: absolute;
@@ -337,4 +410,23 @@
   padding: var(--oa-space-1) var(--oa-space-2);
   color: var(--oa-accent);
   font-weight: var(--oa-weight-medium);
+}
+
+/* The phone layout (PHONE_LAYOUT_QUERY): the toolbar along the bottom, the
+   labels and minimap clear of it. --oa-tree-bottom-bar is set by TreeView. */
+@media (width < 640px), (pointer: coarse) and (max-height: 500px) {
+  .toolbar {
+    top: auto;
+    bottom: var(--oa-space-4);
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .minimap {
+    bottom: calc(var(--oa-tree-bottom-bar, 0px) + var(--oa-space-2));
+  }
+
+  .gutter {
+    left: var(--oa-space-4);
+  }
 }

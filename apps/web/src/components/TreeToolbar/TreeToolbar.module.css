@@ -8,3 +8,10 @@
   margin: var(--oa-space-1) var(--oa-space-2);
   background: var(--oa-border);
 }
+
+[aria-orientation='horizontal'] > .divider {
+  align-self: stretch;
+  width: 1px;
+  height: auto;
+  margin: var(--oa-space-2) var(--oa-space-1);
+}

@@ -167,14 +167,23 @@ export function migrate(db: Database, options: MigrateOptions = {}): number[] {
   const applied: number[] = [];
   for (const migration of migrations) {
     if (migration.version <= current || migration.version > target) continue;
-    db.transaction(() => {
-      db.exec(migration.sql);
-      migration.run?.(db);
-      db.prepare(
-        "INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-      ).run(String(migration.version));
-    })();
-    applied.push(migration.version);
+    const sql = migration.sql;
+    // Another process (a second server, the CLI) may open the same tree and
+    // upgrade it after our first read. BEGIN IMMEDIATE takes the write lock
+    // before we look again, so a step that is already applied is skipped
+    // instead of failing on "table already exists".
+    const ran = db
+      .transaction(() => {
+        if (getSchemaVersion(db) >= migration.version) return false;
+        db.exec(sql);
+        migration.run?.(db);
+        db.prepare(
+          "INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        ).run(String(migration.version));
+        return true;
+      })
+      .immediate();
+    if (ran) applied.push(migration.version);
   }
   return applied;
 }

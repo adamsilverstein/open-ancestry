@@ -15,14 +15,14 @@ export type ReviewChange = {
   key: string;
   defaultAccept: boolean;
   applicable: boolean;
-  conflict?: 'local-edit' | 'local-delete';
+  conflict?: 'local-edit' | 'local-delete' | 'renamed-place';
   requires?: string[];
 } & (
   | { kind: 'person.new'; incomingId: string }
   | { kind: 'sex'; before: string; after: string }
   | { kind: 'name.add'; name: string; nameType: string | null; was?: string }
   | { kind: 'fact.add'; fact: FactView; owner: 'person' | 'family' }
-  | { kind: 'fact.change'; before: FactView; after: FactView }
+  | { kind: 'fact.change'; before: FactView; after: FactView; keepPlace?: true }
   | { kind: 'fact.missing'; fact: FactView }
   | { kind: 'citation.add'; source: string; page: string | null; apid: string | null }
   | { kind: 'tag.add'; tag: string }

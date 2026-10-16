@@ -110,6 +110,31 @@ describe('re-import labels', () => {
     ];
     for (const [change, text] of cases) expect(describeChange(change, 'Noah Ashgrove')).toBe(text);
   });
+
+  it("leaves a kept place out of a change's label", () => {
+    const change: ReviewChange = {
+      ...base,
+      kind: 'fact.change',
+      before: fact('1939', 'Elderford, Ohio'),
+      after: fact('1940', 'Elderford, Cask County, Ohio, USA'),
+      keepPlace: true,
+    };
+    expect(describeChange(change, 'Josiah Ashgrove')).toBe('Birth: 1939 → 1940');
+  });
+
+  it('says why a move away from a renamed place is a conflict', () => {
+    const moved = {
+      ...base,
+      kind: 'fact.change',
+      before: fact('1939', 'Elderford, Ohio'),
+      after: fact('1939', 'Millbrook'),
+      conflict: 'renamed-place',
+      defaultAccept: false,
+    } as ReviewChange;
+    expect(conflictText(moved, 'Josiah Ashgrove')).toBe(
+      'You renamed this place in this tree, and the export moves this fact to another place. It stays at your place unless you tick this.',
+    );
+  });
 });
 
 describe('compare progress (#161)', () => {

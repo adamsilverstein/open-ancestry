@@ -111,8 +111,8 @@ describe('calendar dates', { timeout: 30_000 }, () => {
   // [GEDCOM 5.5.1 DATE, the GEDCOM 7 DATE it exports as]
   const CALENDAR_DATES: [string, string][] = [
     ['@#DJULIAN@ 1 MAR 1700', 'JULIAN 1 MAR 1700'],
-    ['@#DJULIAN@ 11 FEB 1731/32', 'JULIAN 11 FEB 1731'],
-    ['11 FEB 1731/32', '11 FEB 1731'],
+    ['@#DJULIAN@ 11 FEB 1731/32', 'JULIAN 11 FEB 1732'],
+    ['11 FEB 1731/32', '11 FEB 1732'],
     ['@#DGREGORIAN@ 5 SEP 1941', '5 SEP 1941'],
     ['@#DHEBREW@ 1 TSH 5780', 'HEBREW 1 TSH 5780'],
     ['@#DHEBREW@ ADS 5784', 'HEBREW ADS 5784'],

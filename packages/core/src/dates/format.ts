@@ -97,7 +97,7 @@ function isSafePoint(p: DatePoint | undefined, calendar: Calendar): boolean {
   }
   if (p.day !== undefined) {
     if (p.month === undefined || !Number.isSafeInteger(p.day) || p.day < 1) return false;
-    if (p.day > daysInMonth(calendar, p.year, p.month)) return false;
+    if (p.day > daysInMonth(calendar, p.dualYear ?? p.year, p.month)) return false;
   }
   return p.dualYear === undefined || p.dualYear === p.year + 1;
 }
@@ -116,7 +116,7 @@ export function gedcomPhrase(text: unknown): string {
 
 /**
  * GEDCOM DATE payload, always a single line. Version 7 has no dual years, INT
- * or date phrases in the value: dual years keep the first year, and the caller
+ * or date phrases in the value: dual years use the new-style year, and the caller
  * should write the original text as a PHRASE (escaped by its own writer) when
  * the result is empty or the date was interpreted.
  */
@@ -136,7 +136,10 @@ export function toGedcom(date: DateInput, version: GedcomVersion = '5.5.1'): str
     const parts = [(v7 ? GEDCOM7_CALENDAR : GEDCOM551_CALENDAR)[cal]];
     if (p.day !== undefined) parts.push(`${p.day} `);
     if (p.month !== undefined) parts.push(`${monthCode(p.month, cal)} `);
-    parts.push(v7 ? (p.year < 0 ? `${-p.year} BCE` : String(p.year)) : yearText(p, 'B.C.'));
+    // GEDCOM 7 has no dual years: write the new-style year, the year the day
+    // falls in today (29 FEB 1751/52 only exists in 1752).
+    const year = p.dualYear ?? p.year;
+    parts.push(v7 ? (year < 0 ? `${-year} BCE` : String(year)) : yearText(p, 'B.C.'));
     return parts.join('');
   };
   if (end) {

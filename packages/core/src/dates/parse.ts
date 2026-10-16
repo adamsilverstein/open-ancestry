@@ -118,7 +118,10 @@ function parseNormalized(
     const simple = SIMPLE.exec(inner);
     if (simple) inner = simple[2]!;
     const p = parsePoint(inner, calendar);
-    return p && single(original, 'interpreted', p, phrase);
+    // A note after a qualified date keeps the qualifier: "BEF 1850 (per census)"
+    // is still before 1850. A plain date with a note, or INT, is interpreted.
+    const qualifier = !match && simple ? SIMPLE_QUALIFIERS[simple[1]!]! : 'interpreted';
+    return p && single(original, qualifier, p, phrase);
   }
 
   if ((match = BETWEEN.exec(s))) return range(original, 'between', match[1]!, match[2]!, calendar);
@@ -355,11 +358,6 @@ function validPoint(
     // Adar II (ADS) only exists in leap years; elsewhere it can only mean Adar.
     point.month = calendar === 'hebrew' && month === 7 && !isHebrewLeap(year) ? 6 : month;
   }
-  if (day !== undefined) {
-    if (month === undefined || !(day >= 1 && day <= daysInMonth(calendar, point.year, month)))
-      return undefined;
-    point.day = day;
-  }
   if (dual !== undefined) {
     // Dual dating (Old Style / New Style) only exists for Gregorian and Julian years.
     if (bc || year < 100 || (calendar !== 'gregorian' && calendar !== 'julian')) return undefined;
@@ -368,6 +366,13 @@ function validPoint(
     if (next <= year) next += size;
     if (next !== year + 1) return undefined;
     point.dualYear = next;
+  }
+  if (day !== undefined) {
+    // A dual-dated day falls in the new-style year: 29 FEB 1751/52 is a leap day of 1752.
+    const inYear = point.dualYear ?? point.year;
+    if (month === undefined || !(day >= 1 && day <= daysInMonth(calendar, inYear, month)))
+      return undefined;
+    point.day = day;
   }
   return { point, calendar };
 }

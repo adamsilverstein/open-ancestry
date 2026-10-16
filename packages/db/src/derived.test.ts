@@ -10,6 +10,7 @@ import {
   openTree,
   persons,
   redoLast,
+  rebuildSearchIndex,
   rebuildSearchIndexInChunks,
   refreshDerivedColumns,
   searchIndexStale,
@@ -179,6 +180,10 @@ describe('derived column refresh', () => {
     expect(store.searchRebuildPending).toBe(false);
     expect(searchPeople(store, 'Yılmaz').map((r) => r.person.id)).toEqual([id]);
     expect(searchPeople(store, 'Yilmaz').map((r) => r.person.id)).toEqual([id]);
+    // A full rebuild clears the flag too, so it always agrees with the index.
+    store.searchRebuildPending = true;
+    rebuildSearchIndex(store);
+    expect(store.searchRebuildPending).toBe(false);
     store.close();
   });
 

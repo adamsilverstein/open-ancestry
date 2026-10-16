@@ -82,6 +82,8 @@ export function rebuildSearchIndex(store: TreeStore): void {
     rebuildSearchDocs(store.db);
     rebuildSortKeys(store.db);
   })();
+  // Every document is current now, whatever started the rebuild.
+  store.searchRebuildPending = false;
 }
 
 export interface SearchOptions {

@@ -123,3 +123,13 @@ live in `../kin` (`parentLink`, `isParent`, `siblingKind`, `lineQualifier`, `qua
 labels all use them, so they agree: `half-sister`, `adopted brother`, `stepbrother`,
 `foster sister`, `step-aunt`; `private` links count as birth, `related` and `guardian` as care
 (foster wording, `guardian`/`ward` for the direct link).
+
+## Tree card terms
+
+`cardTerm(path, sex, style?)` names a tree card from the path the layout walked from the focus
+person: steps `U` (up to a parent, with the child's `rel`), `D` (down to a child), `S` (to a
+partner) and `B` (to a sibling, with its `kind` or the `shared` links and `apart` that
+`siblingKind` takes), each optionally with the reached person's `sex`. It builds the same words
+as the calculator from the same kin rules: `cardTerm([U('step'), B()], 'F')` is `step-aunt`,
+`[U(), B('half'), D()]` is `half first cousin`, `[up(), B('full', 'M'), S()]` is `wife of uncle`.
+Shapes kinship terms do not cover (down then up without a sibling step) give `undefined`.

@@ -1,10 +1,10 @@
 import { openTree, undoLast, type MediaRow, type TreeStore } from '@open-ancestry/db';
 import { zipSync } from 'fflate';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { makeTempDir } from '../../../../fixtures/temp-dir';
 import { importGedcom } from '../import';
 import { TODAY, ged } from '../test-helpers';
 import { applyReimport, closeReimport, prepareReimport, type ReimportSession } from './index';
@@ -45,7 +45,7 @@ let dir: string;
 let store: TreeStore;
 
 beforeEach(async () => {
-  tmp = mkdtempSync(join(tmpdir(), 'oa-reimport-changed-'));
+  tmp = makeTempDir('oa-reimport-changed-');
   dir = join(tmp, 'Vale.oatree');
   await importGedcom({ gedzip: exportWith('LETTER V1') }, { dir }, { today: TODAY });
   store = openTree(dir);

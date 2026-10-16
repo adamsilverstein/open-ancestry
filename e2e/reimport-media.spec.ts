@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +7,7 @@ import { zipSync } from 'fflate';
 import sharp from 'sharp';
 import { openTree, type MediaRow } from '@open-ancestry/db';
 import { importGedcom } from '../packages/import/src/index';
+import { makeTempDir } from '../fixtures/temp-dir';
 import { expect, test } from './fixtures';
 
 /*
@@ -65,7 +66,8 @@ const library = () =>
 async function seed(label: string, prepare?: (dir: string) => Promise<void>) {
   const info = test.info();
   const name = `Reimport media ${label} ${info.project.name} ${info.workerIndex}${info.retry} ${Date.now() % 1e6}`;
-  const staging = mkdtempSync(join(library(), '..', 'oa-e2e-staging-'));
+  // In the OS temp dir beside the library, so the move into it is a rename.
+  const staging = makeTempDir('oa-e2e-staging-');
   try {
     const built = join(staging, `${name}.oatree`);
     await importGedcom({ gedzip: await exportZip(RED) }, { dir: built, name });

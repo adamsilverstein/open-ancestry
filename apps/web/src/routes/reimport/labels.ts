@@ -41,6 +41,24 @@ const list = (names: string[]) =>
     ? (names[0] ?? 'unknown')
     : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
 
+/** What ticking a conflicting change does, under its checkbox; undefined for other changes. */
+export function conflictText(change: ReviewChange, personName: string): string | undefined {
+  if (change.kind === 'name.add' && change.conflict === 'local-edit') {
+    const was = change.was ? ` (it was ${change.was})` : '';
+    return `The export now calls this person ${change.name}${was}; you renamed them ${personName} here. Tick to also keep ${change.name} as an alternate name; ${personName} stays the primary name.`;
+  }
+  if (change.conflict === 'local-edit') {
+    return 'Edited in this tree since the last import; your edit is kept unless you tick this.';
+  }
+  if (change.conflict === 'local-delete') {
+    return 'You deleted this in this tree; it stays deleted unless you tick this.';
+  }
+  if (change.conflict === 'renamed-place') {
+    return 'You renamed this place in this tree, and the export moves this fact to another place. It stays at your place unless you tick this.';
+  }
+  return undefined;
+}
+
 /** One line describing a change, used as its checkbox label. */
 export function describeChange(change: ReviewChange, personName: string): string {
   switch (change.kind) {
@@ -48,8 +66,13 @@ export function describeChange(change: ReviewChange, personName: string): string
       return `Add ${personName}`;
     case 'sex':
       return `Sex: ${SEX[change.before] ?? change.before} → ${SEX[change.after] ?? change.after}`;
-    case 'name.add':
-      return `Add name: ${change.name} (${NAME_TYPES[change.nameType] ?? change.nameType})`;
+    case 'name.add': {
+      // Ticking adds an alternate name: say so when it competes with the user's own.
+      const type = change.nameType ? ` (${NAME_TYPES[change.nameType] ?? change.nameType})` : '';
+      return change.conflict === 'local-edit'
+        ? `Also keep ${change.name}${type} as an alternate name`
+        : `Add name: ${change.name}${type}`;
+    }
     case 'fact.add':
       return `Add ${change.owner === 'family' ? 'family fact' : 'fact'}: ${factText(change.fact)}`;
     case 'fact.change':
@@ -88,17 +111,5 @@ export function describeChange(change: ReviewChange, personName: string): string
       return `Possibly merged into ${change.existingName} earlier (shares a relative); not added unless you tick it`;
     case 'merged':
       return `Exported separately as ${change.incomingName}; previously merged into ${personName}, so not added again`;
-  }
-}
-
-/** Why a change is a conflict, said under its checkbox. */
-export function conflictText(conflict: NonNullable<ReviewChange['conflict']>): string {
-  switch (conflict) {
-    case 'local-edit':
-      return 'Edited in this tree since the last import; your edit is kept unless you tick this.';
-    case 'local-delete':
-      return 'You deleted this in this tree; it stays deleted unless you tick this.';
-    case 'renamed-place':
-      return 'You renamed this place in this tree, and the export moves this fact to another place. It stays at your place unless you tick this.';
   }
 }

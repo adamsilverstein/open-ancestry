@@ -422,6 +422,8 @@ export function applyReimport(
           ).n;
           insert('person_name', {
             ...n,
+            // Added as an alternate: no invented "birth name" when the export gave no type.
+            type: c.nameType ?? 'aka',
             id: undefined,
             person_id: person,
             is_primary: 0,

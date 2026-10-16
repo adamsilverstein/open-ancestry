@@ -123,12 +123,13 @@ function PersonCard({
                 disabled={waiting}
                 description={
                   change.conflict ? (
-                    // The marker is part of the description, so it is announced with the checkbox.
+                    // The marker opens the description, so it is announced with the checkbox (#194),
+                    // followed by what ticking does (#201).
                     <>
                       <span className={styles.flag}>
                         <TriangleAlert aria-hidden size={14} /> Conflict
                       </span>
-                      {conflictText(change.conflict)}
+                      {conflictText(change, person.name)}
                     </>
                   ) : waiting ? (
                     'Needs the new person above.'

@@ -790,9 +790,17 @@ export function diffTrees(
   nearMisses: Map<string, NearMiss> = new Map(),
 ): ReimportDiff {
   const { edited } = local;
-  /** No logged change: as its import left it; not imported and never logged: unknown. */
-  const mediaBase = (m: MediaRow) =>
-    local.mediaBase.has(m.id) ? local.mediaBase.get(m.id)! : m.import_batch_id ? m.sha256 : null;
+  /**
+   * The file a media row had when the export last spoke for it: the stored
+   * baseline (#224) or, for rows it does not hold, the edit history. No
+   * logged change: as its import left it; not imported and never logged: unknown.
+   */
+  const mediaBase = (m: MediaRow) => {
+    const stored = local.base.get(`media|${m.id}`);
+    if (stored) return (stored.sha256 as string | null | undefined) ?? null;
+    if (local.mediaBase.has(m.id)) return local.mediaBase.get(m.id)!;
+    return m.import_batch_id ? m.sha256 : null;
+  };
   const gone = local.removed;
   const held = new Set<string>();
   const removed: Removed = {

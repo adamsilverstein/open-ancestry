@@ -763,6 +763,13 @@ function recordBase(
       if (c.kind === 'fact.change') images[`event|${c.existingEventId}`] = imageOfView(c.after);
       else if (c.kind === 'fact.add' && c.deletedEventId) {
         images[`event|${c.deletedEventId}`] = imageOfView(c.fact);
+      } else if (c.kind === 'media.replace') {
+        // The export's file, applied or declined: a declined one stays settled.
+        const m = incAll<{ sha256: string | null }>(
+          'SELECT sha256 FROM media WHERE id = ?',
+          c.incomingMediaId,
+        )[0];
+        images[`media|${c.existingMediaId}`] = { sha256: m?.sha256 ?? null };
       } else if (c.kind === 'sex' && person.existingId) {
         images[`person|${person.existingId}`] = { sex: c.after };
       } else if (c.kind === 'name.add' && person.existingId && person.incomingId) {

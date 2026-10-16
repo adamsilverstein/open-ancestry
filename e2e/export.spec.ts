@@ -110,7 +110,7 @@ test('exports a GEDZIP archive that re-imports', async ({ page, request, baseURL
   expect(await reimport(file.bytes)).toEqual(['Adelind', 'Bramwell']);
 });
 
-test('JSON export is a full backup, so privatize is not offered', async ({ page }) => {
+test('JSON export always includes everyone, so privatize is not offered', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'File' }).click();
   await page.getByRole('menuitem', { name: /Export/ }).click();
@@ -123,15 +123,49 @@ test('JSON export is a full backup, so privatize is not offered', async ({ page 
   // GEDZIP media: embedded photo details are removed, other files left out (#263).
   await expect(dialog).toContainText('In a GEDZIP, photos lose their embedded details');
   await dialog.getByRole('combobox', { name: 'Format' }).click();
-  await page.getByRole('option', { name: 'JSON (full backup)' }).click();
+  await page.getByRole('option', { name: 'JSON', exact: true }).click();
   await expect(dialog.getByRole('checkbox', { name: /^Privatize/ })).toBeDisabled();
   // The edit history keeps deleted text, so it is left out unless asked for (#197).
   const history = dialog.getByRole('checkbox', { name: /^Include edit history/ });
   await expect(history).not.toBeChecked();
   await expect(dialog).toContainText('including anything you have deleted');
+  // JSON is a full backup only with the history: the label doesn't claim it, the box says so.
+  await expect(dialog).toContainText('Makes this a full backup');
+  await expect(dialog.getByRole('combobox', { name: 'Format' })).toHaveText(/^JSON$/);
   await dialog.getByRole('button', { name: 'Cancel' }).click();
   await expect(dialog).toBeHidden();
   await expect(page.getByRole('button', { name: 'File' })).toBeFocused();
+});
+
+test('a JSON export has edit history only when the box is checked', async ({
+  page,
+  request,
+  baseURL,
+}, info) => {
+  const tree = treeName(info.title, info.project.name);
+  await seedTree(request, baseURL!, tree);
+  const exportJson = async (withHistory: boolean) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: 'File' }).click();
+    await page.getByRole('menuitem', { name: /Export/ }).click();
+    const dialog = page.getByRole('dialog', { name: 'Export tree' });
+    await dialog.getByRole('combobox', { name: 'Tree' }).click();
+    await page.getByRole('option', { name: tree, exact: true }).click();
+    await dialog.getByRole('combobox', { name: 'Format' }).click();
+    await page.getByRole('option', { name: 'JSON', exact: true }).click();
+    await dialog.getByRole('checkbox', { name: /^Include edit history/ }).setChecked(withHistory);
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      dialog.getByRole('button', { name: 'Export' }).click(),
+    ]);
+    const doc = JSON.parse(await readFile((await download.path())!, 'utf8')) as {
+      tables: Record<string, unknown[]>;
+    };
+    return Object.keys(doc.tables);
+  };
+  // The API leaves history out by default too; the dialog asks for it only when checked.
+  expect(await exportJson(false)).not.toContain('change_log');
+  expect(await exportJson(true)).toContain('change_log');
 });
 
 test('shows what an export could not carry over', async ({ page }, info) => {
@@ -198,9 +232,13 @@ test('privatize starts on for a tree with living people and warns when turned of
     'This export includes everything about 1 person who may be living.',
   );
   await dialog.getByRole('combobox', { name: 'Format' }).click();
-  await page.getByRole('option', { name: 'JSON (full backup)', exact: true }).click();
+  await page.getByRole('option', { name: 'JSON', exact: true }).click();
   await expect(dialog.getByRole('status')).toHaveText(
-    'JSON is a full backup: it includes everything about 1 person who may be living.',
+    'JSON includes everything about 1 person who may be living.',
+  );
+  await dialog.getByRole('checkbox', { name: /^Include edit history/ }).check();
+  await expect(dialog.getByRole('status')).toHaveText(
+    'JSON includes everything about 1 person who may be living. With the edit history it is a full backup, keeping anything you have deleted.',
   );
 });
 

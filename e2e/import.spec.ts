@@ -44,9 +44,7 @@ test('imports the Ancestry sample through the file picker and opens the tree', a
   await expect(report.getByRole('group', { name: 'Media' })).toContainText('2');
   // One sentence that doesn't contradict the counts before it (#279).
   await expect(
-    report.getByText(
-      /Every line was mapped except the \d+ header lines, which are kept verbatim for export\./,
-    ),
+    report.getByText(/Every line was mapped except \d+ kept verbatim for export\./),
   ).toBeVisible();
   await expect(
     page.getByRole('region', { name: 'Warnings' }).getByText('No warnings'),

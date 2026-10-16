@@ -1,6 +1,12 @@
 import { formatDate } from '@open-ancestry/core';
 import type { FamilyRow, MediaRow, TableName, TreeStore } from '@open-ancestry/db';
-import { HIGH_CONFIDENCE, POSSIBLE_MATCH, type NearMiss, type PersonMatch } from './match';
+import {
+  HIGH_CONFIDENCE,
+  POSSIBLE_MATCH,
+  type NearMiss,
+  type PersonMatch,
+  type PlaceRename,
+} from './match';
 import {
   mediaKeys,
   norm,
@@ -136,7 +142,20 @@ export type ReviewChange = ReimportChange & {
   conflict?: 'local-edit' | 'local-delete' | 'renamed-place';
   /** Change ids that must also be accepted (a new person this one depends on). */
   requires?: string[];
+  /** Part of a place rename (`ReimportDiff.placeRenames`, by key): shown and chosen with it. */
+  placeRename?: string;
 };
+
+/**
+ * A place the export renamed (#279), offered as one item: the fact changes
+ * that only move facts from `from` to `to`, chosen together.
+ */
+export interface PlaceRenameReview {
+  key: string;
+  from: string;
+  to: string;
+  changeIds: string[];
+}
 
 export interface PersonReview {
   key: string;
@@ -154,6 +173,8 @@ export interface ReimportDiff {
   people: PersonReview[];
   /** Incoming family id to the tree's family it describes (apply adds to these, never a copy). */
   familyMatches: Record<string, string>;
+  /** Places the export renamed, each covering the fact changes that only move facts there. */
+  placeRenames: PlaceRenameReview[];
   /**
    * Records (`person|id`, `family|id`) whose export text still differs from
    * the tree although nothing is offered, because the user's change stands:
@@ -846,6 +867,7 @@ export function diffTrees(
   local: LocalHistory,
   nearMisses: Map<string, NearMiss> = new Map(),
   typedNames: Set<string> = new Set(),
+  renames: readonly PlaceRename[] = [],
 ): ReimportDiff {
   const { edited } = local;
   /**
@@ -1417,6 +1439,7 @@ export function diffTrees(
   return {
     people,
     familyMatches,
+    placeRenames: groupPlaceRenames(people, renames),
     held: [...held],
     counts: {
       incoming: incoming.people.size,
@@ -1428,4 +1451,38 @@ export function diffTrees(
       changes: people.reduce((n, p) => n + p.changes.filter((c) => c.applicable).length, 0),
     },
   };
+}
+
+/**
+ * Gathers each renamed place's fact changes (#279): matched, unconflicted
+ * changes that move a fact from the old name to the new one and change
+ * nothing else. Two or more make one review item; the rest stay as they are.
+ */
+function groupPlaceRenames(
+  people: PersonReview[],
+  renames: readonly PlaceRename[],
+): PlaceRenameReview[] {
+  const out: PlaceRenameReview[] = [];
+  for (const { from, to } of renames) {
+    const key = `${from}→${to}`;
+    const members = people
+      .filter((p) => p.status === 'matched')
+      .flatMap((p) => p.changes)
+      .filter(
+        (c): c is Extract<ReviewChange, { kind: 'fact.change' }> =>
+          c.kind === 'fact.change' &&
+          c.applicable &&
+          !c.conflict &&
+          !c.keepPlace &&
+          norm(c.before.place) === norm(from) &&
+          norm(c.after.place) === norm(to) &&
+          c.before.date === c.after.date &&
+          c.before.value === c.after.value &&
+          c.before.customType === c.after.customType,
+      );
+    if (members.length < 2) continue;
+    for (const c of members) c.placeRename = key;
+    out.push({ key, from, to, changeIds: members.map((c) => c.id) });
+  }
+  return out;
 }

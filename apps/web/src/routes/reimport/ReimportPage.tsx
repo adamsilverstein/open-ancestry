@@ -4,6 +4,7 @@ import { CircleHelp, TriangleAlert } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '../../api/client';
 import { invalidateTree } from '../../api/edits';
+import { historyQuery } from '../../api/history';
 import { treeQuery } from '../../api/queries';
 import { Button } from '../../components/Button/Button';
 import buttonStyles from '../../components/Button/Button.module.css';
@@ -156,9 +157,11 @@ function Review({ review }: { review: ReimportReview }) {
     () => new Set(all.filter((c) => c.applicable && c.defaultAccept).map((c) => c.id)),
   );
   const [pending, setPending] = useState(false);
-  const [done, setDone] = useState<{ summary: ApplySummary; homePersonId: string | null } | null>(
-    null,
-  );
+  const [done, setDone] = useState<{
+    summary: ApplySummary;
+    homePersonId: string | null;
+    batchId: string;
+  } | null>(null);
   const [stale, setStale] = useState(review.stale);
   const [comparing, setComparing] = useState(false);
   // A large export can change thousands of people: render cards in pages.
@@ -281,6 +284,7 @@ function Review({ review }: { review: ReimportReview }) {
           result.newPeople,
         ),
         homePersonId: tree.homePersonId ?? null,
+        batchId: result.batchId,
       });
     } catch (error) {
       setPending(false);
@@ -303,7 +307,7 @@ function Review({ review }: { review: ReimportReview }) {
     await navigate({ to: '/' });
   }
 
-  if (done) return <Applied {...done} fileName={review.fileName} />;
+  if (done) return <Applied {...done} tree={review.tree} fileName={review.fileName} />;
 
   return (
     <div className={cx(importStyles.page, styles.page)}>
@@ -423,12 +427,13 @@ function Review({ review }: { review: ReimportReview }) {
   );
 }
 
-function SummaryList({ people }: { people: SummaryPerson[] }) {
+/** `linked` is false once the changes were undone: people the re-import added are gone. */
+function SummaryList({ people, linked = true }: { people: SummaryPerson[]; linked?: boolean }) {
   return (
     <ul className={styles.summaryList}>
       {people.map((p) => (
         <li key={`${p.personId ?? ''}|${p.name}`}>
-          {p.personId ? (
+          {p.personId && linked ? (
             <Link to="/person/$personId" params={{ personId: p.personId }} className={styles.name}>
               {p.name}
             </Link>
@@ -453,27 +458,42 @@ function Applied({
   summary,
   homePersonId,
   fileName,
+  tree,
+  batchId,
 }: {
   summary: ApplySummary;
   homePersonId: string | null;
   fileName: string;
+  tree: string;
+  batchId: string;
 }) {
   const plural = (n: number) => `${n} change${n === 1 ? '' : 's'}`;
+  // Undo and redo refetch the history (in this tab or another), so the page
+  // follows the batch's state rather than claiming changes that were undone.
+  const { data: history } = useQuery(historyQuery(tree));
+  const undone = history?.items.find((b) => b.id === batchId)?.state === 'undone';
   return (
     <section aria-labelledby="reimport-applied" className={cx(importStyles.page, styles.page)}>
       <header className={importStyles.header}>
         <div>
           <h1 id="reimport-applied" className={importStyles.title}>
-            Re-import applied
+            {undone ? 'Re-import undone' : 'Re-import applied'}
           </h1>
-          <p className={importStyles.subtitle}>
-            Applied {plural(summary.appliedCount)} from {fileName} to {summary.applied.length}{' '}
-            {summary.applied.length === 1 ? 'person' : 'people'}. Undo all of it with Cmd/Ctrl-Z or
-            from History.
-          </p>
+          {undone ? (
+            <p className={importStyles.subtitle}>
+              This re-import was undone, so none of these {plural(summary.appliedCount)} from{' '}
+              {fileName} are in the tree. Redo it with Shift-Cmd/Ctrl-Z or from History.
+            </p>
+          ) : (
+            <p className={importStyles.subtitle}>
+              Applied {plural(summary.appliedCount)} from {fileName} to {summary.applied.length}{' '}
+              {summary.applied.length === 1 ? 'person' : 'people'}. Undo all of it with Cmd/Ctrl-Z
+              or from History.
+            </p>
+          )}
         </div>
       </header>
-      <SummaryList people={summary.applied} />
+      <SummaryList people={summary.applied} linked={!undone} />
       {summary.skippedCount > 0 && (
         <details className={styles.skipped}>
           <summary>Skipped {plural(summary.skippedCount)}</summary>

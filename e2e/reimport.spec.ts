@@ -201,7 +201,7 @@ test('import, edit, re-import, review, apply, then undo', async ({
   await expect(undone).toContainText('This re-import was undone');
   await expect(undone.getByRole('link', { name: 'Noah Ashgrove' })).toHaveCount(0);
   await expect(undone.getByRole('link', { name: 'Thaddeus Ashgrove' })).toHaveCount(0);
-  await expect(undone.getByText('Noah Ashgrove')).toBeVisible();
+  await expect(undone.getByText('Noah Ashgrove', { exact: true }).first()).toBeVisible();
   // Redo applies it again, and the page follows.
   await page.keyboard.press(`Shift+${mod}+z`);
   await expect(result.getByRole('link', { name: 'Noah Ashgrove' })).toBeVisible();

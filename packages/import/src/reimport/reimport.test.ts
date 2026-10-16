@@ -1676,6 +1676,28 @@ describe('three-way re-import, review findings (#224)', () => {
     }
   });
 
+  it('compares a base with its place as it was, after the user renamed the place (P4)', async () => {
+    const first = await prepareReimport(store, { bytes: josiah1940() }, { today: TODAY });
+    applyReimport(store, first, defaults(first), 'Re-import');
+    closeReimport(first);
+    const death = eventIdOf('@I3@', 'DEAT');
+    const place = value<string>(store, 'SELECT place_id FROM event WHERE id = ?', death);
+    store.transact('Rename place', (tx) =>
+      tx.update('place', place, { full_name: 'Elderford, Ohio' } as never),
+    );
+    store.transact('Edit', (tx) => tx.update('event', death, { date_text: '2 MAY 1940' }));
+    const again = await prepareReimport(store, { bytes: josiah1940(200) }, { today: TODAY });
+    try {
+      // The export still says what it said: the user's date and place name stand.
+      const deaths = changesOf(again, '@I3@').filter(
+        (c) => c.kind === 'fact.change' && c.after.type === 'DEAT',
+      );
+      expect(deaths).toEqual([]);
+    } finally {
+      closeReimport(again);
+    }
+  });
+
   it('records the base only for the changes it declined', async () => {
     const death = eventIdOf('@I3@', 'DEAT');
     const s2 = await prepareReimport(

@@ -200,6 +200,8 @@ export interface LocalHistory {
   base: Map<string, Record<string, unknown>>;
   /** Names (normalized) a person had before the user changed or removed them. */
   formerNames: Map<string, Set<string>>;
+  /** Places the user renamed: each one's name before that, as the export last gave it. */
+  renamedPlaces: Map<string, string>;
   /** Names (normalized) the last re-import's export gave each person it offered names for. */
   baseNames: Map<string, Set<string>>;
   /** People the user deleted: their names (normalized) and birth year. */
@@ -320,8 +322,10 @@ export function localHistory(store: TreeStore): LocalHistory {
     typeof id === 'string'
       ? (gone.get(`${entity}|${id}`) ?? (store.getRow(entity, id) as Image | undefined))
       : undefined;
+  const renamedPlaces = new Map<string, string>();
   // Facts are compared by place name, as the export names them.
   for (const [key, row] of base) {
+    if (key.startsWith('place|')) renamedPlaces.set(key.slice(6), row.full_name as string);
     if (key.startsWith('event|') && row.place_id) {
       base.set(key, { ...row, place_name: rowOf('place', row.place_id)?.full_name ?? null });
     }
@@ -417,6 +421,7 @@ export function localHistory(store: TreeStore): LocalHistory {
     renamed,
     base,
     formerNames,
+    renamedPlaces,
     baseNames,
     deletedPeople,
     removed: { facts, names, citations, media, families, childLinks },
@@ -522,8 +527,11 @@ interface Removed {
     incoming: FactImage,
   ): { state: 'same' | 'changed'; eventId: string } | false;
   citation(ownerId: string, c: SnapCitation): boolean;
-  /** The value the export last gave this event, if the user changed it since (#185). */
-  baseOf(eventId: string): FactImage | undefined;
+  /**
+   * The value the export last gave this event, if the user changed it, or the
+   * name of its place, since (#185).
+   */
+  baseOf(event: SnapEvent): FactImage | undefined;
   /**
    * Notes that a record still differs from the tree although nothing is offered
    * (the user's own change stands), so the exporter regenerates it.
@@ -609,7 +617,7 @@ function diffFacts(
     if (counterpart) {
       used.add(counterpart.row.id);
       // Three-way (#185): base = what the export last said for this fact.
-      const was = removed.baseOf(counterpart.row.id);
+      const was = removed.baseOf(counterpart);
       // The export still says what it said then: whatever the user did stands.
       if (was && sameImage(was, imageOf(ie))) {
         removed.hold(`person|${e.row.id}`);
@@ -718,7 +726,13 @@ export function diffTrees(
       return changed ? { state: 'changed', eventId: changed } : false;
     },
     citation: (owner, c) => gone.citations.has(`${owner}|${c.sourceKey}|${norm(c.page)}`),
-    baseOf: (eventId) => local.base.get(`event|${eventId}`) as FactImage | undefined,
+    baseOf: (event) => {
+      const stored = local.base.get(`event|${event.row.id}`) as FactImage | undefined;
+      if (stored) return stored;
+      // A fact the user left alone, at a place they renamed: its base is the old name.
+      const former = event.row.place_id ? local.renamedPlaces.get(event.row.place_id) : undefined;
+      return former === undefined ? undefined : { ...imageOf(event), place_name: former };
+    },
   };
   const people: PersonReview[] = [];
   const reviews = new Map<string, PersonReview>();

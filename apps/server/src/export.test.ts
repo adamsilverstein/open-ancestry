@@ -1,4 +1,4 @@
-import { openMemoryTree, openTree } from '@open-ancestry/db';
+import { importJsonString, openMemoryTree, openTree } from '@open-ancestry/db';
 import { join } from 'node:path';
 import { parseGedcom, readGedzip } from '@open-ancestry/gedcom';
 import { importGedcom } from '@open-ancestry/import';
@@ -210,6 +210,49 @@ describe('JSON export history (#197)', () => {
     expect(tables.raw_record.some((r) => r.raw_text.includes('Bastien'))).toBe(true);
     // The full backup keeps everything.
     expect((await api.get(`${base}/export.json`)).body).toMatch(/SECRET-INLINE-NOTE/);
+  });
+
+  it('with history=0 leaves out places only deleted records used (#267)', async () => {
+    const base = await createTestTree(api, 'Places');
+    const store = openTree(join(api.root, 'Places.oatree'));
+    await importGedcom(
+      {
+        bytes: [
+          '0 HEAD',
+          '1 GEDC',
+          '2 VERS 5.5.1',
+          '0 @I1@ INDI',
+          '1 NAME Odile /Fernsby/',
+          '1 BIRT',
+          '2 PLAC SECRET-HAMLET, SECRET-PARISH, Kerry',
+          '1 NOTE x',
+          '0 @I2@ INDI',
+          '1 NAME Bastien /Corlew/',
+          '1 BIRT',
+          '2 PLAC Tralee, Kerry',
+          '0 TRLR',
+          '',
+        ].join('\n'),
+      },
+      store,
+    );
+    const odile = store.db
+      .prepare("SELECT person_id FROM person_name WHERE given = 'Odile'")
+      .pluck()
+      .get() as string;
+    store.close();
+    expect((await api.del(`${base}/people/${odile}`)).statusCode).toBe(200);
+
+    const res = await api.get(`${base}/export.json?history=0`);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).not.toContain('SECRET');
+    const { tables } = res.json() as { tables: { place: { name: string }[] } };
+    // Kerry stays: Tralee, which a remaining event uses, sits under it.
+    expect(tables.place.map((p) => p.name).sort()).toEqual(['Kerry', 'Tralee']);
+    // Still a whole document: it loads into an empty tree.
+    expect(() => importJsonString(openMemoryTree(), res.body)).not.toThrow();
+    // The full backup keeps every place, as the history may restore them.
+    expect((await api.get(`${base}/export.json`)).body).toContain('SECRET-HAMLET');
   });
 
   it('keeps the history by default, as a full backup', async () => {

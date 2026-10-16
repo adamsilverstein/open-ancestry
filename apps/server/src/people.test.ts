@@ -169,6 +169,7 @@ describe('GET neighborhood', () => {
   });
 
   it('defaults the focus to the home person', async () => {
+    await api.put(`${s.base}/home`, { personId: null });
     expect((await api.get(`${s.base}/neighborhood`)).json().error.code).toBe('bad_request');
     await api.put(`${s.base}/home`, { personId: s.cora });
     expect((await api.get(`${s.base}/neighborhood`)).json().focusId).toBe(s.cora);
@@ -242,14 +243,15 @@ describe('tags, home and export', () => {
   });
 
   it('gets and sets the home person', async () => {
-    expect((await api.get(`${s.base}/home`)).json()).toEqual({ personId: null, person: null });
-    const set = await api.put(`${s.base}/home`, { personId: s.ada });
-    expect(set.json()).toEqual({ batchId: expect.any(String), personId: s.ada });
-    expect((await api.get(`${s.base}/home`)).json().person.given).toBe('Ada');
-    expect((await api.get(s.base)).json().tree.homePersonId).toBe(s.ada);
+    // The first person added to the empty tree became its home person.
+    expect((await api.get(`${s.base}/home`)).json().personId).toBe(s.ada);
+    const set = await api.put(`${s.base}/home`, { personId: s.cora });
+    expect(set.json()).toEqual({ batchId: expect.any(String), personId: s.cora });
+    expect((await api.get(`${s.base}/home`)).json().person.given).toBe('Cora');
+    expect((await api.get(s.base)).json().tree.homePersonId).toBe(s.cora);
     expect((await api.put(`${s.base}/home`, { personId: '01NOPE' })).statusCode).toBe(404);
     expect((await api.put(`${s.base}/home`, { personId: null })).json().personId).toBeNull();
-    expect((await api.get(`${s.base}/home`)).json().personId).toBeNull();
+    expect((await api.get(`${s.base}/home`)).json()).toEqual({ personId: null, person: null });
   });
 
   it('exports the tree as open-ancestry JSON', async () => {

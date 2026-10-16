@@ -8,9 +8,15 @@ import {
   type InsertRow,
   type TableName,
 } from '@open-ancestry/db';
-import { GedzipError, parseGedcom, readGedzip, type ParseResult } from '@open-ancestry/gedcom';
+import {
+  GedzipError,
+  detectEncoding,
+  parseGedcom,
+  readGedzip,
+  type ParseResult,
+} from '@open-ancestry/gedcom';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync, readSync, rmSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { Mapper, type Sink } from './mapper';
 import { MediaSource } from './media';
@@ -18,13 +24,41 @@ import {
   ImportError,
   type ImportPhase,
   type ImportInput,
+  type ImportLimits,
   type ImportOptions,
   type ImportReport,
   type ImportTarget,
 } from './types';
 
 const MiB = 1024 ** 2;
-const DEFAULT_MAX_BYTES = 256 * MiB;
+
+/**
+ * What one import may contain. A real Ancestry export of 100k people is about
+ * 48 MiB with lines under 1 KiB; past these a file is refused before parsing,
+ * since the parsed tree of a hostile file (millions of CONT lines) can need
+ * dozens of times its size in memory. A GEDZIP is capped by its GEDCOM text
+ * like a plain file, and its photos separately and more generously.
+ */
+export const IMPORT_LIMITS: Readonly<ImportLimits> = Object.freeze({
+  maxBytes: 64 * MiB,
+  maxArchiveBytes: 1024 * MiB,
+  maxMediaBytes: 256 * MiB,
+  maxMediaTotalBytes: 1024 * MiB,
+  maxLineLength: 64 * 1024,
+  maxRecords: 2_000_000,
+  maxContinuations: 100_000,
+});
+
+/** `IMPORT_LIMITS` with the given caps replaced; undefined values keep the default. */
+export function resolveImportLimits(overrides: Partial<ImportLimits> = {}): ImportLimits {
+  const limits = { ...IMPORT_LIMITS };
+  for (const key of Object.keys(limits) as (keyof ImportLimits)[]) {
+    const value = overrides[key];
+    if (value !== undefined) limits[key] = value;
+  }
+  return limits;
+}
+
 /** Records mapped between yields to the event loop (for progress and abort). */
 const CHUNK = 500;
 
@@ -55,8 +89,22 @@ interface ReadResult {
   zipWarnings: string[];
 }
 
-function readInput(input: ImportInput, options: ImportOptions): ReadResult {
-  const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
+/** True when the file at `path` starts like a zip archive. */
+function isZipFile(path: string): boolean {
+  const fd = openSync(path, 'r');
+  try {
+    const head = new Uint8Array(4);
+    return readSync(fd, head, 0, 4, 0) === 4 && isZip(head);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+const tooLarge = (what: string, max: number) =>
+  new ImportError('too-large', `${what} is over ${max} bytes`);
+
+function readInput(input: ImportInput, options: ImportOptions, limits: ImportLimits): ReadResult {
+  const { maxBytes, maxArchiveBytes } = limits;
   let bytes: Uint8Array | string;
   let fileName: string | null = null;
   let zip = false;
@@ -64,7 +112,10 @@ function readInput(input: ImportInput, options: ImportOptions): ReadResult {
     fileName = basename(input.path);
     try {
       const size = statSync(input.path).size;
-      if (size > maxBytes) throw new ImportError('too-large', `File is over ${maxBytes} bytes`);
+      // A GEDZIP is sized by its parts once opened; only the archive cap applies here.
+      const archive = size > maxBytes && isZipFile(input.path);
+      if (size > (archive ? maxArchiveBytes : maxBytes))
+        throw archive ? tooLarge('Archive', maxArchiveBytes) : tooLarge('File', maxBytes);
       bytes = readFileSync(input.path);
     } catch (error) {
       if (error instanceof ImportError) throw error;
@@ -79,9 +130,10 @@ function readInput(input: ImportInput, options: ImportOptions): ReadResult {
     fileName = input.fileName ?? null;
   }
   const raw = typeof bytes === 'string' ? Buffer.from(bytes, 'utf8') : bytes;
-  if (raw.length > maxBytes) throw new ImportError('too-large', `File is over ${maxBytes} bytes`);
-  const sha256 = createHash('sha256').update(raw).digest('hex');
   zip ||= isZip(bytes);
+  if (zip && raw.length > maxArchiveBytes) throw tooLarge('Archive', maxArchiveBytes);
+  if (!zip && raw.length > maxBytes) throw tooLarge('File', maxBytes);
+  const sha256 = createHash('sha256').update(raw).digest('hex');
 
   if (!zip) {
     const media = options.mediaDir ? MediaSource.fromDir(options.mediaDir) : MediaSource.none();
@@ -90,8 +142,14 @@ function readInput(input: ImportInput, options: ImportOptions): ReadResult {
   try {
     const archive = readGedzip(raw, {
       maxGedcomSize: maxBytes,
-      maxEntrySize: options.maxMediaBytes ?? DEFAULT_MAX_BYTES,
+      maxEntrySize: limits.maxMediaBytes,
+      maxTotalSize: maxBytes + limits.maxMediaTotalBytes,
     });
+    let mediaBytes = 0;
+    for (const entry of archive.media.values()) mediaBytes += entry.length;
+    if (mediaBytes > limits.maxMediaTotalBytes) {
+      throw tooLarge('The media in the archive', limits.maxMediaTotalBytes);
+    }
     return {
       gedcom: archive.gedcom,
       fileName,
@@ -110,6 +168,83 @@ function readInput(input: ImportInput, options: ImportOptions): ReadResult {
       );
     }
     throw error;
+  }
+}
+
+const NEWLINE = 0x0a;
+const CR = 0x0d;
+const ZERO = 0x30;
+const SPACE = 0x20;
+
+/** True when the line at `start` is a `<level> CONT` or `<level> CONC` line (ASCII-compatible encodings). */
+function isContinuation(bytes: Uint8Array, start: number, end: number): boolean {
+  let i = start;
+  while (i < end && (bytes[i] === SPACE || bytes[i] === 0x09)) i++;
+  const digits = i;
+  while (i < end && bytes[i]! >= ZERO && bytes[i]! <= ZERO + 9) i++;
+  if (i === digits || bytes[i] !== SPACE) return false;
+  i++;
+  return (
+    i + 4 <= end &&
+    bytes[i] === 0x43 && // C
+    bytes[i + 1] === 0x4f && // O
+    bytes[i + 2] === 0x4e && // N
+    (bytes[i + 3] === 0x54 || bytes[i + 3] === 0x43) && // T or C
+    (i + 4 === end || bytes[i + 4] === SPACE || bytes[i + 4] === CR)
+  );
+}
+
+/** The file as UTF-8 (or another ASCII-compatible encoding), decoding UTF-16 first. */
+function asciiCompatible(input: Uint8Array | string): Uint8Array {
+  if (typeof input === 'string') return Buffer.from(input, 'utf8');
+  const { encoding } = detectEncoding(input);
+  if (encoding !== 'utf-16le' && encoding !== 'utf-16be') return input;
+  return Buffer.from(new TextDecoder(encoding).decode(input), 'utf8');
+}
+
+/**
+ * One linear pass over the file before parsing (UTF-16 is decoded first, as
+ * its newlines and digits are not single bytes): refuses a file whose lines,
+ * records or continuation runs are past the limits.
+ */
+export function checkLimits(
+  input: Uint8Array | string,
+  limits: Pick<ImportLimits, 'maxLineLength' | 'maxRecords' | 'maxContinuations'> = IMPORT_LIMITS,
+): void {
+  const bytes = asciiCompatible(input);
+  let line = 1;
+  let records = 0;
+  let continuations = 0;
+  let start = 0;
+  for (
+    let end = bytes.indexOf(NEWLINE);
+    start < bytes.length;
+    end = bytes.indexOf(NEWLINE, start)
+  ) {
+    const stop = end === -1 ? bytes.length : end;
+    if (stop - start > limits.maxLineLength) {
+      throw new ImportError(
+        'too-large',
+        `Line ${line} is longer than ${limits.maxLineLength} bytes`,
+      );
+    }
+    // Skip a UTF-8 byte-order mark on the first line.
+    let first = start;
+    if (line === 1 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) first += 3;
+    if (bytes[first] === ZERO && (bytes[first + 1] === SPACE || bytes[first + 1] === 0x09)) {
+      if (++records > limits.maxRecords) {
+        throw new ImportError('too-large', `The file has more than ${limits.maxRecords} records`);
+      }
+      continuations = 0;
+    } else if (isContinuation(bytes, first, stop) && ++continuations > limits.maxContinuations) {
+      throw new ImportError(
+        'too-large',
+        `The record ending at line ${line} has more than ${limits.maxContinuations} continuation lines`,
+      );
+    }
+    if (end === -1) break;
+    start = end + 1;
+    line++;
   }
 }
 
@@ -183,11 +318,17 @@ export async function importGedcom(
   const { signal } = options;
   checkAbort(signal);
 
+  const limits = resolveImportLimits({
+    maxBytes: options.maxBytes,
+    maxMediaBytes: options.maxMediaBytes,
+    ...options.limits,
+  });
   progress('read', 0, 1);
-  const read = readInput(input, options);
+  const read = readInput(input, options, limits);
   const readMs = ms(started);
   progress('read', 1, 1);
 
+  checkLimits(read.gedcom, limits);
   progress('parse', 0, 1);
   const parseStart = performance.now();
   const doc = parseGedcom(read.gedcom, { maxWarnings: options.maxWarnings ?? 1000 });
@@ -204,7 +345,12 @@ export async function importGedcom(
   let writer: BulkWriter | undefined;
   let mapper: Mapper | undefined;
   try {
-    writer = new BulkWriter(store);
+    // openTarget guarantees an empty tree, so the load can defer indexes and
+    // foreign key checks to commit (#117).
+    // A tree this import created has no other connections, so it can skip WAL.
+    // A store passed in (the server's import worker) may share the file with
+    // the server's own connections, so it never sets soleConnection.
+    writer = new BulkWriter(store, { freshTree: true, soleConnection: created });
     const bulk = writer;
     const rows: Record<string, number> = {};
     const sink: Sink = {
@@ -242,7 +388,7 @@ export async function importGedcom(
       newId: store.newId,
       media: read.media,
       mediaRoot: store.dir ? treePaths(store.dir).media : null,
-      maxMediaBytes: options.maxMediaBytes ?? DEFAULT_MAX_BYTES,
+      maxMediaBytes: limits.maxMediaBytes,
       maxWarnings: options.maxWarnings ?? 1000,
       today: options.today ?? new Date(),
     });
@@ -302,6 +448,8 @@ export async function importGedcom(
       homePersonSource: mapper.homePersonSource,
       timings: { read: readMs, parse: parseMs, map: mapMs, commit: 0, total: 0 },
     };
+    // The import_batch row may still be buffered in the writer.
+    writer.flush();
     store.db
       .prepare(
         "UPDATE import_batch SET status = 'completed', counts_json = ?, warnings_json = ?, finished_at = ? WHERE id = ?",
@@ -313,16 +461,32 @@ export async function importGedcom(
           lines: report.lines,
           media: { ...report.media, missing: report.media.missing.length },
           living: report.living,
-          unmapped: report.unmapped.slice(0, 200),
+          // Stored without example lines or warning text: they quote the file, and this row
+          // outlives the people and records they are about (deleting someone must not leave
+          // their words here). The live report returned to the caller keeps them.
+          unmapped: report.unmapped
+            .slice(0, 200)
+            .map(({ path, tag, count }) => ({ path, tag, count })),
         }),
-        JSON.stringify(report.warnings),
+        JSON.stringify(report.warnings.map(({ code, line }) => ({ code, line }))),
         store.clock(),
         batchId,
       );
 
+    // Last chance to stop: past this line the import is saved whatever happens.
+    checkAbort(signal);
     progress('commit', 0, 1);
     const commitStart = performance.now();
     const committed: BulkCounts = writer.commit();
+    // The WAL now holds the whole import, often as large as the database; fold
+    // it in and truncate it. Best effort: a reader may hold it open a while.
+    if (!created && store.dir) {
+      try {
+        store.db.pragma('wal_checkpoint(TRUNCATE)');
+      } catch {
+        // Checkpointed later, when the connections close.
+      }
+    }
     report.timings.commit = ms(commitStart);
     report.rows = committed;
     progress('commit', 1, 1);

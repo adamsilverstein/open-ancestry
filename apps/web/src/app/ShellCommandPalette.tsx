@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, useRouterState } from '@tanstack/react-router';
-import { House, ListChecks, Moon, Palette, Sun, Users } from 'lucide-react';
+import { House, ListChecks, Moon, Palette, Sun, UserPlus, Users } from 'lucide-react';
+import { useAddPerson } from './addPerson';
 import { useSearchPeople, type SearchHit } from '../api/search';
 import { Avatar } from '../components/Avatar/Avatar';
 import {
@@ -36,6 +37,7 @@ export default function ShellCommandPalette({ open, onOpenChange }: ShellCommand
   const next = theme === 'dark' ? 'light' : 'dark';
   const [query, setQuery] = useState('');
   const { tree, hits, stale, pending } = useSearchPeople(query);
+  const addPerson = useAddPerson();
 
   // Opening a page moves focus to its heading, so a screen reader announces it (#200).
   const openPage = (go: Promise<unknown>) => go.then(focusMainHeading);
@@ -83,6 +85,13 @@ export default function ShellCommandPalette({ open, onOpenChange }: ShellCommand
             icon: <ListChecks size={16} aria-hidden />,
             keywords: ['check', 'checker', 'problems', 'duplicates', 'errors', 'sources'],
             onSelect: () => openPage(navigate({ to: '/checker' })),
+          },
+          {
+            id: 'add-person',
+            label: 'Add person',
+            icon: <UserPlus size={16} aria-hidden />,
+            keywords: ['add', 'new', 'person', 'create', 'individual'],
+            onSelect: addPerson.open,
           },
         ]
       : []),

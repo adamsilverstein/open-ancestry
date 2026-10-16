@@ -10,12 +10,21 @@ export const EXPORT_FORMATS: { value: ExportFormat; label: string }[] = [
 /** Whether a format can leave out living people (JSON is a full backup, so it cannot). */
 export const canPrivatize = (format: ExportFormat) => format !== 'json';
 
-/** Download URL of a tree export (see docs/api.md). */
-export function exportUrl(tree: string, format: ExportFormat, privatize: boolean): string {
+/**
+ * Download URL of a tree export (see docs/api.md). `history` is for JSON: the
+ * edit history (undo, and the text of anything deleted) is left out when false.
+ */
+export function exportUrl(
+  tree: string,
+  format: ExportFormat,
+  privatize: boolean,
+  history = true,
+): string {
   const base = `/api/trees/${encodeURIComponent(tree)}`;
   const query = new URLSearchParams();
   if (format === 'gedcom-7') query.set('version', '7');
   if (privatize && canPrivatize(format)) query.set('privatize', 'true');
+  if (format === 'json' && !history) query.set('history', '0');
   const path =
     format === 'json' ? 'export.json' : format === 'gedzip' ? 'export.gdz' : 'export.ged';
   const search = query.toString();

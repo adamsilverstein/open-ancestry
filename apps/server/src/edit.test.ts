@@ -44,6 +44,33 @@ describe('people', () => {
     expect(death.event).toMatchObject({ date_qualifier: 'text', date_sort: null });
   });
 
+  it('makes the first person in an empty tree the home person, undoably', async () => {
+    const base = await createTestTree(api, 'Empty');
+    const res = await api.post(`${base}/people`, { names: [{ given: 'Wren', surname: 'Ashby' }] });
+    const { person } = res.json();
+    expect((await api.get(`${base}/home`)).json().personId).toBe(person.id);
+
+    // Later people leave the home person alone.
+    const second = (await api.post(`${base}/people`, { names: [{ given: 'Ivo' }] })).json();
+    expect(second.person.id).not.toBe(person.id);
+    expect((await api.get(`${base}/home`)).json().personId).toBe(person.id);
+
+    // Undoing the second add keeps the home; undoing the first clears it with the person.
+    await api.post(`${base}/undo`);
+    expect((await api.get(`${base}/home`)).json().personId).toBe(person.id);
+    await api.post(`${base}/undo`);
+    expect((await api.get(`${base}/home`)).json().personId).toBeNull();
+    expect((await api.get(`${base}/people/${person.id}`)).statusCode).toBe(404);
+    await api.post(`${base}/redo`);
+    expect((await api.get(`${base}/home`)).json().personId).toBe(person.id);
+  });
+
+  it('does not change the home person of a tree that already has people', async () => {
+    const before = (await api.get(`${s.base}/home`)).json().personId;
+    await api.post(`${s.base}/people`, { names: [{ given: 'Ivo' }] });
+    expect((await api.get(`${s.base}/home`)).json().personId).toBe(before);
+  });
+
   it('validates the body', async () => {
     for (const body of [
       { sex: 'Q' },
@@ -530,9 +557,10 @@ describe('notes and tags', () => {
   it('manages tags and person tag links', async () => {
     const tag = (await api.post(`${s.base}/tags`, { name: 'DNA match' })).json().tag;
     expect(tag.category).toBe('');
-    expect((await api.post(`${s.base}/tags`, { name: 'DNA match' })).json().error.code).toBe(
-      'conflict',
-    );
+    expect((await api.post(`${s.base}/tags`, { name: 'DNA match' })).json().error).toEqual({
+      code: 'conflict',
+      message: 'A tag with that name already exists',
+    });
     expect((await api.post(`${s.base}/tags`, { name: 'x', color: 'red;}' })).statusCode).toBe(400);
     expect(
       (await api.patch(`${s.base}/tags/${tag.id}`, { color: '#00aa00' })).json().tag.color,
@@ -541,12 +569,16 @@ describe('notes and tags', () => {
     expect((await api.post(`${s.base}/people/${s.ada}/tags`, { tagId: tag.id })).statusCode).toBe(
       201,
     );
-    expect((await api.post(`${s.base}/people/${s.ada}/tags`, { tagId: tag.id })).statusCode).toBe(
-      409,
-    );
+    // Tagging again or untagging twice changes nothing, so a retried request is harmless.
+    const again = await api.post(`${s.base}/people/${s.ada}/tags`, { tagId: tag.id });
+    expect(again.statusCode).toBe(201);
+    expect(again.json().batchId).toBeNull();
     expect((await detail(s.ada)).tags.map((t: { name: string }) => t.name)).toEqual(['DNA match']);
     expect((await api.del(`${s.base}/people/${s.ada}/tags/${tag.id}`)).statusCode).toBe(200);
-    expect((await api.del(`${s.base}/people/${s.ada}/tags/${tag.id}`)).statusCode).toBe(404);
+    const twice = await api.del(`${s.base}/people/${s.ada}/tags/${tag.id}`);
+    expect(twice.statusCode).toBe(200);
+    expect(twice.json().batchId).toBeNull();
+    expect((await api.del(`${s.base}/people/01NOPE/tags/${tag.id}`)).statusCode).toBe(404);
     expect((await api.post(`${s.base}/people/${s.ada}/tags`, { tagId: '01NOPE' })).statusCode).toBe(
       404,
     );

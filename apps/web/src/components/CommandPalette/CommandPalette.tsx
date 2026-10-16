@@ -194,6 +194,11 @@ export function CommandPalette({
               event.preventDefault();
               return;
             }
+            // An action that opened a dialog (such as Add person) keeps the focus it moved there.
+            if (document.querySelector('[role="dialog"][data-state="open"]')) {
+              event.preventDefault();
+              return;
+            }
             if (returnFocus(opener.current, outside.current)) event.preventDefault();
           }}
         >

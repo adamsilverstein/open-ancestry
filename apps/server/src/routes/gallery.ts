@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import {
+  PRIVATE_FILE_MODE,
+  restrictMode,
   treePaths,
   type EventRow,
   type MediaKind,
@@ -14,6 +16,7 @@ import {
 } from '@open-ancestry/db';
 import type { Api, Deps } from '../context';
 import { edit, requireRow } from '../edits';
+import { formatBytes } from '../bytes';
 import { ApiError, badRequest, notFound } from '../errors';
 import { MediaThumbParams, TreeIdParams, TreeParams } from '../schemas';
 import { THUMB_SIZES, insideTree, isThumbSize, loadSharp, readHead } from '../thumbnails';
@@ -182,7 +185,10 @@ async function hashFile(path: string): Promise<string> {
   return hash.digest('hex');
 }
 
-export function galleryRoutes(app: Api, { library, thumbnails, uploadLimit }: Deps): void {
+export function galleryRoutes(
+  app: Api,
+  { library, thumbnails, mediaUploadLimit: uploadLimit }: Deps,
+): void {
   const attachLocks = new KeyedLock();
   app.get(
     '/api/trees/:tree/people/:id/media',
@@ -227,6 +233,13 @@ export function galleryRoutes(app: Api, { library, thumbnails, uploadLimit }: De
     if (!request.isMultipart()) {
       throw new ApiError(415, 'unsupported_media_type', 'Upload the file as multipart/form-data');
     }
+    const checkOwner = (fields: Record<string, string>) => {
+      const ownerType = fields.owner_type as (typeof OWNER_TYPES)[number];
+      if (!OWNER_TYPES.includes(ownerType)) throw badRequest('owner_type must be person or event');
+      const ownerId = fields.owner_id ?? '';
+      requireRow(store, ownerType, ownerId);
+      return { ownerType, ownerId };
+    };
     const temp = await mkdtemp(join(tmpdir(), 'oa-attach-'));
     try {
       const fields: Record<string, string> = {};
@@ -240,23 +253,26 @@ export function galleryRoutes(app: Api, { library, thumbnails, uploadLimit }: De
         } else if (part.fieldname !== 'file' || upload) {
           part.file.resume();
         } else {
+          // Check the owner before streaming the file (issue #98).
+          if (fields.owner_type === undefined || fields.owner_id === undefined) {
+            part.file.resume();
+            throw badRequest('Send owner_type and owner_id before the file');
+          }
+          checkOwner(fields);
           const path = join(temp, 'upload');
           const received = await receive(part.file, path);
           if (part.file.truncated) {
             throw new ApiError(
               413,
               'payload_too_large',
-              `Uploads are limited to ${uploadLimit} bytes`,
+              `Uploads are limited to ${formatBytes(uploadLimit)}`,
             );
           }
           upload = { path, name: part.filename, ...received };
         }
       }
 
-      const ownerType = fields.owner_type as (typeof OWNER_TYPES)[number];
-      if (!OWNER_TYPES.includes(ownerType)) throw badRequest('owner_type must be person or event');
-      const ownerId = fields.owner_id ?? '';
-      requireRow(store, ownerType, ownerId);
+      const { ownerType, ownerId } = checkOwner(fields);
       if (!upload) throw badRequest('Attach a file');
 
       // One attach per tree at a time, so two uploads of the same bytes cannot
@@ -284,6 +300,8 @@ export function galleryRoutes(app: Api, { library, thumbnails, uploadLimit }: De
           }
           try {
             await copyFile(upload.path, target, constants.COPYFILE_EXCL);
+            // A copy may carry the upload's mode: make it private, as media is.
+            restrictMode(target, PRIVATE_FILE_MODE);
           } catch (error) {
             // Same name and hash prefix: keep the file that is there if it is these bytes
             // (and a real file, not a symlink to somewhere else).

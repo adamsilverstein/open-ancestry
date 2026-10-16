@@ -303,7 +303,7 @@ function Review({ review }: { review: ReimportReview }) {
 
   async function discard() {
     await discardReimport(review.id).catch(() => {});
-    await navigate({ to: '/' });
+    await navigate(backToTree(review.tree));
   }
 
   if (done) return <Applied {...done} tree={review.tree} fileName={review.fileName} />;
@@ -519,6 +519,10 @@ function Applied({
   );
 }
 
+/** Back to the tree a re-import compared with (#279): its home person. */
+const backToTree = (tree: string) =>
+  ({ to: '/tree/$personId', params: { personId: 'home' }, search: { tree } }) as const;
+
 /** Follows the comparison job, then shows the review. */
 export function ReimportPage() {
   const { jobId } = useParams({ from: '/reimport/$jobId' });
@@ -565,14 +569,21 @@ export function ReimportPage() {
   /** Stops the comparison, or discards its review if it finished in the meantime. */
   async function cancel() {
     setCancelling(true);
-    // False (409): the comparison already finished, so discard its review.
-    if (!(await cancelJob(jobId).catch(() => false))) {
-      const latest = await getJob(jobId).catch(() => null);
-      const done = latest?.result as unknown as { reimportId?: string } | undefined;
-      if (done?.reimportId) await discardReimport(done.reimportId).catch(() => {});
+    const reviewOf = (j: Awaited<ReturnType<typeof getJob>> | null) =>
+      (j?.result as unknown as { reimportId?: string } | null)?.reimportId;
+    // A comparison that already stopped is discarded quietly, without a refused cancel.
+    const before = await getJob(jobId).catch(() => null);
+    let finished = reviewOf(before);
+    // A job that already completed or failed has nothing left to stop.
+    const stopped = before?.state === 'completed' || before?.state === 'failed';
+    // False (409): it finished in the meantime, so discard its review.
+    if (!stopped && !(await cancelJob(jobId).catch(() => false))) {
+      finished = reviewOf(await getJob(jobId).catch(() => null));
     }
+    if (finished) await discardReimport(finished).catch(() => {});
     toast({ title: 'Re-import cancelled. Your tree was not changed.' });
-    await navigate({ to: '/' });
+    const tree = before?.tree ?? job?.tree;
+    await navigate(tree ? backToTree(tree) : { to: '/' });
   }
 
   return (

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { changeText, describeChange, factText } from './labels';
+import { changeText, conflictText, describeChange, factText } from './labels';
 import type { ReviewChange } from './api';
 
 const fact = (date: string | null, place: string | null = 'Elderford') => ({
@@ -109,5 +109,63 @@ describe('re-import labels', () => {
       ],
     ];
     for (const [change, text] of cases) expect(describeChange(change, 'Noah Ashgrove')).toBe(text);
+  });
+});
+
+describe('conflict wording (#160)', () => {
+  const name = (conflict: 'local-edit' | 'local-delete', nameType: string | null = null) =>
+    ({
+      ...base,
+      kind: 'name.add',
+      name: 'Walter Ashgrove',
+      nameType,
+      conflict,
+      defaultAccept: false,
+    }) as ReviewChange;
+
+  it("says that ticking a name keeps the user's name as the primary", () => {
+    const renamed = {
+      ...name('local-edit'),
+      was: 'Walter Ashgrove',
+      name: 'Walther Ashgrove',
+    } as ReviewChange;
+    expect(describeChange(renamed, 'Walt Ashgrove')).toBe(
+      'Also keep Walther Ashgrove as an alternate name',
+    );
+    expect(conflictText(renamed, 'Walt Ashgrove')).toBe(
+      'The export now calls this person Walther Ashgrove (it was Walter Ashgrove); you renamed them Walt Ashgrove here. Tick to also keep Walther Ashgrove as an alternate name; Walt Ashgrove stays the primary name.',
+    );
+    // A stated type stays in the label where the user decides.
+    expect(
+      describeChange({ ...renamed, nameType: 'married' } as ReviewChange, 'Walt Ashgrove'),
+    ).toBe('Also keep Walther Ashgrove (married name) as an alternate name');
+  });
+
+  it('shows a name type only when the export gives one', () => {
+    expect(
+      describeChange(
+        { ...base, kind: 'name.add', name: 'Ann Fen', nameType: null } as ReviewChange,
+        'Ann Fen',
+      ),
+    ).toBe('Add name: Ann Fen');
+    expect(
+      describeChange(
+        { ...base, kind: 'name.add', name: 'Ann Fen', nameType: 'married' } as ReviewChange,
+        'Ann Fen',
+      ),
+    ).toBe('Add name: Ann Fen (married name)');
+  });
+
+  it('keeps the general wording for other conflicts', () => {
+    const fact = { ...base, kind: 'fact.change', conflict: 'local-edit' } as ReviewChange;
+    expect(conflictText(fact, 'X')).toBe(
+      'Edited in this tree since the last import; your edit is kept unless you tick this.',
+    );
+    expect(conflictText({ ...fact, conflict: 'local-delete' } as ReviewChange, 'X')).toBe(
+      'You deleted this in this tree; it stays deleted unless you tick this.',
+    );
+    expect(
+      conflictText({ ...base, kind: 'tag.add', tag: 't' } as ReviewChange, 'X'),
+    ).toBeUndefined();
   });
 });

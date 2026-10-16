@@ -3,16 +3,14 @@ import {
   existsSync,
   linkSync,
   mkdirSync,
-  mkdtempSync,
   rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   assertOwnTree,
   createTree,
@@ -24,13 +22,11 @@ import {
   restrictMode,
   treePaths,
 } from './index';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 let root: string;
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'oa-db-'));
-});
-afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  root = makeTempDir('oa-db-');
 });
 
 const mode = (path: string) => statSync(path).mode & 0o777;

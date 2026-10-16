@@ -1,12 +1,11 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { meta, openTree } from '@open-ancestry/db';
-import { afterAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { startServer } from './index';
 import type { Importer } from './jobs';
 import { IMPORT_PENDING_KEY } from './library';
 import { TOKEN } from './test/helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 /*
  * Review of #156: Ctrl-C while an import saved for more than 10s made close()
@@ -14,8 +13,7 @@ import { TOKEN } from './test/helpers';
  * 1, and one run lost the import, leaving an empty tree with import_pending.
  */
 
-const root = mkdtempSync(join(tmpdir(), 'oa-shutdown-'));
-afterAll(() => rmSync(root, { recursive: true, force: true }));
+const root = makeTempDir('oa-shutdown-');
 
 describe('stopping the server while an import saves', () => {
   it('waits past 10s for the save, keeps the import, and closes cleanly', async () => {

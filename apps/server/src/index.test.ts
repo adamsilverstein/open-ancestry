@@ -1,9 +1,9 @@
-import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, symlink, writeFile } from 'node:fs/promises';
 import { connect } from 'node:net';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { allowedHostsFor, createServer, startServer, type RunningServer } from './index';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 describe('server', () => {
   let running: RunningServer | undefined;
@@ -43,7 +43,7 @@ describe('server', () => {
   });
 
   it('serves the SPA with history fallback when given a static dir', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'oa-static-'));
+    const dir = makeTempDir('oa-static-');
     await writeFile(join(dir, 'index.html'), '<!doctype html><title>spa</title>');
     const app = createServer({ staticDir: dir });
     const root = await app.inject({ method: 'GET', url: '/' });
@@ -59,7 +59,7 @@ describe('server', () => {
   });
 
   it('caches hashed assets forever and the shell never', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'oa-static-'));
+    const dir = makeTempDir('oa-static-');
     await writeFile(join(dir, 'index.html'), '<!doctype html><title>spa</title>');
     await mkdir(join(dir, 'assets'));
     await writeFile(join(dir, 'assets', 'index-abc123.js'), 'console.log(1)');
@@ -84,7 +84,7 @@ describe('server', () => {
   });
 
   it('answers malformed HTTP with the security headers', async () => {
-    running = await startServer({ port: 0, library: await mkdtemp(join(tmpdir(), 'oa-lib-')) });
+    running = await startServer({ port: 0, library: makeTempDir('oa-lib-') });
     const { port } = new URL(running.url);
     const raw = (request: string) =>
       new Promise<string>((resolve, reject) => {
@@ -107,7 +107,7 @@ describe('server', () => {
   });
 
   it('serves the SPA shell with a per-response style nonce in CSP and a meta tag', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'oa-static-'));
+    const dir = makeTempDir('oa-static-');
     await writeFile(
       join(dir, 'index.html'),
       '<!doctype html><html><head><title>spa</title></head><body></body></html>',
@@ -137,7 +137,7 @@ describe('server', () => {
   });
 
   it('serves only regular, non-dot files of the build, matched exactly', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'oa-static-'));
+    const dir = makeTempDir('oa-static-');
     await writeFile(join(dir, 'index.html'), '<!doctype html><title>spa</title>');
     await mkdir(join(dir, 'assets'));
     await writeFile(join(dir, 'assets', 'app-abc123.js'), 'console.log(1)');
@@ -146,7 +146,7 @@ describe('server', () => {
     await writeFile(join(dir, '.git', 'config'), '[core]');
     await mkdir(join(dir, 'assets', '.cache'));
     await writeFile(join(dir, 'assets', '.cache', 'x.js'), 'hidden');
-    const outside = await mkdtemp(join(tmpdir(), 'oa-outside-'));
+    const outside = makeTempDir('oa-outside-');
     await writeFile(join(outside, 'secret.txt'), 'OUTSIDE');
     await symlink(outside, join(dir, 'linked'));
     const app = createServer({ staticDir: dir });

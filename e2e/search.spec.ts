@@ -50,6 +50,52 @@ test('finds a person by name and opens the person page with Enter', async ({ pag
   await expect(dialog).toBeHidden();
 });
 
+test('announces the result count, and focuses the new page heading after Enter (#200)', async ({
+  page,
+}) => {
+  await open(page, '/people');
+  const dialog = await search(page, 'wren thackeray');
+  await expect(people(dialog).first()).toContainText('Wren Thackeray');
+  // A polite status inside the palette says how many results there are once they settle.
+  await expect(dialog.getByRole('status')).toHaveText(/^\d+ (person|people)/);
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/person\//);
+  await expect(page.getByRole('heading', { level: 1 })).toBeFocused();
+});
+
+test('opening the people list and the tree from the palette focuses their heading (#200)', async ({
+  page,
+}) => {
+  await open(page, '/people');
+  let dialog = await search(page, 'wren thackeray');
+  await expect(people(dialog).first()).toContainText('Wren Thackeray');
+  // Shift+Enter shows the person in the tree view.
+  await page.keyboard.press('Shift+Enter');
+  await expect(page).toHaveURL(/\/tree\//);
+  await expect(page.getByRole('heading', { level: 1 })).toBeFocused();
+
+  dialog = await search(page, 'people list');
+  await expect(dialog.getByRole('option', { name: 'Open people list' })).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/people$/);
+  await expect(page.getByRole('heading', { level: 1, name: 'People' })).toBeFocused();
+});
+
+test('says when nothing matches, and Escape still returns focus to the opener', async ({
+  page,
+}) => {
+  await open(page, '/people');
+  const opener = page.getByRole('banner').getByRole('button', { name: /^Find/ });
+  // A mouse click: WebKit does not focus the clicked button, so the palette
+  // falls back to the last control pressed (lib/returnFocus).
+  await opener.click();
+  const dialog = page.getByRole('dialog', { name: 'Command palette' });
+  await dialog.getByRole('combobox').fill('zzzzqqqq');
+  await expect(dialog.getByRole('status')).toHaveText('No results');
+  await page.keyboard.press('Escape');
+  await expect(opener).toBeFocused();
+});
+
 test('arrow keys move through results and Shift+Enter or Alt+Enter focus the tree', async ({
   page,
   request,

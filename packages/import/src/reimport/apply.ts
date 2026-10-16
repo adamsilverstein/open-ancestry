@@ -10,6 +10,7 @@ import {
   type TreeStore,
   type Tx,
 } from '@open-ancestry/db';
+import { BASE_KEY, imageOfView } from './diff';
 import type { ReimportSession } from './session';
 import { mediaKeys, norm, sourceKey } from './snapshot';
 
@@ -591,6 +592,8 @@ export function applyReimport(
         }
       }
     }
+    // Differences nothing was offered for, because the user's own change stands.
+    for (const key of session.diff.held) stale.add(key);
     for (const c of changes) {
       if (chosen.has(c.id) || (c.kind !== 'family.add' && c.kind !== 'child.add')) continue;
       const family = familyFor(c.incomingFamilyId, false);
@@ -633,6 +636,7 @@ export function applyReimport(
       for (const u of lines) tx.insert('unmapped_line', { ...u, id: undefined } as never);
     }
     recordStale(tx, batch.id, stale);
+    recordBase(tx, batch.id, session, incAll);
     return applied;
   }) as { batchId: string; result: number };
 
@@ -658,6 +662,44 @@ const SAME_ANYWAY = new Set([
   'byte_size',
   'mime',
 ]);
+
+/**
+ * What the export said for every row it offered a change to, applied or
+ * declined: the base of the next re-import's three-way comparison (#224).
+ * Without it a declined change would come back as a conflict every time.
+ * Written in the re-import's batch, so undo removes it.
+ */
+function recordBase(
+  tx: Tx,
+  importBatchId: string,
+  session: ReimportSession,
+  incAll: <T>(sql: string, ...params: unknown[]) => T[],
+) {
+  const images: Record<string, unknown> = {};
+  for (const person of session.diff.people) {
+    for (const c of person.changes) {
+      if (c.kind === 'fact.change') images[`event|${c.existingEventId}`] = imageOfView(c.after);
+      else if (c.kind === 'fact.add' && c.deletedEventId) {
+        images[`event|${c.deletedEventId}`] = imageOfView(c.fact);
+      } else if (c.kind === 'sex' && person.existingId) {
+        images[`person|${person.existingId}`] = { sex: c.after };
+      } else if (c.kind === 'name.add' && person.existingId && person.incomingId) {
+        images[`names|${person.existingId}`] = {
+          names: incAll<{ given: string | null; surname: string | null }>(
+            'SELECT given, surname FROM person_name WHERE person_id = ?',
+            person.incomingId,
+          ).map((n) => norm([n.given, n.surname].filter(Boolean).join(' '))),
+        };
+      }
+    }
+  }
+  if (Object.keys(images).length) {
+    tx.insert('meta', {
+      key: `${BASE_KEY}${importBatchId}`,
+      value: JSON.stringify(images),
+    } as never);
+  }
+}
 
 /** Meta key listing records the exporter must not copy verbatim from an import batch. */
 export const staleKey = (importBatchId: string) => `export.stale:${importBatchId}`;

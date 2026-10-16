@@ -8,6 +8,7 @@ import {
   type PlaceRename,
 } from './match';
 import {
+  isRecordApid,
   mediaKeys,
   norm,
   sourceKey,
@@ -856,6 +857,36 @@ function diffFacts(
     const left = o.existing.filter((ee) => !used.has(ee.row.id) && sameKind(ee, ie));
     return left.length === 1 && left[0]!.row.import_batch_id ? left[0] : undefined;
   };
+  /** What a citation says about which record a fact is: a record id, or a source and page. */
+  const records = (e: SnapEvent) =>
+    new Set(
+      e.citations.flatMap((c) => [
+        ...(isRecordApid(c.apid) ? [`apid|${c.apid}`] : []),
+        ...(norm(c.page) ? [`page|${c.sourceKey}|${norm(c.page)}`] : []),
+      ]),
+    );
+  const share = (a: Set<string>, b: SnapEvent) => [...records(b)].some((k) => a.has(k));
+  /**
+   * A person has many facts of a kind (residences), so an export that corrects
+   * one's date and place together can't be told from a dropped fact plus a new
+   * one by kind alone (#302). Both citing the same record can: the only
+   * unpaired imported fact of the kind that does is the same fact, if no other
+   * incoming one of the kind cites it too. A source cited with no page or
+   * record id (a whole-tree source) says nothing about which record it is.
+   */
+  const sameRecord = (ie: SnapEvent): SnapEvent | undefined => {
+    const mine = records(ie);
+    if (!mine.size) return undefined;
+    const left = o.existing.filter(
+      (ee) =>
+        !used.has(ee.row.id) && sameKind(ee, ie) && !!ee.row.import_batch_id && share(mine, ee),
+    );
+    if (left.length !== 1) return undefined;
+    const theirs = records(left[0]!);
+    return pending.some((x) => x !== ie && sameKind(x, ie) && share(theirs, x))
+      ? undefined
+      : left[0];
+  };
   for (const ie of pending) {
     const counterpart = SINGULAR.has(ie.row.type)
       ? o.existing.find(
@@ -871,7 +902,9 @@ function diffFacts(
             sameText(ee.row.custom_type, ie.row.custom_type) &&
             (sameDate(ee.row.date_text, ie.row.date_text) ||
               (sameText(ee.place, ie.place) && sameText(ee.row.value, ie.row.value))),
-        ) ?? lone(ie));
+        ) ??
+        lone(ie) ??
+        sameRecord(ie));
     if (counterpart) {
       used.add(counterpart.row.id);
       // Three-way (#185): base = what the export last said for this fact.

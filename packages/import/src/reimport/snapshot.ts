@@ -130,7 +130,7 @@ export function mediaKeys(store: TreeStore): (m: KeyedMedia) => string {
 }
 
 /** Ancestry record ids only: the database-level `1,7602::0` ids are shared by everyone. */
-const isRecordApid = (apid: string | null): apid is string => !!apid && !/::0$/.test(apid);
+export const isRecordApid = (apid: string | null): apid is string => !!apid && !/::0$/.test(apid);
 
 function all<T>(store: TreeStore, sql: string): T[] {
   return store.db.prepare(sql).all() as T[];

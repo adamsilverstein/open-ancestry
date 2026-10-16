@@ -717,6 +717,8 @@ interface FactOwner {
   addAs: { owner: 'person' } | { owner: 'family'; familyKey: string };
   /** List imported facts the export no longer has (person facts only, as before). */
   listMissing: boolean;
+  /** Pair the only unpaired fact of a kind on each side (family facts; see `lone`). */
+  pairLoneByKind: boolean;
 }
 
 /** Pairs the incoming owner's events with the existing owner's. */
@@ -738,6 +740,20 @@ function diffFacts(
       pending.push(ie);
     }
   }
+  const sameKind = (a: SnapEvent, b: SnapEvent) =>
+    a.row.type === b.row.type && sameText(a.row.custom_type, b.row.custom_type);
+  /**
+   * A family's facts (marriage, divorce) are rarely more than one of a kind,
+   * and Ancestry often corrects date and place together ("MARR 1918" to
+   * "12 JUN 1918, Wexmoor"). So the only unpaired one of its kind on each side
+   * is the same fact, if the tree's came from an import (one the user typed in
+   * is theirs, not an earlier version of the export's).
+   */
+  const lone = (ie: SnapEvent): SnapEvent | undefined => {
+    if (!o.pairLoneByKind || pending.filter((x) => sameKind(x, ie)).length !== 1) return undefined;
+    const left = o.existing.filter((ee) => !used.has(ee.row.id) && sameKind(ee, ie));
+    return left.length === 1 && left[0]!.row.import_batch_id ? left[0] : undefined;
+  };
   for (const ie of pending) {
     const counterpart = SINGULAR.has(ie.row.type)
       ? o.existing.find(
@@ -746,14 +762,14 @@ function diffFacts(
             ee.row.type === ie.row.type &&
             ee.isPreferred === ie.isPreferred,
         )
-      : o.existing.find(
+      : (o.existing.find(
           (ee) =>
             !used.has(ee.row.id) &&
             ee.row.type === ie.row.type &&
             sameText(ee.row.custom_type, ie.row.custom_type) &&
             (sameDate(ee.row.date_text, ie.row.date_text) ||
               (sameText(ee.place, ie.place) && sameText(ee.row.value, ie.row.value))),
-        );
+        ) ?? lone(ie));
     if (counterpart) {
       used.add(counterpart.row.id);
       // Three-way (#185): base = what the export last said for this fact.
@@ -1031,6 +1047,7 @@ export function diffTrees(
         hold: `person|${e.row.id}`,
         addAs: { owner: 'person' },
         listMissing: true,
+        pairLoneByKind: false,
       },
       add,
       removed,
@@ -1266,6 +1283,7 @@ export function diffTrees(
           hold: `family|${existingFamily}`,
           addAs: { owner: 'family', familyKey: existingFamily },
           listMissing: false,
+          pairLoneByKind: true,
         },
         // Only a change opens a review for the owner (reviewFor lists the person).
         (change, extra) =>

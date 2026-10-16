@@ -40,9 +40,9 @@ const SERVE_OPTIONS = `Options for serve:
   --open               Open it even when output is not a terminal
   --static-dir <dir>   Built web app to serve (default: bundled build)
   --import-heap-mb <n> Memory for each import's worker, in MB (default 2048; $OA_IMPORT_HEAP_MB)
-  $OA_MAX_REIMPORTS    Re-import reviews kept open at once, each in memory (default 4)
+  $OA_MAX_REIMPORTS    Re-import reviews kept open at once, each in memory (default 4; 2-1000)
   $OA_MAX_QUEUED_IMPORTS
-                       Imports that may wait for the one running (default 4)`;
+                       Imports that may wait for the one running (default 4; 1-1000)`;
 
 const IMPORT_OPTIONS = `Options for import:
   --name <tree>        Tree name (default: the file name)
@@ -234,18 +234,27 @@ export function parseCliArgs(
     importLimits: importLimits(values, env),
     sharedLibrary,
     importHeapMb: megabytes('import-heap-mb', values['import-heap-mb'], env, 'OA_IMPORT_HEAP_MB'),
-    maxReimports: count(env, 'OA_MAX_REIMPORTS'),
-    maxQueuedImports: count(env, 'OA_MAX_QUEUED_IMPORTS'),
+    // At least two, so a finishing comparison can't push out the review being applied.
+    maxReimports: count(env, 'OA_MAX_REIMPORTS', { min: 2, max: 1000 }),
+    maxQueuedImports: count(env, 'OA_MAX_QUEUED_IMPORTS', { min: 1, max: 1000 }),
   };
 }
 
-/** A positive whole number from an environment variable, if set. */
-function count(env: NodeJS.ProcessEnv, variable: string): number | undefined {
+/**
+ * A whole number from an environment variable, if set, within `min` to `max`:
+ * the cap keeps a typo from sizing something in memory a hundred times over.
+ */
+function count(
+  env: NodeJS.ProcessEnv,
+  variable: string,
+  { min, max }: { min: number; max: number },
+): number | undefined {
   const raw = env[variable] || undefined;
   if (raw === undefined) return undefined;
   const n = Number(raw);
-  if (!Number.isInteger(n) || n <= 0)
-    throw new Error(`Invalid ${variable}: ${raw} (a whole number)`);
+  if (!Number.isInteger(n) || n < min || n > max) {
+    throw new Error(`Invalid ${variable}: ${raw} (a whole number, ${min} to ${max})`);
+  }
   return n;
 }
 

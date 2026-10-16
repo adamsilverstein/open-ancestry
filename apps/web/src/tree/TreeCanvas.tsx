@@ -109,6 +109,8 @@ interface Visible {
   edges: number[];
   lod: boolean;
   light: boolean;
+  /** Which render request this is (`renderSeq`), so a settle can wait for it. */
+  seq: number;
 }
 
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -341,6 +343,8 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   const animation = useRef(0);
   const idle = useRef<ReturnType<typeof setTimeout>>(undefined);
   const lastCells = useRef('');
+  /** Bumped on every setVisible, so a settle can wait for the latest render request. */
+  const renderSeq = useRef(0);
   const lastMode = useRef('');
   const previous = useRef<{ layout: TreeLayout | null; kind: LayoutKind; focus: string } | null>(
     null,
@@ -354,6 +358,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     edges: [],
     lod: false,
     light: false,
+    seq: 0,
   });
 
   const source = layout ?? fan;
@@ -464,8 +469,9 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     return nodes.length;
   }, []);
 
+  /** Mounts what the view shows; true when that needs a render (the cards change). */
   const updateVisible = useCallback(
-    (force = false) => {
+    (force = false): boolean => {
       const { layout: current, fan: currentFan, indexed } = latest.current;
       const t = transform.current;
       const { width, height } = size.current;
@@ -482,7 +488,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       // Far out, nothing mounts while panning: the canvas layer shows it all.
       const light = t.scale < LIGHT_SCALE;
       const key = lod ? 'lod' : `${c0},${r0},${c1},${r1},${light}`;
-      if (!force && key === lastCells.current) return;
+      if (!force && key === lastCells.current) return false;
       // Crossing a detail threshold (full, light, canvas) swaps the focused card's
       // element: put keyboard focus back on the active card after the swap
       // (WCAG 2.4.3).
@@ -507,7 +513,9 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         edges: lod ? [] : indexed.edges.query(rect),
         lod,
         light,
+        seq: ++renderSeq.current,
       });
+      return true;
     },
     [drawLod],
   );
@@ -550,30 +558,61 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
 
   /** Where the running animation ends, so repeated zoom presses add up. */
   const animationTarget = useRef<Transform | null>(null);
+  /** The animation has ended; data-animating clears once its cards are rendered. */
+  const settling = useRef(false);
   const stopAnimation = () => {
     cancelAnimationFrame(animation.current);
     animationTarget.current = null;
+    settling.current = false;
     if (worldRef.current) delete worldRef.current.dataset.animating;
   };
+  /**
+   * The view has arrived: mount the cards it shows now (crossing a detail
+   * threshold swaps their elements) and only then say it has settled, so
+   * nothing that waits for it finds a card about to be replaced.
+   */
+  /** The `renderSeq` of the last committed render. */
+  const renderedSeq = useRef(0);
+  const finishAnimation = () => {
+    cancelAnimationFrame(animation.current);
+    animationTarget.current = null;
+    // This does the work of the frame apply() queued; skip that repeat.
+    cancelAnimationFrame(frame.current);
+    frame.current = 0;
+    updateVisibleRef.current();
+    // Settled only once the latest render request has committed: an earlier
+    // frame's, or a forced one for new cards, may still be pending even when
+    // this one changed nothing (the same cells can hold different cards).
+    if (renderedSeq.current === renderSeq.current) {
+      if (worldRef.current) delete worldRef.current.dataset.animating;
+    } else settling.current = true;
+  };
+  useLayoutEffect(() => {
+    renderedSeq.current = visible.seq;
+    if (!settling.current || visible.seq !== renderSeq.current) return;
+    settling.current = false;
+    if (worldRef.current) delete worldRef.current.dataset.animating;
+  }, [visible]);
 
   const animateTo = useCallback(
     (target: Transform) => {
       stopAnimation();
+      // Lets tests (and anything else) wait for the view to settle.
+      if (worldRef.current) worldRef.current.dataset.animating = '';
       if (reducedMotion()) {
         apply(target);
+        finishAnimation();
         return;
       }
       const from = transform.current;
       const start = performance.now();
       animationTarget.current = target;
-      // Lets tests (and anything else) wait for the view to settle.
-      if (worldRef.current) worldRef.current.dataset.animating = '';
       const step = (now: number) => {
         const p = Math.min(1, (now - start) / ANIMATION_MS);
         moving();
         apply(interpolate(from, target, ease(p)));
         if (p < 1) animation.current = requestAnimationFrame(step);
-        else stopAnimation();
+        else finishAnimation();
       };
       animation.current = requestAnimationFrame(step);
     },
@@ -786,6 +825,10 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       const nodes = layout?.nodes ?? fan?.segments ?? [];
       pendingFocus.current = nodes.some((n) => n.key === had) ? had : focusPersonId;
     }
+    // Not redundant with the forced update at the end: this one bumps renderSeq
+    // before animateTo can finish (at once with reduced motion), so the settle
+    // waits for the new person's cards instead of matching the old render.
+    updateVisible(true);
     if (!prev || prev.kind !== kind) {
       stopAnimation();
       apply(centeredOnFocus(transform.current, true));

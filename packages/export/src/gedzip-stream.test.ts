@@ -2,26 +2,27 @@ import { openTree, treePaths } from '@open-ancestry/db';
 import { importGedcom } from '@open-ancestry/import';
 import { unzipSync, zipSync } from 'fflate';
 import {
+  closeSync,
   linkSync,
   mkdirSync,
-  mkdtempSync,
+  openSync,
   readdirSync,
   renameSync,
-  rmSync,
   statSync,
   symlinkSync,
   truncateSync,
   utimesSync,
   writeFileSync,
+  writeSync,
 } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { finished } from 'node:stream/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buffer } from 'node:stream/consumers';
-import { afterAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { GedzipTooLargeError, buildGedzipExport, planGedzipExport, streamGedzip } from './index';
 import { TODAY, ged } from './test-helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 /*
  * Issue #198: the GEDZIP export read every media file into memory and
@@ -29,8 +30,7 @@ import { TODAY, ged } from './test-helpers';
  * list, one consistent snapshot) and streams it, one file at a time.
  */
 
-const root = mkdtempSync(join(tmpdir(), 'oa-gdz-stream-'));
-afterAll(() => rmSync(root, { recursive: true, force: true }));
+const root = makeTempDir('oa-gdz-stream-');
 
 const gedcom = ged(
   '0 @I1@ INDI',
@@ -157,7 +157,7 @@ describe('streamed GEDZIP export', () => {
     const { store, dir } = await tree();
     const plan = planGedzipExport(store, { now: TODAY });
     // The same file, moved out of the tree and reached through a symlinked folder.
-    const outside = mkdtempSync(join(root, 'outside-'));
+    const outside = makeTempDir('oa-outside-');
     renameSync(join(treePaths(dir).media, 'notes'), join(outside, 'notes'));
     symlinkSync(join(outside, 'notes'), join(treePaths(dir).media, 'notes'));
     const files = unzipSync(await buffer(streamGedzip(plan)));
@@ -176,6 +176,31 @@ describe('streamed GEDZIP export', () => {
     symlinkSync(join(real, 'm'), media);
     const files = unzipSync(await buffer(streamGedzip(plan)));
     expect(Object.keys(files).sort()).toEqual(['gedcom.ged', 'warnings.txt']);
+    store.close();
+  });
+
+  it('warns about a file rewritten in place, at the same length, while it streamed', async () => {
+    const { store, dir } = await tree();
+    const path = join(treePaths(dir).media, 'photos', 'portrait.jpg');
+    truncateSync(path, 3 * 1024 * 1024);
+    const plan = planGedzipExport(store, { now: TODAY });
+    const chunks: Uint8Array[] = [];
+    let rewritten = false;
+    for await (const chunk of streamGedzip(plan)) {
+      chunks.push(chunk as Uint8Array);
+      const read = chunks.reduce((sum, c) => sum + c.byteLength, 0);
+      if (!rewritten && read > 1024 * 1024) {
+        // Same inode and length, new bytes and time: only a look after reading shows it.
+        const fd = openSync(path, 'r+');
+        writeSync(fd, randomBytes(1024), 0, 1024, 2 * 1024 * 1024);
+        closeSync(fd);
+        utimesSync(path, new Date(2000, 0, 1), new Date(2000, 0, 1));
+        rewritten = true;
+      }
+    }
+    expect(rewritten).toBe(true);
+    const files = unzipSync(Buffer.concat(chunks));
+    expect(new TextDecoder().decode(files['warnings.txt'])).toContain('photos/portrait.jpg');
     store.close();
   });
 

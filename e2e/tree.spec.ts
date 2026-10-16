@@ -236,6 +236,90 @@ test.describe('family view', () => {
       .toBeLessThan(2);
   });
 
+  for (const motion of ['reduce', 'no-preference'] as const) {
+    test(`the view reads as settled only once its cards are final (motion: ${motion})`, async ({
+      page,
+    }) => {
+      // Fit lands just under the light-card zoom, so the cards swap elements. In
+      // CI the swap could commit after data-animating cleared, detaching a card a
+      // test had just found ("not visible"). Watch the moment it clears: the
+      // cards must already match the zoom. Reduced motion jumps straight there;
+      // otherwise the last animation frame ends it, which is where CI raced.
+      await page.emulateMedia({ reducedMotion: motion });
+      if (motion === 'no-preference') {
+        // Frames as late as on a loaded CI runner: each one is stamped a second
+        // on, so the animation's first frame is its last and crosses the
+        // light-card zoom itself, the case that raced.
+        await page.addInitScript(() => {
+          const raf = window.requestAnimationFrame.bind(window);
+          window.requestAnimationFrame = (callback) => raf((time) => callback(time + 1000));
+        });
+      }
+      await open(page);
+      await page.evaluate((key) => {
+        const w = window as unknown as { __atSettle: string[] };
+        w.__atSettle = [];
+        const world = document.querySelector<HTMLElement>('[data-testid="tree-world"]')!;
+        new MutationObserver(() => {
+          if ('animating' in world.dataset) return;
+          const light = Number(world.dataset.scale) < 0.6;
+          const el = world.querySelector<HTMLElement>(`[data-key="${key}"]`);
+          const shown = el?.className.includes('lightCard') ?? false;
+          w.__atSettle.push(light === shown ? 'final' : 'pending');
+        }).observe(world, { attributes: true, attributeFilter: ['data-animating'] });
+      }, ids.ada);
+      for (const name of ['Fit to screen', 'Zoom in', 'Fit to screen']) {
+        await page.getByRole('button', { name }).click();
+        await settled(page);
+        await expect(card(page, 'Ada Vale')).toBeVisible();
+      }
+      const states = await page.evaluate(
+        () => (window as unknown as { __atSettle: string[] }).__atSettle,
+      );
+      expect(states).toEqual(['final', 'final', 'final']);
+    });
+  }
+
+  test('a re-focus reads as settled only once the new focus card is shown', async ({ page }) => {
+    // With reduced motion the re-focus ends synchronously, before the new
+    // person's cards are even queued: the settle must wait for them, not for
+    // the old cards that happen to cover the same grid cells.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await open(page);
+    await page.evaluate((key) => {
+      const w = window as unknown as { __atSettle: string[] };
+      w.__atSettle = [];
+      // The whole page: the re-focus may give the canvas a new world element.
+      new MutationObserver((records) => {
+        const world = records.at(-1)!.target as HTMLElement;
+        if (world.dataset.testid !== 'tree-world' || 'animating' in world.dataset) return;
+        // The focus card: a CSS-module class at card zoom, data-focus as a canvas dot.
+        const el = world.querySelector<HTMLElement>(`[data-key="${key}"]`);
+        const shown = !!el && (el.className.includes('focusPerson') || 'focus' in el.dataset);
+        w.__atSettle.push(shown ? 'final' : 'pending');
+      }).observe(document.body, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['data-animating'],
+      });
+    }, ids.bram);
+    await card(page, 'Ada Vale').focus();
+    await page.keyboard.press('ArrowUp');
+    await expect(card(page, 'Bram Vale')).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
+    // The new layout arrives from the worker after the URL changes: wait for it
+    // (and its settle) before reading what the observer saw at the settle.
+    await expect(
+      canvas(page).locator(`[data-key="${ids.bram}"][class*="focusPerson"]`),
+    ).toBeAttached();
+    await settled(page);
+    const states = await page.evaluate(
+      () => (window as unknown as { __atSettle: string[] }).__atSettle,
+    );
+    expect(states).toEqual(['final']);
+  });
+
   test('expanding ancestors reveals fetched generations and lazy-loads more without moving the focus card', async ({
     page,
   }) => {

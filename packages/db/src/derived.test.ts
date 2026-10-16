@@ -2,6 +2,7 @@ import { parseDate } from '@open-ancestry/core';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  countPeople,
   createTree,
   events,
   exportJson,
@@ -176,10 +177,13 @@ describe('derived column refresh', () => {
     // The query is folded to "yilmaz", which the old document lacks; the spelling
     // as typed still finds it, as it did before the upgrade.
     expect(searchPeople(store, 'Yılmaz').map((r) => r.person.id)).toEqual([id]);
+    // The palette's total counts the same way (#305's countPeople).
+    expect(countPeople(store, 'Yılmaz')).toBe(1);
     for (const done of rebuildSearchIndexInChunks(store)) void done;
     expect(store.searchRebuildPending).toBe(false);
     expect(searchPeople(store, 'Yılmaz').map((r) => r.person.id)).toEqual([id]);
     expect(searchPeople(store, 'Yilmaz').map((r) => r.person.id)).toEqual([id]);
+    expect(countPeople(store, 'Yilmaz')).toBe(1);
     // A full rebuild clears the flag too, so it always agrees with the index.
     store.searchRebuildPending = true;
     rebuildSearchIndex(store);

@@ -136,6 +136,8 @@ describe('searchPeople', () => {
     expect(searchPeople(store, 'Neill').map((r) => r.person.id)).toContain(apostrophes[1]);
     expect(searchPeople(store, 'angelo').map((r) => r.person.id)).toContain(apostrophes[2]);
     expect(searchPeople(store, 'oneill').map((r) => r.person.id)).toContain(apostrophes[1]);
+    // The palette's total counts folded spellings too.
+    expect(countPeople(store, 'Yilmaz')).toBe(2);
     // A lone Latin letter still only matches exactly (an initial), not every name it starts.
     expect(searchPeople(store, 'Y').map((r) => r.person.id)).toEqual([]);
     store.close();

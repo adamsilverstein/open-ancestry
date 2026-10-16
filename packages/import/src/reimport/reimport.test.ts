@@ -2339,6 +2339,52 @@ describe('a place the export renamed (#279)', () => {
     ).toBe(merged);
   });
 
+  it('merges places that share a note and a photo, and their same-named children (#307 review)', async () => {
+    const old = placeId(OLD);
+    store.transact('Prepare', (tx) => {
+      const kept = tx.insert('place', { name: 'Millbrook Falls', full_name: NEW } as never) as {
+        id: string;
+      };
+      const note = tx.insert('note', { text: 'Mill town' } as never) as { id: string };
+      const photo = tx.insert('media', { title: 'Main street' } as never) as { id: string };
+      for (const owner of [old, kept.id]) {
+        tx.insert('note_link', { note_id: note.id, owner_type: 'place', owner_id: owner } as never);
+        tx.insert('media_link', {
+          media_id: photo.id,
+          owner_type: 'place',
+          owner_id: owner,
+        } as never);
+        // Both have a cemetery: after the merge there is one.
+        const name = owner === old ? OLD : NEW;
+        tx.insert('place', {
+          name: 'Old Cemetery',
+          full_name: `Old Cemetery, ${name}`,
+          parent_id: owner,
+        } as never);
+      }
+      // A row whose name only looks like it is under Millbrook: not a child, left alone.
+      tx.insert('place', { name: 'Stray', full_name: `Stray, ${OLD}` } as never);
+    });
+    await applyRenames(renamed());
+    const merged = placeId(NEW);
+    expect(
+      rows(store, "SELECT owner_id FROM note_link WHERE owner_type = 'place'").map(
+        (r) => (r as { owner_id: string }).owner_id,
+      ),
+    ).toEqual([merged]);
+    expect(
+      value(
+        store,
+        "SELECT count(*) FROM media_link WHERE owner_type = 'place' AND owner_id = ?",
+        merged,
+      ),
+    ).toBe(1);
+    expect(
+      value(store, 'SELECT count(*) FROM place WHERE full_name = ?', `Old Cemetery, ${NEW}`),
+    ).toBe(1);
+    expect(value(store, 'SELECT count(*) FROM place WHERE full_name = ?', `Stray, ${OLD}`)).toBe(1);
+  });
+
   it('moves facts rather than renaming a place whose county changed (#307 review)', async () => {
     const ELDER = 'Elderford, Cask County, Ohio, USA';
     const CO = 'Elderford, Cask Co., Ohio, USA';

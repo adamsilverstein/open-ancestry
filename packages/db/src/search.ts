@@ -113,6 +113,8 @@ export const MIN_PREFIX_LENGTH = 2;
 export const MAX_SEARCH_WORDS = 8;
 /** A year in the query also matches events this many years either side (prefix tier and below). */
 export const YEAR_SLACK = 2;
+/** Rows read by score, per row wanted, before near-ties are put in name order. */
+export const TIEBREAK_WINDOW = 3;
 
 /** FTS5 expression for one query word in one tier, or null if the word cannot match in it. */
 function wordMatch(word: string, tier: SearchMatch, keys: string[]): string {
@@ -203,20 +205,29 @@ export function searchPeople(
   const hits: { id: string; match: SearchMatch; score: number }[] = [];
   // Scores within a tenth of each other are the same match to a reader (a longer
   // document scores a little lower), so those go by name: predictable, not by
-  // when each person was added (#280).
+  // when each person was added (#280). The name order applies within the best
+  // TIEBREAK_WINDOW times as many rows as wanted, taken by score from the index
+  // alone, so a common surname does not join and sort every match.
   const statement = store.stmt(
-    `SELECT d.person_id AS id, -bm25(person_search, 10.0, 5.0, 1.0, 1.0) AS score
-     FROM person_search JOIN search_doc d ON d.doc_id = person_search.rowid
-     LEFT JOIN person_sort ps ON ps.person_id = d.person_id
-     WHERE person_search MATCH ?
-     ORDER BY round(score, 1) DESC, ps.surname COLLATE NOCASE, ps.given COLLATE NOCASE, d.person_id
-     LIMIT ?`,
+    `SELECT w.id, w.score FROM (
+       SELECT d.person_id AS id, -bm25(person_search, 10.0, 5.0, 1.0, 1.0) AS score
+       FROM person_search JOIN search_doc d ON d.doc_id = person_search.rowid
+       WHERE person_search MATCH @match ORDER BY score DESC LIMIT @window
+     ) w
+     LEFT JOIN person_sort ps ON ps.person_id = w.id
+     ORDER BY round(w.score, 1) DESC, ps.surname COLLATE NOCASE, ps.given COLLATE NOCASE, w.id
+     LIMIT @limit`,
   );
   TIERS.forEach((tier, rank) => {
     if (hits.length >= limit || (tier === 'phonetic' && !hasPhonetic)) return;
     const match = parsed.match(tier);
     // Ask for enough rows to fill the limit after skipping earlier tiers' hits.
-    for (const row of statement.all(match, limit + seen.size) as { id: string; score: number }[]) {
+    const wanted = limit + seen.size;
+    const rows = statement.all({ match, window: wanted * TIEBREAK_WINDOW, limit: wanted }) as {
+      id: string;
+      score: number;
+    }[];
+    for (const row of rows) {
       if (hits.length >= limit) break;
       if (seen.has(row.id)) continue;
       seen.add(row.id);

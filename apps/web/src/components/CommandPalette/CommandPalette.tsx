@@ -73,6 +73,10 @@ export function describeResults(groups: PaletteGroup[], visible: PaletteAction[]
   return parts.length ? parts.join(', ') : 'No results';
 }
 
+/** Open modal dialogs and confirms; popovers (Radix popper content) also use role="dialog". */
+const OPEN_MODALS =
+  '[role="dialog"][data-state="open"]:not([data-radix-popper-content-wrapper] *), [role="alertdialog"][data-state="open"]';
+
 /** Item values are ids, so two people with the same name stay distinct. */
 const itemValue = (item: PaletteAction) => `${item.id}`;
 
@@ -200,9 +204,7 @@ export function CommandPalette({
             // Every open dialog, not the first in DOM order (the one underneath):
             // any that does not hold the opener is one an action opened, or the
             // opener is gone.
-            const open = [
-              ...document.querySelectorAll<HTMLElement>('[role="dialog"][data-state="open"]'),
-            ];
+            const open = [...document.querySelectorAll<HTMLElement>(OPEN_MODALS)];
             if (open.some((d) => !(opener.current?.isConnected && d.contains(opener.current)))) {
               event.preventDefault();
               // Nothing took focus (the opener was removed): the topmost dialog does.

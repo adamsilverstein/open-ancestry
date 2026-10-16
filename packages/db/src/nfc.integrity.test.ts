@@ -4,10 +4,15 @@ import {
   TreeStore,
   exportJson,
   importJson,
+  meta,
   migrate,
+  names,
   openMemoryTree,
   persons,
   places,
+  tagLinks,
+  tags,
+  undoLast,
 } from './index';
 
 const NFD = (s: string) => s.normalize('NFD');
@@ -33,6 +38,61 @@ describe('NFC on JSON import of a current-version document', () => {
       surname: string;
     };
     expect(row).toEqual({ given: NFC('Zoë'), surname: NFC('Müllerbrook') });
+    target.close();
+  });
+});
+
+describe('NFC on JSON import keeps history undoable', () => {
+  it('undoes an edit from a current-version backup written entirely as NFD', () => {
+    const source = openMemoryTree();
+    const { result: person } = source.transact('add', (tx) =>
+      persons.create(tx, { names: [{ given: 'Zoë', surname: 'Müllerbrook' }] }),
+    );
+    const name = names.list(source, person.id)[0]!;
+    source.transact('Rename', (tx) => names.update(tx, name.id, { given: 'Zoë Ann' }));
+    // Another tool rewrote the whole backup decomposed, change history included.
+    const doc = JSON.parse(NFD(JSON.stringify(exportJson(source)))) as ReturnType<
+      typeof exportJson
+    >;
+    source.close();
+    const target = openMemoryTree();
+    importJson(target, doc);
+    expect(undoLast(target)?.label).toBe('Rename');
+    expect(target.getRow('person_name', name.id)?.given).toBe(NFC('Zoë'));
+    target.close();
+  });
+});
+
+describe('NFC on JSON import merges tags that differ only in normalization', () => {
+  it('folds an NFD copy of a tag into the NFC one, as the v3 upgrade does', () => {
+    const source = openMemoryTree();
+    const { result } = source.transact('add', (tx) => {
+      const person = persons.create(tx, { names: [{ given: 'Ada', surname: 'Quill' }] });
+      const other = persons.create(tx, { names: [{ given: 'Ben', surname: 'Quill' }] });
+      const first = tags.create(tx, { category: 'Research', name: 'Zoë research' });
+      const second = tags.create(tx, { category: 'Research', name: 'Zoe research' });
+      tagLinks.create(tx, { tag_id: first.id, owner_type: 'person', owner_id: person.id });
+      tagLinks.create(tx, { tag_id: second.id, owner_type: 'person', owner_id: person.id });
+      tagLinks.create(tx, { tag_id: second.id, owner_type: 'person', owner_id: other.id });
+      return { person, other, first, second };
+    });
+    const doc = exportJson(source);
+    source.close();
+    // The second copy, written decomposed by another tool, is the same tag to a reader.
+    const copy = doc.tables.tag.find((t) => t.id === result.second.id)!;
+    copy.name = NFD('Zoë research');
+    const [keep, drop] = [result.first.id, result.second.id].sort();
+
+    const target = openMemoryTree();
+    importJson(target, doc);
+    expect(tags.list(target).map((t) => [t.id, t.name])).toEqual([[keep, NFC('Zoë research')]]);
+    expect(tagLinks.listFor(target, 'person', result.person.id).map((l) => l.tag_id)).toEqual([
+      keep,
+    ]);
+    expect(tagLinks.listFor(target, 'person', result.other.id).map((l) => l.tag_id)).toEqual([
+      keep,
+    ]);
+    expect(JSON.parse(meta.get(target, 'nfc_merged_ids') ?? '[]')).toEqual([drop]);
     target.close();
   });
 });

@@ -8,6 +8,7 @@ import {
   getSchemaVersion,
   migrate,
   openTree,
+  TreeStore,
   type Migration,
 } from './index';
 import { makeTempDir } from '../../../fixtures/temp-dir';
@@ -44,6 +45,29 @@ describe('two connections upgrading one tree at once', () => {
     expect(() => migrate(a, { migrations: chain })).not.toThrow();
     expect(getSchemaVersion(a)).toBe(LATEST_SCHEMA_VERSION);
     a.close();
+  });
+});
+
+describe('upgrade lock wait', () => {
+  it('waits longer for the lock while migrating than the caller does for requests', () => {
+    let db!: Database.Database;
+    let during = 0;
+    const chain: Migration[] = MIGRATIONS.map((m, i) =>
+      i !== MIGRATIONS.length - 1
+        ? m
+        : {
+            ...m,
+            get sql() {
+              during = db.pragma('busy_timeout', { simple: true }) as number;
+              return m.sql;
+            },
+          },
+    );
+    db = new Database(':memory:');
+    const store = new TreeStore(db, null, { busyTimeoutMs: 50, migrations: chain });
+    expect(during).toBeGreaterThanOrEqual(30_000);
+    expect(db.pragma('busy_timeout', { simple: true })).toBe(50);
+    store.close();
   });
 });
 

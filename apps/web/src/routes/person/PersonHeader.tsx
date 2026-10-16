@@ -152,7 +152,8 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
         {/* The primary name's nickname, saved in Edit person but shown nowhere before (#280). */}
         {nickname && (
           <p className={styles.nickname} data-testid="nickname">
-            Known as “{nickname}”
+            {/* Isolated, so a right-to-left nickname keeps the quotes around it in order. */}
+            Known as “<bdi>{nickname}</bdi>”
           </p>
         )}
         <div className={styles.vitals}>

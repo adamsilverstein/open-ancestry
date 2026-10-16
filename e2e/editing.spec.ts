@@ -33,6 +33,7 @@ test.describe('person', () => {
     await dialog.getByRole('button', { name: 'Save' }).click();
     await expect(dialog).toBeHidden();
     await expect(page.getByTestId('nickname')).toHaveText('Known as “Ro”');
+    await expect(page.getByTestId('nickname').locator('bdi')).toHaveText('Ro');
     await expect(h1(page)).toHaveText('Rowan Ashdown');
   });
 

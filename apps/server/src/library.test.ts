@@ -15,9 +15,38 @@ import Database from 'better-sqlite3';
 import { getSchemaVersion, migrate } from '@open-ancestry/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from './index';
-import { Library, defaultLibraryRoot, treeNameProblem } from './library';
+import {
+  Library,
+  MAX_TREE_NAME_BYTES,
+  MAX_TREE_NAME_LENGTH,
+  defaultLibraryRoot,
+  treeNameFromFile,
+  treeNameProblem,
+} from './library';
 import { testApi, type TestApi } from './test/helpers';
 import { makeTempDir } from '../../../fixtures/temp-dir';
+
+describe('tree name length in bytes (#275 P1)', () => {
+  // ext4 and most Linux file systems allow 255 bytes per name, and the folder
+  // adds ".oatree" (and a timestamp in the trash): count UTF-8 bytes, not characters.
+  it('refuses a name past the byte cap, even under the character cap', () => {
+    const cjk = '漢'.repeat(MAX_TREE_NAME_LENGTH); // 100 characters, 300 bytes
+    expect(treeNameProblem(cjk)).toMatch(/too long/);
+    expect(treeNameProblem('漢'.repeat(MAX_TREE_NAME_BYTES / 3))).toBeNull();
+    expect(
+      Buffer.byteLength(`${'漢'.repeat(MAX_TREE_NAME_BYTES / 3)} 2026-10-16T12-00-00.000Z.oatree`),
+    ).toBeLessThanOrEqual(255);
+  });
+
+  it('shortens a file-derived name to fit, at a character boundary', () => {
+    const name = treeNameFromFile(`${'漢'.repeat(150)}.ged`);
+    expect(treeNameProblem(name)).toBeNull();
+    // Room left for a " 2" ... " 1000" suffix.
+    expect(Buffer.byteLength(`${name} 1000`)).toBeLessThanOrEqual(MAX_TREE_NAME_BYTES);
+    expect(name).toBe('漢'.repeat([...name].length));
+    expect(treeNameFromFile(`${'😀'.repeat(100)}.ged`)).not.toMatch(/\uFFFD/);
+  });
+});
 
 describe('treeNameProblem', () => {
   it.each([

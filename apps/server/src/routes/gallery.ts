@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { constants, createReadStream, createWriteStream } from 'node:fs';
-import { copyFile, lstat, mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
+import { copyFile, lstat, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Transform } from 'node:stream';
@@ -14,6 +14,7 @@ import {
   type MediaRow,
   type TreeStore,
 } from '@open-ancestry/db';
+import { MediaFolderOutsideError, makeFoldersInside } from '@open-ancestry/import';
 import type { Api, Deps } from '../context';
 import { ATTACH_PREFIX } from './imports';
 import { edit, requireRow } from '../edits';
@@ -315,7 +316,14 @@ export function galleryRoutes(
             // Checked again after the awaits above: mkdir must not recreate a
             // folder for a tree deleted or renamed meanwhile.
             if (!library.exists(tree)) throw notFound(`Tree "${tree}" not found`);
-            await mkdir(join(mediaRoot, ATTACHED_DIR), { recursive: true });
+            // One level at a time from the tree folder, refusing a symlinked media/
+            // or attached/, so nothing is created where a link points (#314).
+            try {
+              makeFoldersInside(library.dirOf(tree), join(mediaRoot, ATTACHED_DIR), ATTACHED_DIR);
+            } catch (error) {
+              if (!(error instanceof MediaFolderOutsideError)) throw error;
+              throw new ApiError(409, 'conflict', 'The media folder leads outside the tree');
+            }
             // A symlinked attached/ (or media/) folder must not carry the copy out of the tree.
             if (!(await insideTree(library.dirOf(tree), join(mediaRoot, ATTACHED_DIR)))) {
               throw new ApiError(409, 'conflict', 'The media folder leads outside the tree');

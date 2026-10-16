@@ -453,6 +453,20 @@ describe('containment', () => {
     expect(await readdir(outside)).toEqual([]);
   });
 
+  it('creates no folder through a symlinked media folder when attaching (#314)', async () => {
+    // Before, mkdir -p made attached/ wherever media/ pointed, then refused the copy.
+    const outside = makeTempDir('oa-outside-');
+    await rm(join(treeDir(), 'media'), { recursive: true, force: true });
+    await symlink(outside, join(treeDir(), 'media'));
+    const res = await attach(
+      { owner_type: 'person', owner_id: s.ada },
+      { name: 'a.png', bytes: png },
+    );
+    expect(res.statusCode, res.body).toBe(409);
+    expect(res.json().error.message).toMatch(/outside the tree/);
+    expect(await readdir(outside)).toEqual([]);
+  });
+
   it('does not serve a thumbnail that is a symlink out of the tree', async () => {
     const outside = makeTempDir('oa-outside-');
     await writeFile(join(outside, 'secret.webp'), 'secret');

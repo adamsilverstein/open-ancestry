@@ -10,7 +10,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { importGedcom } from './import';
 import {
@@ -18,6 +18,8 @@ import {
   kindFromType,
   mediaType,
   MediaSource,
+  MediaFolderOutsideError,
+  makeFoldersInside,
   storeMediaFile,
   suffixedPath,
 } from './media';
@@ -349,6 +351,21 @@ describe('storing media in a tree', () => {
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
+  });
+
+  it('refuses a folder that is not under its root (#315)', () => {
+    const outside = makeTempDir('oa-outside-');
+    for (const dir of [
+      join(outside, 'x'),
+      join(root, '..', basename(outside), 'y'),
+      dirname(root),
+    ]) {
+      expect(() => makeFoldersInside(root, dir, 'x')).toThrow(MediaFolderOutsideError);
+    }
+    expect(readdirSync(outside)).toEqual([]);
+    // Inside the root is fine, and the root itself needs nothing made.
+    expect(makeFoldersInside(root, join(root, 'a', 'b'), 'a/b')).toBe(join(root, 'a'));
+    expect(makeFoldersInside(root, root, '.')).toBeUndefined();
   });
 
   it('never creates folders outside the tree through a symlinked folder (L3, #267)', () => {

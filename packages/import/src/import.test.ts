@@ -3,6 +3,7 @@ import { zipSync } from 'fflate';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
+  linkSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -375,6 +376,28 @@ describe('media', () => {
     expect(existsSync(join(dir, 'media', 'photos', 'inline.png'))).toBe(false);
     expect(report.warnings.map((w) => w.code)).toContain('media-too-large');
     expect(report.media.linked).toBe(0);
+  });
+
+  it('refuses a hard-linked file in the media folder, reporting it rejected (#266)', async () => {
+    const media = join(tmp, 'src');
+    mkdirSync(join(media, 'photos'), { recursive: true });
+    // Someone who can write to the media folder links in another of the user's files.
+    writeFileSync(join(tmp, 'secret.txt'), 'secret');
+    linkSync(join(tmp, 'secret.txt'), join(media, 'photos', 'portrait.JPG'));
+    writeFileSync(join(media, 'photos', 'inline.png'), 'x');
+    const dir = join(tmp, 'h.oatree');
+    const report = await importGedcom({ bytes: MEDIA_GED }, { dir }, { mediaDir: media });
+    expect(existsSync(join(dir, 'media', 'photos', 'portrait.JPG'))).toBe(false);
+    // The hard link, and MEDIA_GED's ../../etc/passwd.
+    expect(report.media.rejected).toBe(2);
+    expect(report.warnings).toContainEqual(
+      expect.objectContaining({
+        code: 'media-refused',
+        message: 'Media file "photos/portrait.JPG" is a hard link; not copied',
+      }),
+    );
+    // An ordinary file next to it is still copied.
+    expect(existsSync(join(dir, 'media', 'photos', 'inline.png'))).toBe(true);
   });
 
   it('reports local files as missing when no media source is given', async () => {

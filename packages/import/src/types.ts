@@ -69,6 +69,7 @@ export type ImportWarningCode =
   | 'media-unsafe-path'
   | 'media-too-large'
   | 'media-copy-failed'
+  | 'media-refused'
   | 'home-person'
   | (string & {});
 

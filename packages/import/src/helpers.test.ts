@@ -1,7 +1,9 @@
 import { createTree } from '@open-ancestry/db';
 import {
+  appendFileSync,
   mkdirSync,
   readdirSync,
+  renameSync,
   readFileSync,
   rmSync,
   statSync,
@@ -222,6 +224,36 @@ describe('media folder edge cases', () => {
       'D:\\nowhere\\gone.jpg',
     ]);
     store.close();
+  });
+
+  it('refuses to read a file swapped for another, or for a link, after the folder was read (#266)', () => {
+    const source = join(tmp, 'src');
+    mkdirSync(source);
+    writeFileSync(join(source, 'a.jpg'), 'a');
+    writeFileSync(join(source, 'b.jpg'), 'b');
+    const media = MediaSource.fromDir(source);
+    // Swapped after the walk: another file now has the name.
+    writeFileSync(join(tmp, 'other.jpg'), 'other');
+    renameSync(join(tmp, 'other.jpg'), join(source, 'a.jpg'));
+    expect(() => media.find({ type: 'local', path: 'a.jpg' })!.read()).toThrow(
+      /a\.jpg changed after the media folder was read/,
+    );
+    // Replaced by a symlink: never followed.
+    rmSync(join(source, 'b.jpg'));
+    symlinkSync(join(tmp, 'other.jpg'), join(source, 'b.jpg'));
+    expect(() => media.find({ type: 'local', path: 'b.jpg' })!.read()).toThrow();
+  });
+
+  it('refuses a file that grew after the folder was read, without reading it all (#266)', () => {
+    const source = join(tmp, 'src');
+    mkdirSync(source);
+    writeFileSync(join(source, 'a.jpg'), 'small');
+    const media = MediaSource.fromDir(source);
+    const file = media.find({ type: 'local', path: 'a.jpg' })!;
+    expect(file.size).toBe(5);
+    // Same file, same single link: only its size changed, past what was checked.
+    appendFileSync(join(source, 'a.jpg'), 'x'.repeat(1024 * 1024));
+    expect(() => file.read()).toThrow(/a\.jpg changed after the media folder was read/);
   });
 
   it('ignores an unreadable media folder', () => {

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   existsSync,
+  linkSync,
   readFileSync,
   readdirSync,
   renameSync,
@@ -150,6 +151,15 @@ function processAlive(pid: number): boolean {
   } catch (error) {
     // EPERM: it runs, as another user.
     return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/** A file's inode, or undefined when it is gone. */
+function inodeOf(path: string): number | undefined {
+  try {
+    return statSync(path).ino;
+  } catch {
+    return undefined;
   }
 }
 
@@ -492,7 +502,16 @@ export class Library {
             treeNameProblem(n) === null && !existsSync(join(this.root, `${n}${TREE_EXTENSION}`)),
         );
       if (!id) continue;
-      renameSync(temp, join(this.root, `${id}${TREE_EXTENSION}`));
+      this.testHooks.beforeRecoverRename?.();
+      try {
+        renameSync(temp, join(this.root, `${id}${TREE_EXTENSION}`));
+      } catch (error) {
+        // Another server starting at the same moment moved it first (ENOENT),
+        // or took the name (EEXIST, ENOTEMPTY): startup goes on either way.
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT' || code === 'EEXIST' || code === 'ENOTEMPTY') continue;
+        throw error;
+      }
       rmSync(join(this.root, `${id}${TREE_EXTENSION}`, RENAME_MARKER), { force: true });
       recovered.push(id);
     }
@@ -632,6 +651,9 @@ export class Library {
     };
   }
 
+  /** Seams for tests that need another server's step at an exact moment. */
+  readonly testHooks: { beforeLockTakeover?: () => void; beforeRecoverRename?: () => void } = {};
+
   /** This Library's mark in lock files, so it never mistakes its own lock for another server's. */
   private readonly owner = randomUUID();
   /** Trees whose lock file this Library holds, re-touched by the heartbeat. */
@@ -665,14 +687,28 @@ export class Library {
       const held = this.readLock(id);
       if (held?.owner === this.owner) return;
       if (attempt === 0 && (!held || this.lockStale(id, held))) {
-        // Take over a stale lock: move it aside (only one taker can), then retry.
+        // Take over a stale lock: move it aside, then retry the create. Another
+        // server may have taken it over in between, so check that the file moved
+        // is the one judged stale (same inode); if not, put it back and refuse.
+        const judged = inodeOf(path);
+        this.testHooks.beforeLockTakeover?.();
+        this.testHooks.beforeLockTakeover = undefined;
         const aside = `${path}.stale-${randomUUID()}`;
         try {
           renameSync(path, aside);
-          rmSync(aside, { force: true });
         } catch {
-          // Another server moved it first; the retry decides.
+          continue; // Another server moved it first; the retry decides.
         }
+        if (inodeOf(aside) !== judged) {
+          try {
+            linkSync(aside, path);
+          } catch {
+            // A third server's lock is there now; it holds the tree.
+          }
+          rmSync(aside, { force: true });
+          break;
+        }
+        rmSync(aside, { force: true });
         continue;
       }
       break;
@@ -737,7 +773,7 @@ export class Library {
 
   private busyElsewhereError(id: string): ApiError {
     return busy(
-      `Tree "${id}" is busy in another Open Ancestry server using this library (an import is running)`,
+      `Tree "${id}" is busy in another Open Ancestry server using this library; try again in a moment`,
     );
   }
 
@@ -757,7 +793,8 @@ export class Library {
 
   /** Throws 409 while the tree is importing. */
   assertIdle(id: string): void {
-    if (this.isBusy(id)) throw busy(`Tree "${id}" is busy (an import is running)`);
+    // Busy with an import, a re-import compare or an attach: say so generically.
+    if (this.isBusy(id)) throw busy(`Tree "${id}" is busy; try again in a moment`);
     if (this.busyElsewhere(id)) throw this.busyElsewhereError(id);
   }
 

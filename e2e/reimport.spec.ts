@@ -631,7 +631,9 @@ test('discarding a review changes nothing', async ({ page, request, baseURL }, t
   const seeded = await seed(request, baseURL!, testInfo);
   await startReimport(page, seeded);
   await page.getByRole('button', { name: 'Discard' }).click();
-  await expect(page).toHaveURL(/\/$/);
+  // Back on the tree it was comparing with (#279), not the start page.
+  await expect(page).toHaveURL(/\/tree\/(?!home)[^/?#]+/);
+  await expect(page.getByRole('button', { name: `Tree: ${seeded.tree}` })).toBeVisible();
   const history = (await (
     await request.get(`/api/trees/${encodeURIComponent(seeded.tree)}/history`)
   ).json()) as { items: unknown[] };
@@ -661,7 +663,7 @@ test('cancelling the comparison keeps nothing and changes nothing', async ({
   await expect(page.getByRole('heading', { name: 'Starting the comparison' })).toBeVisible();
   const jobId = /\/reimport\/([^/?#]+)/.exec(page.url())![1]!;
   await page.getByRole('button', { name: 'Cancel' }).click();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/tree\/(?!home)[^/?#]+/);
   await expect(
     page.getByText('Re-import cancelled. Your tree was not changed.', { exact: true }),
   ).toBeVisible();

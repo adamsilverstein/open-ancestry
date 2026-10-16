@@ -109,6 +109,18 @@ export const REPLAYABLE_TABLES: ReadonlySet<string> = new Set<string>(DATA_TABLE
  * The result has exactly the table's columns in table order, so it can be
  * compared with `JSON.stringify` of the live row.
  */
+/**
+ * Meta keys the app manages itself, never through an edit: the schema version
+ * (migrations), an import in progress (the server's `import_pending`) and the
+ * ids the v3 Unicode upgrade merged. A change_log entry for one of them, from a
+ * crafted or corrupted backup, could leave a tree that no longer opens.
+ */
+export const MANAGED_META_KEYS: ReadonlySet<string> = new Set([
+  'schema_version',
+  'import_pending',
+  'nfc_merged_ids',
+]);
+
 export function parseLogImage(
   store: TreeStore,
   entity: string,
@@ -119,6 +131,9 @@ export function parseLogImage(
   if (!REPLAYABLE_TABLES.has(entity)) throw new Error(`Cannot replay ${entity} rows`);
   const invalid = (why: string) =>
     new Error(`Invalid change_log image for ${entity} ${entityId}: ${why}`);
+  if (entity === 'meta' && MANAGED_META_KEYS.has(entityId)) {
+    throw invalid('this key is managed by the app, not by edits');
+  }
   if (!Number.isInteger(version) || version < 1) throw invalid(`bad schema version ${version}`);
   if (version > store.schemaVersion) {
     throw invalid(`written by schema version ${version}, newer than ${store.schemaVersion}`);
@@ -132,6 +147,10 @@ export function parseLogImage(
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
     throw invalid('not an object');
+  // The image's own key column too, in case it differs from the entry's id.
+  if (entity === 'meta' && MANAGED_META_KEYS.has(String((parsed as { key?: unknown }).key))) {
+    throw invalid('this key is managed by the app, not by edits');
+  }
   const image = upgradeRow(store.migrations, version, entity, parsed as Record<string, unknown>);
   const { key, columns, defaults, required } = store.plan(entity);
   const row: Record<string, unknown> = {};

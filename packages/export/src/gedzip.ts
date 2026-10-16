@@ -9,9 +9,19 @@ import {
 } from '@open-ancestry/db';
 import { safeEntryPath } from '@open-ancestry/gedcom';
 import { Zip, ZipDeflate, ZipPassThrough, zipSync, type Zippable } from 'fflate';
-import { closeSync, fstatSync, readFileSync, type BigIntStats } from 'node:fs';
+import { closeSync, fstatSync, readFileSync, readSync, type BigIntStats } from 'node:fs';
 import { Readable } from 'node:stream';
 import { buildGedcomExport } from './gedcom';
+import {
+  SNIFF_BYTES,
+  StripError,
+  createStripper,
+  strippableKind,
+  stripBytes,
+  webpRemovedBytes,
+  type StripKind,
+  type Stripper,
+} from './strip-metadata';
 import type { GedcomExport, GedzipExport, GedzipExportOptions } from './types';
 
 /** The GEDCOM file's name inside a GEDZIP archive (GEDCOM 7, section 1.2). */
@@ -58,6 +68,8 @@ interface PlannedFile {
   dev: bigint;
   ino: bigint;
   level: 0 | 6;
+  /** Privatized: the photo format whose embedded metadata is removed as it is written. */
+  strip?: StripKind;
 }
 
 /**
@@ -108,12 +120,20 @@ export function planGedzipExport(
     if (!file && path && root) {
       let refusal: MediaRefusal = 'missing';
       const found = checkMediaPathSync(root, path, (reason) => (refusal = reason));
-      if (found?.info.isFile()) {
+      // Privatized: only photos whose embedded metadata can be removed go in (#263).
+      const isFile = found?.info.isFile() ?? false;
+      const strip = isFile && options.privatizeLiving ? sniffStrip(root, path) : undefined;
+      if (isFile && options.privatizeLiving && !strip) {
+        warnings.push(
+          `Media file ${shown} was left out (${strip === null ? 'it could not be read' : 'its embedded metadata cannot be removed'})`,
+        );
+      } else if (found && isFile) {
         const entry = entryName(scrub(path));
         const { mtimeNs, dev, ino } = found.info;
         const size = Number(found.info.size);
         const level = STORED.test(entry) ? 0 : 6;
         file = { entry, root, localPath: path, size, mtimeNs, dev, ino, level };
+        if (strip) file.strip = strip;
         files.set(media.id, file);
       } else {
         warnings.push(`Media file ${shown} was left out (${refusal})`);
@@ -203,17 +223,65 @@ async function* gedzipChunks(plan: GedzipPlan): AsyncGenerator<Uint8Array> {
       continue;
     }
     try {
+      let stripper: Stripper | undefined;
+      if (file.strip) {
+        try {
+          const removed =
+            file.strip === 'webp'
+              ? await webpRemovedBytes(async (position, length) => {
+                  const bytes = Buffer.alloc(length);
+                  const { bytesRead } = await handle.read(bytes, 0, length, position);
+                  return bytes.subarray(0, bytesRead);
+                })
+              : 0;
+          stripper = createStripper(file.strip, removed);
+          // A first pass, writing nothing, so a file that is cut short or not what it
+          // starts as is left out whole rather than written half (bytes cannot be taken back).
+          const check = createStripper(file.strip, removed);
+          const probe = Buffer.alloc(Math.min(CHUNK, Math.max(1, file.size)));
+          for (let at = 0; ;) {
+            const { bytesRead } = await handle.read(probe, 0, probe.length, at);
+            if (bytesRead === 0) break;
+            check.push(probe.subarray(0, bytesRead));
+            at += bytesRead;
+          }
+          check.end();
+        } catch {
+          // Not the format it starts as, cut short, or unreadable: nothing of it goes in.
+          late.push(`Media file ${file.entry} was left out (its metadata could not be removed)`);
+          continue;
+        }
+      }
       const entry = add(file.entry, file.level);
       const buffer = Buffer.alloc(Math.min(CHUNK, Math.max(1, file.size)));
       let read = 0;
+      let cut = false;
       for (;;) {
         const { bytesRead } = await handle.read(buffer, 0, buffer.length, read);
         if (bytesRead === 0) break;
         read += bytesRead;
         // The output may hold this chunk until it is read, and the buffer is reused: copy.
-        entry.push(buffer.subarray(0, bytesRead).slice(), false);
+        const chunk = buffer.subarray(0, bytesRead);
+        try {
+          // A real copy (Buffer#slice is only a view of the reused buffer).
+          entry.push(new Uint8Array(stripper ? stripper.push(chunk) : chunk), false);
+        } catch (error) {
+          if (!(error instanceof StripError)) throw error;
+          // Only bytes already checked went out: the copy stops here, without the rest.
+          cut = true;
+          break;
+        }
         yield* flush();
       }
+      if (stripper && !cut) {
+        try {
+          stripper.end();
+        } catch {
+          cut = true;
+        }
+      }
+      if (cut)
+        late.push(`Media file ${file.entry} is cut short: its metadata could not be removed`);
       entry.push(new Uint8Array(0), true);
       // Its bytes are already sent, so a file rewritten in place while it was
       // read (same inode, maybe the same length) can only be warned about.
@@ -282,9 +350,19 @@ export function buildGedzipExport(
     const opened = openMediaFileSync(file.root, file.localPath);
     try {
       if (!opened || !asPlanned(file, opened.info)) throw new Error('changed');
-      const bytes = readFileSync(opened.fd);
+      let bytes: Uint8Array = readFileSync(opened.fd);
       // Rewritten in place while it was read: left out, unlike a streamed export.
       if (!asPlanned(file, fstatSync(opened.fd, { bigint: true }))) throw new Error('changed');
+      if (file.strip) {
+        try {
+          bytes = stripBytes(file.strip, bytes);
+        } catch {
+          result.warnings.push(
+            `Media file ${file.entry} was left out (its metadata could not be removed)`,
+          );
+          continue;
+        }
+      }
       zip[file.entry] = [bytes, { level: file.level }];
     } catch {
       result.warnings.push(`Media file ${file.entry} could not be read`);
@@ -301,4 +379,27 @@ export function buildGedzipExport(
 
 export function exportGedzip(store: TreeStore, options: GedzipExportOptions = {}): Uint8Array {
   return buildGedzipExport(store, options).bytes;
+}
+
+/**
+ * The photo format of a media file, for a privatized export: undefined when
+ * its embedded metadata cannot be removed (it is then left out), null when it
+ * could not be read (the plan's own checks report that).
+ */
+function sniffStrip(root: string, localPath: string): StripKind | undefined | null {
+  const opened = openMediaFileSync(root, localPath);
+  if (!opened) return null;
+  try {
+    const head = Buffer.alloc(SNIFF_BYTES);
+    const bytesRead = readSync(opened.fd, head, 0, SNIFF_BYTES, 0);
+    return strippableKind(head.subarray(0, bytesRead));
+  } catch {
+    return null;
+  } finally {
+    try {
+      closeSync(opened.fd);
+    } catch {
+      // Nothing to report: the export opens the file again to copy it.
+    }
+  }
 }

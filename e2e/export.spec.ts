@@ -120,6 +120,8 @@ test('JSON export is a full backup, so privatize is not offered', async ({ page 
     'Names of theirs that the export recognizes are also replaced',
   );
   await expect(dialog).toContainText('This is best effort');
+  // GEDZIP media: embedded photo details are removed, other files left out (#263).
+  await expect(dialog).toContainText('In a GEDZIP, photos lose their embedded details');
   await dialog.getByRole('combobox', { name: 'Format' }).click();
   await page.getByRole('option', { name: 'JSON (full backup)' }).click();
   await expect(dialog.getByRole('checkbox', { name: /^Privatize/ })).toBeDisabled();

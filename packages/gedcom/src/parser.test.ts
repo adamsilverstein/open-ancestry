@@ -368,7 +368,7 @@ describe('parseGedcomStream', () => {
     expect(find(utf.index.get('@I1@'), 'NAME')?.value).toBe('Łukasz');
   });
 
-  it('detects the encoding from the first 64 KiB of a long stream', async () => {
+  it('detects the encoding from the first non-ASCII bytes of a long stream', async () => {
     const enc = new TextEncoder();
     const filler = '1 NOTE ' + 'x'.repeat(70) + '\n';
     const bytes = new Uint8Array([
@@ -377,12 +377,11 @@ describe('parseGedcomStream', () => {
       ...enc.encode('\n0 TRLR\n'),
     ]);
     const streamed = await parseGedcomStream(chunks(bytes, 1000));
-    // Too late to switch to CP1252 (whole-buffer parsing would); the byte is replaced instead.
-    expect(streamed.encoding.encoding).toBe('ascii');
-    expect(codes(streamed)).toContain('invalid-bytes');
-    expect(streamed.warnings).toContainEqual(
-      expect.objectContaining({ code: 'replacement-char', line: 1004 }),
-    );
+    // The choice waits for the first non-ASCII byte, so a late one still decides (#269).
+    expect(streamed.encoding.encoding).toBe('windows-1252');
+    expect(codes(streamed)).toContain('encoding-fallback');
+    expect(codes(streamed)).not.toContain('invalid-bytes');
+    expect(find(streamed.records[1], 'NAME')?.value).toBe('René');
 
     const early = new Uint8Array([
       ...enc.encode('0 HEAD\n1 CHAR ASCII\n1 NOTE Ren'),

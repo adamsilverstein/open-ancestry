@@ -1,9 +1,12 @@
 import {
   DETECT_BYTES,
   bomLength,
+  canDefer,
+  chooseAtHighBytes,
   createDecoder,
   decodeGedcom,
   detectEncoding,
+  firstHighByte,
   asciiFallbackWarning,
   decodeFailedWarning,
   invalidBytesWarning,
@@ -368,7 +371,10 @@ export function parseGedcom(input: Uint8Array | string, options: ParseOptions = 
 /**
  * Parses a byte stream (a Node or web ReadableStream, or any async iterable of
  * chunks) without holding the whole file as one string. The encoding is
- * detected from the first 64 KiB.
+ * detected from the first 64 KiB, or, when those are all ASCII and nothing
+ * else settles it, from the 64 KiB after the first non-ASCII byte: ASCII
+ * reads the same in every candidate, so lines before it are parsed as they
+ * arrive and nothing more is held.
  */
 export async function parseGedcomStream(
   source: AsyncIterable<Uint8Array>,
@@ -381,33 +387,75 @@ export async function parseGedcomStream(
   let decoder: ReturnType<typeof createDecoder> | undefined;
   let encoding: EncodingInfo | undefined;
   let fallback = false;
+  /** Set while the choice waits for the first non-ASCII byte. */
+  let deferred: EncodingInfo | undefined;
+  /** Bytes from that byte on, held until there are enough to choose by. */
+  const pending: Uint8Array[] = [];
+  let pendingSize = 0;
+  const ascii = new TextDecoder('windows-1252');
 
-  const start = (complete: boolean) => {
-    const prefix = concatBytes(head, headSize);
-    encoding = detectEncoding(prefix, { encoding: options.encoding, complete });
-    if (encoding.encoding === 'ascii' && !isValidUtf8(prefix, !complete)) {
-      encoding = { ...encoding, encoding: 'windows-1252' };
+  const activate = (info: EncodingInfo, bytes: Uint8Array, complete: boolean, skip: number) => {
+    encoding = info;
+    if (info.encoding === 'ascii' && !isValidUtf8(bytes, !complete)) {
+      encoding = { ...info, encoding: 'windows-1252' };
       fallback = true;
     }
     const active = createDecoder(encoding.encoding);
     decoder = active;
     // Each chunk is decoded before its lines are split, so this is current for every line.
     builder.hasInvalidBytes = () => active.invalidBytes() > 0;
-    splitter.push(decoder.decode(prefix.subarray(bomLength(prefix, encoding.encoding))));
+    splitter.push(active.decode(bytes.subarray(skip)));
+  };
+
+  const start = (complete: boolean) => {
+    const prefix = concatBytes(head, headSize);
+    head.length = 0;
+    const info = detectEncoding(prefix, { encoding: options.encoding, complete });
+    if (!complete && canDefer(info) && firstHighByte(prefix.subarray(0, DETECT_BYTES)) === -1) {
+      deferred = info;
+      defer(prefix);
+      return;
+    }
+    activate(info, prefix, complete, bomLength(prefix, info.encoding));
+  };
+
+  const choose = (complete: boolean) => {
+    const window = concatBytes(pending, pendingSize);
+    pending.length = 0;
+    const info = pendingSize ? chooseAtHighBytes(deferred!, window, !complete) : deferred!;
+    activate(info, window, complete, 0);
+  };
+
+  const defer = (chunk: Uint8Array) => {
+    if (pendingSize === 0) {
+      const at = firstHighByte(chunk);
+      if (at === -1) {
+        splitter.push(ascii.decode(chunk));
+        return;
+      }
+      splitter.push(ascii.decode(chunk.subarray(0, at)));
+      chunk = chunk.subarray(at);
+    }
+    pending.push(chunk);
+    pendingSize += chunk.length;
+    if (pendingSize >= DETECT_BYTES) choose(false);
   };
 
   let failure: GedcomWarning | undefined;
   try {
     for await (const chunk of source) {
-      if (decoder) {
-        splitter.push(decoder.decode(chunk));
-        continue;
+      if (decoder) splitter.push(decoder.decode(chunk));
+      else if (deferred) defer(chunk);
+      else {
+        head.push(chunk);
+        headSize += chunk.length;
+        if (headSize >= DETECT_BYTES) start(false);
       }
-      head.push(chunk);
-      headSize += chunk.length;
-      if (headSize >= DETECT_BYTES) start(false);
     }
-    if (!decoder) start(true);
+    if (!decoder) {
+      if (deferred) choose(true);
+      else start(true);
+    }
     splitter.push(decoder!.end());
     splitter.end();
   } catch (error) {
@@ -416,12 +464,12 @@ export async function parseGedcomStream(
     failure = decodeFailedWarning(error);
   }
 
-  const warnings = mismatchWarnings(encoding!);
+  const warnings = mismatchWarnings(encoding ?? deferred!);
   if (failure) warnings.push(failure);
   if (fallback) warnings.push(asciiFallbackWarning());
-  const invalid = decoder!.invalidBytes();
-  if (invalid > 0) warnings.push(invalidBytesWarning(invalid, encoding!.encoding));
-  return result(builder, encoding!, warnings);
+  const invalid = decoder?.invalidBytes() ?? 0;
+  if (invalid > 0) warnings.push(invalidBytesWarning(invalid, (encoding ?? deferred!).encoding));
+  return result(builder, (encoding ?? deferred)!, warnings);
 }
 
 function concatBytes(chunks: Uint8Array[], size: number): Uint8Array {

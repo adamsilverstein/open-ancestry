@@ -6,6 +6,8 @@ import { BulkWriter } from './bulk';
 import { refreshDerivedColumns } from './derived';
 import { ENUM_COLUMNS } from './enums';
 import { listTables, migrate, upgradeRow, type TableRowsByName } from './migrations/index';
+import { nfcRow } from './nfc';
+import { mergeTags, recordMergedIds } from './migrations/v003-nfc-text';
 import type { TreeStore } from './store';
 import { parseLogImage } from './undo';
 import type { ChangeBatchRow, ChangeLogRow, TableRows } from './types';
@@ -212,6 +214,11 @@ export function importJson(
       `Document does not match the JSON Schema: ${first?.instancePath ?? ''} ${first?.message ?? ''}`.trim(),
     );
   }
+  // Two copies of one tag that differ only in normalization would collide once
+  // stored as NFC; merge them as the v3 upgrade does. Links are copied first
+  // so the caller's document is left as it was.
+  if (tables.tag_link) tables.tag_link = tables.tag_link.map((row) => ({ ...row }));
+  recordMergedIds(tables, mergeTags(tables));
   const valid = doc as OaJsonDocument;
   for (const entry of valid.tables.change_log ?? []) {
     parseLogImage(store, entry.entity, entry.entity_id, entry.before_json, entry.schema_version);
@@ -234,7 +241,11 @@ export function importJson(
         [];
       for (const row of rows) {
         if (name === 'meta' && row.key === 'schema_version') continue;
-        writer.insertAny(name, row);
+        // Text is stored as NFC (#164). An old document got that from the v3
+        // upgrade step; a current one written by another tool may still be NFD.
+        // History images are normalized too, or undo would see the NFC rows as
+        // changed by a later edit.
+        writer.insertAny(name, name === 'change_log' ? nfcLogImages(row) : nfcRow(name, row));
       }
     }
   } catch (error) {
@@ -244,6 +255,19 @@ export function importJson(
   writer.commit();
   // The backup's sort keys came from whatever date parser wrote them.
   refreshDerivedColumns(store, { force: true, reason: 'imported backup' });
+}
+
+/** A change_log row with its before and after images in NFC (a copy only when something changes). */
+function nfcLogImages(row: Record<string, unknown>): Record<string, unknown> {
+  let out: Record<string, unknown> | undefined;
+  for (const column of ['before_json', 'after_json']) {
+    const json = row[column];
+    if (typeof json !== 'string') continue;
+    const image = JSON.parse(json) as Record<string, unknown>;
+    const nfc = nfcRow(String(row.entity), image);
+    if (nfc !== image) (out ??= { ...row })[column] = JSON.stringify(nfc);
+  }
+  return out ?? row;
 }
 
 /**

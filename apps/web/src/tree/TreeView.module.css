@@ -159,6 +159,15 @@
   }
 
   /*
+   * Where a chevron's target meets the switcher's (narrower pedigree cards,
+   * the switcher's strip above a spouse's up chevron), the chevron wins: the
+   * switcher's target is wide enough to lose those slivers.
+   */
+  .chevron {
+    z-index: 2;
+  }
+
+  /*
    * The pill stays on the card's corner. Its target grows with the zoom like
    * the up chevron's, so it moves right by as much as they would overlap: it
    * starts where the chevron's 48px ends.

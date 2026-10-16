@@ -12,8 +12,8 @@ import {
   utimesSync,
   writeFileSync,
 } from 'node:fs';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
-import { homedir, hostname, tmpdir } from 'node:os';
+import { readdir } from 'node:fs/promises';
+import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { getSchemaVersion, migrate } from '@open-ancestry/db';
@@ -655,7 +655,7 @@ describe.skipIf(process.platform === 'win32')('library permissions', () => {
 describe('search index rebuild (#199)', () => {
   it('opens a tree with a stale index at once and rebuilds it in the background', async () => {
     const { persons, searchIndexStale, searchPeople } = await import('@open-ancestry/db');
-    const root = await mkdtemp(join(tmpdir(), 'oa-library-search-'));
+    const root = makeTempDir('oa-library-search-');
     const first = new Library(root);
     const store = first.create('Fold');
     const id = store.transact('add', (tx) =>
@@ -671,12 +671,11 @@ describe('search index rebuild (#199)', () => {
     await expect.poll(() => searchIndexStale(opened), { interval: 5, timeout: 5000 }).toBe(false);
     expect(searchPeople(opened, 'yilmaz').map((r) => r.person.id)).toEqual([id]);
     library.closeAll();
-    await rm(root, { recursive: true, force: true });
   });
 
   it('stops a background rebuild when the tree closes, and finishes it after reopening', async () => {
     const { persons, searchIndexStale, searchPeople } = await import('@open-ancestry/db');
-    const root = await mkdtemp(join(tmpdir(), 'oa-library-search-'));
+    const root = makeTempDir('oa-library-search-');
     const first = new Library(root);
     const store = first.create('Fold');
     const id = store.transact('add', (tx) =>
@@ -697,6 +696,5 @@ describe('search index rebuild (#199)', () => {
     await expect.poll(() => searchIndexStale(reopened), { interval: 5, timeout: 5000 }).toBe(false);
     expect(searchPeople(reopened, 'strasse').map((r) => r.person.id)).toEqual([id]);
     library.closeAll();
-    await rm(root, { recursive: true, force: true });
   });
 });

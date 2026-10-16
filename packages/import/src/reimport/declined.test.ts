@@ -191,6 +191,24 @@ describe('a declined new person (#271)', () => {
     }
   });
 
+  it('keeps a declined person unticked when the export adds a marriage for them', async () => {
+    const first = await prepareReimport(store, { bytes: withNoah(100) }, { today: TODAY });
+    applyReimport(store, first, new Set(), 'Re-import, Noah declined');
+    closeReimport(first);
+    // The same Noah, now married to Lily: still the person the user declined.
+    const married = withNoah(0).replace(
+      '0 TRLR',
+      ['0 @F60@ FAM', '1 HUSB @I27@', '1 WIFE @I26@', '0 TRLR'].join('\n'),
+    );
+    expect(married).toContain('@F60@');
+    const again = await prepareReimport(store, { bytes: renumber(married, 200) }, { today: TODAY });
+    try {
+      expect(noah(again)?.changes.find((c) => c.kind === 'person.new')?.defaultAccept).toBe(false);
+    } finally {
+      closeReimport(again);
+    }
+  });
+
   it('does not untick a different person with the same name and birth year', async () => {
     const first = await prepareReimport(store, { bytes: withNoah(100) }, { today: TODAY });
     applyReimport(store, first, new Set(), 'Re-import, Noah declined');

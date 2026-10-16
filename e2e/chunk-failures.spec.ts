@@ -58,7 +58,7 @@ test('a tree busy in another process gets its own page, and Try again recovers',
           contentType: 'application/json',
           body: JSON.stringify({
             error: {
-              code: 'conflict',
+              code: 'busy',
               message: 'The tree is busy (an import is running); try again when it finishes',
             },
           }),

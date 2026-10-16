@@ -16,7 +16,7 @@ export const isNotFound = (error: unknown): boolean =>
 
 /** Another connection (an import, an upgrade) holds the tree; trying again later works. */
 export const isBusy = (error: unknown): boolean =>
-  error instanceof ApiError && error.status === 409 && /\bbusy\b/i.test(error.message);
+  error instanceof ApiError && error.code === 'busy';
 
 /** The edit was made from data that changed since it loaded (another tab, an undo). */
 export const isStale = (error: unknown): boolean =>

@@ -71,7 +71,10 @@ describe('writes to a tree while it imports', () => {
     ]);
     for (const res of writes) {
       expect(res.statusCode, res.body).toBe(409);
-      expect(res.json().error.message).toMatch(/busy/);
+      expect(res.json().error).toMatchObject({
+        code: 'busy',
+        message: expect.stringMatching(/busy/),
+      });
     }
     // Reads still work, and other trees take writes.
     expect((await api.get(`${busy}/history`)).statusCode).toBe(200);
@@ -111,7 +114,10 @@ describe('a tree another connection is writing', () => {
       const res = await api.post(`${base}/tags`, { name: 'During' });
       expect(performance.now() - started).toBeLessThan(1000);
       expect(res.statusCode, res.body).toBe(409);
-      expect(res.json().error.message).toMatch(/busy/);
+      expect(res.json().error).toMatchObject({
+        code: 'busy',
+        message: expect.stringMatching(/busy/),
+      });
       other.exec('ROLLBACK');
     } finally {
       other.close();

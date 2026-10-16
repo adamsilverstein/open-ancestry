@@ -12,7 +12,7 @@ import {
   treePaths,
   type TreeStore,
 } from '@open-ancestry/db';
-import { ApiError, conflict, notFound } from './errors';
+import { ApiError, busy, conflict, notFound } from './errors';
 import type { ReimportFolders } from './reimport-folders';
 
 /*
@@ -491,7 +491,7 @@ export class Library {
 
   /** Throws 409 while the tree is importing. */
   assertIdle(id: string): void {
-    if (this.isBusy(id)) throw conflict(`Tree "${id}" is busy (an import is running)`);
+    if (this.isBusy(id)) throw busy(`Tree "${id}" is busy (an import is running)`);
   }
 
   private close(tree: string): void {

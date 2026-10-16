@@ -26,6 +26,8 @@ const PLACE_LINKS = [
 
 export function normalizeText(db: Database): void {
   const merged: string[] = [];
+  // Places whose full name normalization changed: only these may now collide.
+  const renamedPlaces = new Set<string>();
   for (const table of DATA_TABLES) {
     const columns = (
       db.prepare('SELECT name FROM pragma_table_info(?)').all(table) as { name: string }[]
@@ -43,6 +45,9 @@ export function normalizeText(db: Database): void {
         ([column, value]) => column !== key && value !== row[column],
       );
       if (patch.length === 0) continue;
+      if (table === 'place' && patch.some(([column]) => column === 'full_name')) {
+        renamedPlaces.add(row[key] as string);
+      }
       if (table === 'tag' && mergeTag(db, row[key] as string, Object.fromEntries(patch))) {
         merged.push(row[key] as string);
         continue;
@@ -52,7 +57,7 @@ export function normalizeText(db: Database): void {
       ).run(...patch.map(([, value]) => value), row[key]);
     }
   }
-  merged.push(...mergePlaces(db));
+  merged.push(...mergePlaces(db, renamedPlaces));
   if (merged.length) {
     // Undo names these in its refusal of older edits that still point at them (see undo.ts).
     db.prepare(
@@ -81,19 +86,27 @@ function mergeTag(db: Database, id: string, patch: Row): boolean {
 }
 
 /**
- * Merges places with identical full names into the oldest, parents (shorter
- * names) first. Returns the ids of the places merged away.
+ * Folds each place whose full name normalization changed into a place that
+ * now has the same name, parents (shorter names) first. Places that were
+ * already identical before the upgrade (the app allows that, e.g. two towns
+ * the user kept apart) are left alone. Returns the ids merged away.
  */
-function mergePlaces(db: Database): string[] {
+function mergePlaces(db: Database, renamed: ReadonlySet<string>): string[] {
   const merged: string[] = [];
+  if (renamed.size === 0) return merged;
   const names = db
     .prepare('SELECT full_name FROM place GROUP BY full_name HAVING count(*) > 1')
     .pluck()
     .all() as string[];
   for (const fullName of names.sort((a, b) => a.length - b.length)) {
-    const [survivor, ...duplicates] = db
+    const group = db
       .prepare('SELECT id, latitude, longitude FROM place WHERE full_name = ? ORDER BY id')
       .all(fullName) as { id: string; latitude: number | null; longitude: number | null }[];
+    const changed = group.filter((p) => renamed.has(p.id));
+    if (changed.length === 0) continue;
+    // Keep the oldest place that already had this name, else the oldest renamed one.
+    const survivor = group.find((p) => !renamed.has(p.id)) ?? changed[0]!;
+    const duplicates = changed.filter((p) => p !== survivor);
     for (const dup of duplicates) {
       if (survivor!.latitude == null && dup.latitude != null) {
         db.prepare('UPDATE place SET latitude = ?, longitude = ? WHERE id = ?').run(
@@ -129,23 +142,7 @@ export function upgradeRow(table: string, row: Row): Row {
 
 /** The merges for an older JSON document, whose rows `upgradeRow` already normalized. */
 export function upgradeTables(tables: TableRowsByName): void {
-  const merged: string[] = [];
-  merged.push(
-    ...mergeRows(
-      tables,
-      'tag',
-      (t) => `${String(t.category)}\u0000${String(t.name)}`,
-      (from, to) => {
-        const links = tables.tag_link;
-        if (!links) return;
-        for (const link of links) if (link.tag_id === from) link.tag_id = to;
-        tables.tag_link = unique(
-          links,
-          (l) => `${String(l.tag_id)}|${String(l.owner_type)}|${String(l.owner_id)}`,
-        );
-      },
-    ),
-  );
+  const merged = mergeTags(tables);
   merged.push(
     ...mergeRows(
       tables,
@@ -172,11 +169,47 @@ export function upgradeTables(tables: TableRowsByName): void {
       },
     ),
   );
-  if (merged.length) {
-    const meta = (tables.meta ??= []).filter((row) => row.key !== MERGED_IDS_KEY);
-    meta.push({ key: MERGED_IDS_KEY, value: JSON.stringify(merged.sort()) });
-    tables.meta = meta;
+  recordMergedIds(tables, merged);
+}
+
+/**
+ * Folds tags whose category and name are equal once normalized into the one
+ * with the smallest id, repointing their links (the UNIQUE constraint on tag
+ * would refuse both). Changes `tables` in place; returns the ids merged away.
+ */
+export function mergeTags(tables: TableRowsByName): string[] {
+  return mergeRows(
+    tables,
+    'tag',
+    (t) => `${String(t.category)}\u0000${String(t.name)}`,
+    (from, to) => {
+      const links = tables.tag_link;
+      if (!links) return;
+      for (const link of links) if (link.tag_id === from) link.tag_id = to;
+      tables.tag_link = unique(
+        links,
+        (l) => `${String(l.tag_id)}|${String(l.owner_type)}|${String(l.owner_id)}`,
+      );
+    },
+  );
+}
+
+/** Adds `ids` to the document's list of merged ids, so undo can explain refusing them. */
+export function recordMergedIds(tables: TableRowsByName, ids: readonly string[]): void {
+  if (!ids.length) return;
+  const meta = tables.meta ?? [];
+  const previous = meta.find((row) => row.key === MERGED_IDS_KEY);
+  let known: unknown = [];
+  try {
+    known = previous ? JSON.parse(String(previous.value)) : [];
+  } catch {
+    // An unreadable list is replaced; it only improves undo's message.
   }
+  const all = new Set([...(Array.isArray(known) ? known.map(String) : []), ...ids]);
+  tables.meta = [
+    ...meta.filter((row) => row !== previous),
+    { key: MERGED_IDS_KEY, value: JSON.stringify([...all].sort()) },
+  ];
 }
 
 /**

@@ -628,3 +628,53 @@ describe('getNeighborhood childrenLoaded', () => {
     store.close();
   });
 });
+
+describe('getNeighborhood moreSiblings', () => {
+  it('flags line ancestors whose siblings the slice left out, until a slice holds them', () => {
+    const store = memoryTree();
+    const ids = store.transact('seed', (tx) => {
+      const p = (given: string) => persons.create(tx, { names: [{ given, surname: 'Synth' }] }).id;
+      const [gp, gm, dad, aunt, me, sis] = [
+        p('Gp'),
+        p('Gm'),
+        p('Dad'),
+        p('Aunt'),
+        p('Me'),
+        p('Sis'),
+      ];
+      families.create(tx, {
+        partner1_id: gp,
+        partner2_id: gm,
+        children: [{ child_id: dad }, { child_id: aunt }],
+      });
+      families.create(tx, { partner1_id: dad, children: [{ child_id: me }, { child_id: sis }] });
+      return { dad, me, aunt };
+    }).result;
+    const narrow = getNeighborhood(store, ids.me, { up: 2, down: 0, siblingsDepth: 1 });
+    expect(narrow.moreSiblings).toEqual([ids.dad]);
+    expect(narrow.siblingsLoaded).toContain(ids.me);
+    expect(narrow.siblingsLoaded).not.toContain(ids.dad);
+    const wide = getNeighborhood(store, ids.me, { up: 2, down: 0, siblingsDepth: 2 });
+    expect(wide.moreSiblings).toEqual([]);
+    expect(wide.siblingsLoaded).toEqual(expect.arrayContaining([ids.me, ids.dad]));
+    // A slice on Dad himself, with his siblings.
+    const onDad = getNeighborhood(store, ids.dad, { up: 1, down: 0, siblingsDepth: 1 });
+    expect(onDad.siblingsLoaded).toContain(ids.dad);
+    store.close();
+  });
+
+  it('does not flag an ancestor without siblings', () => {
+    const store = memoryTree();
+    const ids = store.transact('seed', (tx) => {
+      const p = (given: string) => persons.create(tx, { names: [{ given, surname: 'Synth' }] }).id;
+      const [gp, dad, me] = [p('Gp'), p('Dad'), p('Me')];
+      families.create(tx, { partner1_id: gp, children: [{ child_id: dad }] });
+      families.create(tx, { partner1_id: dad, children: [{ child_id: me }] });
+      return { me };
+    }).result;
+    expect(
+      getNeighborhood(store, ids.me, { up: 2, down: 0, siblingsDepth: 1 }).moreSiblings,
+    ).toEqual([]);
+    store.close();
+  });
+});

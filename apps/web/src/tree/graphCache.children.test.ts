@@ -75,3 +75,41 @@ describe('GraphCache needsChildren with partly loaded families', () => {
     store.close();
   });
 });
+
+describe('GraphCache needsSiblings', () => {
+  it('needs siblings a slice left out until a slice holds them', () => {
+    const store = memoryTree();
+    const ids = store.transact('seed', (tx) => {
+      const p = (given: string) => persons.create(tx, { names: [{ given, surname: 'Synth' }] }).id;
+      const [gp, dad, aunt, me] = [p('Gp'), p('Dad'), p('Aunt'), p('Me')];
+      families.create(tx, { partner1_id: gp, children: [{ child_id: dad! }, { child_id: aunt! }] });
+      families.create(tx, { partner1_id: dad, children: [{ child_id: me! }] });
+      return { dad: dad!, aunt: aunt!, me: me! };
+    }).result;
+    const cache = new GraphCache();
+    cache.merge(
+      getNeighborhood(store, ids.me, {
+        up: 2,
+        down: 0,
+        siblingsDepth: 1,
+      }) as unknown as ApiNeighborhood,
+    );
+    expect(cache.needsSiblings(ids.dad)).toBe(true);
+    expect(
+      cache.graph().people instanceof Map &&
+        (cache.graph().people as Map<string, { hasMoreSiblings?: boolean }>).get(ids.dad)
+          ?.hasMoreSiblings,
+    ).toBe(true);
+    // Expanding fetches a slice on Dad with his siblings.
+    cache.merge(
+      getNeighborhood(store, ids.dad, {
+        up: 1,
+        down: 0,
+        siblingsDepth: 1,
+      }) as unknown as ApiNeighborhood,
+    );
+    expect(cache.has(ids.aunt)).toBe(true);
+    expect(cache.needsSiblings(ids.dad)).toBe(false);
+    store.close();
+  });
+});

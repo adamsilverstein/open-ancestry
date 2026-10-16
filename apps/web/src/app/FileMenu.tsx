@@ -3,7 +3,7 @@ import { ChevronDown, FileDown, FileUp, RefreshCw } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import buttonStyles from '../components/Button/Button.module.css';
-import { Menu, MenuContent, MenuItem, MenuTrigger } from '../components/Menu/Menu';
+import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '../components/Menu/Menu';
 import { useToast } from '../components/Toast/Toast';
 import {
   BAD_FILE_MESSAGE,
@@ -94,10 +94,17 @@ export default function FileMenu() {
             <RefreshCw size={16} aria-hidden />
             Re-import updated export…
           </MenuItem>
-          <MenuItem onSelect={() => setExporting(true)}>
+          <MenuItem disabled={!tree} onSelect={() => setExporting(true)}>
             <FileDown size={16} aria-hidden />
             Export…
           </MenuItem>
+          {!tree && (
+            <>
+              <MenuSeparator />
+              {/* Disabled items cannot say why on their own (#280). */}
+              <MenuItem disabled>Re-import and export need a tree. Import a GEDCOM first.</MenuItem>
+            </>
+          )}
         </MenuContent>
       </Menu>
       <ExportDialog

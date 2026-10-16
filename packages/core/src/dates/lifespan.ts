@@ -16,6 +16,8 @@ export interface LifeDate {
   qualifier?: LifeQualifier | undefined;
   /** New-style year of a dual date: `year` 1750 with `dualYear` 1751 reads `1750/51`. */
   dualYear?: number | undefined;
+  /** Shown instead of the year, for a decade or century (`1850s`). */
+  label?: string | undefined;
 }
 
 export interface Lifespan {
@@ -34,12 +36,34 @@ const ABBREVIATION: Partial<Record<DateQualifier, LifeQualifier>> = {
 
 const yearOfKey = (key: number) => Math.floor(key / 10000);
 
+/** Ranges up to this many years read as about their middle year. */
+const NARROW_RANGE_YEARS = 10;
+
+/**
+ * A range's year-level form: one year when it starts and ends in it, a
+ * decade or century as written (`1850s`), about the middle year for a
+ * narrow range (`BET 1870 AND 1872` is `abt. 1871`), and its start bound
+ * for a wide one (`BET 1800 AND 1850` is `aft. 1800`), so a card never
+ * claims more precision than the record has.
+ */
+function rangeLifeDate(first: number, last: number | undefined, text?: string | null): LifeDate {
+  if (last === undefined) return { year: first, qualifier: 'abt' };
+  if (last === first) return { year: first };
+  const span = /(\d{3,4})'?s\b/i.exec(text ?? '');
+  if (span && Number(span[1]) === first && (last === first + 9 || last === first + 99)) {
+    return { year: first, label: `${first}s` };
+  }
+  if (last - first <= NARROW_RANGE_YEARS) {
+    return { year: Math.floor((first + last) / 2), qualifier: 'abt' };
+  }
+  return { year: first, qualifier: 'aft' };
+}
+
 /**
  * The year-level date of a stored event (`dateSort`, `dateQualifier` and
  * `dateText`, as the database and API keep them), or undefined without a
- * sortable date. A range has no single year, so it reads as about its middle
- * year (`BET 1870 AND 1872` is `abt. 1871`); an open period reads as before
- * or after its bound (`FROM 1890` is `aft. 1890`).
+ * sortable date. Ranges read as `rangeLifeDate` says; an open period reads
+ * as before or after its bound (`FROM 1890` is `aft. 1890`).
  */
 export function lifeDate(
   event:
@@ -52,10 +76,7 @@ export function lifeDate(
   const kind = event.dateQualifier as DateQualifier;
   if (kind === 'between' || kind === 'from_to') {
     const end = event.dateText ? parseDate(event.dateText).sortKeyEnd : undefined;
-    return {
-      year: end === undefined ? year : Math.floor((year + yearOfKey(end)) / 2),
-      qualifier: 'abt',
-    };
+    return rangeLifeDate(year, end === undefined ? undefined : yearOfKey(end), event.dateText);
   }
   if (kind === 'from') return { year, qualifier: 'aft' };
   if (kind === 'to') return { year, qualifier: 'bef' };
@@ -72,9 +93,10 @@ export function lifeDate(
   return date;
 }
 
-export function formatLifeDate({ year, qualifier, dualYear }: LifeDate): string {
-  const shown =
-    year < 0
+export function formatLifeDate({ year, qualifier, dualYear, label }: LifeDate): string {
+  const shown = label
+    ? label
+    : year < 0
       ? `${-year} B.C.`
       : dualYear !== undefined
         ? `${year}/${String(dualYear % 100).padStart(2, '0')}`

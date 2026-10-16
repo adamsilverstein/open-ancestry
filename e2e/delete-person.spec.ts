@@ -16,6 +16,8 @@ test.beforeEach(async ({ request, baseURL }, testInfo) => {
 });
 
 const h1 = (page: Page) => page.getByRole('heading', { level: 1 });
+const toasts = (page: Page) =>
+  page.getByRole('region', { name: /Notifications/ }).getByRole('listitem');
 const deletedToast = (page: Page, name: string) =>
   page
     .getByRole('region', { name: /Notifications/ })
@@ -38,6 +40,10 @@ test('lands on a parent, and Cmd/Ctrl-Z returns to the restored person', async (
   await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}(\\?tree=[^&]*)?$`));
   await expect(h1(page)).toHaveText('Edmund Ashdown');
   await expect(deletedToast(page, 'Rowan Ashdown')).toBeVisible();
+  // A delete made here is not also announced as one made elsewhere (#189).
+  await page.waitForTimeout(500);
+  await expect(toasts(page)).toHaveCount(1);
+  await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}(\\?tree=[^&]*)?$`));
 
   await page.keyboard.press(`${mod}+z`);
   await expect(page).toHaveURL(new RegExp(`/person/${seeded.rowan}(\\?tree=[^&]*)?$`));

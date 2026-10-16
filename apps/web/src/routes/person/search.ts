@@ -6,6 +6,8 @@ export interface PersonSearch {
   tab?: Exclude<PersonTab, 'facts'>;
   /** The tree the id belongs to; ids repeat across copied trees. Filled in on arrival. */
   tree?: string;
+  /** Opens the Edit person dialog (the tree's quick view Edit links here). */
+  edit?: true;
 }
 
 /**
@@ -20,5 +22,6 @@ export function validatePersonSearch(search: Record<string, unknown>): PersonSea
         ? (tab as PersonSearch['tab'])
         : undefined,
     tree: typeof search.tree === 'string' && search.tree ? search.tree : undefined,
+    edit: search.edit === true || search.edit === 'true' ? true : undefined,
   };
 }

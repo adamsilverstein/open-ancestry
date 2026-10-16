@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { useLocation, useNavigate } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, Pencil, Plus, Trash2 } from 'lucide-react';
@@ -43,8 +43,10 @@ export default function TreeSwitcher() {
   const [name, setName] = useState('');
   const [error, setError] = useState<string | undefined>();
   const [pending, setPending] = useState(false);
+  const nameInput = useRef<HTMLInputElement>(null);
 
-  const currentName = trees.find((t) => t.id === current)?.name ?? current;
+  const currentTree = trees.find((t) => t.id === current);
+  const currentName = currentTree?.label ?? current;
   const pathname = useLocation({ select: (l) => l.pathname });
   const urlTree = useLocation({ select: (l) => (l.search as { tree?: unknown }).tree });
 
@@ -85,17 +87,26 @@ export default function TreeSwitcher() {
   function open(next: Mode) {
     setMode(next);
     setError(undefined);
-    setName(next === 'rename' ? (currentName ?? '') : '');
+    // Rename edits the stored name, not the label with its folder suffix.
+    setName(next === 'rename' ? (currentTree?.name ?? current ?? '') : '');
   }
 
   async function submit(event?: FormEvent) {
     event?.preventDefault();
+    if (mode !== 'delete' && !name.trim()) {
+      // Spaces pass `required`; say what is missing instead of sending it.
+      setError('Enter a tree name');
+      nameInput.current?.focus();
+      return;
+    }
     setPending(true);
     setError(undefined);
     try {
       if (mode === 'create') {
         const tree = await createTree(name.trim());
-        await goToTree(tree.id, 'open');
+        await setCurrentTree(queryClient, tree.id);
+        // A new tree is empty: its people list offers Add person.
+        await navigate({ to: '/people' });
       } else if (mode === 'rename' && current) {
         const tree = await renameTree(current, name.trim());
         await goToTree(tree.id, 'rename');
@@ -151,7 +162,7 @@ export default function TreeSwitcher() {
               >
                 {trees.map((tree) => (
                   <MenuRadioItem key={tree.id} value={tree.id}>
-                    {tree.name}
+                    {tree.label}
                   </MenuRadioItem>
                 ))}
               </MenuRadioGroup>
@@ -176,6 +187,7 @@ export default function TreeSwitcher() {
       >
         <form id="tree-name-form" onSubmit={(event) => void submit(event)}>
           <Input
+            ref={nameInput}
             label="Tree name"
             value={name}
             onChange={(event) => setName(event.target.value)}

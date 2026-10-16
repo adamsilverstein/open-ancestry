@@ -1,15 +1,25 @@
 import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { generateGedcom } from '../../../fixtures/generate';
-import { exposureWarning, parseCliArgs, progressReporter, run, stopOnSignals } from './main';
+import { openMemoryTree } from '@open-ancestry/db';
+import { importGedcom } from '@open-ancestry/import';
+import {
+  exposureWarning,
+  formatReport,
+  main,
+  parseCliArgs,
+  progressReporter,
+  run,
+  stopOnSignals,
+} from './main';
 
 describe('parseCliArgs', () => {
   it('parses serve with defaults', () => {
-    expect(parseCliArgs(['serve'], {})).toEqual({
+    expect(parseCliArgs(['serve'], {}, { tty: false })).toEqual({
       command: 'serve',
       host: '127.0.0.1',
       port: 4317,
@@ -18,6 +28,7 @@ describe('parseCliArgs', () => {
       staticDir: undefined,
       importLimits: {},
       importHeapMb: undefined,
+      sharedLibrary: false,
     });
   });
 
@@ -60,8 +71,34 @@ describe('parseCliArgs', () => {
     });
   });
 
+  it('reads --shared-library and OA_SHARED_LIBRARY=1 (issue #211)', () => {
+    expect(parseCliArgs(['serve'], {})).toMatchObject({ sharedLibrary: false });
+    expect(parseCliArgs(['serve', '--shared-library'], {})).toMatchObject({ sharedLibrary: true });
+    expect(parseCliArgs(['serve'], { OA_SHARED_LIBRARY: '1' })).toMatchObject({
+      sharedLibrary: true,
+    });
+    expect(parseCliArgs(['import', 'a.ged', '--shared-library'], {})).toMatchObject({
+      sharedLibrary: true,
+    });
+  });
+
   it('rejects an invalid port', () => {
     expect(() => parseCliArgs(['serve', '--port', 'abc'])).toThrow(/port/);
+  });
+
+  it('opens the browser by default on a terminal, unless --no-open (issue #122)', () => {
+    expect(parseCliArgs(['serve'], {}, { tty: true })).toMatchObject({ open: true });
+    // Piped or scripted output (CI, e2e) gets no browser unless asked.
+    expect(parseCliArgs(['serve'], {}, { tty: false })).toMatchObject({ open: false });
+    expect(parseCliArgs(['serve', '--no-open'], {}, { tty: true })).toMatchObject({ open: false });
+    expect(parseCliArgs(['serve', '--open'], {}, { tty: false })).toMatchObject({ open: true });
+  });
+
+  it('reads -h and --help, for the CLI and for each command (issue #119)', () => {
+    expect(parseCliArgs(['--help'])).toEqual({ command: 'help' });
+    expect(parseCliArgs(['-h'])).toEqual({ command: 'help' });
+    expect(parseCliArgs(['serve', '--help'])).toEqual({ command: 'help', topic: 'serve' });
+    expect(parseCliArgs(['import', '-h'])).toEqual({ command: 'help', topic: 'import' });
   });
 
   it('returns help for no command', () => {
@@ -119,6 +156,41 @@ describe('run', () => {
     expect(exposureWarning('0.0.0.0')).toMatch(/WARNING: listening on 0\.0\.0\.0/);
   });
 
+  it('exits 0 with usage for --help, per command too', async () => {
+    const logs: string[] = [];
+    expect(await main(['--help'], { log: (line) => logs.push(line) })).toBe(0);
+    expect(logs.join('\n')).toMatch(/^Usage: open-ancestry <command>/);
+    logs.length = 0;
+    expect(await main(['serve', '--help'], { log: (line) => logs.push(line) })).toBe(0);
+    expect(logs.join('\n')).toMatch(/^Usage: open-ancestry serve/);
+    expect(logs.join('\n')).toContain('--no-open');
+    expect(logs.join('\n')).not.toContain('--media');
+    logs.length = 0;
+    expect(await main(['import', '--help'], { log: (line) => logs.push(line) })).toBe(0);
+    expect(logs.join('\n')).toMatch(/^Usage: open-ancestry import <file>/);
+    expect(logs.join('\n')).not.toContain('--port');
+  });
+
+  it('exits 2 with a one-line message and usage for unknown commands and options', async () => {
+    for (const [argv, message] of [
+      [['bogus'], 'Unknown command: bogus'],
+      [['serve', '--bogus'], 'Unknown option: --bogus'],
+      [['import', 'a.ged', '-x'], 'Unknown option: -x'],
+    ] as const) {
+      const errors: string[] = [];
+      const logs: string[] = [];
+      const code = await main([...argv], {
+        error: (line) => errors.push(line),
+        log: (line) => logs.push(line),
+      });
+      expect(code).toBe(2);
+      const [first, ...rest] = errors.join('\n').split('\n');
+      expect(first).toBe(message);
+      expect(rest.join('\n')).toContain('Usage: open-ancestry');
+      expect(logs).toEqual([]);
+    }
+  });
+
   it('prints usage for help', async () => {
     const logs: string[] = [];
     expect(await run(['help'], { log: (line) => logs.push(line) })).toBeUndefined();
@@ -150,6 +222,7 @@ describe('import', () => {
       name: 'Vale',
       library: '/l',
       importLimits: {},
+      sharedLibrary: false,
     });
     expect(() => parseCliArgs(['import'], {})).toThrow(/file/);
   });
@@ -206,6 +279,22 @@ describe('import', () => {
       run(['import', fixture, '--name', 'a/b', '--library', library], { log: () => {} }),
     ).rejects.toThrow(/path separator/);
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'refuses a library folder other accounts can write to, unless --shared-library',
+    async () => {
+      const library = await mkdtemp(join(tmpdir(), 'oa-cli-shared-'));
+      await writeFile(join(library, 'notes.txt'), 'not a tree');
+      await chmod(library, 0o775);
+      const args = ['import', fixture, '--name', 'Shared', '--library', library];
+      await expect(run(args, { log: () => {}, warn: () => {} })).rejects.toThrow(
+        /--shared-library/,
+      );
+      expect(existsSync(join(library, 'Shared.oatree'))).toBe(false);
+      await run([...args, '--shared-library'], { log: () => {}, warn: () => {} });
+      expect(existsSync(join(library, 'Shared.oatree'))).toBe(true);
+    },
+  );
 
   it('applies --max-gedcom-mb to the import', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'oa-cli-big-'));
@@ -381,5 +470,39 @@ describe('serve on SIGINT/SIGTERM', () => {
     signals.emit('SIGINT', 'SIGINT');
     await vi.waitFor(() => expect(exits).toEqual([1]));
     expect(logs.at(-1)).toBe('Could not stop cleanly: Plugin did not start in time: preClose');
+  });
+});
+
+describe('formatReport layout (issue #121)', () => {
+  async function report(lines: string[]) {
+    return importGedcom(
+      { bytes: ['0 HEAD', '1 GEDC', '2 VERS 5.5.1', ...lines, '0 TRLR', ''].join('\n') },
+      openMemoryTree(),
+      { today: new Date('2026-10-14T12:00:00Z') },
+    );
+  }
+  const tree = { name: 'T', dir: '/lib/T.oatree', homePerson: null };
+
+  it('keeps a space between columns and shortens long examples', async () => {
+    const r = await report([
+      '0 @I1@ INDI',
+      '1 NOTE start',
+      '1 CONC stray continuation',
+      `1 _LONG ${'x'.repeat(500)}`,
+    ]);
+    const out = formatReport(r, tree).split('\n');
+    const warning = out.find((l) => l.includes('misplaced-continuation'))!;
+    expect(warning).toMatch(/misplaced-continuation +\S/);
+    const long = out.find((l) => l.includes('INDI._LONG'))!;
+    expect(long.length).toBeLessThanOrEqual(130);
+    expect(long.endsWith('…')).toBe(true);
+  });
+
+  it('reads short imports as under 0.1s, not 0.0s', async () => {
+    const r = await report(['0 @I1@ INDI']);
+    r.timings.total = 12;
+    expect(formatReport(r, tree).split('\n')[0]).toMatch(/ in under 0\.1s$/);
+    r.timings.total = 1234;
+    expect(formatReport(r, tree).split('\n')[0]).toMatch(/ in 1\.2s$/);
   });
 });

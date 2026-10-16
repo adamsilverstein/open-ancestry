@@ -1,8 +1,17 @@
-import { existsSync } from 'node:fs';
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { mkdtemp, readdir } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createServer } from './index';
 import { Library, defaultLibraryRoot, treeNameProblem } from './library';
 import { testApi, type TestApi } from './test/helpers';
 
@@ -67,6 +76,32 @@ describe('Library', () => {
     expect(reopened).not.toBe(created);
     expect(library.open('One')).toBe(reopened);
     library.closeAll();
+  });
+
+  it('tells copied tree folders apart by folder name (#193)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'oa-lib-'));
+    const library = new Library(root);
+    library.create('Smith');
+    library.closeAll();
+    // A folder copied by hand keeps the tree_name inside it.
+    cpSync(join(root, 'Smith.oatree'), join(root, 'Smith copy.oatree'), { recursive: true });
+    cpSync(join(root, 'Smith.oatree'), join(root, 'Backup.oatree'), { recursive: true });
+    expect(library.list().map(({ id, name, label }) => ({ id, name, label }))).toEqual([
+      { id: 'Smith', name: 'Smith', label: 'Smith' },
+      { id: 'Backup', name: 'Smith', label: 'Smith (Backup)' },
+      { id: 'Smith copy', name: 'Smith', label: 'Smith (Smith copy)' },
+    ]);
+    // Without a folder named exactly "Smith", every copy shows its folder: no
+    // tree takes over the plain label, so labels cannot swap.
+    library.closeAll();
+    rmSync(join(root, 'Smith.oatree'), { recursive: true, force: true });
+    expect(library.list().map((t) => t.label)).toEqual(['Smith (Backup)', 'Smith (Smith copy)']);
+    // Folder names cannot smuggle bidi or control characters into a label.
+    library.closeAll();
+    cpSync(join(root, 'Backup.oatree'), join(root, 'Evil\u202Eypoc.oatree'), { recursive: true });
+    expect(library.list().map((t) => t.label)).toContain('Smith (Evilypoc)');
+    library.closeAll();
+    rmSync(root, { recursive: true, force: true });
   });
 
   it('refuses to rename or delete a busy tree', async () => {
@@ -154,6 +189,15 @@ describe('tree routes', () => {
       expect(res.statusCode).toBe(400);
       expect(res.json().error.code).toBe('bad_request');
     }
+    // Blank names get a plain message, not a schema error (issue #123).
+    for (const name of ['', '   ']) {
+      const res = await api.post('/api/trees', { name });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toEqual({ code: 'bad_request', message: 'Enter a tree name' });
+    }
+    expect((await api.patch('/api/trees/A', { name: ' ' })).json().error.message).toBe(
+      'Enter a tree name',
+    );
     expect((await api.post('/api/trees', {})).json().error.code).toBe('validation_failed');
     expect((await api.post('/api/trees', { name: 'A', extra: 1 })).statusCode).toBe(400);
   });
@@ -166,5 +210,150 @@ describe('tree routes', () => {
     expect((await api.get('/api/trees/.trash')).statusCode).toBe(400);
     expect((await api.patch('/api/trees/Nope', { name: 'X' })).statusCode).toBe(404);
     expect((await api.del('/api/trees/Nope')).statusCode).toBe(404);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('library permissions', () => {
+  const mode = (path: string) => statSync(path).mode & 0o777;
+  const temps: string[] = [];
+  const temp = async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'oa-lib-'));
+    temps.push(dir);
+    return dir;
+  };
+  afterEach(() => {
+    for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  it('creates the library folder private to its owner', async () => {
+    const root = join(await temp(), 'Library');
+    const library = new Library(root);
+    library.create('Vale');
+    expect(mode(root)).toBe(0o700);
+    expect(mode(library.dirOf('Vale'))).toBe(0o700);
+    library.closeAll();
+  });
+
+  it('tightens an existing library folder and its trees on open', async () => {
+    const root = join(await temp(), 'Library');
+    new Library(root).create('Vale');
+    chmodSync(root, 0o755);
+    chmodSync(new Library(root).dirOf('Vale'), 0o755);
+    const library = new Library(root);
+    expect(library.list().map((t) => t.id)).toEqual(['Vale']);
+    expect(mode(root)).toBe(0o700);
+    expect(mode(library.dirOf('Vale'))).toBe(0o700);
+    library.closeAll();
+  });
+
+  it('refuses a library folder other accounts can write to, unless it is declared shared', async () => {
+    // Issue #211: another account could swap a tree folder between the checks
+    // and SQLite opening it by path.
+    const root = await temp();
+    chmodSync(root, 0o775);
+    writeFileSync(join(root, 'notes.txt'), 'not a tree');
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(() => new Library(root).list()).toThrow(
+      expect.objectContaining({
+        statusCode: 403,
+        message: expect.stringMatching(/other accounts can change.*--shared-library/s),
+      }),
+    );
+    expect(() => new Library(root).create('Vale')).toThrow(/--shared-library/);
+    for (const writable of [0o757, 0o777]) {
+      chmodSync(root, writable);
+      expect(() => new Library(root).list()).toThrow(/other accounts can change/);
+    }
+    chmodSync(root, 0o775);
+    const shared = new Library(root, { shared: true });
+    shared.create('Vale');
+    expect(shared.list().map((t) => t.id)).toEqual(['Vale']);
+    shared.closeAll();
+    // Not on Windows, where these mode bits mean nothing.
+    expect(() => new Library(root, { platform: 'win32' }).list()).not.toThrow();
+  });
+
+  it('refuses a library folder that belongs to another account', async () => {
+    // Under a parent others can write to (no sticky bit), another account can
+    // swap in its own 0700 folder: the mode looks private, the owner is not you.
+    const root = await temp();
+    expect(() => new Library(root, { uid: -1 }).list()).toThrow(
+      expect.objectContaining({
+        statusCode: 403,
+        message: expect.stringMatching(/belongs to another account.*--shared-library/s),
+      }),
+    );
+    expect(() => new Library(root, { uid: -1 }).open('Any')).toThrow(/another account/);
+    expect(() => new Library(root, { uid: -1, shared: true }).list()).not.toThrow();
+    expect(() => new Library(root, { uid: -1, platform: 'win32' }).list()).not.toThrow();
+    expect(() => new Library(root).list()).not.toThrow();
+  });
+
+  it('refuses a folder of another account even when it holds only trees (tightening branch)', async () => {
+    // A folder of nothing but trees is tightened rather than warned about, and
+    // tightening skips a folder that is not ours: the owner check must still run.
+    const root = join(await temp(), 'Library');
+    new Library(root).create('Vale');
+    new Library(root).closeAll();
+    chmodSync(root, 0o755);
+    expect(() => new Library(root, { uid: -1 }).list()).toThrow(/belongs to another account/);
+    expect(() => new Library(root, { uid: -1, shared: true }).list()).not.toThrow();
+  });
+
+  it('leaves a shared folder that holds more than trees alone, with a warning', async () => {
+    // e.g. `--library ~` or a group-shared folder: chmod would lock others out.
+    const root = await temp();
+    chmodSync(root, 0o755);
+    writeFileSync(join(root, 'notes.txt'), 'not a tree');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const library = new Library(root);
+    library.create('Vale');
+    expect(mode(root)).toBe(0o755);
+    expect(mode(library.dirOf('Vale'))).toBe(0o700);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]![0])).toMatch(/other accounts can see/);
+    library.list();
+    expect(warn).toHaveBeenCalledTimes(1);
+    library.closeAll();
+  });
+
+  it('warns about a shared library folder once, at startup', async () => {
+    const root = await temp();
+    chmodSync(root, 0o755);
+    writeFileSync(join(root, 'notes.txt'), 'not a tree');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const app = createServer({ library: root });
+    expect(warn).toHaveBeenCalledTimes(1);
+    await app.close();
+  });
+
+  it('leaves an existing empty folder alone too, with a warning', async () => {
+    const root = await temp();
+    chmodSync(root, 0o755);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    new Library(root).list();
+    expect(mode(root)).toBe(0o755);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a planted tree link with a clear 403', async () => {
+    const root = join(await temp(), 'Library');
+    const library = new Library(root);
+    library.create('Real');
+    library.closeAll();
+    symlinkSync(library.dirOf('Real'), library.dirOf('Planted'));
+    expect(() => library.open('Planted')).toThrow(
+      expect.objectContaining({ statusCode: 403, message: expect.stringMatching(/symbolic link/) }),
+    );
+  });
+
+  it('keeps the trash private', async () => {
+    const root = join(await temp(), 'Library');
+    const library = new Library(root);
+    library.create('Gone');
+    library.delete('Gone');
+    expect(mode(join(root, '.trash'))).toBe(0o700);
+    library.closeAll();
   });
 });

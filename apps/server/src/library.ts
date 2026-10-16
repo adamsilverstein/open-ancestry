@@ -1,9 +1,11 @@
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
   TREE_EXTENSION,
+  TreeAccessError,
   createTree,
+  ensurePrivateDir,
   meta,
   openTree,
   treePaths,
@@ -47,7 +49,7 @@ const WINDOWS_DEVICE = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\..*)?$
 
 /** Why `name` cannot be a tree folder name, or null when it can. */
 export function treeNameProblem(name: string): string | null {
-  if (name.length === 0) return 'Tree name is empty';
+  if (name.trim().length === 0) return 'Enter a tree name';
   if (name.length > MAX_TREE_NAME_LENGTH)
     return `Tree name is longer than ${MAX_TREE_NAME_LENGTH} characters`;
   if (name !== name.trim()) return 'Tree name has leading or trailing spaces';
@@ -85,8 +87,31 @@ function assertTreeName(name: string): void {
 
 export interface TreeInfo {
   id: string;
+  /** The stored name (what Rename edits). */
   name: string;
+  /** What the switcher and start page show: the name, plus the folder when names repeat. */
+  label: string;
   modifiedAt: string;
+}
+
+/** Control and format characters (bidi overrides, zero-width marks) that could disguise a label. */
+const HIDDEN_CHARS = /[\p{Cc}\p{Cf}]/gu;
+
+/**
+ * A tree's name lives inside its folder, so a folder copied by hand (a backup,
+ * an experiment) lists under the same name as the original. When names
+ * repeat, only the tree whose folder is named exactly that keeps the plain
+ * label; every other one shows its folder too: "Smith (Smith copy)". The rule
+ * depends only on each tree's own folder, so labels never swap between trees.
+ */
+function withLabels(trees: TreeInfo[]): TreeInfo[] {
+  const counts = new Map<string, number>();
+  for (const tree of trees) counts.set(tree.name, (counts.get(tree.name) ?? 0) + 1);
+  return trees.map((tree) => {
+    if (counts.get(tree.name)! < 2 || tree.id === tree.name) return tree;
+    const folder = tree.id.replace(HIDDEN_CHARS, '') || 'copy';
+    return { ...tree, label: `${tree.name} (${folder})` };
+  });
 }
 
 export class Library {
@@ -96,12 +121,100 @@ export class Library {
   /** Trees with an import queued or running, and how many. */
   private readonly busy = new Map<string, number>();
 
-  constructor(root: string) {
+  /** Trees may be opened from a folder other accounts can write to (--shared-library). */
+  readonly shared: boolean;
+  private readonly platform: NodeJS.Platform;
+  private readonly uid: number | undefined;
+
+  constructor(
+    root: string,
+    {
+      shared = false,
+      platform = process.platform,
+      uid = typeof process.getuid === 'function' ? process.getuid() : undefined,
+    }: {
+      shared?: boolean;
+      /** For tests: the platform and account id to check as. */
+      platform?: NodeJS.Platform;
+      uid?: number | undefined;
+    } = {},
+  ) {
     this.root = resolve(root);
+    this.shared = shared;
+    this.platform = platform;
+    this.uid = uid;
   }
 
-  private ensureRoot(): void {
-    mkdirSync(this.root, { recursive: true });
+  private rootChecked = false;
+
+  /**
+   * The library folder, private to the owner. One the app creates is made
+   * 0700, as is an existing one holding nothing but trees. Any other folder
+   * (`--library ~`, a group-shared folder) keeps its mode, since tightening
+   * it would lock others out of their own files: say so once instead.
+   */
+  ensureRoot(): void {
+    if (!existsSync(this.root)) {
+      ensurePrivateDir(this.root);
+      this.rootChecked = true;
+      return;
+    }
+    if (this.rootChecked) return this.assertRootSafe();
+    this.rootChecked = true;
+    if (this.platform === 'win32' || (statSync(this.root).mode & 0o077) === 0) {
+      return this.assertRootSafe();
+    }
+    const ours = (name: string) =>
+      name.endsWith(TREE_EXTENSION) || name === TRASH_DIR || name === '.DS_Store';
+    const entries = readdirSync(this.root);
+    if (entries.length > 0 && entries.every(ours)) {
+      ensurePrivateDir(this.root);
+      // Tightening skips a folder that is not ours, so check what it is now.
+      this.assertRootSafe();
+    } else {
+      this.assertRootSafe();
+      console.warn(
+        `Warning: other accounts can see the library folder ${this.root}; ` +
+          'its trees are private, but consider a folder only you can open.',
+      );
+    }
+  }
+
+  /**
+   * Refuses a library folder other accounts can write to (issue #211): they
+   * could swap a tree folder between the app's checks and SQLite opening the
+   * database by path. --shared-library accepts the risk; on Windows these mode
+   * bits mean nothing.
+   */
+  private assertRootSafe(): void {
+    if (this.shared || this.platform === 'win32') return;
+    let stat;
+    try {
+      stat = statSync(this.root);
+    } catch {
+      return; // Not there yet: ensureRoot creates it private.
+    }
+    // A folder that looks private but is someone else's (swapped in under a
+    // parent others can write to) is no safer than a writable one.
+    if (this.uid !== undefined && stat.uid !== this.uid) {
+      throw new ApiError(
+        403,
+        'forbidden',
+        `The library folder ${this.root} belongs to another account, so it could ` +
+          'swap a tree while it is open. Use a folder of your own, or pass --shared-library ' +
+          '(or set OA_SHARED_LIBRARY=1) if you trust that account.',
+      );
+    }
+    const { mode } = stat;
+    if ((mode & 0o022) === 0) return;
+    throw new ApiError(
+      403,
+      'forbidden',
+      `The library folder ${this.root} is one other accounts can change ` +
+        `(mode ${(mode & 0o777).toString(8)}), so they could swap a tree while it is open. ` +
+        'Use a folder only you can write to, or pass --shared-library ' +
+        '(or set OA_SHARED_LIBRARY=1) if you trust everyone who can write to it.',
+    );
   }
 
   /**
@@ -147,7 +260,7 @@ export class Library {
 
   list(): TreeInfo[] {
     this.ensureRoot();
-    return readdirSync(this.root, { withFileTypes: true })
+    const trees = readdirSync(this.root, { withFileTypes: true })
       .filter((d) => d.isDirectory() && d.name.endsWith(TREE_EXTENSION) && !d.name.startsWith('.'))
       .map((d) => d.name.slice(0, -TREE_EXTENSION.length))
       .filter(
@@ -155,14 +268,16 @@ export class Library {
           treeNameProblem(id) === null &&
           existsSync(treePaths(join(this.root, `${id}${TREE_EXTENSION}`)).database),
       )
-      .map((id) => this.info(id))
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .map((id) => this.info(id));
+    return withLabels(trees).sort((a, b) => a.label.localeCompare(b.label));
   }
 
   info(id: string): TreeInfo {
+    const name = meta.get(this.open(id), 'tree_name') || id;
     return {
       id,
-      name: meta.get(this.open(id), 'tree_name') || id,
+      name,
+      label: name,
       modifiedAt: statSync(treePaths(this.dirOf(id)).database).mtime.toISOString(),
     };
   }
@@ -245,12 +360,20 @@ export class Library {
     // Cache keys are on-disk spellings, so an exact hit needs no lookup.
     const cached = this.stores.get(id);
     if (cached) return cached;
+    this.assertRootSafe();
     assertTreeName(id);
     if (!this.exists(id)) throw notFound(`Tree "${id}" not found`);
     const canonical = this.canonical(id);
     const existing = this.stores.get(canonical);
     if (existing) return existing;
-    const store = openTree(this.dirOf(canonical), { busyTimeoutMs: LIBRARY_BUSY_TIMEOUT_MS });
+    let store: TreeStore;
+    try {
+      store = openTree(this.dirOf(canonical), { busyTimeoutMs: LIBRARY_BUSY_TIMEOUT_MS });
+    } catch (error) {
+      // A planted link or another account's file: say why, not a bare 500.
+      if (error instanceof TreeAccessError) throw new ApiError(403, 'forbidden', error.message);
+      throw error;
+    }
     this.stores.set(canonical, store);
     return store;
   }
@@ -275,7 +398,7 @@ export class Library {
     this.assertIdle(id);
     this.close(id);
     const trash = join(this.root, TRASH_DIR);
-    mkdirSync(trash, { recursive: true });
+    ensurePrivateDir(trash);
     const stamp = new Date().toISOString().replaceAll(':', '-');
     renameSync(this.dirOf(id), join(trash, `${id} ${stamp}${TREE_EXTENSION}`));
   }

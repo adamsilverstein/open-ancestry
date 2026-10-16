@@ -59,13 +59,25 @@ function controllableImporter() {
   let release: (value?: unknown) => void = () => {};
   let fail: (error: Error) => void = () => {};
   const importer: Importer = async (path, _store, options) => {
-    calls.push({ path, content: await readFile(path, 'utf8'), options });
-    options.onProgress({ phase: 'parse', done: 1, total: 2 });
-    return new Promise((resolve, reject) => {
-      release = resolve;
-      fail = reject;
-      options.signal.addEventListener('abort', () => reject(new Error('aborted')));
+    // Like the real importers, honor an abort that came before the work
+    // started listening (a cancel during the read below), or the job never
+    // ends and server shutdown waits forever.
+    const aborted = new Promise<never>((_, reject) => {
+      const abort = () => reject(new Error('aborted'));
+      if (options.signal.aborted) abort();
+      else options.signal.addEventListener('abort', abort, { once: true });
     });
+    aborted.catch(() => {});
+    calls.push({ path, content: await readFile(path, 'utf8'), options });
+    if (options.signal.aborted) throw new Error('aborted');
+    options.onProgress({ phase: 'parse', done: 1, total: 2 });
+    return Promise.race([
+      aborted,
+      new Promise((resolve, reject) => {
+        release = resolve;
+        fail = reject;
+      }),
+    ]);
   };
   return { importer, calls, release: (v?: unknown) => release(v), fail: (e: Error) => fail(e) };
 }
@@ -235,6 +247,21 @@ describe('POST import', () => {
     fake.release();
   });
 
+  it('shuts down even when a job is cancelled before its importer starts listening', async () => {
+    // The queue-full test flaked with "Hook timed out" in afterEach: releasing
+    // the first job let the second one start, and close() cancelled it while
+    // its importer was still reading the upload. An abort that lands before
+    // the importer looks at its signal must still end the job.
+    const fake = controllableImporter();
+    api = await testApi({ importer: fake.importer });
+    const base = await createTestTree(api);
+    expect((await upload(api, base)).statusCode).toBe(202);
+    // The job is running and its importer is awaiting the upload's contents.
+    const drained = api.app.drain().then(() => 'drained');
+    const timeout = new Promise((r) => setTimeout(() => r('hung'), 3000));
+    expect(await Promise.race([drained, timeout])).toBe('drained');
+  });
+
   it('refuses an import into a tree with people before reading the body (issue #98)', async () => {
     const fake = controllableImporter();
     api = await testApi({ importer: fake.importer, uploadLimit: 1024 });
@@ -266,7 +293,12 @@ describe('POST import', () => {
     expect((await upload(api, base, 'big.ged', Buffer.alloc(4096, 'x'))).statusCode).toBe(413);
     const huge = await upload(api, base, 'huge.gdz', Buffer.alloc(16_384, 'x'));
     expect(huge.statusCode).toBe(413);
-    expect(huge.json().error.message).toMatch(/8192/);
+    // In units a person reads (issue #120).
+    expect(huge.json().error.message).toBe('GEDZIP uploads are limited to 8 KB');
+    expect((await api.get('/api/limits')).json()).toEqual({
+      importUpload: { gedcomBytes: 1024, archiveBytes: 8192 },
+      mediaUploadBytes: 1024 ** 3,
+    });
     expect(fake.calls).toHaveLength(0);
     const zip = await upload(api, base, 'photos.zip', Buffer.alloc(4096, 'x'));
     expect(zip.statusCode, zip.body).toBe(202);

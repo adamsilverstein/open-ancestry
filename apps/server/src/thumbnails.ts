@@ -100,7 +100,8 @@ async function render(source: string, treeDir: string, mediaId: string): Promise
         .resize({ width: edge, height: edge, fit: 'inside', withoutEnlargement: true })
         .webp({ quality: 80 })
         .toBuffer();
-      await writeFile(tmp(size), webp);
+      // 0600: private to the owner whatever the process umask.
+      await writeFile(tmp(size), webp, { mode: 0o600 });
       previous = webp;
     }
     // The largest is renamed last: its presence means the set is complete.

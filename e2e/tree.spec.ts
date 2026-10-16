@@ -151,6 +151,43 @@ test.describe('family view', () => {
     await expect(page).toHaveURL(new RegExp(`/person/${ids.bram}(\\?tree=[^&]*)?$`));
   });
 
+  test('quick view Edit opens the editor, not just the profile (#134)', async ({ page }) => {
+    await open(page);
+    await card(page, 'Bram Vale').click();
+    await page
+      .getByRole('dialog', { name: 'Bram Vale' })
+      .getByRole('button', { name: 'Edit' })
+      .click();
+    await expect(page).toHaveURL(new RegExp(`/person/${ids.bram}\\?edit=true(&tree=[^&]*)?$`));
+    const editor = page.getByRole('dialog', { name: 'Edit person' });
+    await expect(editor).toBeVisible();
+    // Closing the editor leaves the plain profile URL, so reload does not reopen it.
+    await page.keyboard.press('Escape');
+    await expect(editor).toHaveCount(0);
+    await expect(page).toHaveURL(new RegExp(`/person/${ids.bram}(\\?tree=[^&]*)?$`));
+    // Focus lands on the header's Edit person button, not lost on the page.
+    await expect(page.getByRole('button', { name: 'Edit person' })).toBeFocused();
+  });
+
+  test('quick view says Living once (#134)', async ({ page }) => {
+    await open(page);
+    await card(page, 'Wren Ash').click();
+    const quick = page.getByRole('dialog', { name: 'Wren Ash' });
+    await expect(quick).toContainText('Living');
+    await expect(quick.getByText(/Living/)).toHaveCount(1);
+  });
+
+  test('cards without a photo show a silhouette tinted by sex, without a badge (#134)', async ({
+    page,
+  }) => {
+    await open(page);
+    for (const name of ['Bram Vale', 'Elsa Hale']) {
+      const c = card(page, name);
+      await expect(c.locator('[data-fallback="silhouette"] svg.lucide-user-round')).toHaveCount(1);
+      await expect(c.locator('svg.lucide-mars, svg.lucide-venus')).toHaveCount(0);
+    }
+  });
+
   test('Escape closes the quick view and returns focus to the card', async ({ page }) => {
     await open(page);
     await card(page, 'Elsa Hale').click();
@@ -493,6 +530,8 @@ test.describe('family view', () => {
 
     // Single-key shortcuts only act while focus is in the tree (WCAG 2.1.4).
     await expect(card(page, 'Ada Vale')).toHaveAccessibleName(/focus person/);
+    // Keyboard focus follows the re-focus to Ada; let it land before moving on.
+    await expect(card(page, 'Ada Vale')).toBeFocused();
     await card(page, 'Bram Vale').focus();
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
@@ -919,12 +958,28 @@ test.describe('family view', () => {
       await dialog.getByRole('button', { name: 'Create tree' }).click();
       await expect(dialog).toBeHidden();
       await expect(switcher).toContainText(created);
-      // The empty tree has nobody to show: its tree view says so.
-      await expect(page.getByRole('heading', { name: 'No home person' })).toBeVisible();
+      // The empty tree opens on its people list, ready to add someone.
+      await expect(page).toHaveURL(/\/people$/);
+      await expect(page.getByRole('button', { name: 'Add person' })).toBeVisible();
       await expect(page.getByText('Ada Vale')).toHaveCount(0);
     } finally {
       await request.delete(`/api/trees/${encodeURIComponent(created)}`, { headers });
     }
+  });
+
+  test('changing tabs on a person page keeps the tree in the URL', async ({ page }) => {
+    // Dropping ?tree= would redirect against whichever tree is current.
+    await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+    await page.goto(`/person/${ids.ada}`);
+    await expect(page).toHaveURL(/[?&]tree=/);
+    await page.getByRole('tab', { name: 'Sources' }).click();
+    await expect(page).toHaveURL(/[?&]tab=sources/);
+    await expect(page).toHaveURL(
+      new RegExp(`[?&]tree=${encodeURIComponent(tree).replace(/%20/g, '(%20|\\+)')}`),
+    );
+    await page.getByRole('tab', { name: 'Facts' }).click();
+    await expect(page).not.toHaveURL(/[?&]tab=/);
+    await expect(page).toHaveURL(/[?&]tree=/);
   });
 
   test('switching trees on the people list stays on the people list', async ({ page }) => {
@@ -1203,6 +1258,155 @@ test.describe('fan chart keyboard', () => {
   });
 });
 
+for (const [width, height] of [
+  [320, 568],
+  [390, 844],
+  [568, 320],
+  [680, 900],
+  [844, 390],
+] as const) {
+  test.describe(`quick view at ${width}x${height}`, () => {
+    test.use({ viewport: { width, height }, hasTouch: true });
+
+    test('stays on screen, below the top bar, off its card, with reachable actions', async ({
+      page,
+    }) => {
+      // Four cards, each opened, measured and closed.
+      test.slow();
+      await open(page);
+      await settled(page);
+      // The minimap picks its corner after the view settles; measure after that,
+      // or a card clear of it now can be under it in the next fresh view.
+      await minimapRested(page);
+      const topBar = (await page.getByRole('banner').boundingBox())!;
+      const top = topBar.y + topBar.height;
+      const touchTargets = await page.evaluate(
+        () => window.matchMedia('(pointer: coarse), (max-width: 640px)').matches,
+      );
+      // The leftmost, rightmost, topmost and bottommost cards fully on screen and
+      // not under the toolbar or minimap.
+      const onScreen = await page.evaluate(
+        ({ top, width, height }) =>
+          [...document.querySelectorAll<HTMLElement>('[role="application"] [data-key]')]
+            .map((el) => ({ key: el.dataset.key!, b: el.getBoundingClientRect() }))
+            .filter(({ key, b }) => {
+              if (b.x < 0 || b.y < top || b.right > width || b.bottom > height) return false;
+              const hit = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+              return hit?.closest<HTMLElement>('[data-key]')?.dataset.key === key;
+            })
+            .map(({ key, b }) => ({ key, x: b.x, y: b.y })),
+        { top, width, height },
+      );
+      expect(onScreen.length).toBeGreaterThanOrEqual(1);
+      const by = (f: (o: (typeof onScreen)[number]) => number) =>
+        [...onScreen].sort((a, b) => f(a) - f(b))[0]!.key;
+      const picks = [
+        ...new Set([by((o) => o.x), by((o) => -o.x), by((o) => o.y), by((o) => -o.y)]),
+      ].map((key) => canvas(page).locator(`[data-key="${key}"]`));
+      for (const [i, target] of picks.entries()) {
+        // Each from a fresh view: closing with Escape returns keyboard focus to the
+        // card, which may scroll the view to show it.
+        if (i > 0) {
+          await open(page);
+          await settled(page);
+          await minimapRested(page);
+        }
+        const name = (await target.getAttribute('aria-label'))!.split(',')[0]!;
+        const cardBox = await box(target);
+        await target.tap();
+        const quick = page.getByRole('dialog', { name });
+        await expect(quick).toBeVisible();
+        // Let the positioning settle (it can take a frame or two after opening).
+        let b = await box(quick);
+        await expect
+          .poll(async () => {
+            const now = await box(quick);
+            const same = now.x === b.x && now.y === b.y && now.height === b.height;
+            b = now;
+            return same;
+          })
+          .toBe(true);
+        expect(b.x, name).toBeGreaterThanOrEqual(0);
+        expect(b.y, name).toBeGreaterThanOrEqual(top);
+        expect(b.x + b.width, name).toBeLessThanOrEqual(width);
+        expect(b.y + b.height, name).toBeLessThanOrEqual(height);
+        // It does not cover the card it describes.
+        const overlap =
+          b.x < cardBox.x + cardBox.width &&
+          cardBox.x < b.x + b.width &&
+          b.y < cardBox.y + cardBox.height &&
+          cardBox.y < b.y + b.height;
+        expect(
+          overlap,
+          `${name} covered by its quick view: ${JSON.stringify({ b, cardBox })}`,
+        ).toBe(false);
+        // The name stays in sight, not scrolled under the actions.
+        const title = quick.getByText(name, { exact: true });
+        const t = await box(title);
+        const shown = await page.evaluate(
+          ({ x, y }) => document.elementFromPoint(x, y)?.textContent ?? '',
+          { x: t.x + Math.min(t.width / 2, 20), y: t.y + t.height / 2 },
+        );
+        expect(shown, `${name} hidden in its quick view`).toBe(name);
+        const actions = [
+          quick.getByRole('link', { name: 'Profile' }),
+          quick.getByRole('button', { name: 'Make focus' }),
+          quick.getByRole('button', { name: 'Edit' }),
+        ];
+        // Initial focus is on the first action.
+        await expect(actions[0]!).toBeFocused();
+        for (const action of actions) {
+          const a = await box(action);
+          expect(a.x, name).toBeGreaterThanOrEqual(0);
+          expect(a.y, name).toBeGreaterThanOrEqual(top);
+          expect(a.x + a.width, name).toBeLessThanOrEqual(width);
+          expect(a.y + a.height, name).toBeLessThanOrEqual(height);
+          if (touchTargets) {
+            expect(a.height).toBeGreaterThanOrEqual(44);
+            expect(a.width).toBeGreaterThanOrEqual(44);
+          }
+        }
+        await page.keyboard.press('Escape');
+        await expect(quick).toHaveCount(0);
+      }
+    });
+  });
+}
+
+test.describe('quick view above a bottom toolbar', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+  test('keeps clear of the phone layout bottom bar', async ({ page }) => {
+    await open(page);
+    await settled(page);
+    // Stand in for the phone toolbar: the layout publishes its height on the tree region.
+    const bar = 120;
+    await page.evaluate((height) => {
+      document
+        .querySelector<HTMLElement>('[data-tree-region]')!
+        .style.setProperty('--oa-tree-bottom-bar', `${height}px`);
+    }, bar);
+    // Pan so Ada's card ends where the popover fits below it on the bare screen
+    // but not above the bar.
+    const ada = await box(card(page, 'Ada Vale'));
+    const dy = 500 - (ada.y + ada.height);
+    await page.mouse.move(200, 400);
+    await page.mouse.down();
+    await page.mouse.move(200, 400 + dy, { steps: 5 });
+    await page.mouse.up();
+    const lowest = ids.ada;
+    expect(lowest).toBeTruthy();
+    const target = canvas(page).locator(`[data-key="${lowest}"]`);
+    const name = (await target.getAttribute('aria-label'))!.split(',')[0]!;
+    await target.tap();
+    const quick = page.getByRole('dialog', { name });
+    await expect(quick).toBeVisible();
+    await expect
+      .poll(async () => (await box(quick)).y + (await box(quick)).height)
+      .toBeLessThanOrEqual(844 - bar);
+  });
+});
+
 test.describe('far zoom', () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -1390,6 +1594,15 @@ test.describe('wide descendant charts (#74)', () => {
     // The minimap re-checks its corner 150ms after each pan settles.
     await expect(check).toPass({ timeout: 2000 });
   });
+});
+
+test('the fan has no minimap, so its toolbar offers none (#134)', async ({ page }) => {
+  await open(page, 'ada', '&layout=fan');
+  const tools = page.getByRole('toolbar', { name: 'Tree tools' });
+  await expect(tools.getByRole('button', { name: 'Fit to screen' })).toBeVisible();
+  await expect(tools.getByRole('button', { name: 'Minimap' })).toHaveCount(0);
+  await page.keyboard.press('m');
+  await expect(page.getByTestId('tree-minimap')).toHaveCount(0);
 });
 
 test.describe('fan labels (#137)', () => {

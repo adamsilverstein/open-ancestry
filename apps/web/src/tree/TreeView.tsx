@@ -710,7 +710,10 @@ export function TreeView({
         h: () => void goHome(),
         f: palette.open,
         l: () => setMenuOpen(true),
-        m: () => setMinimapVisible((v) => !v),
+        // The fan has no minimap.
+        m: () => {
+          if (kind !== 'fan') setMinimapVisible((v) => !v);
+        },
       };
       const action = actions[event.key.length === 1 ? event.key.toLowerCase() : event.key];
       if (!action) return;
@@ -721,14 +724,15 @@ export function TreeView({
     return () => {
       window.removeEventListener('keydown', onKey);
     };
-  }, [goHome, palette]);
+  }, [goHome, palette, kind]);
 
   const anchor = useMemo<QuickViewAnchor | null>(
     () =>
       popoverKey
         ? {
             getBoundingClientRect: () => canvas.current?.clientRect(popoverKey) ?? new DOMRect(),
-            focus: () => canvas.current?.focusCard(popoverKey),
+            // Closing the quick view returns focus to its card without moving the view.
+            focus: () => canvas.current?.focusCard(popoverKey, { reveal: false }),
             isConnected: true,
           }
         : null,
@@ -806,7 +810,7 @@ export function TreeView({
         onZoomOut={() => canvas.current?.zoomBy(1 / ZOOM_STEP)}
         onFit={() => canvas.current?.fit()}
         minimapVisible={minimapVisible}
-        onToggleMinimap={() => setMinimapVisible((v) => !v)}
+        onToggleMinimap={kind === 'fan' ? undefined : () => setMinimapVisible((v) => !v)}
       />
       <TreeCanvas
         ref={canvas}
@@ -880,7 +884,13 @@ export function TreeView({
           if (!open) setPopoverKey(null);
         }}
         onMakeFocus={(p) => goTo(p.id)}
-        onEdit={(p) => void navigate({ to: '/person/$personId', params: { personId: p.id } })}
+        onEdit={(p) =>
+          void navigate({
+            to: '/person/$personId',
+            params: { personId: p.id },
+            search: { edit: true },
+          })
+        }
       />
     </>
   );

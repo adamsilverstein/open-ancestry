@@ -2,7 +2,12 @@
   display: flex;
   flex-direction: column;
   gap: var(--oa-space-3);
-  width: 300px;
+  width: min(300px, calc(100vw - 16px));
+  /* Short screens (a phone in landscape): never taller than the room Radix
+     reports beside the card; the details scroll and the actions stay put. */
+  max-height: var(--radix-popover-content-available-height);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .header {
@@ -36,11 +41,80 @@
 }
 
 .actions {
+  position: sticky;
+  bottom: calc(-1 * var(--oa-space-4));
   display: flex;
   flex-wrap: wrap;
   gap: var(--oa-space-2);
+  margin-bottom: calc(-1 * var(--oa-space-4));
+  padding-bottom: var(--oa-space-4);
+  background: var(--oa-surface);
 }
 
 .actions a {
   text-decoration: none;
+}
+
+/* Phone layout (PHONE_LAYOUT_QUERY, set as data-phone) and touch screens:
+   actions are 44px targets (WCAG 2.5.5). */
+.content[data-phone] .actions :is(a, button) {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* Short screens (a phone in landscape leaves ~110px beside a card): the name
+   and dates share one line pinned at the top, the actions one row pinned at
+   the bottom, and only the details between them scroll. */
+@media (max-height: 500px) {
+  .content {
+    gap: var(--oa-space-2);
+  }
+
+  .header {
+    position: sticky;
+    top: calc(-1 * var(--oa-space-4));
+    z-index: 1;
+    margin-top: calc(-1 * var(--oa-space-4));
+    padding-top: var(--oa-space-4);
+    background: var(--oa-surface);
+  }
+
+  .header > :first-child {
+    display: none;
+  }
+
+  .title {
+    display: flex;
+    align-items: baseline;
+    gap: var(--oa-space-2);
+    min-width: 0;
+  }
+
+  .name {
+    overflow: hidden;
+    font: var(--oa-text-md);
+    font-family: var(--oa-font-serif);
+    font-weight: var(--oa-weight-semibold);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .lifespan {
+    flex: none;
+  }
+
+  .actions {
+    flex-wrap: nowrap;
+  }
+
+  .actions svg {
+    display: none;
+  }
+}
+
+@media (pointer: coarse) {
+  .actions :is(a, button) {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }

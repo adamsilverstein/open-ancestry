@@ -94,7 +94,7 @@ both. `relationshipName({ up, down }, sex, half?, modifier?, style?)` names a sh
    and cousins (`min(u, d) - 1`, removed `|u - d|`), in the chosen style. Words are gendered by A's sex with neutral
    fallbacks (`parent`, `sibling`, `niece or nephew`). Step, adopted and foster links on the path
    give `stepfather`, `adoptive mother`, `adopted son`, `foster daughter` unless a biological path
-   exists. Half relatives are hyphenated (`half-sister`, `half-uncle`) except cousins (`half 1st
+   exists. Half relatives are hyphenated (`half-sister`, `half-uncle`) except cousins (`half first
    cousin`).
 3. **Marriage.** Partners are named directly (`husband`, `wife`, `partner`) and listed alongside
    any blood relationship, as are in-laws through A's or B's own partner (`niece and also
@@ -123,3 +123,13 @@ live in `../kin` (`parentLink`, `isParent`, `siblingKind`, `lineQualifier`, `qua
 labels all use them, so they agree: `half-sister`, `adopted brother`, `stepbrother`,
 `foster sister`, `step-aunt`; `private` links count as birth, `related` and `guardian` as care
 (foster wording, `guardian`/`ward` for the direct link).
+
+## Tree card terms
+
+`cardTerm(path, sex, style?)` names a tree card from the path the layout walked from the focus
+person: steps `U` (up to a parent, with the child's `rel`), `D` (down to a child), `S` (to a
+partner) and `B` (to a sibling, with its `kind` or the `shared` links and `apart` that
+`siblingKind` takes), each optionally with the reached person's `sex`. It builds the same words
+as the calculator from the same kin rules: `cardTerm([U('step'), B()], 'F')` is `step-aunt`,
+`[U(), B('half'), D()]` is `half first cousin`, `[up(), B('full', 'M'), S()]` is `wife of uncle`.
+Shapes kinship terms do not cover (down then up without a sibling step) give `undefined`.

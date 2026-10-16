@@ -9,6 +9,7 @@ const base: ApiPersonSummary = {
   privacy: 'public',
   primaryMediaId: null,
   primaryPhotoLocal: false,
+  primaryPhotoVersion: null,
   given: 'Ada',
   surname: 'Vale',
   surnamePrefix: null,

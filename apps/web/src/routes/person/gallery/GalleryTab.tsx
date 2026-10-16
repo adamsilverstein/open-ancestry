@@ -31,6 +31,7 @@ import {
   learnedSize,
   mediaGroup,
   mediaSource,
+  mediaVersion,
   originalUrl,
   personMediaQuery,
   setProfilePhoto,
@@ -88,7 +89,7 @@ function Preview({
   const known =
     media.width !== null ? { width: media.width, height: media.height ?? media.width } : learned;
   if (hasThumbnail(media) && !failures.has(media.id)) {
-    const image = tileImage(tree, media.id, known);
+    const image = tileImage(tree, media.id, known, mediaVersion(media));
     // Decorative: the tile's caption already names it.
     return (
       <img
@@ -244,7 +245,7 @@ function Lightbox({
         <div className={styles.stage}>
           {showsImage ? (
             <img
-              src={thumbUrl(tree, media.id, 'lg')}
+              src={thumbUrl(tree, media.id, 'lg', mediaVersion(media))}
               alt={titleOf(media)}
               onError={() => failures.add(media.id)}
             />
@@ -280,7 +281,11 @@ function Lightbox({
         </dl>
         <div className={styles.nav}>
           {media.local_path ? (
-            <a href={originalUrl(tree, media.id)} target="_blank" rel="noreferrer noopener">
+            <a
+              href={originalUrl(tree, media.id, mediaVersion(media))}
+              target="_blank"
+              rel="noreferrer noopener"
+            >
               Open original <ExternalLink size={14} aria-hidden />
             </a>
           ) : remoteLink ? (
@@ -496,7 +501,8 @@ export function GalleryTab({ tree, detail }: { tree: string; detail: PersonDetai
           failures={failures}
           onIndexChange={setOpen}
           onClose={close}
-          onSetPrimary={(mediaId) =>
+          onSetPrimary={(mediaId) => {
+            const chosen = items?.find((i) => i.media.id === mediaId)?.media;
             // Through the shared edit hook: optimistic, rolled back on error, and one
             // undoable change like every other edit.
             edit.mutate({
@@ -510,13 +516,13 @@ export function GalleryTab({ tree, detail }: { tree: string; detail: PersonDetai
                   summary: {
                     ...d.summary,
                     primaryMediaId: mediaId,
-                    primaryPhotoLocal: !!items?.find((i) => i.media.id === mediaId)?.media
-                      .local_path,
+                    primaryPhotoLocal: !!chosen?.local_path,
+                    primaryPhotoVersion: chosen ? mediaVersion(chosen) : null,
                   },
                 }),
               },
-            })
-          }
+            });
+          }}
         />
       )}
       {attaching && (

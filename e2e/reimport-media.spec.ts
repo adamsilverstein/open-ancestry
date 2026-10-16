@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -57,16 +57,27 @@ const exportZip = async (color: string) =>
 const library = () =>
   process.env.OA_E2E_LIBRARY ?? join(tmpdir(), `oa-e2e-library-${process.env.E2E_PORT}`);
 
-/** Imports the first export (a red photo) straight into the e2e library. */
-async function seed(label: string) {
+/**
+ * Imports the first export (a red photo), lets `prepare` edit the tree, then
+ * moves it into the e2e library. Built aside, so the server (which opens
+ * every tree in the library to list it) never holds it while it is written.
+ */
+async function seed(label: string, prepare?: (dir: string) => Promise<void>) {
   const info = test.info();
   const name = `Reimport media ${label} ${info.project.name} ${info.workerIndex}${info.retry} ${Date.now() % 1e6}`;
-  const dir = join(library(), `${name}.oatree`);
-  await importGedcom({ gedzip: await exportZip(RED) }, { dir, name });
-  const store = openTree(dir);
-  const person = store.db.prepare('SELECT id FROM person').pluck().get() as string;
-  store.close();
-  return { name, dir, person };
+  const staging = mkdtempSync(join(library(), '..', 'oa-e2e-staging-'));
+  try {
+    const built = join(staging, `${name}.oatree`);
+    await importGedcom({ gedzip: await exportZip(RED) }, { dir: built, name });
+    await prepare?.(built);
+    const store = openTree(built);
+    const person = store.db.prepare('SELECT id FROM person').pluck().get() as string;
+    store.close();
+    renameSync(built, join(library(), `${name}.oatree`));
+    return { name, person };
+  } finally {
+    rmSync(staging, { recursive: true, force: true });
+  }
 }
 
 /** The user's own replacement of the photo in this tree (a logged edit, not an import). */
@@ -168,8 +179,7 @@ test('a photo changed only in the export is offered ticked and shown once applie
 test('a photo changed in both is an unticked conflict, applied only when ticked', async ({
   page,
 }) => {
-  const { name, dir, person } = await seed('both');
-  await replaceInTree(dir, GREEN);
+  const { name, person } = await seed('both', (dir) => replaceInTree(dir, GREEN));
   await page.addInitScript((t) => localStorage.setItem('oa-tree', t), name);
   expect(await shownColor(await galleryPhoto(page, person))).toBe('green');
 

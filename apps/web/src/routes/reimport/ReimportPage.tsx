@@ -571,11 +571,13 @@ export function ReimportPage() {
     setCancelling(true);
     const reviewOf = (j: Awaited<ReturnType<typeof getJob>> | null) =>
       (j?.result as unknown as { reimportId?: string } | null)?.reimportId;
-    // A comparison that already finished is discarded quietly, without a refused cancel.
+    // A comparison that already stopped is discarded quietly, without a refused cancel.
     const before = await getJob(jobId).catch(() => null);
     let finished = reviewOf(before);
+    // A job that already completed or failed has nothing left to stop.
+    const stopped = before?.state === 'completed' || before?.state === 'failed';
     // False (409): it finished in the meantime, so discard its review.
-    if (!finished && !(await cancelJob(jobId).catch(() => false))) {
+    if (!stopped && !(await cancelJob(jobId).catch(() => false))) {
       finished = reviewOf(await getJob(jobId).catch(() => null));
     }
     if (finished) await discardReimport(finished).catch(() => {});

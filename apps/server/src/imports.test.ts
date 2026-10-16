@@ -193,6 +193,26 @@ describe('POST import', () => {
     expect(jobId).toBeTruthy();
   });
 
+  it('the fake importer keeps a release that comes before it is waiting', async () => {
+    // "bounds concurrency" flaked on CI: a job is "running" before its importer
+    // has read the upload, so a release() in that window was lost and the next
+    // job stayed queued. The fake must remember it.
+    const fake = controllableImporter();
+    const upload = join(makeTempDir('oa-fake-'), 'u.ged');
+    await writeFile(upload, '0 HEAD\n0 TRLR\n');
+    const controller = new AbortController();
+    const running = fake.importer(upload, {} as never, {
+      onProgress: () => {},
+      signal: controller.signal,
+    });
+    fake.release({ done: true });
+    const settled = await Promise.race([
+      running,
+      new Promise((r) => setTimeout(() => r('hung'), 2000)),
+    ]);
+    expect(settled).toEqual({ done: true });
+  });
+
   it('bounds concurrency and the queue', async () => {
     const fake = controllableImporter();
     api = await testApi({ importer: fake.importer, maxQueuedImports: 1 });

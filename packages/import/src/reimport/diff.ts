@@ -1008,8 +1008,10 @@ export function diffTrees(
         return m ? `media-file|${c.existingMediaId}|${m.sha256 ?? ''}` : undefined;
       }
       case 'person.new': {
-        // Name and birth year, and who their parents and partners are: two people
-        // of one name and year are told apart by their family, as matching does.
+        // Name and birth year, and who their parents are: two people of one name
+        // and year are told apart by their family. Parents, not partners, so a
+        // marriage the export adds later doesn't make them someone new; partners
+        // only for someone the export gives no parents.
         const p = incoming.people.get(c.incomingId);
         if (!p) return undefined;
         const names = (ids: string[]) =>
@@ -1018,7 +1020,10 @@ export function diffTrees(
             .map((x) => (x ? norm(displayName(x)) : ''))
             .sort()
             .join('+');
-        return `person|${norm(displayName(p))}|${p.birthYear ?? ''}|${names(p.parents)}|${names(p.spouses)}`;
+        const family = p.parents.length
+          ? `parents:${names(p.parents)}`
+          : `partners:${names(p.spouses)}`;
+        return `person|${norm(displayName(p))}|${p.birthYear ?? ''}|${family}`;
       }
       case 'family.add':
         return `family|${c.partnerNames.map(norm).sort().join('+')}`;

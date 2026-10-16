@@ -248,8 +248,16 @@ function makeFoldersInside(root: string, dir: string, relPath: string): string |
     current = join(current, part);
     const stat = lstatOrNull(current);
     if (!stat) {
-      mkdirSync(current, { mode: 0o700 });
-      first ??= current;
+      try {
+        mkdirSync(current, { mode: 0o700 });
+        first ??= current;
+      } catch (error) {
+        // Another server made it meanwhile: fine if it is a real folder.
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        if (!lstatOrNull(current)?.isDirectory()) {
+          throw new Error(`media folder for ${relPath} leads outside the tree`);
+        }
+      }
     } else if (!stat.isDirectory()) {
       throw new Error(`media folder for ${relPath} leads outside the tree`);
     }

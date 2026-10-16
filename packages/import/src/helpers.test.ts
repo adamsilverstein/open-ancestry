@@ -251,6 +251,22 @@ describe('shared derived columns', () => {
   });
 });
 
+describe('spilling media to disk', () => {
+  it.skipIf(process.platform === 'win32')(
+    'writes spilled files private to the owner (#267)',
+    () => {
+      const dir = makeTempDir('oa-spill-');
+      const source = MediaSource.fromEntries(
+        new Map([['photos/a.jpg', new TextEncoder().encode('bytes')]]),
+      );
+      const spilled = source.spill(dir);
+      expect(statSync(join(dir, 'photos', 'a.jpg')).mode & 0o777).toBe(0o600);
+      expect(statSync(join(dir, 'photos')).mode & 0o777).toBe(0o700);
+      expect(spilled.find({ type: 'local', path: 'photos/a.jpg' } as never)).toBeTruthy();
+    },
+  );
+});
+
 describe('storing media in a tree', () => {
   let root: string;
   const hash = (b: Uint8Array) => Buffer.from(b).toString('hex');

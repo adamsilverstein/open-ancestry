@@ -212,7 +212,7 @@ describe('JSON export history (#197)', () => {
     expect((await api.get(`${base}/export.json`)).body).toMatch(/SECRET-INLINE-NOTE/);
   });
 
-  it('with history=0 leaves out places, notes and media only deleted records used (#267)', async () => {
+  it('with history=0 leaves out places, notes, media and citations only deleted records used (#267)', async () => {
     const base = await createTestTree(api, 'Places');
     const store = openTree(join(api.root, 'Places.oatree'));
     await importGedcom(
@@ -226,14 +226,33 @@ describe('JSON export history (#197)', () => {
           '1 BIRT',
           '2 PLAC SECRET-HAMLET, SECRET-PARISH, Kerry',
           '3 NOTE SECRET-PLACE-NOTE',
+          '3 NOTE @N8@',
           '1 NOTE SECRET-PERSON-NOTE',
           '1 OBJE',
           '2 FILE secret/SECRET-PORTRAIT.jpg',
           '2 TITL SECRET-PHOTO-TITLE',
+          '1 SOUR @S1@',
+          '2 PAGE SECRET-CITATION-PAGE',
+          '1 NOTE @N9@',
+          '1 OBJE @O9@',
           '0 @I2@ INDI',
           '1 NAME Bastien /Corlew/',
           '1 BIRT',
           '2 PLAC Tralee, Kerry',
+          '2 SOUR @S1@',
+          '3 PAGE Entry 12',
+          '0 @N8@ NOTE SECRET-PLACE-RECORD-NOTE',
+          '1 SOUR @S1@',
+          '2 PAGE SECRET-PLACE-NOTE-CITATION',
+          '0 @N9@ NOTE SECRET-SHARED-NOTE',
+          '1 SOUR @S1@',
+          '2 PAGE SECRET-NOTE-CITATION',
+          '0 @O9@ OBJE',
+          '1 FILE secret/SECRET-SCAN.jpg',
+          '1 SOUR @S1@',
+          '2 PAGE SECRET-MEDIA-CITATION',
+          '0 @S1@ SOUR',
+          '1 TITL Parish register of Tralee',
           '0 TRLR',
           '',
         ].join('\n'),
@@ -251,6 +270,9 @@ describe('JSON export history (#197)', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body).not.toContain('SECRET');
     const { tables } = res.json() as { tables: { place: { name: string }[] } };
+    // The source a remaining citation uses stays, with that citation.
+    expect(res.body).toContain('Parish register of Tralee');
+    expect(res.body).toContain('Entry 12');
     // Kerry stays: Tralee, which a remaining event uses, sits under it.
     expect(tables.place.map((p) => p.name).sort()).toEqual(['Kerry', 'Tralee']);
     // Still a whole document: it loads into an empty tree.

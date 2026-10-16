@@ -130,8 +130,9 @@
  * next row's card (a 64px gap), so it is wider than it is tall there. Into
  * its own card it reaches 8px on screen up to 100% zoom (8px of tree beyond),
  * and never more than 14px of tree, so a tap on a zoomed-out card's top
- * quarter opens the card. At the lowest zoom a side reaches about 2px on
- * screen into a spouse card, only in that top band.
+ * quarter opens the card. At the lowest zoom a chevron's side reaches about
+ * 2px on screen into a spouse card, only in that top band; the switcher's
+ * stops at its pill (see below).
  */
 @media (pointer: coarse) {
   .chevron,
@@ -168,9 +169,20 @@
     translate: 22px 0;
   }
 
+  /*
+   * The spouse card starts 16px past the card, under the pill's right end: the
+   * target stops at the pill there, and takes its width in the free space
+   * above the row instead (::after), out to where the chevron's would reach.
+   */
   .switcher::before {
-    inset: calc(-1 * var(--out)) calc(-1 * var(--side) - var(--shift)) var(--in)
+    inset: calc(-1 * var(--out)) 0 var(--in) calc(var(--shift) - var(--side));
+  }
+
+  .switcher::after {
+    position: absolute;
+    inset: calc(-1 * var(--out)) calc(-1 * var(--side) - var(--shift)) 100%
       calc(var(--shift) - var(--side));
+    content: '';
   }
 }
 

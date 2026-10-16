@@ -1,4 +1,4 @@
-import { openMemoryTree, type TreeStore } from '@open-ancestry/db';
+import { openMemoryTree, undoLast, type TreeStore } from '@open-ancestry/db';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -182,9 +182,71 @@ describe('a declined new person (#271)', () => {
     closeReimport(first);
     const again = await prepareReimport(store, { bytes: withNoah(200) }, { today: TODAY });
     try {
-      expect(noah(again)?.changes.find((c) => c.kind === 'person.new')?.defaultAccept).not.toBe(
-        true,
-      );
+      // Still listed, so the user can still add them, but no longer ticked.
+      expect(noah(again)?.changes.find((c) => c.kind === 'person.new')?.defaultAccept).toBe(false);
+    } finally {
+      closeReimport(again);
+    }
+  });
+});
+
+describe('what a declined addition is remembered by (#271)', () => {
+  const withResi = (date: string) =>
+    append(SAMPLE, '@I3@', ['1 RESI', `2 DATE ${date}`, '2 PLAC Dalesend, Wexmoor']);
+  const resiAdds = (s: ReimportSession) =>
+    changesOf(s, '@I3@').filter((c) => c.kind === 'fact.add' && c.fact.type === 'RESI');
+
+  async function decline(text: string) {
+    const first = await prepareReimport(store, { bytes: renumber(text) }, { today: TODAY });
+    applyReimport(store, first, new Set(), 'Re-import, declined');
+    closeReimport(first);
+  }
+
+  it('offers the addition again, ticked, once the export says something else', async () => {
+    await decline(withResi('1910'));
+    const changed = await prepareReimport(
+      store,
+      { bytes: renumber(withResi('1911'), 200) },
+      {
+        today: TODAY,
+      },
+    );
+    try {
+      expect(resiAdds(changed).map((c) => c.defaultAccept)).toEqual([true]);
+    } finally {
+      closeReimport(changed);
+    }
+  });
+
+  it('forgets the decline when the re-import that recorded it is undone', async () => {
+    await decline(withResi('1910'));
+    undoLast(store);
+    const again = await prepareReimport(
+      store,
+      { bytes: renumber(withResi('1910'), 200) },
+      {
+        today: TODAY,
+      },
+    );
+    try {
+      expect(resiAdds(again).map((c) => c.defaultAccept)).toEqual([true]);
+    } finally {
+      closeReimport(again);
+    }
+  });
+
+  it('holds a declined fact while the export still says it', async () => {
+    await decline(withResi('1910'));
+    const again = await prepareReimport(
+      store,
+      { bytes: renumber(withResi('1910'), 200) },
+      {
+        today: TODAY,
+      },
+    );
+    try {
+      expect(resiAdds(again)).toEqual([]);
+      expect(again.diff.held).toContain(`person|${pid(store, '@I3@')}`);
     } finally {
       closeReimport(again);
     }

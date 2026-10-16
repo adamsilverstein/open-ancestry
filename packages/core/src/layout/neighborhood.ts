@@ -56,13 +56,16 @@ export interface NeighborhoodInput {
   }[];
   moreUp: string[];
   moreDown: string[];
+  /** People with siblings not loaded yet: their cards get a siblings chevron. */
+  moreSiblings?: string[];
 }
 
-/** One person as the layout sees them; `moreParents`/`moreChildren` are the hasMore hints. */
+/** One person as the layout sees them; the `more*` flags are the hasMore hints. */
 export function toTreePerson(
   p: NeighborhoodPerson,
   moreParents: boolean,
   moreChildren: boolean,
+  moreSiblings = false,
 ): TreePerson {
   const living = p.living !== 'dead' && p.living !== 'inferred_dead';
   const name = [p.prefix, p.given, p.surnamePrefix, p.surname, p.suffix]
@@ -79,6 +82,7 @@ export function toTreePerson(
   if (p.birth?.dateSort) person.birthSortKey = p.birth.dateSort;
   if (moreParents) person.hasMoreParents = true;
   if (moreChildren) person.hasMoreChildren = true;
+  if (moreSiblings) person.hasMoreSiblings = true;
   return person;
 }
 
@@ -107,8 +111,11 @@ export function toTreeFamily(
 export function fromNeighborhood(result: NeighborhoodInput): TreeGraph {
   const up = new Set(result.moreUp);
   const down = new Set(result.moreDown);
+  const sideways = new Set(result.moreSiblings);
   const people = new Map<string, TreePerson>();
-  for (const p of result.people) people.set(p.id, toTreePerson(p, up.has(p.id), down.has(p.id)));
+  for (const p of result.people) {
+    people.set(p.id, toTreePerson(p, up.has(p.id), down.has(p.id), sideways.has(p.id)));
+  }
 
   const children = new Map<string, NeighborhoodInput['children']>();
   for (const c of result.children) {

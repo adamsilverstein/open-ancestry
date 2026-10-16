@@ -36,6 +36,9 @@ export class GraphCache {
   private readonly familySeq = new Map<string, number>();
   /** People whose children some slice held in full (the server's `childrenLoaded`). */
   private readonly childrenLoaded = new Set<string>();
+  private readonly moreSiblings = new Set<string>();
+  /** People whose siblings some slice held in full (the server's `siblingsLoaded`). */
+  private readonly siblingsLoaded = new Set<string>();
   /** Person id to the families they are a partner in. */
   private readonly partnerFamilies = new Map<string, string[]>();
   private memo: { version: number; graph: TreeGraph } | null = null;
@@ -79,6 +82,17 @@ export class GraphCache {
       if (!this.moreUp.has(id)) {
         this.moreUp.add(id);
         this.version++;
+      }
+    }
+    for (const [list, set] of [
+      [slice.moreSiblings, this.moreSiblings],
+      [slice.siblingsLoaded, this.siblingsLoaded],
+    ] as const) {
+      for (const id of list ?? []) {
+        if (!set.has(id)) {
+          set.add(id);
+          this.version++;
+        }
       }
     }
     for (const id of slice.childrenLoaded ?? []) {
@@ -128,6 +142,11 @@ export class GraphCache {
     return this.moreDown.has(id) && !this.childrenLoaded.has(id);
   }
 
+  /** The database has siblings for this person that no slice has loaded yet. */
+  needsSiblings(id: string): boolean {
+    return this.moreSiblings.has(id) && !this.siblingsLoaded.has(id);
+  }
+
   /** Partners of the person's preferred (else first) parent family. */
   parentsOf(id: string): string[] {
     const links = this.parentFamilies.get(id) ?? [];
@@ -147,6 +166,8 @@ export class GraphCache {
       moreUp: [...this.moreUp],
       moreDown: [...this.moreDown],
       childrenLoaded: [...this.childrenLoaded],
+      moreSiblings: [...this.moreSiblings],
+      siblingsLoaded: [...this.siblingsLoaded],
       truncated: false,
     };
   }
@@ -158,6 +179,7 @@ export class GraphCache {
       children: [...this.children.values()],
       moreUp: [...this.moreUp].filter((id) => this.needsParents(id)),
       moreDown: [...this.moreDown].filter((id) => this.needsChildren(id)),
+      moreSiblings: [...this.moreSiblings].filter((id) => this.needsSiblings(id)),
     };
   }
 

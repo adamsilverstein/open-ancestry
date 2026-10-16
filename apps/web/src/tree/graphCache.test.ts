@@ -55,6 +55,8 @@ const first: ApiNeighborhood = {
   moreUp: ['bram'],
   moreDown: ['ada'],
   childrenLoaded: [],
+  moreSiblings: [],
+  siblingsLoaded: [],
   truncated: false,
 };
 
@@ -87,6 +89,8 @@ describe('GraphCache', () => {
       moreUp: ['otto'],
       moreDown: [],
       childrenLoaded: [],
+      moreSiblings: [],
+      siblingsLoaded: [],
       truncated: false,
     });
     expect(cache.needsParents('bram')).toBe(false);
@@ -106,6 +110,8 @@ describe('GraphCache', () => {
       moreUp: [],
       moreDown: [],
       childrenLoaded: [],
+      moreSiblings: [],
+      siblingsLoaded: [],
       truncated: false,
     };
     cache.merge(some);

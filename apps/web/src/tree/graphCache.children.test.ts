@@ -95,11 +95,8 @@ describe('GraphCache needsSiblings', () => {
       }) as unknown as ApiNeighborhood,
     );
     expect(cache.needsSiblings(ids.dad)).toBe(true);
-    expect(
-      cache.graph().people instanceof Map &&
-        (cache.graph().people as Map<string, { hasMoreSiblings?: boolean }>).get(ids.dad)
-          ?.hasMoreSiblings,
-    ).toBe(true);
+    const people = cache.graph().people as ReadonlyMap<string, { hasMoreSiblings?: boolean }>;
+    expect(people.get(ids.dad)?.hasMoreSiblings).toBe(true);
     // Expanding fetches a slice on Dad with his siblings.
     cache.merge(
       getNeighborhood(store, ids.dad, {

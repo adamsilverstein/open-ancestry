@@ -825,8 +825,9 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       const nodes = layout?.nodes ?? fan?.segments ?? [];
       pendingFocus.current = nodes.some((n) => n.key === had) ? had : focusPersonId;
     }
-    // Queue the new cards first, so a re-focus that finishes at once (reduced
-    // motion) waits for them instead of settling on the old ones.
+    // Not redundant with the forced update at the end: this one bumps renderSeq
+    // before animateTo can finish (at once with reduced motion), so the settle
+    // waits for the new person's cards instead of matching the old render.
     updateVisible(true);
     if (!prev || prev.kind !== kind) {
       stopAnimation();

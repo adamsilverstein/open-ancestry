@@ -1145,7 +1145,11 @@ export function diffTrees(
     for (const c of p.changes) {
       const ids =
         c.kind === 'child.add' ? [c.incomingChildId] : c.kind === 'family.add' ? c.partners : [];
-      for (const id of ids) links.set(id, [...(links.get(id) ?? []), c]);
+      for (const id of ids) {
+        const list = links.get(id);
+        if (list) list.push(c);
+        else links.set(id, [c]);
+      }
     }
   }
   for (const [incomingId, changeId] of newPersonChange) {
@@ -1171,11 +1175,21 @@ export function diffTrees(
     );
   }
   const existingName = (id: string) => displayName(existing.people.get(id)!);
+  // The first match per tree person, as `find` over `matches` gave, without a scan per call.
+  let firstMatch: Map<string, PersonMatch> | undefined;
+  const matchOf = (existingId: string) => {
+    if (!firstMatch) {
+      firstMatch = new Map();
+      for (const m of matches.values())
+        if (!firstMatch.has(m.existingId)) firstMatch.set(m.existingId, m);
+    }
+    return firstMatch.get(existingId)!;
+  };
   const matchedReview = (existingId: string) =>
     reviews.get(`m:${existingId}`) ??
     review(`m:${existingId}`, () => {
       const e = existing.people.get(existingId)!;
-      const m = [...matches.values()].find((x) => x.existingId === existingId)!;
+      const m = matchOf(existingId);
       return {
         key: `m:${existingId}`,
         status: 'matched',

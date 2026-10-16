@@ -481,26 +481,32 @@ test('the comparison page names the file and phase while it runs (#161)', async 
   baseURL,
 }, testInfo) => {
   const seeded = await seed(request, baseURL!, testInfo);
-  // Hold the job at the compare phase, however fast the real one is.
+  // Hold the job at the compare phase, however fast the real one is. The page
+  // reads the job again when the stream ends, so that read is held too.
+  const held = (id: string) => ({
+    id,
+    kind: 'reimport',
+    tree: seeded.tree,
+    fileName: 'Ashgrove 2026.ged',
+    createdTree: false,
+    state: 'running',
+    progress: { phase: 'compare', done: 0, total: 1 },
+    result: null,
+    error: null,
+    cancelled: false,
+  });
   await page.route('**/api/jobs/*/events', (route) => {
-    const id = /jobs\/([^/]+)\/events/.exec(route.request().url())![1];
-    const job = {
-      id,
-      kind: 'reimport',
-      tree: seeded.tree,
-      fileName: 'Ashgrove 2026.ged',
-      createdTree: false,
-      state: 'running',
-      progress: { phase: 'compare', done: 0, total: 1 },
-      result: null,
-      error: null,
-      cancelled: false,
-    };
+    const id = /jobs\/([^/]+)\/events/.exec(route.request().url())![1]!;
     void route.fulfill({
       status: 200,
       contentType: 'text/event-stream',
-      body: `event: state\ndata: ${JSON.stringify(job)}\n\n`,
+      body: `event: state\ndata: ${JSON.stringify(held(id))}\n\n`,
     });
+  });
+  await page.route('**/api/jobs/*', (route) => {
+    if (route.request().method() !== 'GET') return void route.continue();
+    const id = /jobs\/([^/?#]+)/.exec(route.request().url())![1]!;
+    void route.fulfill({ status: 200, contentType: 'application/json', json: held(id) });
   });
   await page.addInitScript((tree) => localStorage.setItem('oa-tree', tree), seeded.tree);
   await page.goto('/');

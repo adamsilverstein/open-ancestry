@@ -237,7 +237,9 @@ export function importJson(
         if (name === 'meta' && row.key === 'schema_version') continue;
         // Text is stored as NFC (#164). An old document got that from the v3
         // upgrade step; a current one written by another tool may still be NFD.
-        writer.insertAny(name, nfcRow(name, row));
+        // History images are normalized too, or undo would see the NFC rows as
+        // changed by a later edit.
+        writer.insertAny(name, name === 'change_log' ? nfcLogImages(row) : nfcRow(name, row));
       }
     }
   } catch (error) {
@@ -247,6 +249,19 @@ export function importJson(
   writer.commit();
   // The backup's sort keys came from whatever date parser wrote them.
   refreshDerivedColumns(store, { force: true, reason: 'imported backup' });
+}
+
+/** A change_log row with its before and after images in NFC (a copy only when something changes). */
+function nfcLogImages(row: Record<string, unknown>): Record<string, unknown> {
+  let out: Record<string, unknown> | undefined;
+  for (const column of ['before_json', 'after_json']) {
+    const json = row[column];
+    if (typeof json !== 'string') continue;
+    const image = JSON.parse(json) as Record<string, unknown>;
+    const nfc = nfcRow(String(row.entity), image);
+    if (nfc !== image) (out ??= { ...row })[column] = JSON.stringify(nfc);
+  }
+  return out ?? row;
 }
 
 /**

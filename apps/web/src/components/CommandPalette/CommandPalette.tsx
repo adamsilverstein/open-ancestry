@@ -197,9 +197,16 @@ export function CommandPalette({
             // An action that opened a dialog (such as Add person) keeps the focus it
             // moved there; a dialog that holds the opener is the one the palette was
             // opened over (Cmd/Ctrl-K in Edit person), so focus goes back into it.
-            const dialog = document.querySelector('[role="dialog"][data-state="open"]');
-            if (dialog && !(opener.current && dialog.contains(opener.current))) {
+            // Every open dialog, not the first in DOM order (the one underneath):
+            // any that does not hold the opener is one an action opened, or the
+            // opener is gone.
+            const open = [
+              ...document.querySelectorAll<HTMLElement>('[role="dialog"][data-state="open"]'),
+            ];
+            if (open.some((d) => !(opener.current?.isConnected && d.contains(opener.current)))) {
               event.preventDefault();
+              // Nothing took focus (the opener was removed): the topmost dialog does.
+              if (!open.some((d) => d.contains(document.activeElement))) open.at(-1)?.focus();
               return;
             }
             if (returnFocus(opener.current, outside.current)) event.preventDefault();

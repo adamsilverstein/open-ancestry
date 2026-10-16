@@ -38,6 +38,9 @@ function all<R>(store: TreeStore, sql: string, ...params: unknown[]): R[] {
 /** Deletes rows that hang off an owner: citation/media/note/tag links and preserved GEDCOM. */
 function deleteOwned(tx: Tx, ownerType: string, ownerId: string): void {
   const linked: [kind: 'citation' | 'media' | 'note', id: string][] = [];
+  // Pointers kept only as imported text (a NOTE inside an ASSO, an OBJE in a custom
+  // subtree) have no link row: their records are checked like linked ones (#245).
+  const pointed = textPointers(tx, ownerType, ownerId);
   for (const [table, target, kind] of [
     ['citation_link', 'citation_id', 'citation'],
     ['media_link', 'media_id', 'media'],
@@ -59,6 +62,39 @@ function deleteOwned(tx: Tx, ownerType: string, ownerId: string): void {
   // Notes, media and citations exist to be attached: one left with no attachment
   // goes with its last link (in the same batch, so undo brings it back).
   for (const [kind, id] of linked) deleteIfUnused(tx, kind, id);
+  for (const [kind, id] of pointed) {
+    if (kind === 'source') deleteSourceIfUnused(tx, id);
+    else deleteIfUnused(tx, kind, id);
+  }
+}
+
+/** A pointer line to a NOTE, OBJE or SOUR record: `2 NOTE @N5@` (padding allowed). */
+const POINTER_LINE = /^\s*\d+\s+(?:@[^@\s]+@\s+)?(NOTE|SNOTE|OBJE|SOUR)\s+(@[^@#\s][^@\s]*@)\s*$/;
+const POINTED_KIND = { NOTE: 'note', SNOTE: 'note', OBJE: 'media', SOUR: 'source' } as const;
+
+/** The records an owner's unmapped lines point to, from the same import. */
+function textPointers(
+  tx: Tx,
+  ownerType: string,
+  ownerId: string,
+): [kind: 'media' | 'note' | 'source', id: string][] {
+  const found: [kind: 'media' | 'note' | 'source', id: string][] = [];
+  for (const row of all<{ line: string; import_batch_id: string }>(
+    tx.store,
+    'SELECT line, import_batch_id FROM unmapped_line WHERE owner_type = ? AND owner_id = ? ORDER BY id',
+    ownerType,
+    ownerId,
+  )) {
+    const m = POINTER_LINE.exec(row.line);
+    if (!m) continue;
+    const kind = POINTED_KIND[m[1] as keyof typeof POINTED_KIND];
+    const id = tx.store
+      .stmt(`SELECT id FROM ${kind} WHERE external_id = ? AND import_batch_id = ?`)
+      .pluck()
+      .get(m[2], row.import_batch_id) as string | undefined;
+    if (id) found.push([kind, id]);
+  }
+  return found;
 }
 
 /** Deletes a note, media or citation nothing links to any more. */

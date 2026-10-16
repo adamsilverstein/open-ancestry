@@ -1,6 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, rm, utimes } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readdir, readFile, rm, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { startServer } from './index';
@@ -15,6 +14,7 @@ import {
   testApi,
   type TestApi,
 } from './test/helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 /** A multipart/form-data body with one file field. */
 function multipart(fileName: string, content: string | Buffer, field = 'file') {
@@ -479,7 +479,7 @@ describe('POST /api/import (new tree owned by the server)', () => {
   it('aborts imports and cleans up on shutdown, even with an event stream open', async () => {
     const fake = controllableImporter();
     api = await testApi(); // keeps afterEach's close happy; this test runs its own server
-    const root = await mkdtemp(join(tmpdir(), 'oa-lib-'));
+    const root = makeTempDir('oa-lib-');
     const server = await startServer({ library: root, importer: fake.importer, token: TOKEN });
     const origin = server.url;
     const form = new FormData();
@@ -567,7 +567,7 @@ describe('startup sweeps', () => {
 
   it('removes stale upload folders only', async () => {
     api = await testApi();
-    const dir = await mkdtemp(join(tmpdir(), 'oa-sweep-'));
+    const dir = makeTempDir('oa-sweep-');
     await mkdir(join(dir, `${UPLOAD_PREFIX}old`));
     await mkdir(join(dir, `${UPLOAD_PREFIX}fresh`));
     await mkdir(join(dir, 'unrelated-old'));

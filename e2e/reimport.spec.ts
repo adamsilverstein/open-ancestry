@@ -245,7 +245,9 @@ test('a fact deleted here is offered back unticked, and stays deleted by default
     { headers: seeded.headers },
   );
   expect(removed.ok()).toBe(true);
-  await startReimport(page, seeded);
+  // Ancestry changed the fact the user deleted: now both differ, so it asks (#185).
+  // (An export that still has it as it was offers nothing.)
+  await startReimport(page, seeded, laterExport().replace('2 DATE BEF 1920', '2 DATE ABT 1918'));
   const restore = card(page, 'Mercy Bellweather').getByRole('checkbox', {
     name: /Add fact: Death/,
   });
@@ -421,10 +423,11 @@ test('match percent and reasons say what differs, and why a new person is new', 
   await expect(add).not.toBeChecked();
   await page.getByRole('button', { name: 'Accept all high-confidence' }).click();
   await expect(add).not.toBeChecked();
-  // A genuinely new person says so.
+  // A genuinely new person says so, truthfully: nobody was close enough to compare.
   await expect(
-    card(page, 'Noah Ashgrove').getByText(/closest:|no one with a similar name/),
+    card(page, 'Noah Ashgrove').getByText('no close match in your tree', { exact: false }),
   ).toBeVisible();
+  await expect(card(page, 'Noah Ashgrove').getByText(/closest:/)).toHaveCount(0);
 });
 
 test('the review lists what needs a decision first, filters by group, and formats dates', async ({
@@ -473,6 +476,69 @@ test('the review lists what needs a decision first, filters by group, and format
   await expect(groups).toHaveCount(4);
   const results = await new AxeBuilder({ page }).analyze();
   expect(results.violations).toEqual([]);
+});
+
+test('a second re-import follows Ancestry for a value the first one set (#185)', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const josiah = (await personByName(request, seeded.tree, 'Josiah'))!;
+  const applied = () =>
+    expect(
+      page
+        .getByRole('region', { name: /Notifications/ })
+        .getByRole('listitem')
+        .filter({ hasText: /Applied \d+ change/ })
+        .last(),
+    ).toBeVisible({ timeout: 30_000 });
+  await startReimport(page, seeded);
+  await page.getByRole('button', { name: /^Apply \d+ changes?$/ }).click();
+  await applied();
+  expect((await eventDate(request, seeded.tree, josiah, 'DEAT')).date_text).toBe('1940');
+  // The next export changes it again; nobody edited it here, so it is offered ticked.
+  await startReimport(page, seeded, laterExport().replace('2 DATE 1940', '2 DATE 1941'));
+  const death = card(page, 'Josiah Ashgrove').getByRole('checkbox', { name: /Death: 1940 → 1941/ });
+  await expect(death).toBeChecked();
+  await page.getByRole('button', { name: /^Apply \d+ changes?$/ }).click();
+  await applied();
+  expect((await eventDate(request, seeded.tree, josiah, 'DEAT')).date_text).toBe('1941');
+});
+
+test("a renamed person's export name is offered as an alternate, saying so", async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const thaddeus = (await personByName(request, seeded.tree, 'Thaddeus'))!;
+  const detail = (await (
+    await request.get(`/api/trees/${encodeURIComponent(seeded.tree)}/people/${thaddeus}`)
+  ).json()) as { names: { id: string }[] };
+  const renamed = await request.patch(
+    `/api/trees/${encodeURIComponent(seeded.tree)}/names/${detail.names[0]!.id}`,
+    { headers: seeded.headers, data: { given: 'Thad' } },
+  );
+  expect(renamed.ok()).toBe(true);
+  // Ancestry renamed him too, so both sides changed the name (#185).
+  await startReimport(
+    page,
+    seeded,
+    laterExport().replace(
+      '1 NAME Thaddeus /Ashgrove/\n2 GIVN Thaddeus\n',
+      '1 NAME Thaddeus James /Ashgrove/\n2 GIVN Thaddeus James\n',
+    ),
+  );
+  const keep = card(page, 'Thad Ashgrove').getByRole('checkbox', {
+    name: 'Also keep Thaddeus James Ashgrove as an alternate name',
+  });
+  await expect(keep).not.toBeChecked();
+  await expect(
+    card(page, 'Thad Ashgrove').getByText(
+      'The export now calls this person Thaddeus James Ashgrove (it was Thaddeus Ashgrove); you renamed them Thad Ashgrove here. Tick to also keep Thaddeus James Ashgrove as an alternate name; Thad Ashgrove stays the primary name.',
+    ),
+  ).toBeVisible();
 });
 
 test('discarding a review changes nothing', async ({ page, request, baseURL }, testInfo) => {

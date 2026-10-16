@@ -5,11 +5,9 @@ import {
   closeSync,
   linkSync,
   mkdirSync,
-  mkdtempSync,
   openSync,
   readdirSync,
   renameSync,
-  rmSync,
   statSync,
   symlinkSync,
   truncateSync,
@@ -19,12 +17,12 @@ import {
 } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { finished } from 'node:stream/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buffer } from 'node:stream/consumers';
-import { afterAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { GedzipTooLargeError, buildGedzipExport, planGedzipExport, streamGedzip } from './index';
 import { TODAY, ged } from './test-helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 /*
  * Issue #198: the GEDZIP export read every media file into memory and
@@ -32,8 +30,7 @@ import { TODAY, ged } from './test-helpers';
  * list, one consistent snapshot) and streams it, one file at a time.
  */
 
-const root = mkdtempSync(join(tmpdir(), 'oa-gdz-stream-'));
-afterAll(() => rmSync(root, { recursive: true, force: true }));
+const root = makeTempDir('oa-gdz-stream-');
 
 const gedcom = ged(
   '0 @I1@ INDI',
@@ -160,7 +157,7 @@ describe('streamed GEDZIP export', () => {
     const { store, dir } = await tree();
     const plan = planGedzipExport(store, { now: TODAY });
     // The same file, moved out of the tree and reached through a symlinked folder.
-    const outside = mkdtempSync(join(root, 'outside-'));
+    const outside = makeTempDir('oa-outside-');
     renameSync(join(treePaths(dir).media, 'notes'), join(outside, 'notes'));
     symlinkSync(join(outside, 'notes'), join(treePaths(dir).media, 'notes'));
     const files = unzipSync(await buffer(streamGedzip(plan)));

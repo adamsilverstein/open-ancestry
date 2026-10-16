@@ -284,7 +284,8 @@ describe('readGedzip', () => {
 
     it('still reads an honest archive of distinct records', () => {
       const archive = handZip([ged, photo]);
-      expect(readGedzip(archive).media.get('a.bin')).toEqual(sparse);
+      // Compared as a buffer: a deep equal of 2 MiB element by element is slow.
+      expect(Buffer.from(readGedzip(archive).media.get('a.bin')!).equals(sparse)).toBe(true);
     });
   });
 

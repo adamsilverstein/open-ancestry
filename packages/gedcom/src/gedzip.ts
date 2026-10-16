@@ -64,6 +64,8 @@ export function safeEntryPath(name: string): string | undefined {
 
 interface ZipEntry {
   name: string;
+  /** The name as stored, compared byte for byte with the local header's. */
+  rawName: Uint8Array;
   path: string;
   method: number;
   flags: number;
@@ -76,6 +78,24 @@ interface ZipEntry {
 const INFLATE_SLICE = 4096;
 
 const invalid = (message: string) => new GedzipError('invalid', message);
+
+const utf8 = new TextDecoder('utf-8', { fatal: true });
+const cp1252 = new TextDecoder('windows-1252');
+
+/**
+ * An entry name as text. Bit 11 marks UTF-8, but Info-ZIP and macOS (ditto,
+ * Finder) write UTF-8 without it (#287): a name that is valid UTF-8 is read
+ * as UTF-8, and only anything else as the legacy code page (CP437, which
+ * CP1252 covers for ASCII).
+ */
+function decodeName(raw: Uint8Array, flags: number): string {
+  if (flags & 0x800) return new TextDecoder('utf-8').decode(raw);
+  try {
+    return utf8.decode(raw);
+  } catch {
+    return cp1252.decode(raw);
+  }
+}
 
 /** Reads the end-of-central-directory record and every central directory entry. */
 function readCentralDirectory(bytes: Uint8Array, maxEntries: number): Omit<ZipEntry, 'path'>[] {
@@ -105,16 +125,15 @@ function readCentralDirectory(bytes: Uint8Array, maxEntries: number): Omit<ZipEn
     const nameLength = view.getUint16(p + 28, true);
     const end = p + 46 + nameLength + view.getUint16(p + 30, true) + view.getUint16(p + 32, true);
     if (end > bytes.length) throw invalid('Corrupt central directory');
+    const rawName = bytes.subarray(p + 46, p + 46 + nameLength);
     const entry = {
       flags,
       method: view.getUint16(p + 10, true),
       compressedSize: view.getUint32(p + 20, true),
       size: view.getUint32(p + 24, true),
       localOffset: view.getUint32(p + 42, true),
-      // Bit 11 marks UTF-8 names; older tools write CP437, which CP1252 covers for ASCII.
-      name: new TextDecoder(flags & 0x800 ? 'utf-8' : 'windows-1252').decode(
-        bytes.subarray(p + 46, p + 46 + nameLength),
-      ),
+      rawName,
+      name: decodeName(rawName, flags),
     };
     if ([entry.compressedSize, entry.size, entry.localOffset].includes(0xffffffff)) {
       throw invalid('ZIP64 entries are not supported');
@@ -136,10 +155,8 @@ function localRecord(bytes: Uint8Array, entry: ZipEntry) {
   if (p + 30 + nameLength > bytes.length) throw invalid(`Corrupt local header for ${entry.path}`);
   const start = p + 30 + nameLength + view.getUint16(p + 28, true);
   if (start + entry.compressedSize > bytes.length) throw invalid(`${entry.path} is truncated`);
-  const name = new TextDecoder(
-    view.getUint16(p + 6, true) & 0x800 ? 'utf-8' : 'windows-1252',
-  ).decode(bytes.subarray(p + 30, p + 30 + nameLength));
-  return { start, end: start + entry.compressedSize, name };
+  const rawName = bytes.subarray(p + 30, p + 30 + nameLength);
+  return { start, end: start + entry.compressedSize, rawName };
 }
 
 /** Returns an entry's compressed bytes, located through its local header. */
@@ -155,8 +172,8 @@ function entryData(bytes: Uint8Array, entry: ZipEntry): Uint8Array {
  */
 function assertDistinctRecords(bytes: Uint8Array, entries: ZipEntry[]) {
   const ranges = entries.map((entry) => {
-    const { end, name } = localRecord(bytes, entry);
-    return { entry, start: entry.localOffset, end, name };
+    const { end, rawName } = localRecord(bytes, entry);
+    return { entry, start: entry.localOffset, end, rawName };
   });
   ranges.sort((a, b) => a.start - b.start || a.end - b.end);
   for (let i = 1; i < ranges.length; i++) {
@@ -169,8 +186,15 @@ function assertDistinctRecords(bytes: Uint8Array, entries: ZipEntry[]) {
       throw invalid(`${range.entry.path} overlaps ${before.entry.path}`);
     }
   }
-  for (const { entry, name } of ranges) {
-    if (name !== entry.name) throw invalid(`${entry.path} is named ${name} in its local header`);
+  // By bytes: a writer may flag UTF-8 (bit 11) in only one of the two headers.
+  const same = (a: Uint8Array, b: Uint8Array) =>
+    a.length === b.length && a.every((byte, i) => byte === b[i]);
+  for (const { entry, rawName } of ranges) {
+    if (!same(rawName, entry.rawName)) {
+      throw invalid(
+        `${entry.path} is named ${decodeName(rawName, entry.flags)} in its local header`,
+      );
+    }
   }
 }
 

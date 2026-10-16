@@ -127,4 +127,43 @@ describe("a person's corrected fact on re-import (#302)", () => {
       closeReimport(s);
     }
   });
+
+  it("never takes a fact the user typed in as the export's earlier version", async () => {
+    const store = await tree();
+    // Josiah's residence, as if typed in by the user (no import), with the same citation.
+    store.db
+      .prepare(
+        `UPDATE event SET import_batch_id = NULL WHERE type = 'RESI' AND id IN (
+           SELECT event_id FROM event_role WHERE person_id = ?)`,
+      )
+      .run(pid(store, '@I3@'));
+    const s = await prepareReimport(
+      store,
+      { bytes: renumber(SAMPLE.replace(RESI, corrected(RESI))) },
+      { today: TODAY },
+    );
+    try {
+      // The user's own fact is kept and never listed as missing from the export.
+      expect(residenceKinds(store, s)).toEqual(['fact.add']);
+    } finally {
+      closeReimport(s);
+    }
+  });
+
+  it('pairs neither of two incoming facts that cite the same record', async () => {
+    const store = await tree();
+    const twice = `${corrected(RESI)}\n${corrected(RESI).replace('2 DATE 4 JUN 1900', '2 DATE 1901')}`;
+    const s = await prepareReimport(
+      store,
+      { bytes: renumber(SAMPLE.replace(RESI, twice)) },
+      {
+        today: TODAY,
+      },
+    );
+    try {
+      expect(residenceKinds(store, s)).toEqual(['fact.add', 'fact.add', 'fact.missing']);
+    } finally {
+      closeReimport(s);
+    }
+  });
 });

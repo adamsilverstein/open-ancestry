@@ -11,7 +11,7 @@ import {
   type TreeStore,
   type Tx,
 } from '@open-ancestry/db';
-import { BASE_KEY, imageOfView } from './diff';
+import { BASE_KEY, DECLINED, imageOfView, placeRenames } from './diff';
 import { MediaCopier } from './media';
 import type { ReimportSession } from './session';
 import { mediaKeys, norm, sourceKey } from './snapshot';
@@ -154,16 +154,36 @@ export function applyReimport(
     tx.insert('import_batch', { ...batch });
 
     const placeMap = new Map<string, string>();
+    /**
+     * The tree's places by name as the diff compares them (normalized, so case
+     * and accents don't make a second place), with the names places the user
+     * renamed had, so the export's old name finds the renamed place (#271).
+     */
+    let placesByName: Map<string, string> | undefined;
+    const treePlace = (name: string): string | undefined => {
+      if (!placesByName) {
+        placesByName = new Map();
+        const rows = tx.store.db.prepare('SELECT id, full_name FROM place ORDER BY id').all() as {
+          id: string;
+          full_name: string;
+        }[];
+        for (const r of rows) {
+          if (!placesByName.has(norm(r.full_name))) placesByName.set(norm(r.full_name), r.id);
+        }
+        for (const [id, former] of placeRenames(tx.store)) {
+          if (!placesByName.has(norm(former))) placesByName.set(norm(former), id);
+        }
+      }
+      return placesByName.get(norm(name));
+    };
     const ensurePlace = (incomingId: string | null): string | null => {
       if (!incomingId) return null;
       const known = placeMap.get(incomingId);
       if (known) return known;
       const p = get('place', incomingId) as PlaceRow;
-      const existing = tx.store
-        .stmt('SELECT id FROM place WHERE full_name = ? ORDER BY id LIMIT 1')
-        .get(p.full_name) as { id: string } | undefined;
-      const id =
-        existing?.id ?? insert('place', { ...plain(p), parent_id: ensurePlace(p.parent_id) });
+      const existing = treePlace(p.full_name);
+      const id = existing ?? insert('place', { ...plain(p), parent_id: ensurePlace(p.parent_id) });
+      placesByName?.set(norm(p.full_name), id);
       placeMap.set(incomingId, id);
       return id;
     };
@@ -797,6 +817,8 @@ function recordBase(
   for (const person of session.diff.people) {
     for (const c of person.changes) {
       if (written.has(c.id)) continue;
+      // An addition left unticked: remembered, so the same export doesn't bring it back ticked.
+      if (c.declineKey) images[`${DECLINED}${c.declineKey}`] = {};
       if (c.kind === 'fact.change') images[`event|${c.existingEventId}`] = imageOfView(c.after);
       else if (c.kind === 'fact.add' && c.deletedEventId) {
         images[`event|${c.deletedEventId}`] = imageOfView(c.fact);

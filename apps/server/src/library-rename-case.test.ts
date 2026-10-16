@@ -71,4 +71,13 @@ describe('a rename interrupted between its two steps (#289)', () => {
     expect(bare.library.list().map((t) => t.id)).toEqual(['Quill']);
     bare.library.closeAll();
   });
+
+  it('does not fail startup when another server recovers the same folder first', () => {
+    const { library, temp, root } = interrupted({ from: 'Quill', to: 'QUILL' });
+    // Another server starting at the same moment moves it between our listing and our rename.
+    library.testHooks.beforeRecoverRename = () => renameSync(temp, join(root, 'QUILL.oatree'));
+    expect(() => library.recoverRenames()).not.toThrow();
+    expect(library.list().map((t) => t.id)).toEqual(['QUILL']);
+    library.closeAll();
+  });
 });

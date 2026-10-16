@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -64,7 +65,7 @@ describe('a tree busy in another server on the same library (#275 P3)', () => {
     expect(() => second.delete('Shared')).toThrow(/busy in another/);
     expect(() => second.assertIdle('Shared')).toThrow(expect.objectContaining({ statusCode: 409 }));
     // The server holding the lock reports its own import, not another server's.
-    expect(() => first.assertIdle('Shared')).toThrow(/an import is running/);
+    expect(() => first.assertIdle('Shared')).toThrow(/is busy; try again/);
     const again = first.markBusy('Shared');
     release();
     expect(() => second.assertIdle('Shared')).toThrow(/busy in another/);
@@ -91,6 +92,31 @@ describe('a tree busy in another server on the same library (#275 P3)', () => {
     release();
     second.markBusy('Race')();
     for (const library of [first, second, third]) library.closeAll();
+  });
+
+  it('never moves aside a fresh lock another server just took over (#289)', () => {
+    // A and B both judge an old lock stale. A moves it aside and creates its
+    // own; B, a moment later, must not move A's fresh lock aside too.
+    const root = makeTempDir('oa-lock-takeover-');
+    const a = new Library(root);
+    const b = new Library(root);
+    a.create('T');
+    a.closeAll();
+    const lock = join(root, 'T.oatree', 'busy.lock');
+    writeFileSync(lock, JSON.stringify({ pid: 4242, host: 'gone', owner: 'old', at: '' }));
+    const then = new Date(Date.now() - 10 * 60_000);
+    utimesSync(lock, then, then);
+    let releaseA: (() => void) | undefined;
+    b.testHooks.beforeLockTakeover = () => {
+      releaseA = a.markBusy('T');
+    };
+    expect(() => b.markBusy('T')).toThrow(/busy in another/);
+    expect(JSON.parse(readFileSync(lock, 'utf8')).owner).not.toBe('old');
+    expect(() => b.assertIdle('T')).toThrow(/busy in another/);
+    expect(readdirSync(join(root, 'T.oatree')).filter((n) => n.includes('stale'))).toEqual([]);
+    releaseA!();
+    a.closeAll();
+    b.closeAll();
   });
 
   describe('lock liveness: a heartbeat, not the host or a day (#289 a)', () => {

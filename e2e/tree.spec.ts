@@ -1,3 +1,5 @@
+import { cpSync } from 'node:fs';
+import { join } from 'node:path';
 import AxeBuilder from '@axe-core/playwright';
 import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './fixtures';
@@ -146,7 +148,7 @@ test.describe('family view', () => {
     await expect(quick).toContainText('Died 5 Sep 1957');
     await expect(card(page, 'Bram Vale')).toHaveAttribute('aria-expanded', 'true');
     await quick.getByRole('link', { name: 'Profile' }).click();
-    await expect(page).toHaveURL(new RegExp(`/person/${ids.bram}$`));
+    await expect(page).toHaveURL(new RegExp(`/person/${ids.bram}(\\?tree=[^&]*)?$`));
   });
 
   test('quick view Edit opens the editor, not just the profile (#134)', async ({ page }) => {
@@ -156,13 +158,13 @@ test.describe('family view', () => {
       .getByRole('dialog', { name: 'Bram Vale' })
       .getByRole('button', { name: 'Edit' })
       .click();
-    await expect(page).toHaveURL(new RegExp(`/person/${ids.bram}\\?edit=true$`));
+    await expect(page).toHaveURL(new RegExp(`/person/${ids.bram}\\?edit=true(&tree=[^&]*)?$`));
     const editor = page.getByRole('dialog', { name: 'Edit person' });
     await expect(editor).toBeVisible();
     // Closing the editor leaves the plain profile URL, so reload does not reopen it.
     await page.keyboard.press('Escape');
     await expect(editor).toHaveCount(0);
-    await expect(page).toHaveURL(new RegExp(`/person/${ids.bram}$`));
+    await expect(page).toHaveURL(new RegExp(`/person/${ids.bram}(\\?tree=[^&]*)?$`));
     // Focus lands on the header's Edit person button, not lost on the page.
     await expect(page.getByRole('button', { name: 'Edit person' })).toBeFocused();
   });
@@ -880,6 +882,199 @@ test.describe('family view', () => {
     await expect(page).toHaveURL(new RegExp(`/tree/${seed.perf.focusId}\\?`));
     await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
     await expect(card(page, 'Ada Vale')).toHaveCount(0);
+  });
+
+  test('switching trees from a tree view opened without ?tree opens the new tree', async ({
+    page,
+  }) => {
+    // The family tree is the current one (runs after the fixture's own init script).
+    await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+    await page.goto(`/tree/${ids.ada}?layout=pedigree&up=3`);
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    const switcher = page.getByRole('banner').getByRole('button', { name: /Tree:/ });
+    await switcher.click();
+    await page.getByRole('menuitemradio', { name: seed.perf.tree }).click();
+    await expect(page).toHaveURL(new RegExp(`/tree/${seed.perf.focusId}(\\?|$)`));
+    // The view keeps its layout and generations in the new tree.
+    await expect(page).toHaveURL(/layout=pedigree/);
+    await expect(page).toHaveURL(/up=3/);
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    await expect(card(page, 'Ada Vale')).toHaveCount(0);
+    await expect(page.getByText('Person not found')).toHaveCount(0);
+  });
+
+  test('switching trees from a person page opens the new tree, never the old person', async ({
+    page,
+  }) => {
+    await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+    await page.goto(`/person/${ids.ada}`);
+    await expect(page.getByRole('heading', { level: 1, name: /Ada Vale/ })).toBeVisible();
+    const switcher = page.getByRole('banner').getByRole('button', { name: /Tree:/ });
+    await switcher.click();
+    await page.getByRole('menuitemradio', { name: seed.perf.tree }).click();
+    await expect(page).toHaveURL(new RegExp(`/tree/${seed.perf.focusId}(\\?|$)`));
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    await expect(page.getByText('Ada Vale')).toHaveCount(0);
+  });
+
+  test('Back to a person page after switching trees shows that tree, even with shared ids', async ({
+    page,
+    request,
+    baseURL,
+  }, testInfo) => {
+    const { token } = (await (await request.get('/api/session')).json()) as { token: string };
+    const headers = { origin: baseURL!, 'x-oa-token': token };
+    // A copied tree folder keeps every id: the same person id names a person in both trees.
+    const library = process.env.OA_E2E_LIBRARY!;
+    const folder = `copy ${testInfo.workerIndex} ${Date.now()}`;
+    const copy = `${folder} b`;
+    cpSync(join(library, `${tree}.oatree`), join(library, `${folder}.oatree`), { recursive: true });
+    const api = `/api/trees/${encodeURIComponent(copy)}`;
+    try {
+      const renamed = await request.patch(`/api/trees/${encodeURIComponent(folder)}`, {
+        data: { name: copy },
+        headers,
+      });
+      expect(renamed.ok(), await renamed.text()).toBe(true);
+      const detail = await (await request.get(`${api}/people/${ids.ada}`)).json();
+      const nameId = detail.names[0].id as string;
+      expect(
+        (
+          await request.patch(`${api}/names/${nameId}`, { data: { given: 'Adacopy' }, headers })
+        ).ok(),
+      ).toBe(true);
+
+      await page.addInitScript((t) => localStorage.setItem('oa-tree', t), copy);
+      await page.goto(`/person/${ids.ada}`);
+      await expect(page.getByRole('heading', { level: 1, name: /Adacopy Vale/ })).toBeVisible();
+      // The person URL names its tree, so history entries stay in that tree.
+      await expect(page).toHaveURL(new RegExp(`/person/${ids.ada}\\?.*tree=`));
+      const switcher = page.getByRole('banner').getByRole('button', { name: /Tree:/ });
+      await switcher.click();
+      await page.getByRole('menuitemradio', { name: tree, exact: true }).click();
+      // The family tree's home person (Ada) opens in the tree view.
+      await expect(page).toHaveURL(new RegExp(`/tree/${ids.ada}\\?`));
+      await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+      await expect(switcher).toContainText(tree);
+
+      await page.goBack();
+      await expect(page.getByRole('heading', { level: 1, name: /Adacopy Vale/ })).toBeVisible();
+      // The copy is current again, so edits from here go to it.
+      await expect(switcher).toContainText(copy);
+      await page.reload();
+      await expect(page.getByRole('heading', { level: 1, name: /Adacopy Vale/ })).toBeVisible();
+    } finally {
+      await request.delete(api, { headers });
+    }
+  });
+
+  test('a tree without a home person points to the people list', async ({
+    page,
+    request,
+    baseURL,
+  }, testInfo) => {
+    const { token } = (await (await request.get('/api/session')).json()) as { token: string };
+    const headers = { origin: baseURL!, 'x-oa-token': token };
+    const empty = `empty ${testInfo.workerIndex} ${Date.now()}`;
+    expect((await request.post('/api/trees', { data: { name: empty }, headers })).ok()).toBe(true);
+    try {
+      await page.goto(`/tree/home?tree=${encodeURIComponent(empty)}`);
+      await expect(page.getByRole('heading', { name: 'No home person' })).toBeVisible();
+      await page.getByRole('link', { name: 'Open the people list' }).click();
+      await expect(page).toHaveURL(/\/people/);
+    } finally {
+      await request.delete(`/api/trees/${encodeURIComponent(empty)}`, { headers });
+    }
+  });
+
+  test('renaming the open tree keeps the person page working', async ({
+    page,
+    request,
+    baseURL,
+  }, testInfo) => {
+    const { token } = (await (await request.get('/api/session')).json()) as { token: string };
+    const headers = { origin: baseURL!, 'x-oa-token': token };
+    const library = process.env.OA_E2E_LIBRARY!;
+    const folder = `rename ${testInfo.workerIndex} ${Date.now()}`;
+    const renamed = `${folder} renamed`;
+    cpSync(join(library, `${tree}.oatree`), join(library, `${folder}.oatree`), { recursive: true });
+    try {
+      await page.addInitScript((t) => localStorage.setItem('oa-tree', t), folder);
+      await page.goto(`/person/${ids.ada}`);
+      await expect(page.getByRole('heading', { level: 1, name: /Ada Vale/ })).toBeVisible();
+      const switcher = page.getByRole('banner').getByRole('button', { name: /Tree:/ });
+      await switcher.click();
+      await page.getByRole('menuitem', { name: 'Rename tree…' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Rename tree' });
+      await dialog.getByLabel('Tree name').fill(renamed);
+      await dialog.getByRole('button', { name: 'Rename' }).click();
+      await expect(dialog).toBeHidden();
+      // The URL follows the tree's new name, so a reload (or an edit) still finds it.
+      await expect(page).toHaveURL(
+        new RegExp(`tree=${encodeURIComponent(renamed).replace(/%20/g, '(\\+|%20)')}`),
+      );
+      await page.reload();
+      await expect(page.getByRole('heading', { level: 1, name: /Ada Vale/ })).toBeVisible();
+      await expect(switcher).toContainText(renamed);
+    } finally {
+      await request.delete(`/api/trees/${encodeURIComponent(renamed)}`, { headers });
+      await request.delete(`/api/trees/${encodeURIComponent(folder)}`, { headers });
+    }
+  });
+
+  test('a new tree made from a person page opens it, never the old person', async ({
+    page,
+    request,
+    baseURL,
+  }, testInfo) => {
+    const { token } = (await (await request.get('/api/session')).json()) as { token: string };
+    const headers = { origin: baseURL!, 'x-oa-token': token };
+    const created = `new ${testInfo.workerIndex} ${Date.now()}`;
+    try {
+      await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+      await page.goto(`/person/${ids.ada}`);
+      await expect(page.getByRole('heading', { level: 1, name: /Ada Vale/ })).toBeVisible();
+      const switcher = page.getByRole('banner').getByRole('button', { name: /Tree:/ });
+      await switcher.click();
+      await page.getByRole('menuitem', { name: 'New tree…' }).click();
+      const dialog = page.getByRole('dialog', { name: 'New tree' });
+      await dialog.getByLabel('Tree name').fill(created);
+      await dialog.getByRole('button', { name: 'Create tree' }).click();
+      await expect(dialog).toBeHidden();
+      await expect(switcher).toContainText(created);
+      // The empty tree opens on its people list, ready to add someone.
+      await expect(page).toHaveURL(/\/people$/);
+      await expect(page.getByRole('button', { name: 'Add person' })).toBeVisible();
+      await expect(page.getByText('Ada Vale')).toHaveCount(0);
+    } finally {
+      await request.delete(`/api/trees/${encodeURIComponent(created)}`, { headers });
+    }
+  });
+
+  test('changing tabs on a person page keeps the tree in the URL', async ({ page }) => {
+    // Dropping ?tree= would redirect against whichever tree is current.
+    await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+    await page.goto(`/person/${ids.ada}`);
+    await expect(page).toHaveURL(/[?&]tree=/);
+    await page.getByRole('tab', { name: 'Sources' }).click();
+    await expect(page).toHaveURL(/[?&]tab=sources/);
+    await expect(page).toHaveURL(
+      new RegExp(`[?&]tree=${encodeURIComponent(tree).replace(/%20/g, '(%20|\\+)')}`),
+    );
+    await page.getByRole('tab', { name: 'Facts' }).click();
+    await expect(page).not.toHaveURL(/[?&]tab=/);
+    await expect(page).toHaveURL(/[?&]tree=/);
+  });
+
+  test('switching trees on the people list stays on the people list', async ({ page }) => {
+    await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+    await page.goto('/people');
+    await expect(page.getByRole('cell', { name: 'Abel Vale' })).toBeVisible();
+    const switcher = page.getByRole('banner').getByRole('button', { name: /Tree:/ });
+    await switcher.click();
+    await page.getByRole('menuitemradio', { name: seed.perf.tree }).click();
+    await expect(page).toHaveURL(/\/people/);
+    await expect(page.getByRole('cell', { name: 'Abel Vale' })).toHaveCount(0);
   });
 
   test('/tree/home opens the home person', async ({ page }) => {

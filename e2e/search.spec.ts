@@ -76,7 +76,7 @@ test('finds a person by name and opens the person page with Enter', async ({ pag
   await expect(first).toContainText('Kestrel Cove, Saltmarsh');
   await expect(first).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(new RegExp(`/person/${wren}$`));
+  await expect(page).toHaveURL(new RegExp(`/person/${wren}(\\?tree=[^&]*)?$`));
   await expect(dialog).toBeHidden();
 });
 
@@ -167,7 +167,7 @@ test('Enter right after typing waits for this query, never the previous one', as
   await expect(people(dialog).first()).toContainText('Mabyn Thackeray');
   await dialog.getByRole('combobox').fill('ezra');
   await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(new RegExp(`/person/${ezra}$`));
+  await expect(page).toHaveURL(new RegExp(`/person/${ezra}(\\?tree=[^&]*)?$`));
 
   const second = await search(page, 'mabyn');
   await expect(people(second).first()).toContainText('Mabyn Thackeray');
@@ -216,7 +216,7 @@ test('on the tree, Find focuses the tree and Alt+Enter opens the person page', a
   await dialog.getByRole('combobox').fill('ezra thackery');
   await expect(people(dialog).first()).toContainText('Ezra Thackery');
   await page.keyboard.press('Alt+Enter');
-  await expect(page).toHaveURL(new RegExp(`/person/${ezra}$`));
+  await expect(page).toHaveURL(new RegExp(`/person/${ezra}(\\?tree=[^&]*)?$`));
 });
 
 test('search answers within the budget on a 10k tree', async ({ request }) => {

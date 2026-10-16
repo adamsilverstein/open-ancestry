@@ -15,6 +15,7 @@ import {
   type TreeStore,
 } from '@open-ancestry/db';
 import type { Api, Deps } from '../context';
+import { ATTACH_PREFIX } from './imports';
 import { edit, requireRow } from '../edits';
 import { formatBytes } from '../bytes';
 import { ApiError, badRequest, notFound } from '../errors';
@@ -187,9 +188,11 @@ async function hashFile(path: string): Promise<string> {
 
 export function galleryRoutes(
   app: Api,
-  { library, thumbnails, mediaUploadLimit: uploadLimit }: Deps,
+  { library, thumbnails, mediaUploadLimit: uploadLimit, maxConcurrentAttaches }: Deps,
 ): void {
   const attachLocks = new KeyedLock();
+  /** Attaches streaming to a temp folder now: each may hold up to the upload limit on disk. */
+  let attaching = 0;
   app.get(
     '/api/trees/:tree/people/:id/media',
     { schema: { params: TreeIdParams } },
@@ -240,8 +243,17 @@ export function galleryRoutes(
       requireRow(store, ownerType, ownerId);
       return { ownerType, ownerId };
     };
-    const temp = await mkdtemp(join(tmpdir(), 'oa-attach-'));
+    if (attaching >= maxConcurrentAttaches) {
+      throw new ApiError(
+        429,
+        'too_many_jobs',
+        'Too many photos are uploading at once; try again when one finishes',
+      );
+    }
+    attaching++;
+    let temp: string | undefined;
     try {
+      temp = await mkdtemp(join(tmpdir(), ATTACH_PREFIX));
       const fields: Record<string, string> = {};
       let upload: { path: string; name: string; sha256: string; size: number } | undefined;
       const parts = request.parts({
@@ -361,7 +373,8 @@ export function galleryRoutes(
       thumbnails.enqueue(library.dirOf(tree), media.id, media.local_path);
       return reply.code(201).send({ media, batchId: mediaId.batchId });
     } finally {
-      await rm(temp, { recursive: true, force: true });
+      attaching--;
+      if (temp) await rm(temp, { recursive: true, force: true });
     }
   });
 }

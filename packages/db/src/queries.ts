@@ -870,7 +870,7 @@ function sortedPeople(
     birth: ['birth_key', null],
     death: ['death_key', null],
   };
-  const name = (sort && sort in orders ? sort : 'surname') as PeopleSort;
+  const name = (sort && Object.hasOwn(orders, sort) ? sort : 'surname') as PeopleSort;
   const [key, second] = orders[name];
   const text = second !== null;
   const index = `person_sort_${name}${desc ? '_desc' : ''}_idx`;

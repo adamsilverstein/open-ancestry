@@ -427,6 +427,10 @@ describe('listPeople', () => {
     expect(listPeople(store, { sex: 'F' }).total).toBe(5);
     // Untyped callers sending an unknown sort get the default order, not an SQL error.
     expect(listPeople(store, { sort: 'bogus' as 'surname' }).items[0]?.surname).toBe('Fenn');
+    // A prototype key is not a sort either (#267): the default, not a crash.
+    for (const sort of ['toString', 'constructor', '__proto__', 'hasOwnProperty']) {
+      expect(listPeople(store, { sort: sort as 'surname' }).items[0]?.surname, sort).toBe('Fenn');
+    }
 
     store.transact('tag', (tx) => {
       const t = tags.create(tx, { name: 'Line A' });

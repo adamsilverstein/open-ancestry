@@ -1,6 +1,7 @@
 import { existsSync, statSync } from 'node:fs';
 import { mkdir, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
 import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { TreeStore } from '@open-ancestry/db';
@@ -282,6 +283,39 @@ describe('attaching media', () => {
     expect(fileFirst.statusCode).toBe(400);
     expect(fileFirst.json().error.message).toMatch(/owner_type and owner_id before the file/);
     await small.app.close();
+  });
+
+  it('refuses a photo attach past the concurrent limit, before reading it (L5, #267)', async () => {
+    const capped = await testApi({ library, maxConcurrentAttaches: 1 });
+    try {
+      // The first upload sends its fields and part of the file, then waits.
+      const body = multipart(
+        { owner_type: 'person', owner_id: s.ada },
+        { name: 'a.png', bytes: png },
+      );
+      const stream = new PassThrough();
+      stream.write(body.payload.subarray(0, body.payload.length - 200));
+      const slow = capped.inject({
+        method: 'POST',
+        url: `${s.base}/media`,
+        payload: stream,
+        headers: body.headers,
+      });
+      await new Promise((r) => setTimeout(r, 100));
+      const second = multipart(
+        { owner_type: 'person', owner_id: s.ada },
+        { name: 'b.png', bytes: png },
+      );
+      const refused = await capped.inject({ method: 'POST', url: `${s.base}/media`, ...second });
+      expect(refused.statusCode, refused.body).toBe(429);
+      stream.end(body.payload.subarray(body.payload.length - 200));
+      expect((await slow).statusCode).toBe(201);
+      // With the first done, there is room again.
+      const after = await capped.inject({ method: 'POST', url: `${s.base}/media`, ...second });
+      expect(after.statusCode).toBe(201);
+    } finally {
+      await capped.app.close();
+    }
   });
 
   it('deduplicates by sha256 and can attach to an event', async () => {

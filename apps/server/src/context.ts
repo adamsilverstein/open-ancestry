@@ -33,6 +33,8 @@ export interface Deps {
   archiveUploadLimit: number;
   /** Largest media (gallery) upload, in bytes. */
   mediaUploadLimit: number;
+  /** Photo attaches streaming at once; more get 429 before their body is read. */
+  maxConcurrentAttaches: number;
   /** Background WebP thumbnails for media. */
   thumbnails: ThumbnailQueue;
   /** Re-imports waiting for review. */

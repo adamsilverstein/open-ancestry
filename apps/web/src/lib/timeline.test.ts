@@ -247,10 +247,11 @@ describe('lifetime window', () => {
       });
     const titles = (entries: ReturnType<typeof buildTimeline>) => entries.map((e) => e.title);
 
-    it('keeps a BEF death that straddles the death date before it, with no age', () => {
+    it('sorts a BEF death that straddles the death date by its date, with no age (#278)', () => {
+      // "bef. 1920" sorts after a 1911 death, like every other date in the app.
       const entries = withPartnerDeath('BEF 1920', 19200100);
-      expect(titles(entries)).toEqual(['Death of wife Iris Vale', 'Death']);
-      expect(entries[0]!.age).toBeUndefined();
+      expect(titles(entries)).toEqual(['Death', 'Death of wife Iris Vale']);
+      expect(entries[1]!.age).toBeUndefined();
     });
 
     it('keeps an AFT death that starts in the lifetime, with no age', () => {

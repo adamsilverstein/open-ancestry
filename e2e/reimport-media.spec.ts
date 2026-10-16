@@ -168,11 +168,13 @@ test('a photo changed only in the export is offered ticked and shown once applie
   await expect(replace).toBeChecked();
   await apply(page);
 
-  // Back through the app's own history to the gallery seen before.
-  await expect(page).toHaveURL(/\/tree\//);
-  await page.goBack();
-  await page.goBack();
+  // On to the person from the result page, inside the app, and to her gallery.
+  await page
+    .getByRole('region', { name: 'Re-import applied' })
+    .getByRole('link', { name: 'Wren Halloway' })
+    .click();
   await expect(page).toHaveURL(new RegExp(`/person/${person}`));
+  await page.getByRole('tab', { name: 'Gallery' }).click();
   const photo = await galleryPhoto(page);
   await expect.poll(() => shownColor(photo)).toBe('blue');
   expect(await page.evaluate(() => (window as unknown as { stayed?: boolean }).stayed)).toBe(true);

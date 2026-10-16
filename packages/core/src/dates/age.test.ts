@@ -23,7 +23,10 @@ describe('ageAt', () => {
     ['AFT 1900', '1950', 50, true],
     ['BET 1890 AND 1900', '1950', 55, true],
     ['FROM 1890 TO 1900', '1950', 55, true],
-    ['11 FEB 1731/32', '11 FEB 1752', 20, false],
+    // Both Old Style: the same calendar, so exactly 20 years.
+    ['11 FEB 1731/32', '11 FEB 1751/52', 20, false],
+    // Old Style 11 Feb 1732 is Gregorian 22 Feb, so on Gregorian 11 Feb 1752 they were 19.
+    ['11 FEB 1731/32', '11 FEB 1752', 19, false],
     ['29 FEB 2000', '28 FEB 2001', 0, false],
     ['29 FEB 2000', '1 MAR 2001', 1, false],
     ['10 B.C.', '10', 19, true],

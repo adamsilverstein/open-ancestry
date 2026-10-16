@@ -29,7 +29,9 @@ describe('sortKey', () => {
     ['FROM 1941', 19410701],
     ['TO 1941', 19410701],
     ['1750/51', 17510701],
-    ['11 FEB 1731/32', 17320211],
+    // A dual date is Old Style: Julian 11 Feb 1732 is Gregorian 22 Feb 1732 (#298).
+    ['11 FEB 1731/32', 17320222],
+    ['29 FEB 1751/52', 17520311],
     ['44 B.C.', -44 * 10000 + 701],
     ['15 MAR 44 B.C.', -44 * 10000 + 315],
     ['JULIAN 5 SEP 1700', 17000916],
@@ -237,5 +239,43 @@ describe('yearOf', () => {
   it('is undefined for text', () => {
     expect(yearOf('unknown')).toBeUndefined();
     expect(yearOf(parseDate(''))).toBeUndefined();
+  });
+});
+
+describe('dual dates sort as Julian (#298)', () => {
+  it('gives a dual date the same key as the Julian date it is', () => {
+    expect(parseDate('29 FEB 1751/52').sortKey).toBe(parseDate('@#DJULIAN@ 29 FEB 1752').sortKey);
+    expect(parseDate('ABT 11 FEB 1731/32').sortKey).toBe(
+      parseDate('ABT @#DJULIAN@ 11 FEB 1732').sortKey,
+    );
+  });
+
+  it('agrees with the Julian date for any day', () => {
+    const MON = [
+      'JAN',
+      'FEB',
+      'MAR',
+      'APR',
+      'MAY',
+      'JUN',
+      'JUL',
+      'AUG',
+      'SEP',
+      'OCT',
+      'NOV',
+      'DEC',
+    ];
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1000, max: 1998 }),
+        fc.integer({ min: 1, max: 12 }),
+        fc.integer({ min: 1, max: 28 }),
+        (year, month, day) => {
+          const dual = `${day} ${MON[month - 1]} ${year}/${String((year + 1) % 100).padStart(2, '0')}`;
+          const julian = `@#DJULIAN@ ${day} ${MON[month - 1]} ${year + 1}`;
+          expect(parseDate(dual).sortKey).toBe(parseDate(julian).sortKey);
+        },
+      ),
+    );
   });
 });

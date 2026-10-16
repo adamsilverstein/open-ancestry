@@ -85,6 +85,34 @@ describe('derived column refresh', () => {
     store.close();
   });
 
+  it('recomputes dual (Old Style) dates, which sort as Julian (#298)', () => {
+    const store = openMemoryTree();
+    store.transact('seed', (tx) => {
+      const p = persons.create(tx, { names: [{ given: 'Osric', surname: 'Pell' }] });
+      for (const date_text of ['29 FEB 1751/52', '1820']) {
+        events.create(tx, {
+          type: 'BIRT',
+          date_text,
+          calendar: 'gregorian',
+          // What the importer stored before #298: the day read as Gregorian.
+          date_sort: date_text === '1820' ? 18200701 : 17520229,
+          date_sort_end: null,
+          roles: [{ person_id: p.id }],
+        });
+      }
+    });
+    expect(refreshDerivedColumns(store, { force: true })).toMatchObject({ event_date_sort: 1 });
+    expect(sorts(store)).toEqual([
+      { date_text: '1820', date_sort: 18200701, date_sort_end: null },
+      {
+        date_text: '29 FEB 1751/52',
+        date_sort: parseDate('@#DJULIAN@ 29 FEB 1752').sortKey,
+        date_sort_end: null,
+      },
+    ]);
+    store.close();
+  });
+
   it('runs on open only when the date parser changed, and logs what it did', () => {
     const dir = join(root, 'stale.oatree');
     let store = createTree(dir);

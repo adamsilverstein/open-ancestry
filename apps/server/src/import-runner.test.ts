@@ -1,11 +1,11 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createTree, type TreeStore } from '@open-ancestry/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { generateGedcom } from '../../../fixtures/generate';
 import { devWorkerImporter, type WorkerImporterOptions } from './import-runner';
 import type { ImportProgress } from './jobs';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 /*
  * Imports run in a worker thread (security review): a hostile file can only
@@ -15,12 +15,11 @@ import type { ImportProgress } from './jobs';
 let root: string;
 let store: TreeStore;
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'oa-runner-'));
+  root = makeTempDir('oa-runner-');
   store = createTree(join(root, 'T.oatree'));
 });
 afterEach(() => {
   store.close();
-  rmSync(root, { recursive: true, force: true });
 });
 
 function file(name: string, content: string) {

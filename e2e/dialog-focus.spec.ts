@@ -48,6 +48,95 @@ test.describe('focus returns to the opener', () => {
     await expect(opener).toBeFocused();
   });
 
+  test('the command palette opened over Edit person gives focus back to the dialog', async ({
+    page,
+  }) => {
+    // Escape from the palette must not leave focus on <body> just because the
+    // dialog underneath is open: that dialog holds what opened the palette.
+    await openSeeded(page, seeded);
+    await openWithKeyboard(page.getByRole('button', { name: 'Edit person', exact: true }));
+    const dialog = page.getByRole('dialog', { name: 'Edit person' });
+    const given = dialog.getByRole('textbox', { name: 'Given names' }).first();
+    await expect(given).toBeFocused();
+    await page.keyboard.press(`${process.platform === 'darwin' ? 'Meta' : 'Control'}+k`);
+    const palette = page.getByRole('dialog', { name: 'Command palette' });
+    await expect(palette).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(palette).toBeHidden();
+    await expect(dialog).toBeVisible();
+    await expect(given).toBeFocused();
+  });
+
+  test('Add person run from the palette over Edit person keeps focus in Add person', async ({
+    page,
+  }) => {
+    // The action's dialog opens over Edit person, which holds the opener: focus
+    // must stay in the new dialog, not go back to the hidden field beneath it.
+    await openSeeded(page, seeded);
+    await openWithKeyboard(page.getByRole('button', { name: 'Edit person', exact: true }));
+    const edit = page.getByRole('dialog', { name: 'Edit person' });
+    await expect(edit.getByRole('textbox', { name: 'Given names' }).first()).toBeFocused();
+    await page.keyboard.press(`${process.platform === 'darwin' ? 'Meta' : 'Control'}+k`);
+    const palette = page.getByRole('dialog', { name: 'Command palette' });
+    await palette.getByRole('combobox').fill('Add person');
+    await palette
+      .getByRole('option', { name: /^Add person/ })
+      .first()
+      .click();
+    const add = page.getByRole('dialog', { name: 'Add person' });
+    await expect(add).toBeVisible();
+    await expect(add.getByRole('textbox').first()).toBeFocused();
+    await expect(page.locator('[role="dialog"][data-state="open"]')).toHaveCount(2);
+  });
+
+  test('a palette opener removed while the palette was open sends focus nowhere hidden', async ({
+    page,
+  }) => {
+    // The field that opened the palette is gone when it closes: the dialog it
+    // was in keeps focus inside it rather than dropping it on <body>.
+    await openSeeded(page, seeded);
+    await openWithKeyboard(page.getByRole('button', { name: 'Edit person', exact: true }));
+    const edit = page.getByRole('dialog', { name: 'Edit person' });
+    const given = edit.getByRole('textbox', { name: 'Given names' }).first();
+    await expect(given).toBeFocused();
+    // A handle: the palette's modal hides Edit person from role queries.
+    const field = (await given.elementHandle())!;
+    await page.keyboard.press(`${process.platform === 'darwin' ? 'Meta' : 'Control'}+k`);
+    const palette = page.getByRole('dialog', { name: 'Command palette' });
+    await expect(palette).toBeVisible();
+    await field.evaluate((el) => el.remove());
+    await page.keyboard.press('Escape');
+    await expect(palette).toBeHidden();
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const active = document.activeElement;
+          return !!active && active !== document.body && !!active.closest('[role="dialog"]');
+        }),
+      )
+      .toBe(true);
+  });
+
+  test('the palette opened over the Delete person confirm gives focus back to the confirm', async ({
+    page,
+  }) => {
+    await openSeeded(page, seeded);
+    await openWithKeyboard(page.getByRole('button', { name: 'Edit person', exact: true }));
+    const edit = page.getByRole('dialog', { name: 'Edit person' });
+    await edit.getByRole('button', { name: 'Delete person' }).click();
+    const confirm = page.getByRole('alertdialog', { name: /Delete Rowan Ashdown/ });
+    await expect(confirm).toBeVisible();
+    const focused = () =>
+      page.evaluate(() => document.activeElement?.closest('[role="alertdialog"]') !== null);
+    await expect.poll(focused).toBe(true);
+    await page.keyboard.press(`${process.platform === 'darwin' ? 'Meta' : 'Control'}+k`);
+    const palette = page.getByRole('dialog', { name: 'Command palette' });
+    await expect(palette).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(palette).toBeHidden();
+    await expect.poll(focused).toBe(true);
+  });
+
   test('Edit person opened with a mouse click returns focus to it', async ({ page }) => {
     // WebKit does not focus a clicked button and focuses the <main> landmark
     // (tabindex=-1) instead; that must not become the place focus returns to.

@@ -7,6 +7,7 @@ import { refreshDerivedColumns } from './derived';
 import { ENUM_COLUMNS } from './enums';
 import { listTables, migrate, upgradeRow, type TableRowsByName } from './migrations/index';
 import { nfcRow } from './nfc';
+import { mergeTags, recordMergedIds } from './migrations/v003-nfc-text';
 import type { TreeStore } from './store';
 import { parseLogImage } from './undo';
 import type { ChangeBatchRow, ChangeLogRow, TableRows } from './types';
@@ -213,6 +214,11 @@ export function importJson(
       `Document does not match the JSON Schema: ${first?.instancePath ?? ''} ${first?.message ?? ''}`.trim(),
     );
   }
+  // Two copies of one tag that differ only in normalization would collide once
+  // stored as NFC; merge them as the v3 upgrade does. Links are copied first
+  // so the caller's document is left as it was.
+  if (tables.tag_link) tables.tag_link = tables.tag_link.map((row) => ({ ...row }));
+  recordMergedIds(tables, mergeTags(tables));
   const valid = doc as OaJsonDocument;
   for (const entry of valid.tables.change_log ?? []) {
     parseLogImage(store, entry.entity, entry.entity_id, entry.before_json, entry.schema_version);

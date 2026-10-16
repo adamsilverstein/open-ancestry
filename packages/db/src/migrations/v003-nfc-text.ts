@@ -142,23 +142,7 @@ export function upgradeRow(table: string, row: Row): Row {
 
 /** The merges for an older JSON document, whose rows `upgradeRow` already normalized. */
 export function upgradeTables(tables: TableRowsByName): void {
-  const merged: string[] = [];
-  merged.push(
-    ...mergeRows(
-      tables,
-      'tag',
-      (t) => `${String(t.category)}\u0000${String(t.name)}`,
-      (from, to) => {
-        const links = tables.tag_link;
-        if (!links) return;
-        for (const link of links) if (link.tag_id === from) link.tag_id = to;
-        tables.tag_link = unique(
-          links,
-          (l) => `${String(l.tag_id)}|${String(l.owner_type)}|${String(l.owner_id)}`,
-        );
-      },
-    ),
-  );
+  const merged = mergeTags(tables);
   merged.push(
     ...mergeRows(
       tables,
@@ -185,11 +169,47 @@ export function upgradeTables(tables: TableRowsByName): void {
       },
     ),
   );
-  if (merged.length) {
-    const meta = (tables.meta ??= []).filter((row) => row.key !== MERGED_IDS_KEY);
-    meta.push({ key: MERGED_IDS_KEY, value: JSON.stringify(merged.sort()) });
-    tables.meta = meta;
+  recordMergedIds(tables, merged);
+}
+
+/**
+ * Folds tags whose category and name are equal once normalized into the one
+ * with the smallest id, repointing their links (the UNIQUE constraint on tag
+ * would refuse both). Changes `tables` in place; returns the ids merged away.
+ */
+export function mergeTags(tables: TableRowsByName): string[] {
+  return mergeRows(
+    tables,
+    'tag',
+    (t) => `${String(t.category)}\u0000${String(t.name)}`,
+    (from, to) => {
+      const links = tables.tag_link;
+      if (!links) return;
+      for (const link of links) if (link.tag_id === from) link.tag_id = to;
+      tables.tag_link = unique(
+        links,
+        (l) => `${String(l.tag_id)}|${String(l.owner_type)}|${String(l.owner_id)}`,
+      );
+    },
+  );
+}
+
+/** Adds `ids` to the document's list of merged ids, so undo can explain refusing them. */
+export function recordMergedIds(tables: TableRowsByName, ids: readonly string[]): void {
+  if (!ids.length) return;
+  const meta = tables.meta ?? [];
+  const previous = meta.find((row) => row.key === MERGED_IDS_KEY);
+  let known: unknown = [];
+  try {
+    known = previous ? JSON.parse(String(previous.value)) : [];
+  } catch {
+    // An unreadable list is replaced; it only improves undo's message.
   }
+  const all = new Set([...(Array.isArray(known) ? known.map(String) : []), ...ids]);
+  tables.meta = [
+    ...meta.filter((row) => row !== previous),
+    { key: MERGED_IDS_KEY, value: JSON.stringify([...all].sort()) },
+  ];
 }
 
 /**

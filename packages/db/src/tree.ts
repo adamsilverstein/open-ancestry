@@ -183,6 +183,36 @@ export function openTree(dir: string, options: StoreOptions = {}): TreeStore {
   }
 }
 
+/**
+ * A tree's stored name, read without opening it as a store: a read-only
+ * connection that runs no migration and is closed at once, after the same
+ * access checks and permission tightening as openTree. For listing a library, where opening (and so
+ * upgrading) every tree could wait on another process's long upgrade.
+ * Throws SQLITE_BUSY after `busyTimeoutMs` if another connection holds a lock.
+ */
+export function readTreeName(
+  dir: string,
+  { busyTimeoutMs = 5000 }: { busyTimeoutMs?: number } = {},
+): string | undefined {
+  assertTreeDir(dir);
+  const paths = treePaths(dir);
+  if (!existsSync(paths.database)) throw new Error(`Tree not found at ${dir}`);
+  assertOwnTree(paths);
+  restrictTree(paths);
+  const db = new Database(paths.database, {
+    readonly: true,
+    fileMustExist: true,
+    timeout: Math.max(0, Math.floor(busyTimeoutMs)),
+  });
+  try {
+    const row = db.prepare("SELECT value FROM meta WHERE key = 'tree_name'").get() as
+      { value: string } | undefined;
+    return row && toNFC(row.value);
+  } finally {
+    db.close();
+  }
+}
+
 /** An in-memory tree for tests and tools. */
 export function openMemoryTree({ name, ...options }: CreateTreeOptions = {}): TreeStore {
   const store = new TreeStore(new Database(':memory:'), null, options);

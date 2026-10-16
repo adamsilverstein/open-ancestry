@@ -2,6 +2,7 @@ import {
   chmodSync,
   cpSync,
   existsSync,
+  mkdirSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -11,6 +12,7 @@ import { readdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
+import { getSchemaVersion, migrate } from '@open-ancestry/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from './index';
 import { Library, defaultLibraryRoot, treeNameProblem } from './library';
@@ -117,6 +119,35 @@ describe('Library', () => {
     await running;
     library.rename('Busy', 'Other');
     expect(library.list().map((t) => t.id)).toEqual(['Other']);
+    library.closeAll();
+  });
+
+  it('lists a tree another process is upgrading without waiting for the upgrade', () => {
+    const root = makeTempDir('oa-lib-');
+    // A tree written by an older version, so opening it would upgrade it.
+    const dir = join(root, 'Old.oatree');
+    mkdirSync(join(dir, 'media'), { recursive: true });
+    mkdirSync(join(dir, 'thumbs'));
+    const old = new Database(join(dir, 'tree.sqlite'));
+    migrate(old, { to: 3 });
+    old.prepare("INSERT INTO meta (key, value) VALUES ('tree_name', 'Old family')").run();
+    old.pragma('journal_mode = WAL');
+    // Another server or the CLI is part way through the upgrade: it holds the
+    // write lock, and an upgrade waits for its lock for up to 30 s.
+    old.exec('BEGIN IMMEDIATE');
+    const library = new Library(root);
+    try {
+      const started = performance.now();
+      expect(library.list().map(({ id, name }) => ({ id, name }))).toEqual([
+        { id: 'Old', name: 'Old family' },
+      ]);
+      expect(performance.now() - started).toBeLessThan(1000);
+    } finally {
+      old.exec('ROLLBACK');
+    }
+    // Listing reads the name only: it leaves the upgrade to whoever opens the tree.
+    expect(getSchemaVersion(old)).toBe(3);
+    old.close();
     library.closeAll();
   });
 

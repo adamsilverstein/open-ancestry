@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
-import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
+import { lstat, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { Transform } from 'node:stream';
@@ -16,16 +16,19 @@ export const IMPORT_EXTENSIONS = new Set(['.ged', '.gedcom', '.zip', '.gdz']);
 const ARCHIVE_EXTENSIONS = new Set(['.zip', '.gdz']);
 
 export const UPLOAD_PREFIX = 'oa-upload-';
+/** Photo attach uploads (routes/gallery.ts) stream to folders named like this. */
+export const ATTACH_PREFIX = 'oa-attach-';
 /** Upload folders older than this are left over from a crash and swept on startup. */
 export const STALE_UPLOAD_MS = 6 * 60 * 60 * 1000;
 
-/** Startup: removes upload temp folders an earlier, interrupted server left behind. */
+/** Startup: removes upload and attach temp folders an earlier, interrupted server left behind. */
 export async function sweepStaleUploads(now = Date.now(), dir = tmpdir()): Promise<number> {
   let removed = 0;
   for (const name of await readdir(dir).catch(() => [] as string[])) {
-    if (!name.startsWith(UPLOAD_PREFIX)) continue;
+    if (!name.startsWith(UPLOAD_PREFIX) && !name.startsWith(ATTACH_PREFIX)) continue;
     const path = join(dir, name);
-    const info = await stat(path).catch(() => null);
+    // lstat: a link named like our folder is not ours, and is never followed.
+    const info = await lstat(path).catch(() => null);
     if (!info?.isDirectory() || now - info.mtimeMs < STALE_UPLOAD_MS) continue;
     await rm(path, { recursive: true, force: true });
     removed++;

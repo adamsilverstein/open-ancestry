@@ -46,6 +46,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-unit
+          # Re-running a failed job uploads again under the same name.
+          overwrite: true
           path: coverage/unit/
           retention-days: 3
 
@@ -92,6 +94,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-e2e-${{ matrix.shard }}
+          # Re-running a failed job uploads again under the same name.
+          overwrite: true
           path: coverage/e2e/raw/
           retention-days: 3
 
@@ -100,6 +104,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report-${{ matrix.shard }}
+          # Re-running a failed job uploads again under the same name.
+          overwrite: true
           path: |
             playwright-report/
             test-results/
@@ -162,6 +168,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage
+          # Re-running a failed job uploads again under the same name.
+          overwrite: true
           path: coverage/merged/
           retention-days: 14
 

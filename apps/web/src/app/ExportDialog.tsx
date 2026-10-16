@@ -72,10 +72,20 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
   // The decision lasts for one tree and format in one opening of the dialog (#277).
   const [choice, setChoice] = useState<boolean | undefined>();
   const [wasOpen, setWasOpen] = useState(open);
+  // Said in a status line when a change of format or tree turns privatize back on.
+  const [resetNote, setResetNote] = useState('');
   if (open !== wasOpen) {
     setWasOpen(open);
-    if (open) setChoice(undefined);
+    if (open) {
+      setChoice(undefined);
+      setResetNote('');
+    }
   }
+  /** Back to the tree's default after a format or tree change, saying so if that turns it on. */
+  const resetChoice = () => {
+    setResetNote(choice === false ? 'Privatize turned back on for this export.' : '');
+    setChoice(undefined);
+  };
   const [state, setState] = useState<ExportState>({ status: 'idle' });
   const list = trees.data ?? [];
   // The open tree by default, or the only one there is.
@@ -83,7 +93,14 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
     tree ??
     (current && list.some((t) => t.id === current) ? current : undefined) ??
     (list.length === 1 ? list[0]!.id : undefined);
-  const info = useQuery({ ...treeQuery(selected ?? ''), enabled: open && Boolean(selected) });
+  // Fresh counts on every opening: someone living may have been added in another
+  // tab or by the CLI since the cached ones, and they decide the privatize default (#283).
+  const info = useQuery({
+    ...treeQuery(selected ?? ''),
+    enabled: open && Boolean(selected),
+    staleTime: 0,
+    refetchOnMount: 'always',
+  });
   const living = info.data?.livingCount ?? 0;
   const marked = info.data?.privateCount ?? 0;
   // Privatize by default whenever the tree has living or private people, and fail closed:
@@ -149,8 +166,8 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
             </DialogClose>
             <Button
               variant="primary"
-              // Wait for the counts that decide the privatize default (a failed load keeps it on).
-              disabled={!selected || (Boolean(selected) && info.isPending)}
+              // Wait for fresh counts that decide the privatize default (a failed load keeps it on).
+              disabled={!selected || (Boolean(selected) && (info.isPending || info.isFetching))}
               loading={state.status === 'busy'}
               iconStart={<Download size={16} aria-hidden />}
               onClick={download}
@@ -185,7 +202,7 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
             value={selected}
             onValueChange={(id) => {
               setTree(id);
-              setChoice(undefined);
+              resetChoice();
             }}
             placeholder={trees.isPending ? 'Loading trees…' : 'Choose a tree'}
             error={
@@ -202,7 +219,7 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
             value={format}
             onValueChange={(value) => {
               setFormat(value as ExportFormat);
-              setChoice(undefined);
+              resetChoice();
             }}
           />
           <Checkbox
@@ -214,7 +231,10 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
             }
             checked={privatize}
             disabled={!canPrivatize(format)}
-            onChange={(event) => setChoice(event.target.checked)}
+            onChange={(event) => {
+              setChoice(event.target.checked);
+              setResetNote('');
+            }}
           />
           {format === 'json' && (
             <Checkbox
@@ -223,6 +243,12 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
               checked={history}
               onChange={(event) => setHistory(event.target.checked)}
             />
+          )}
+          {/* Visually hidden: the checkbox shows the new state; this says it changed. */}
+          {privatize && resetNote && (
+            <p className="oa-visually-hidden" role="status">
+              {resetNote}
+            </p>
           )}
           {info.isError && (
             <p className={styles.warning} role="status">

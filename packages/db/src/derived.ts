@@ -275,6 +275,7 @@ export function* rebuildSearchIndexInChunks(store: TreeStore, size = 2000): Gene
     yield Math.min(start + size, ids.length);
   }
   saveFingerprint(store, searchIndex.name, fingerprint);
+  store.searchRebuildPending = false;
   if (ids.length > 0) {
     store.log(`Recomputed ${searchIndex.name} for ${ids.length} rows (${searchIndex.reason})`);
   }
@@ -304,7 +305,10 @@ export function refreshDerivedColumns(
   const results: Record<string, number> = {};
   store.db.transaction(() => {
     for (const step of DERIVED_STEPS) {
-      if (deferSearch && step === searchIndex) continue;
+      if (deferSearch && step === searchIndex) {
+        store.searchRebuildPending = searchIndexStale(store);
+        continue;
+      }
       const fingerprint = step.fingerprint();
       if (!force && storedFingerprint(store, step.name) === fingerprint) continue;
       const changed = step.recompute(store);

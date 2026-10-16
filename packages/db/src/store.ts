@@ -75,6 +75,11 @@ export class TreeStore {
   /** The schema version this store migrated to and writes change_log images under. */
   readonly schemaVersion: number;
   readonly log: (message: string) => void;
+  /**
+   * Set while a stale search index waits for `rebuildSearchIndexInChunks`: some
+   * documents predate the current fold, so searches also try the query as typed.
+   */
+  searchRebuildPending = false;
   private readonly statements = new Map<string, Statement>();
   private readonly plans = new Map<string, TablePlan>();
 

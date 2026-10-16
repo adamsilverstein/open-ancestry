@@ -156,16 +156,24 @@ function wordMatch(word: string, tier: SearchMatch, keys: string[]): string {
  * keys 5, places and years 1.
  */
 /** Query words and their phonetic keys, or null when nothing can match. */
-function parseQuery(query: string, phoneticKeys: SearchOptions['phoneticKeys'] = []) {
+function parseQuery(
+  query: string,
+  phoneticKeys: SearchOptions['phoneticKeys'] = [],
+  asTypedToo = false,
+) {
   // Folded like the index (NFC, ı, ß, vowel marks, apostrophes); distinct and
   // capped so a long repetitive query cannot stall the server.
-  const words = [
-    ...new Set(
-      (foldForSearch(query.slice(0, MAX_SEARCH_LENGTH)).match(/[\p{L}\p{N}]+/gu) ?? []).map((w) =>
-        w.toLowerCase(),
-      ),
-    ),
-  ].slice(0, MAX_SEARCH_WORDS);
+  const toWords = (text: string) =>
+    [...new Set((text.match(/[\p{L}\p{N}]+/gu) ?? []).map((w) => w.toLowerCase()))].slice(
+      0,
+      MAX_SEARCH_WORDS,
+    );
+  const typed = query.slice(0, MAX_SEARCH_LENGTH);
+  const words = toWords(foldForSearch(typed));
+  // While a deferred rebuild runs, some documents predate the fold and hold names
+  // only as typed: also match the query unfolded, as searches did before (#199).
+  const asTyped = asTypedToo ? toWords(typed.normalize('NFC')) : [];
+  const alsoAsTyped = asTyped.length > 0 && asTyped.join(' ') !== words.join(' ');
   if (words.length === 0) return null;
   const keysFor = (word: string, index: number): string[] => {
     const keys =
@@ -180,8 +188,12 @@ function parseQuery(query: string, phoneticKeys: SearchOptions['phoneticKeys'] =
   };
   const keys = words.map(keysFor);
   const hasPhonetic = keys.some((k) => k.length > 0);
-  const match = (tier: SearchMatch) =>
-    words.map((w, i) => wordMatch(w, tier, keys[i]!)).join(' AND ');
+  const match = (tier: SearchMatch) => {
+    const folded = words.map((w, i) => wordMatch(w, tier, keys[i]!)).join(' AND ');
+    return alsoAsTyped
+      ? `(${folded}) OR (${asTyped.map((w) => wordMatch(w, tier, [])).join(' AND ')})`
+      : folded;
+  };
   return { match, hasPhonetic };
 }
 
@@ -194,7 +206,8 @@ export function countPeople(
   query: string,
   { phoneticKeys = [] }: Omit<SearchOptions, 'limit'> = {},
 ): number {
-  const parsed = parseQuery(query, phoneticKeys);
+  // Same matching as searchPeople, folded and (mid-rebuild) as typed, so the total agrees.
+  const parsed = parseQuery(query, phoneticKeys, store.searchRebuildPending);
   if (!parsed) return 0;
   return store
     .stmt('SELECT count(*) FROM person_search WHERE person_search MATCH ?')
@@ -207,7 +220,7 @@ export function searchPeople(
   query: string,
   { limit = 20, phoneticKeys = [], tiebreakMaxMatches = TIEBREAK_MAX_MATCHES }: SearchOptions = {},
 ): SearchResult[] {
-  const parsed = parseQuery(query, phoneticKeys);
+  const parsed = parseQuery(query, phoneticKeys, store.searchRebuildPending);
   if (!parsed || limit < 1) return [];
   const { hasPhonetic } = parsed;
 

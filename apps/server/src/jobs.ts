@@ -74,6 +74,8 @@ interface Job extends JobView {
   controller: AbortController;
   /** A queued job being cancelled: cleaning up, never to run. */
   cancelling?: boolean;
+  /** Its work returned or threw: only cleanup is left, which a cancel can't stop. */
+  finished?: boolean;
   cleanup: () => Promise<void>;
 }
 
@@ -179,13 +181,17 @@ export class JobManager {
   /**
    * Whether `cancel` can still stop the job: it is queued, or running in a
    * phase the work checks its abort signal in. An importer reports `finalize`
-   * and `commit` for the stretch it runs to the end without checking.
+   * and `commit` for the stretch it runs to the end without checking; a
+   * re-import's compare can always be stopped, since those phases are of its
+   * scratch copy. Once the work has returned, nothing is left to stop.
    */
   cancellable(id: string): boolean {
     const job = this.jobs.get(id);
     if (!job) return false;
     if (job.state === 'queued') return true;
-    if (job.state !== 'running') return false;
+    if (job.state !== 'running' || job.finished) return false;
+    // A re-import's compare never writes the tree: its importer phases are of a scratch copy.
+    if (job.kind === 'reimport') return true;
     const phase = job.progress?.phase;
     return !(typeof phase === 'string' && UNCANCELLABLE_PHASES.has(phase));
   }
@@ -272,6 +278,7 @@ export class JobManager {
         // Only a failure after an abort is a cancel; work that finished anyway completed.
         job.cancelled = job.controller.signal.aborted;
       }
+      job.finished = true;
     }
     // Clean up first, so a finished job never leaves its upload behind.
     await job.cleanup().catch(() => {});

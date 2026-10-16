@@ -67,3 +67,49 @@ describe('a phrase after a qualified date (#272)', () => {
     expect(parseDate('5 SEP 1941 (a note)').qualifier).toBe('interpreted');
   });
 });
+
+describe('dual-dated leap days follow Julian (Old Style) rules (#272 review)', () => {
+  // 1700 is a Julian leap year but not a Gregorian one; dual dating is Old Style.
+  it.each(['29 FEB 1699/1700', '29 FEB 1699/00'])('accepts %s', (text) => {
+    expect(parseDate(text)).toMatchObject({ valid: true, start: { day: 29, month: 2 } });
+    expect(toGedcom(text)).toBe('29 FEB 1699/00');
+    // GEDCOM 7 has no dual years: an Old Style day is a Julian one.
+    expect(toGedcom(text, '7')).toBe('JULIAN 29 FEB 1700');
+  });
+  it.each(['29 FEB 1752/53', '29 FEB 1750/51'])(
+    'rejects %s, not a leap year either way',
+    (text) => {
+      expect(parseDate(text).valid).toBe(false);
+    },
+  );
+});
+
+describe('a note after a range or period (#272 review)', () => {
+  it.each([
+    [
+      'BET 1890 AND 1895 (per census)',
+      'between',
+      'BET 1890 AND 1895',
+      'bet. 1890 and 1895 (per census)',
+    ],
+    ['FROM 1890 TO 1895 (lease)', 'from_to', 'FROM 1890 TO 1895', 'from 1890 to 1895 (lease)'],
+    ['FROM 1890 (lease)', 'from', 'FROM 1890', 'from 1890 (lease)'],
+    ['TO 1895 (lease)', 'to', 'TO 1895', 'to 1895 (lease)'],
+    ['1850s (family story)', 'between', 'BET 1850 AND 1859', 'bet. 1850 and 1859 (family story)'],
+    ['@#DJULIAN@ ABT 1700 (old style)', 'about', 'ABT JULIAN 1700', 'abt. Julian 1700 (old style)'],
+  ])('%s keeps its form and phrase', (text, qualifier, v7, shown) => {
+    const date = parseDate(text);
+    expect(date).toMatchObject({
+      qualifier,
+      valid: true,
+      phrase: text.slice(text.indexOf('(') + 1, -1),
+    });
+    expect(toGedcom(date, '7')).toBe(v7);
+    expect(formatDate(date)).toBe(shown);
+    expect(parseDate(shown)).toMatchObject({
+      qualifier,
+      sortKey: date.sortKey,
+      phrase: date.phrase,
+    });
+  });
+});

@@ -113,15 +113,22 @@ function parseNormalized(
   }
 
   let match = INT.exec(s);
-  if (match || phrase !== undefined) {
-    let inner = match ? match[1]! : s;
+  if (!match && phrase !== undefined) {
+    // A note after a date keeps everything the date says: "BEF 1850 (per
+    // census)" is still before 1850, "BET 1890 AND 1895 (note)" still a range.
+    // Only a plain date with a note reads as interpreted.
+    const date = parseNormalized(original, input, undefined);
+    if (!date) return undefined;
+    if (date.qualifier === 'exact') date.qualifier = 'interpreted';
+    if (phrase) date.phrase = phrase;
+    return date;
+  }
+  if (match) {
+    let inner = match[1]!;
     const simple = SIMPLE.exec(inner);
     if (simple) inner = simple[2]!;
     const p = parsePoint(inner, calendar);
-    // A note after a qualified date keeps the qualifier: "BEF 1850 (per census)"
-    // is still before 1850. A plain date with a note, or INT, is interpreted.
-    const qualifier = !match && simple ? SIMPLE_QUALIFIERS[simple[1]!]! : 'interpreted';
-    return p && single(original, qualifier, p, phrase);
+    return p && single(original, 'interpreted', p, phrase);
   }
 
   if ((match = BETWEEN.exec(s))) return range(original, 'between', match[1]!, match[2]!, calendar);
@@ -368,9 +375,11 @@ function validPoint(
     point.dualYear = next;
   }
   if (day !== undefined) {
-    // A dual-dated day falls in the new-style year: 29 FEB 1751/52 is a leap day of 1752.
+    // A dual-dated day falls in the new-style year and in the Julian calendar
+    // (Old Style), so 29 FEB 1751/52 and 29 FEB 1699/1700 are real days.
     const inYear = point.dualYear ?? point.year;
-    if (month === undefined || !(day >= 1 && day <= daysInMonth(calendar, inYear, month)))
+    const rules = point.dualYear === undefined ? calendar : 'julian';
+    if (month === undefined || !(day >= 1 && day <= daysInMonth(rules, inYear, month)))
       return undefined;
     point.day = day;
   }

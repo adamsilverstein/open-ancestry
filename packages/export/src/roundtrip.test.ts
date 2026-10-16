@@ -112,7 +112,7 @@ describe('calendar dates', { timeout: 30_000 }, () => {
   const CALENDAR_DATES: [string, string][] = [
     ['@#DJULIAN@ 1 MAR 1700', 'JULIAN 1 MAR 1700'],
     ['@#DJULIAN@ 11 FEB 1731/32', 'JULIAN 11 FEB 1732'],
-    ['11 FEB 1731/32', '11 FEB 1732'],
+    ['11 FEB 1731/32', 'JULIAN 11 FEB 1732'],
     ['@#DGREGORIAN@ 5 SEP 1941', '5 SEP 1941'],
     ['@#DHEBREW@ 1 TSH 5780', 'HEBREW 1 TSH 5780'],
     ['@#DHEBREW@ ADS 5784', 'HEBREW ADS 5784'],
@@ -211,8 +211,8 @@ describe(
       const store = await importInto(source);
       const out = exportGedcom(store, { version: '7', now: TODAY });
       expect(gedcom7Problems(out)).toEqual([]);
-      // 29 February only exists in the new-style year.
-      expect(out).toContain('2 DATE 29 FEB 1752\n3 PHRASE 29 FEB 1751/52\n');
+      // An Old Style (Julian) day in its new-style year.
+      expect(out).toContain('2 DATE JULIAN 29 FEB 1752\n3 PHRASE 29 FEB 1751/52\n');
       expect(out).toContain('2 DATE BEF 1850\n3 PHRASE BEF 1850 (per census)\n');
       const again = await importInto(out);
       expect(rows(again, 'SELECT date_text, date_qualifier FROM event ORDER BY date_text')).toEqual(

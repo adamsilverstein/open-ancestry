@@ -72,7 +72,7 @@ describe('toGedcom', () => {
     ['from 1890', 'FROM 1890', 'FROM 1890'],
     ['to 1895', 'TO 1895', 'TO 1895'],
     ['05/28/1960', '28 MAY 1960', '28 MAY 1960'],
-    ['1750/51', '1750/51', '1751'],
+    ['1750/51', '1750/51', 'JULIAN 1751'],
     ['44 BC', '44 B.C.', '44 BCE'],
     ['Julian 5 Sep 1700', '@#DJULIAN@ 5 SEP 1700', 'JULIAN 5 SEP 1700'],
     [
@@ -119,6 +119,8 @@ describe('round trips', { timeout: PROPERTY_TIMEOUT }, () => {
     ...shape(p),
     qualifier: p.qualifier === 'interpreted' ? 'exact' : p.qualifier,
     start: p.start && { ...p.start, year: p.start.dualYear ?? p.start.year, dualYear: undefined },
+    // A dual (Old Style) date is written as a Julian one.
+    calendar: p.start?.dualYear !== undefined ? 'julian' : p.calendar,
     sortKey: undefined,
   });
 

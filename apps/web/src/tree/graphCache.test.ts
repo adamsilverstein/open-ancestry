@@ -227,16 +227,27 @@ describe('GraphCache.index', () => {
   });
 
   it('labels kin from the index as from the merged graph (step, adopted links)', () => {
+    // Mixed sexes, so gendered words (stepmother, adopted daughter) are compared too.
+    const sex = (key: string) => (Number(key.replace(/\D/g, '')) % 2 ? 'F' : 'M');
     for (let seed = 1; seed <= 20; seed++) {
       const cache = new GraphCache();
-      for (const slice of randomSlices(seed, 4)) cache.merge(slice);
-      for (let i = 0; i < 40; i += 3) {
-        const layout = layoutFamily(cache.index(), `p${i}`, {});
-        if (!layout.focusKey) continue;
-        const sex = () => 'U' as const;
-        expect(kinshipLabels(buildRelations(layout, cache.index()), layout.focusKey, sex)).toEqual(
-          kinshipLabels(buildRelations(layout, cache.graph()), layout.focusKey, sex),
-        );
+      for (const slice of randomSlices(seed, 4)) {
+        cache.merge(slice);
+        const index = cache.index();
+        const graph = cache.graph();
+        for (const f of graph.families) expect(index.family(f.id)?.id).toBe(f.id);
+        expect(index.family('nope')).toBeUndefined();
+        for (let i = 0; i < 40; i += 3) {
+          for (const layout of [
+            layoutFamily(index, `p${i}`, {}),
+            layoutPedigree(index, `p${i}`, {}),
+          ]) {
+            if (!layout.focusKey) continue;
+            expect(kinshipLabels(buildRelations(layout, index), layout.focusKey, sex)).toEqual(
+              kinshipLabels(buildRelations(layout, graph), layout.focusKey, sex),
+            );
+          }
+        }
       }
     }
   });

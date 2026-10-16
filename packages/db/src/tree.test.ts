@@ -12,6 +12,7 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  assertOwnTree,
   createTree,
   ensurePrivateDir,
   meta,
@@ -113,6 +114,32 @@ describe.skipIf(process.platform === 'win32')('opening refuses linked tree files
     const dir = join(root, 'Plain.oatree');
     createTree(dir).close();
     expect(() => openTree(dir).close()).not.toThrow();
+  });
+});
+
+describe('on Windows (issue #211)', () => {
+  // A platform shim: the uid check is skipped there, the link refusals are not.
+  const windows = { platform: 'win32' as const, uid: undefined };
+
+  it.skipIf(process.platform === 'win32')('still refuses symlinks and hard links', () => {
+    const dir = join(root, 'Win.oatree');
+    createTree(dir).close();
+    const { database } = treePaths(dir);
+    linkSync(database, join(root, 'elsewhere.sqlite'));
+    expect(() => assertOwnTree(treePaths(dir), windows)).toThrow(/hard link/);
+    const link = join(root, 'WinLink.oatree');
+    symlinkSync(dir, link);
+    expect(() => assertOwnTree(treePaths(link), windows)).toThrow(/symbolic link/);
+  });
+
+  it('skips only the owner check', () => {
+    const dir = join(root, 'Owner.oatree');
+    createTree(dir).close();
+    // Elsewhere another uid is refused; on Windows ownership is not compared.
+    expect(() => assertOwnTree(treePaths(dir), { platform: 'linux', uid: -1 })).toThrow(
+      /another account/,
+    );
+    expect(() => assertOwnTree(treePaths(dir), windows)).not.toThrow();
   });
 });
 

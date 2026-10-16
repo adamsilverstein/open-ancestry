@@ -153,6 +153,11 @@ export function CommandPalette({
             returnFocus.current = document.activeElement as HTMLElement | null;
           }}
           onCloseAutoFocus={(event) => {
+            // An action that opened a dialog (such as Add person) keeps the focus it moved there.
+            if (document.querySelector('[role="dialog"][data-state="open"]')) {
+              event.preventDefault();
+              return;
+            }
             if (!returnFocus.current?.isConnected) return;
             event.preventDefault();
             returnFocus.current.focus();

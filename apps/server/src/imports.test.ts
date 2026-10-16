@@ -59,13 +59,25 @@ function controllableImporter() {
   let release: (value?: unknown) => void = () => {};
   let fail: (error: Error) => void = () => {};
   const importer: Importer = async (path, _store, options) => {
-    calls.push({ path, content: await readFile(path, 'utf8'), options });
-    options.onProgress({ phase: 'parse', done: 1, total: 2 });
-    return new Promise((resolve, reject) => {
-      release = resolve;
-      fail = reject;
-      options.signal.addEventListener('abort', () => reject(new Error('aborted')));
+    // Like the real importers, honor an abort that came before the work
+    // started listening (a cancel during the read below), or the job never
+    // ends and server shutdown waits forever.
+    const aborted = new Promise<never>((_, reject) => {
+      const abort = () => reject(new Error('aborted'));
+      if (options.signal.aborted) abort();
+      else options.signal.addEventListener('abort', abort, { once: true });
     });
+    aborted.catch(() => {});
+    calls.push({ path, content: await readFile(path, 'utf8'), options });
+    if (options.signal.aborted) throw new Error('aborted');
+    options.onProgress({ phase: 'parse', done: 1, total: 2 });
+    return Promise.race([
+      aborted,
+      new Promise((resolve, reject) => {
+        release = resolve;
+        fail = reject;
+      }),
+    ]);
   };
   return { importer, calls, release: (v?: unknown) => release(v), fail: (e: Error) => fail(e) };
 }
@@ -233,6 +245,21 @@ describe('POST import', () => {
       'C',
     ]);
     fake.release();
+  });
+
+  it('shuts down even when a job is cancelled before its importer starts listening', async () => {
+    // The queue-full test flaked with "Hook timed out" in afterEach: releasing
+    // the first job let the second one start, and close() cancelled it while
+    // its importer was still reading the upload. An abort that lands before
+    // the importer looks at its signal must still end the job.
+    const fake = controllableImporter();
+    api = await testApi({ importer: fake.importer });
+    const base = await createTestTree(api);
+    expect((await upload(api, base)).statusCode).toBe(202);
+    // The job is running and its importer is awaiting the upload's contents.
+    const drained = api.app.drain().then(() => 'drained');
+    const timeout = new Promise((r) => setTimeout(() => r('hung'), 3000));
+    expect(await Promise.race([drained, timeout])).toBe('drained');
   });
 
   it('refuses an import into a tree with people before reading the body (issue #98)', async () => {

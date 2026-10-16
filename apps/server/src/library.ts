@@ -275,8 +275,23 @@ export class Library {
           treeNameProblem(id) === null &&
           existsSync(treePaths(join(this.root, `${id}${TREE_EXTENSION}`)).database),
       )
-      .map((id) => this.info(id));
+      .map((id) => this.listedInfo(id));
     return withLabels(trees).sort((a, b) => a.label.localeCompare(b.label));
+  }
+
+  /**
+   * `info`, or for a tree another process holds locked (`open-ancestry import`
+   * writing it), its folder name for now: one busy tree must not fail the
+   * whole list, which every page loads.
+   */
+  private listedInfo(id: string): TreeInfo {
+    try {
+      return this.info(id);
+    } catch (error) {
+      if (!(error as { code?: string }).code?.startsWith('SQLITE_BUSY')) throw error;
+      const modifiedAt = statSync(treePaths(this.dirOf(id)).database).mtime.toISOString();
+      return { id, name: id, label: id, modifiedAt };
+    }
   }
 
   info(id: string): TreeInfo {

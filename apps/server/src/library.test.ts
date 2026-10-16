@@ -10,6 +10,7 @@ import {
 import { readdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from './index';
 import { Library, defaultLibraryRoot, treeNameProblem } from './library';
@@ -116,6 +117,39 @@ describe('Library', () => {
     await running;
     library.rename('Busy', 'Other');
     expect(library.list().map((t) => t.id)).toEqual(['Other']);
+    library.closeAll();
+  });
+
+  it('still lists the library while another process is importing into one tree', () => {
+    const root = makeTempDir('oa-lib-');
+    const setup = new Library(root);
+    setup.create('Settled');
+    setup.create('Importing');
+    setup.closeAll();
+    // `open-ancestry import` (or an e2e worker) writing a tree holds its lock
+    // for the whole import, so the server cannot open that one tree yet.
+    const importer = new Database(join(root, 'Importing.oatree', 'tree.sqlite'));
+    importer.pragma('journal_mode = DELETE');
+    importer.exec('BEGIN EXCLUSIVE');
+    const library = new Library(root);
+    try {
+      // The server waits briefly for the lock, not better-sqlite3's default 5 s.
+      const started = performance.now();
+      expect(library.list().map(({ id, name }) => ({ id, name }))).toEqual([
+        { id: 'Importing', name: 'Importing' },
+        { id: 'Settled', name: 'Settled' },
+      ]);
+      expect(performance.now() - started).toBeLessThan(1000);
+      // Opening the locked tree itself still reports it busy, as a 409.
+      expect(() => library.open('Importing')).toThrow(
+        expect.objectContaining({ code: 'SQLITE_BUSY' }),
+      );
+    } finally {
+      importer.exec('ROLLBACK');
+      importer.close();
+    }
+    // Once the import is done the tree opens and shows its stored name.
+    expect(library.info('Importing').name).toBe('Importing');
     library.closeAll();
   });
 

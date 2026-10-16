@@ -566,10 +566,13 @@ test('cancelling the comparison keeps nothing and changes nothing', async ({
     page.getByText('Re-import cancelled. Your tree was not changed.', { exact: true }),
   ).toBeVisible();
   // Whether the job was stopped or had already finished, no review is left behind.
-  const job = (await (await request.get(`/api/jobs/${jobId}`)).json()) as {
-    state: string;
-    result?: { reimportId: string } | null;
-  };
+  // A worker job settles after its cancel (up to the grace period): wait for it.
+  type Job = { state: string; result?: { reimportId: string } | null };
+  const read = async () => (await (await request.get(`/api/jobs/${jobId}`)).json()) as Job;
+  await expect
+    .poll(async () => (await read()).state, { timeout: 10_000 })
+    .toMatch(/^(completed|failed)$/);
+  const job = await read();
   if (job.result?.reimportId) {
     expect((await request.get(`/api/reimports/${job.result.reimportId}`)).status()).toBe(404);
   } else {

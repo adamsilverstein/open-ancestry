@@ -91,6 +91,8 @@ export interface SearchOptions {
    * lowest tier. An array applies to the last word only.
    */
   phoneticKeys?: string[] | ((word: string) => string[]);
+  /** Matches in a tier above which near-ties go by id, not name (default TIEBREAK_MAX_MATCHES). */
+  tiebreakMaxMatches?: number;
 }
 
 export type SearchMatch = 'exact' | 'prefix' | 'phonetic';
@@ -201,7 +203,7 @@ export function countPeople(
 export function searchPeople(
   store: TreeStore,
   query: string,
-  { limit = 20, phoneticKeys = [] }: SearchOptions = {},
+  { limit = 20, phoneticKeys = [], tiebreakMaxMatches = TIEBREAK_MAX_MATCHES }: SearchOptions = {},
 ): SearchResult[] {
   const parsed = parseQuery(query, phoneticKeys);
   if (!parsed || limit < 1) return [];
@@ -245,7 +247,7 @@ export function searchPeople(
     const match = parsed.match(tier);
     // Ask for enough rows to fill the limit after skipping earlier tiers' hits.
     const wanted = limit + seen.size;
-    const broad = (count.get(match) as number) > TIEBREAK_MAX_MATCHES;
+    const broad = (count.get(match) as number) > tiebreakMaxMatches;
     const rows = (
       broad
         ? byScore.all({ match, limit: wanted })

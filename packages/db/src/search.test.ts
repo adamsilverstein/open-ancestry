@@ -77,6 +77,24 @@ describe('searchPeople', () => {
     store.close();
   });
 
+  it('goes by score then id above the tiebreak limit, by name at or below it (#305)', () => {
+    const store = memoryTree();
+    // Added in reverse name order, so id order and name order differ.
+    const given = ['Hugo', 'Gwen', 'Flora', 'Ezra', 'Dora', 'Cyrus', 'Bea', 'Abel'];
+    const ids = store.transact('add', (tx) =>
+      given.map((g) => persons.create(tx, { names: [{ given: g, surname: 'Ashgrove' }] }).id),
+    ).result;
+    const givens = (tiebreakMaxMatches: number) =>
+      searchPeople(store, 'ashgrove', { limit: 4, tiebreakMaxMatches }).map((r) => r.person.given);
+    // 8 matches > 5: plain score order, equal scores by person id (here, the order added).
+    const byId = [...ids].sort().map((id) => given[ids.indexOf(id)]);
+    expect(givens(5)).toEqual(byId.slice(0, 4));
+    // 8 matches <= 8: names.
+    expect(givens(8)).toEqual(['Abel', 'Bea', 'Cyrus', 'Dora']);
+    expect(countPeople(store, 'ashgrove')).toBe(8);
+    store.close();
+  });
+
   it('matches places and years', () => {
     const store = memoryTree();
     const f = seedSmallFamily(store);

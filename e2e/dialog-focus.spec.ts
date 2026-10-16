@@ -48,6 +48,25 @@ test.describe('focus returns to the opener', () => {
     await expect(opener).toBeFocused();
   });
 
+  test('the command palette opened over Edit person gives focus back to the dialog', async ({
+    page,
+  }) => {
+    // Escape from the palette must not leave focus on <body> just because the
+    // dialog underneath is open: that dialog holds what opened the palette.
+    await openSeeded(page, seeded);
+    await openWithKeyboard(page.getByRole('button', { name: 'Edit person', exact: true }));
+    const dialog = page.getByRole('dialog', { name: 'Edit person' });
+    const given = dialog.getByRole('textbox', { name: 'Given names' }).first();
+    await expect(given).toBeFocused();
+    await page.keyboard.press(`${process.platform === 'darwin' ? 'Meta' : 'Control'}+k`);
+    const palette = page.getByRole('dialog', { name: 'Command palette' });
+    await expect(palette).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(palette).toBeHidden();
+    await expect(dialog).toBeVisible();
+    await expect(given).toBeFocused();
+  });
+
   test('Edit person opened with a mouse click returns focus to it', async ({ page }) => {
     // WebKit does not focus a clicked button and focuses the <main> landmark
     // (tabindex=-1) instead; that must not become the place focus returns to.

@@ -35,6 +35,7 @@ import {
   Minimap,
   Panel,
   PersonCard,
+  PersonName,
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -580,6 +581,25 @@ export function DesignPage() {
           </li>
           <li>
             <LifespanText death={{ year: 1880 }} />
+          </li>
+        </ul>
+      </Section>
+
+      <Section
+        title="PersonName"
+        notes="Isolated with <bdi>, so a right-to-left name keeps the text after it in order; control and override characters are removed."
+      >
+        <ul className={styles.plainList}>
+          <li>
+            <PersonName name="Thaddeus Marlowe" />{' '}
+            <LifespanText birth={{ year: 1911 }} death={{ year: 1957 }} />
+          </li>
+          <li>
+            <PersonName name="שרה כהן" />{' '}
+            <LifespanText birth={{ year: 1911 }} death={{ year: 1957 }} />
+          </li>
+          <li>
+            <PersonName name={'Evil\u202e Ashdown'} /> <LifespanText birth={{ year: 1880 }} />
           </li>
         </ul>
       </Section>

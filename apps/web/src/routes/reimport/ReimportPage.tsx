@@ -29,6 +29,7 @@ import { groupReview, QUESTIONS, type GroupId } from './group';
 import { compareProgress, conflictText, describeChange, placeRenameText } from './labels';
 import { summarizeApply, type ApplySummary, type SummaryPerson } from './summary';
 import styles from './Reimport.module.css';
+import { PersonName } from '../../components/PersonName/PersonName';
 
 /** People shown per page of the review. */
 export const PAGE = 100;
@@ -87,7 +88,7 @@ function PersonCard({
       <header className={styles.cardHeader}>
         <div>
           <h3 className={styles.name}>
-            {person.name}
+            <PersonName name={person.name} />
             {person.lifespan && <span className={styles.lifespan}> {person.lifespan}</span>}
           </h3>
           <p className={styles.meta}>

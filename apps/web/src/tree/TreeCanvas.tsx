@@ -48,6 +48,7 @@ import {
   type Transform,
 } from './viewport';
 import styles from './TreeView.module.css';
+import { PersonName } from '../components/PersonName/PersonName';
 
 /** Grid cell for virtualization, in world pixels. */
 const CELL = 512;
@@ -207,7 +208,7 @@ const TreeCard = memo(function TreeCard({
           )}
           {...common}
         >
-          <span className={cardStyles.name}>{person.name}</span>
+          <PersonName className={cardStyles.name} name={person.name} />
           <span className={cardStyles.lifespan}>{formatLifespan(person)}</span>
         </button>
       ) : (

@@ -1,4 +1,4 @@
-import { formatDate, lifeDate, parseDate } from '@open-ancestry/core';
+import { displayText, formatDate, lifeDate, parseDate } from '@open-ancestry/core';
 import type { PersonSummary } from '../lib/person';
 import type { LifeEvent } from '../components/QuickViewPopover/QuickViewPopover';
 import { avatarUrl } from '../lib/media';
@@ -6,6 +6,7 @@ import type { ApiEventBrief, ApiPersonSummary } from './api';
 
 export function displayName(p: ApiPersonSummary): string {
   const name = [p.prefix, p.given, p.surnamePrefix, p.surname, p.suffix]
+    .map((part) => (part ? displayText(part) : ''))
     .filter((part) => part)
     .join(' ');
   return name || 'Unknown';

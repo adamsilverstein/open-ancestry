@@ -24,7 +24,14 @@ import { Select } from '../../../components/Select/Select';
 import { useToast } from '../../../components/Toast/Toast';
 import { fullName, isLivingStatus, nearestRelative } from '../../../lib/person';
 import { useOpenRestored } from '../../../lib/useOpenRestored';
-import { applyNames, applyPerson, nameChanges, toDraft, type NameDraft } from './optimistic';
+import {
+  applyNames,
+  applyPerson,
+  nameChanges,
+  needsCleaning,
+  toDraft,
+  type NameDraft,
+} from './optimistic';
 import { useDirtyForm } from './dirty';
 import { rebaseNames, rebaseValue } from './rebase';
 import { SaveError, useSaveState } from './SaveError';
@@ -146,6 +153,7 @@ export function EditPersonDialog({
   const onRestored = useOpenRestored();
   const queryClient = useQueryClient();
   const [names, setNames] = useState<NameDraft[]>(() => detail.names.map(toDraft));
+  const cleaned = detail.names.some(needsCleaning);
   const [sex, setSex] = useState<Sex>(detail.person.sex);
   const [living, setLiving] = useState<LivingChoice>(livingChoice(detail.person.living));
   const [links, setLinks] = useState<ParentLink[]>(() => parentLinks(detail));
@@ -378,6 +386,12 @@ export function EditPersonDialog({
             save();
           }}
         >
+          {cleaned && (
+            <p role="status" className={styles.cleaned}>
+              Removed invisible characters (such as a text-direction override) that made this name
+              display out of order. Save to keep them out.
+            </p>
+          )}
           {names.map((draft, index) => (
             <fieldset key={draft.id ?? `new-${index}`} className={styles.fieldset}>
               <legend className={styles.legend}>

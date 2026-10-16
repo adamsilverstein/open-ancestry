@@ -18,7 +18,7 @@ import {
   devWorkerImporter,
   isLoopbackHost,
   startServer,
-  treeNameProblem,
+  newTreeNameProblem,
   workerComparer,
   workerImporter,
   type RunningServer,
@@ -490,7 +490,7 @@ async function importCommand(
     if (!isDir) throw new Error(`--media folder not found: ${cli.media}`);
   }
   const name = cli.name ?? basename(cli.file, extname(cli.file)).trim();
-  const problem = treeNameProblem(name);
+  const problem = newTreeNameProblem(name);
   if (problem) throw new Error(`${problem}: "${name}". Choose another with --name.`);
   const library = new Library(cli.library, { shared: cli.sharedLibrary });
   library.ensureRoot();

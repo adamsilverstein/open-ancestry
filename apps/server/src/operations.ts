@@ -10,7 +10,7 @@ import {
   type TreeStore,
   type Tx,
 } from '@open-ancestry/db';
-import { nameRow, refreshLiving, requireRow } from './edits';
+import { nameRow, refreshLiving, refuseUnsafeText, requireRow } from './edits';
 import { badRequest, conflict, notFound, stale } from './errors';
 import { resolveMediaPathSync, sniffMediaType } from './routes/media';
 import type { BatchOperation, NameBody } from './schemas';
@@ -113,6 +113,8 @@ export function updateFamilyChild(tx: Tx, id: string, patch: Static<typeof Famil
 }
 
 export function createTag(tx: Tx, body: Static<typeof TagBody>, attachTo?: string) {
+  refuseUnsafeText('tag name', body.name);
+  refuseUnsafeText('tag category', body.category);
   const tag = tags.create(tx, { ...body, category: body.category ?? '' });
   if (attachTo) tagPerson(tx, attachTo, tag.id);
   return tag;

@@ -1,4 +1,4 @@
-import { ageAt, formatDate, parseDate } from '@open-ancestry/core';
+import { ageAt, displayText, formatDate, parseDate } from '@open-ancestry/core';
 import type { ChildRelationship } from '@open-ancestry/db';
 import type { ApiPersonSummary, EventBrief, EventDetail, PersonDetail } from '../api/types';
 import {
@@ -122,7 +122,7 @@ const where = (place: string | null | undefined) => (place ? `in ${place}` : '')
 const words = (...parts: (string | false | null | undefined)[]) => parts.filter(Boolean).join(' ');
 
 function given(person: ApiPersonSummary): string {
-  return person.given?.split(' ')[0] || fullName(person);
+  return (person.given && displayText(person.given).split(' ')[0]) || fullName(person);
 }
 
 function firstOwn(events: EventDetail[], types: string[]): EventDetail | undefined {

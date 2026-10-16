@@ -2,6 +2,7 @@ import { lifeDate as coreLifeDate } from '@open-ancestry/core';
 import type { LivingStatus } from '@open-ancestry/db';
 import type { ApiPersonSummary, EventBrief, PersonDetail } from '../api/types';
 import type { LifeDate } from './lifespan';
+import { displayText } from '@open-ancestry/core';
 
 export type Sex = 'M' | 'F' | 'U';
 
@@ -44,9 +45,11 @@ export function isLivingStatus(status: LivingStatus): boolean {
   return status !== 'dead' && status !== 'inferred_dead';
 }
 
+/** The name as shown: parts cleaned one by one, so an override in one cannot reach the next (#190). */
 export function fullName(person: ApiPersonSummary): string {
   const name = [person.prefix, person.given, person.surnamePrefix, person.surname, person.suffix]
-    .filter((part) => part?.trim())
+    .map((part) => (part ? displayText(part) : ''))
+    .filter((part) => part.trim())
     .join(' ');
   return name || 'Unknown name';
 }

@@ -30,6 +30,7 @@ import {
   personLabel,
   refreshLiving,
   refuseCycles,
+  refuseUnsafeText,
   relativesOf,
   requireRow,
   resolveRelative,
@@ -570,6 +571,8 @@ export function editRoutes(app: Api, { library }: Deps): void {
       const store = open(request.params.tree);
       const { id } = request.params;
       const tag = requireRow(store, 'tag', id);
+      refuseUnsafeText('tag name', request.body.name);
+      refuseUnsafeText('tag category', request.body.category);
       const { batchId, result } = edit(store, `Edit tag: ${tag.name}`, (tx) =>
         tags.update(tx, id, request.body),
       );

@@ -63,7 +63,8 @@ const REBUILD_DOCS = `
       WHERE r.role = 'principal' AND r.person_id IS NOT NULL AND e.date_sort IS NOT NULL)
     GROUP BY person_id;
   INSERT INTO person_search (rowid, names, phonetic, places, years)
-    SELECT d.doc_id, n.names, n.phonetic, p.places, y.years FROM search_doc d
+    SELECT d.doc_id, ${SEARCH_FOLD}(n.names), n.phonetic, ${SEARCH_FOLD}(p.places), y.years
+    FROM search_doc d
     LEFT JOIN temp.rebuild_names n ON n.person_id = d.person_id
     LEFT JOIN temp.rebuild_places p ON p.person_id = d.person_id
     LEFT JOIN temp.rebuild_years y ON y.person_id = d.person_id;

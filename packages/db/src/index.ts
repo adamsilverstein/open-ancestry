@@ -48,6 +48,7 @@ export {
   MIN_PREFIX_LENGTH,
   YEAR_SLACK,
   rebuildSearchIndex,
+  countPeople,
   searchPeople,
   type SearchMatch,
   type SearchOptions,

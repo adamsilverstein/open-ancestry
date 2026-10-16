@@ -28,6 +28,14 @@ function loaded() {
   }
 }
 
+let big: TreeStore | undefined;
+
+function loadedBig() {
+  if (big) return;
+  big = openMemoryTree();
+  bulkInsert(big, generateSyntheticTree({ people: 100_000, seed: 2 }));
+}
+
 export default [
   {
     name: 'db: bulk insert 10k-person tree',
@@ -62,6 +70,27 @@ export default [
     name: 'db: search by name (10k tree)',
     setup: loaded,
     fn: () => searchPeople(store, ['ash', 'bel', 'cor', 'dun', 'ell'][i++ % 5] as string),
+    budgetMs: 50,
+  },
+  {
+    // A broad prefix: "19" matches nearly every birth year, so most of the tree (#305).
+    name: 'db: search, year prefix "19", palette page (100k tree)',
+    setup: loadedBig,
+    fn: () => searchPeople(big!, '19', { limit: 8 }),
+    budgetMs: 50,
+  },
+  {
+    // Broader still: "we" starts names and places for 44k of the 100k people.
+    name: 'db: search, prefix "we", palette page (100k tree)',
+    setup: loadedBig,
+    fn: () => searchPeople(big!, 'we', { limit: 8 }),
+    budgetMs: 50,
+  },
+  {
+    name: 'db: search by name, palette page (100k tree)',
+    setup: loadedBig,
+    fn: () =>
+      searchPeople(big!, ['ash', 'bel', 'cor', 'dun', 'ell'][i++ % 5] as string, { limit: 8 }),
     budgetMs: 50,
   },
 ] satisfies BenchCase[];

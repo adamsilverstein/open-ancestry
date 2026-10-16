@@ -31,12 +31,12 @@ function PersonPicker({
   const [query, setQuery] = useState('');
   const q = useDeferredValue(query.trim());
   const searching = /[\p{L}\p{N}]/u.test(q);
-  const { data: hits = [] } = useQuery({
+  const { data } = useQuery({
     ...searchQuery(tree, q, 10),
     enabled: searching,
     placeholderData: keepPreviousData,
   });
-  const results = searching ? hits.map((hit) => hit.person) : [];
+  const results = searching ? (data?.items ?? []).map((hit) => hit.person) : [];
   return (
     <Combobox
       label={label}

@@ -287,6 +287,14 @@ describe('caching and compression', () => {
   });
 });
 
+describe('GET search total (#280)', () => {
+  it('says how many people match beyond the page', async () => {
+    const res = await api.get(`${s.base}/search?q=vale&limit=2`);
+    expect(res.json().items).toHaveLength(2);
+    expect(res.json().total).toBe(3);
+  });
+});
+
 describe('GET places (#280)', () => {
   it('suggests places by any part of their name, starts first', async () => {
     const res = await api.get(`${s.base}/places?q=harl`);

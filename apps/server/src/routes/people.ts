@@ -9,6 +9,7 @@ import {
   getRelationship,
   listPeople,
   meta,
+  countPeople,
   searchPeople,
   suggestPlaces,
   type LivingStatus,
@@ -130,8 +131,11 @@ export function peopleRoutes(app: Api, { library }: Deps): void {
     { schema: { params: TreeParams, querystring: SearchQuery } },
     async (request) => {
       const { q, limit = 20 } = request.query;
+      const store = library.open(request.params.tree);
       return {
-        items: searchPeople(library.open(request.params.tree), q, { limit, phoneticKeys }),
+        items: searchPeople(store, q, { limit, phoneticKeys }),
+        // Everyone who matches, so a short list can say there are more (#280).
+        total: countPeople(store, q, { phoneticKeys }),
       };
     },
   );

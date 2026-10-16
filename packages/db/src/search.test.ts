@@ -8,6 +8,7 @@ import {
   persons,
   places,
   rebuildSearchIndex,
+  countPeople,
   searchPeople,
   type TreeStore,
 } from './index';
@@ -38,6 +39,59 @@ describe('searchPeople', () => {
     expect(searchPeople(store, 'zoe angstrom').map((r) => r.person.id)).toEqual([p.id]);
     expect(searchPeople(store, 'zoe" ( * -').map((r) => r.person.id)).toEqual([p.id]);
     expect(searchPeople(store, '  ')).toEqual([]);
+    store.close();
+  });
+
+  it('orders equally good matches by name and counts every match (#280)', () => {
+    const store = memoryTree();
+    const given = ['Walter', 'Edith', 'Josiah', 'Ruth', 'Daniel', 'Emily', 'Zebulon', 'Ada'];
+    store.transact('add', (tx) => {
+      for (const g of given) persons.create(tx, { names: [{ given: g, surname: 'Ashgrove' }] });
+      persons.create(tx, { names: [{ given: 'Mabel', surname: 'Stone' }] });
+    });
+    const first = searchPeople(store, 'ashgrove', { limit: 5 }).map((r) => r.person.given);
+    expect(first).toEqual(['Ada', 'Daniel', 'Edith', 'Emily', 'Josiah']);
+    expect(countPeople(store, 'ashgrove')).toBe(8);
+    expect(countPeople(store, 'ashgr')).toBe(8);
+    expect(countPeople(store, 'nobody')).toBe(0);
+    expect(countPeople(store, '  ')).toBe(0);
+    store.close();
+  });
+
+  it('puts a whole tied bucket in name order, past the read window (#305)', () => {
+    const store = memoryTree();
+    // 40 equally good matches added in reverse name order, so the alphabetically
+    // first ones are the last added: a window of 15 read in insertion order would miss them.
+    const letters = 'abcdefghijklmnopqrstuvwxyz';
+    const given = Array.from(
+      { length: 40 },
+      (_, i) => `G${letters[Math.floor(i / 26)]}${letters[i % 26]}`,
+    )
+      .sort()
+      .reverse();
+    store.transact('add', (tx) => {
+      for (const g of given) persons.create(tx, { names: [{ given: g, surname: 'Kittering' }] });
+    });
+    const first = searchPeople(store, 'kittering', { limit: 5 }).map((r) => r.person.given);
+    expect(first).toEqual([...given].sort().slice(0, 5));
+    store.close();
+  });
+
+  it('goes by score then id above the tiebreak limit, by name at or below it (#305)', () => {
+    const store = memoryTree();
+    // Added in reverse name order, so id order and name order differ.
+    const given = ['Hugo', 'Gwen', 'Flora', 'Ezra', 'Dora', 'Cyrus', 'Bea', 'Abel'];
+    const ids = store.transact('add', (tx) =>
+      given.map((g) => persons.create(tx, { names: [{ given: g, surname: 'Ashgrove' }] }).id),
+    ).result;
+    const givens = (tiebreakMaxMatches: number) =>
+      searchPeople(store, 'ashgrove', { limit: 4, tiebreakMaxMatches }).map((r) => r.person.given);
+    // 8 matches > 5: plain score order, equal scores by person id (here, the order added).
+    const byId = [...ids].sort().map((id) => given[ids.indexOf(id)]);
+    expect(givens(5)).toEqual(byId.slice(0, 4));
+    // 8 matches <= 8: names.
+    expect(givens(8)).toEqual(['Abel', 'Bea', 'Cyrus', 'Dora']);
+    expect(countPeople(store, 'ashgrove')).toBe(8);
     store.close();
   });
 

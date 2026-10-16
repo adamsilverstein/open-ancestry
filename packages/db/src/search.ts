@@ -91,6 +91,8 @@ export interface SearchOptions {
    * lowest tier. An array applies to the last word only.
    */
   phoneticKeys?: string[] | ((word: string) => string[]);
+  /** Matches in a tier above which near-ties go by id, not name (default TIEBREAK_MAX_MATCHES). */
+  tiebreakMaxMatches?: number;
 }
 
 export type SearchMatch = 'exact' | 'prefix' | 'phonetic';
@@ -113,6 +115,14 @@ export const MIN_PREFIX_LENGTH = 2;
 export const MAX_SEARCH_WORDS = 8;
 /** A year in the query also matches events this many years either side (prefix tier and below). */
 export const YEAR_SLACK = 2;
+/** Most rows read by score before near-ties are put in name order; past it, ties go by id. */
+export const TIEBREAK_CAP = 2000;
+/**
+ * Above this many matches in a tier (a broad prefix such as "19" or "we") the
+ * name tiebreak is skipped: scoring and keeping every match costs more than the
+ * order is worth, so those go by score, then id, as before #305.
+ */
+export const TIEBREAK_MAX_MATCHES = 20_000;
 
 /** FTS5 expression for one query word in one tier, or null if the word cannot match in it. */
 function wordMatch(word: string, tier: SearchMatch, keys: string[]): string {
@@ -140,11 +150,8 @@ function wordMatch(word: string, tier: SearchMatch, keys: string[]): string {
  * surnames matched by sound. Within a tier, BM25 ranks names 10, phonetic
  * keys 5, places and years 1.
  */
-export function searchPeople(
-  store: TreeStore,
-  query: string,
-  { limit = 20, phoneticKeys = [] }: SearchOptions = {},
-): SearchResult[] {
+/** Query words and their phonetic keys, or null when nothing can match. */
+function parseQuery(query: string, phoneticKeys: SearchOptions['phoneticKeys'] = []) {
   // NFC so decomposed input (pasted from PDFs, macOS) tokenizes like typed text;
   // distinct and capped so a long repetitive query cannot stall the server.
   const words = [
@@ -157,7 +164,7 @@ export function searchPeople(
       ).map((w) => w.toLowerCase()),
     ),
   ].slice(0, MAX_SEARCH_WORDS);
-  if (words.length === 0 || limit < 1) return [];
+  if (words.length === 0) return null;
   const keysFor = (word: string, index: number): string[] => {
     const keys =
       typeof phoneticKeys === 'function'
@@ -171,19 +178,85 @@ export function searchPeople(
   };
   const keys = words.map(keysFor);
   const hasPhonetic = keys.some((k) => k.length > 0);
+  const match = (tier: SearchMatch) =>
+    words.map((w, i) => wordMatch(w, tier, keys[i]!)).join(' AND ');
+  return { match, hasPhonetic };
+}
+
+/**
+ * How many people match `query` at all: the loosest tier, which every
+ * stricter one is inside. The palette says "Show all N" with it.
+ */
+export function countPeople(
+  store: TreeStore,
+  query: string,
+  { phoneticKeys = [] }: Omit<SearchOptions, 'limit'> = {},
+): number {
+  const parsed = parseQuery(query, phoneticKeys);
+  if (!parsed) return 0;
+  return store
+    .stmt('SELECT count(*) FROM person_search WHERE person_search MATCH ?')
+    .pluck()
+    .get(parsed.match(parsed.hasPhonetic ? 'phonetic' : 'prefix')) as number;
+}
+
+export function searchPeople(
+  store: TreeStore,
+  query: string,
+  { limit = 20, phoneticKeys = [], tiebreakMaxMatches = TIEBREAK_MAX_MATCHES }: SearchOptions = {},
+): SearchResult[] {
+  const parsed = parseQuery(query, phoneticKeys);
+  if (!parsed || limit < 1) return [];
+  const { hasPhonetic } = parsed;
 
   const seen = new Set<string>();
   const hits: { id: string; match: SearchMatch; score: number }[] = [];
+  // Scores within a tenth of each other are the same match to a reader (a longer
+  // document scores a little lower), so those go by name: predictable, not by
+  // when each person was added (#280). Score every match once (FTS alone), find
+  // the rounded score of the last row wanted, and name-sort every row from that
+  // bucket up, so a tie that straddles the cut is settled by name (#305). Past
+  // TIEBREAK_CAP rows the bucket is cut in search-document order first.
   const statement = store.stmt(
+    `WITH s AS MATERIALIZED (
+       SELECT rowid AS doc, -bm25(person_search, 10.0, 5.0, 1.0, 1.0) AS score
+       FROM person_search WHERE person_search MATCH @match
+     ),
+     cut AS (SELECT round(score, 1) AS bucket FROM s ORDER BY score DESC, doc LIMIT 1 OFFSET @last),
+     b AS (
+       SELECT doc, score FROM s
+       WHERE round(score, 1) >= coalesce((SELECT bucket FROM cut), -1e300)
+       ORDER BY score DESC, doc LIMIT @cap
+     )
+     SELECT d.person_id AS id, b.score FROM b
+     JOIN search_doc d ON d.doc_id = b.doc
+     LEFT JOIN person_sort ps ON ps.person_id = d.person_id
+     ORDER BY round(b.score, 1) DESC, ps.surname COLLATE NOCASE, ps.given COLLATE NOCASE, d.person_id
+     LIMIT @limit`,
+  );
+  const count = store
+    .stmt('SELECT count(*) FROM person_search WHERE person_search MATCH ?')
+    .pluck();
+  const byScore = store.stmt(
     `SELECT d.person_id AS id, -bm25(person_search, 10.0, 5.0, 1.0, 1.0) AS score
      FROM person_search JOIN search_doc d ON d.doc_id = person_search.rowid
-     WHERE person_search MATCH ? ORDER BY score DESC, d.person_id LIMIT ?`,
+     WHERE person_search MATCH @match ORDER BY score DESC, d.person_id LIMIT @limit`,
   );
   TIERS.forEach((tier, rank) => {
     if (hits.length >= limit || (tier === 'phonetic' && !hasPhonetic)) return;
-    const match = words.map((w, i) => wordMatch(w, tier, keys[i]!)).join(' AND ');
+    const match = parsed.match(tier);
     // Ask for enough rows to fill the limit after skipping earlier tiers' hits.
-    for (const row of statement.all(match, limit + seen.size) as { id: string; score: number }[]) {
+    const wanted = limit + seen.size;
+    const broad = (count.get(match) as number) > tiebreakMaxMatches;
+    const rows = (
+      broad
+        ? byScore.all({ match, limit: wanted })
+        : statement.all({ match, cap: TIEBREAK_CAP, last: wanted - 1, limit: wanted })
+    ) as {
+      id: string;
+      score: number;
+    }[];
+    for (const row of rows) {
       if (hits.length >= limit) break;
       if (seen.has(row.id)) continue;
       seen.add(row.id);

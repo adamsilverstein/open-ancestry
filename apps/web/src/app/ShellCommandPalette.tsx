@@ -2,7 +2,12 @@ import { useState } from 'react';
 import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { House, ListChecks, Moon, Palette, Sun, UserPlus, Users } from 'lucide-react';
 import { useAddPerson } from './addPerson';
-import { useSearchPeople, type SearchHit } from '../api/search';
+import {
+  PALETTE_ALL_RESULTS,
+  PALETTE_RESULTS,
+  useSearchPeople,
+  type SearchHit,
+} from '../api/search';
 import { Avatar } from '../components/Avatar/Avatar';
 import {
   CommandPalette,
@@ -43,7 +48,13 @@ export default function ShellCommandPalette({
   const { theme, toggle } = useTheme();
   const next = theme === 'dark' ? 'light' : 'dark';
   const [query, setQuery] = useState('');
-  const { tree, hits, stale, pending } = useSearchPeople(query);
+  // "Show all N people" widens this query only; new text starts at the short list again.
+  const [allFor, setAllFor] = useState<string | null>(null);
+  const showAll = allFor !== null && allFor === query;
+  const { tree, hits, total, stale, pending } = useSearchPeople(
+    query,
+    showAll ? PALETTE_ALL_RESULTS : PALETTE_RESULTS,
+  );
   const addPerson = useAddPerson();
 
   // Opening a page moves focus to its heading, so a screen reader announces it (#200).
@@ -125,6 +136,19 @@ export default function ShellCommandPalette({
     },
   ];
 
+  // Say there are more than the short list shows, and offer them (#280).
+  if (!stale && hits.length > 0 && total > hits.length && !showAll) {
+    people.push({
+      id: 'people:all',
+      // The palette lists at most PALETTE_ALL_RESULTS: say so rather than promise all.
+      label:
+        total > PALETTE_ALL_RESULTS
+          ? `Show the first ${PALETTE_ALL_RESULTS} of ${total.toLocaleString()} people`
+          : `Show all ${total} people`,
+      keepOpen: true,
+      onSelect: () => setAllFor(query),
+    });
+  }
   const groups: PaletteGroup[] = [
     ...(people.length > 0 ? [{ heading: 'People', items: people, unfiltered: true }] : []),
     { heading: 'Actions', items: actions },

@@ -234,6 +234,50 @@ test.describe('family view', () => {
       .toBeLessThan(2);
   });
 
+  for (const motion of ['reduce', 'no-preference'] as const) {
+    test(`the view reads as settled only once its cards are final (motion: ${motion})`, async ({
+      page,
+    }) => {
+      // Fit lands just under the light-card zoom, so the cards swap elements. In
+      // CI the swap could commit after data-animating cleared, detaching a card a
+      // test had just found ("not visible"). Watch the moment it clears: the
+      // cards must already match the zoom. Reduced motion jumps straight there;
+      // otherwise the last animation frame ends it, which is where CI raced.
+      await page.emulateMedia({ reducedMotion: motion });
+      if (motion === 'no-preference') {
+        // Frames as late as on a loaded CI runner: each one is stamped a second
+        // on, so the animation's first frame is its last and crosses the
+        // light-card zoom itself, the case that raced.
+        await page.addInitScript(() => {
+          const raf = window.requestAnimationFrame.bind(window);
+          window.requestAnimationFrame = (callback) => raf((time) => callback(time + 1000));
+        });
+      }
+      await open(page);
+      await page.evaluate((key) => {
+        const w = window as unknown as { __atSettle: string[] };
+        w.__atSettle = [];
+        const world = document.querySelector<HTMLElement>('[data-testid="tree-world"]')!;
+        new MutationObserver(() => {
+          if ('animating' in world.dataset) return;
+          const light = Number(world.dataset.scale) < 0.6;
+          const el = world.querySelector<HTMLElement>(`[data-key="${key}"]`);
+          const shown = el?.className.includes('lightCard') ?? false;
+          w.__atSettle.push(light === shown ? 'final' : 'pending');
+        }).observe(world, { attributes: true, attributeFilter: ['data-animating'] });
+      }, ids.ada);
+      for (const name of ['Fit to screen', 'Zoom in', 'Fit to screen']) {
+        await page.getByRole('button', { name }).click();
+        await settled(page);
+        await expect(card(page, 'Ada Vale')).toBeVisible();
+      }
+      const states = await page.evaluate(
+        () => (window as unknown as { __atSettle: string[] }).__atSettle,
+      );
+      expect(states).toEqual(['final', 'final', 'final']);
+    });
+  }
+
   test('expanding ancestors reveals fetched generations and lazy-loads more without moving the focus card', async ({
     page,
   }) => {

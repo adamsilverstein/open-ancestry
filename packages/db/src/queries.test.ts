@@ -614,6 +614,11 @@ describe('getNeighborhood childrenLoaded', () => {
     expect(wide.childrenLoaded).toContain(ids.gp);
     expect(wide.childrenLoaded).not.toContain(ids.aunt);
     expect(wide.moreDown).toContain(ids.aunt);
+    // A slice stopped at the cap, even exactly at it, claims nothing.
+    const capped = getNeighborhood(store, ids.me, { up: 0, down: 2, maxPeople: 2 });
+    expect(capped.truncated).toBe(true);
+    expect(capped.people).toHaveLength(2);
+    expect(capped.childrenLoaded).toEqual([]);
     // The bottom generation's children are past `down`.
     expect(getNeighborhood(store, ids.me, { up: 0, down: 0 }).childrenLoaded).toEqual([]);
     store.close();

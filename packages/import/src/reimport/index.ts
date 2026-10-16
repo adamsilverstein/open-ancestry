@@ -2,7 +2,7 @@ export { applyReimport, ReimportStaleError, type ApplyResult } from './apply';
 export type {
   FactView,
   PersonReview,
-  PlaceRenameReview,
+  ExportPlaceRename,
   ReimportChange,
   ReimportDiff,
   ReviewChange,

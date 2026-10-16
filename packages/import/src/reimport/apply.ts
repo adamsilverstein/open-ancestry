@@ -1,5 +1,6 @@
 import {
   familyChildren,
+  places,
   type EventRow,
   type FamilyRow,
   type MediaRow,
@@ -444,6 +445,45 @@ export function applyReimport(
     const owners = new Map<string, string | null>();
     for (const p of session.diff.people) {
       for (const c of p.changes) owners.set(c.id, p.existingId ?? p.incomingId);
+    }
+    // A place the export renamed, accepted whole (#307 review): rename the place itself,
+    // so every fact there follows (family and undated ones too) and the tree keeps one
+    // row for it. Its fact changes below then find the place under its new name.
+    const byId = new Map(changes.map((c) => [c.id, c]));
+    for (const rename of session.diff.exportPlaceRenames) {
+      if (!rename.changeIds.every((id) => chosen.has(id))) continue;
+      const olds = new Set<string>();
+      for (const id of rename.changeIds) {
+        const c = byId.get(id);
+        if (c?.kind !== 'fact.change') continue;
+        const placeId = tx.store.getRow('event', c.existingEventId)?.place_id;
+        if (placeId) olds.add(placeId);
+      }
+      let target = (
+        tx.store
+          .stmt('SELECT id FROM place WHERE full_name = ? ORDER BY id LIMIT 1')
+          .get(rename.to) as { id: string } | undefined
+      )?.id;
+      for (const old of olds) {
+        if (!target) {
+          tx.update('place', old, {
+            full_name: rename.to,
+            name: rename.to.split(',')[0]!.trim() || rename.to,
+          });
+          target = old;
+          continue;
+        }
+        if (old === target) continue;
+        // The tree already has the new name: its facts and child places move there.
+        const ids = (table: 'event' | 'place', column: string) =>
+          tx.store
+            .stmt(`SELECT id FROM ${table} WHERE ${column} = ? ORDER BY id`)
+            .pluck()
+            .all(old) as string[];
+        for (const id of ids('event', 'place_id')) tx.update('event', id, { place_id: target });
+        for (const id of ids('place', 'parent_id')) tx.update('place', id, { parent_id: target });
+        places.delete(tx, old);
+      }
     }
     let applied = 0;
     /** Changes whose rows this batch wrote: those rows are the next comparison's base. */

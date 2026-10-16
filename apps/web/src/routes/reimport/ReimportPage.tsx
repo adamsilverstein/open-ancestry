@@ -165,24 +165,35 @@ function Review({ review }: { review: ReimportReview }) {
   const [comparing, setComparing] = useState(false);
   // A large export can change thousands of people: render cards in pages.
   const [shown, setShown] = useState(PAGE);
-  const [filter, setFilter] = useState<GroupId | 'all'>('all');
+  const [filter, setFilter] = useState<GroupId | 'all' | 'places'>('all');
   // A renamed place's fact changes are one item above the cards (#279), not repeated on them.
   const cardPeople = useMemo(
     () =>
       review.diff.people
-        .map((p) => ({ ...p, changes: p.changes.filter((c) => !c.placeRename) }))
+        .map((p) => ({ ...p, changes: p.changes.filter((c) => !c.exportPlaceRename) }))
         .filter((p) => p.changes.length),
     [review],
   );
   const groups = useMemo(() => groupReview(cardPeople), [cardPeople]);
+  const renames = review.diff.exportPlaceRenames;
   const visible = groups.filter((g) => g.people.length && (filter === 'all' || g.id === filter));
   const listed = visible.reduce((n, g) => n + g.people.length, 0);
   // Matched people without a card: nothing in the export changed them.
   const unchanged = Math.max(
     0,
-    review.diff.counts.matched - cardPeople.filter((p) => p.status === 'matched').length,
+    // People whose only change is a rename were changed: they count with the cards.
+    review.diff.counts.matched - review.diff.people.filter((p) => p.status === 'matched').length,
   );
   const active = useMemo(() => effective(review, selected), [review, selected]);
+  // A place rename is one change to the user, however many facts it moves.
+  const applyCount = useMemo(() => {
+    let n = active.size;
+    for (const r of review.diff.exportPlaceRenames) {
+      const on = r.changeIds.filter((id) => active.has(id)).length;
+      if (on) n -= on - 1;
+    }
+    return n;
+  }, [active, review]);
   const { counts } = review.diff;
 
   // Edits elsewhere (another tab) make the review stale: check whenever the page is back in view.
@@ -358,7 +369,7 @@ function Review({ review }: { review: ReimportReview }) {
           Accept none
         </Button>
       </div>
-      {cardPeople.length === 0 && review.diff.placeRenames.length === 0 ? (
+      {cardPeople.length === 0 && review.diff.exportPlaceRenames.length === 0 ? (
         <p className={importStyles.note}>
           This export matches your tree: there is nothing to change.
         </p>
@@ -366,7 +377,10 @@ function Review({ review }: { review: ReimportReview }) {
         <>
           <div role="group" aria-label="Filter the review" className={styles.filters}>
             {[
-              { id: 'all' as const, title: 'All', count: cardPeople.length },
+              { id: 'all' as const, title: 'All', count: cardPeople.length + renames.length },
+              ...(renames.length
+                ? [{ id: 'places' as const, title: 'Places renamed', count: renames.length }]
+                : []),
               ...groups
                 .filter((g) => g.people.length)
                 .map((g) => ({ id: g.id, title: g.title, count: g.people.length })),
@@ -386,13 +400,13 @@ function Review({ review }: { review: ReimportReview }) {
               </Button>
             ))}
           </div>
-          {review.diff.placeRenames.length > 0 && (filter === 'all' || filter === 'changes') && (
+          {renames.length > 0 && (filter === 'all' || filter === 'places') && (
             <section aria-labelledby="group-places" className={styles.group}>
               <h2 id="group-places" className={styles.groupTitle}>
-                Places renamed ({review.diff.placeRenames.length})
+                Places renamed ({review.diff.exportPlaceRenames.length})
               </h2>
               <ul className={styles.changes}>
-                {review.diff.placeRenames.map((rename) => (
+                {review.diff.exportPlaceRenames.map((rename) => (
                   <li key={rename.key}>
                     <Checkbox
                       label={placeRenameText(rename)}
@@ -452,7 +466,7 @@ function Review({ review }: { review: ReimportReview }) {
           disabled={pending || stale || active.size === 0}
           onClick={() => void apply()}
         >
-          Apply {active.size} change{active.size === 1 ? '' : 's'}
+          Apply {applyCount} change{applyCount === 1 ? '' : 's'}
         </Button>
       </div>
     </div>

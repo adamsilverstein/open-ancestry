@@ -38,7 +38,7 @@ export function reimportRoutes(app: Api, { library, reimports, thumbnails }: Dep
       diff: {
         people: session.diff.people,
         counts: session.diff.counts,
-        placeRenames: session.diff.placeRenames,
+        exportPlaceRenames: session.diff.exportPlaceRenames,
       },
     };
   };

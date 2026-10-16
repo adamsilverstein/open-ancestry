@@ -201,8 +201,11 @@ const factsByTypeDate = (p: SnapPerson) => {
  * longer uses, where people the two clearly share (the same xref as the last
  * import, or the same name and birth date, on one person each side) have
  * facts of the same type and date there, now under a name the tree doesn't
- * have. At least two such facts, all agreeing, make a rename. Worked out
- * before matching, so the rename doesn't count against anyone's match.
+ * have. At least two such facts, and at least 80% of those that moved, going
+ * to one name make a rename; a stray fact sent elsewhere stays an ordinary
+ * change. Undated facts can't be paired, so they are no evidence (they still
+ * follow the place when the rename is applied). Worked out before matching,
+ * so the rename doesn't count against anyone's match.
  */
 export function detectPlaceRenames(existing: Snapshot, incoming: Snapshot): PlaceRename[] {
   const placesOf = (s: Snapshot) => {
@@ -229,11 +232,16 @@ export function detectPlaceRenames(existing: Snapshot, incoming: Snapshot): Plac
     return out;
   };
   const treeByKey = unique(existing);
+  const incomingByKey = unique(incoming);
   const pairs: [SnapPerson, SnapPerson][] = [];
-  for (const [key, i] of unique(incoming)) {
-    const byXref = i?.row.external_id ? existing.importXrefs.get(i.row.external_id) : undefined;
-    const e = (byXref && existing.people.get(byXref)) || treeByKey.get(key);
-    if (i && e) pairs.push([e, i]);
+  for (const i of incoming.people.values()) {
+    // The same xref as the last import first: it pairs people without a birth date too.
+    const byXref = i.row.external_id ? existing.importXrefs.get(i.row.external_id) : undefined;
+    const key = keyOf(i);
+    const e =
+      (byXref && existing.people.get(byXref)) ||
+      (key && incomingByKey.get(key) === i ? treeByKey.get(key) : undefined);
+    if (e) pairs.push([e, i]);
   }
   // Tree name -> export name -> facts seen; an ambiguous tree name is dropped.
   const seen = new Map<string, Map<string, { from: string; to: string; count: number }>>();
@@ -255,9 +263,15 @@ export function detectPlaceRenames(existing: Snapshot, incoming: Snapshot): Plac
   const renames: PlaceRename[] = [];
   const claimed = new Map<string, number>();
   for (const targets of seen.values()) {
-    if (targets.size !== 1) continue;
-    const [b, entry] = [...targets][0]!;
-    if (entry.count < 2) continue;
+    let total = 0;
+    let top: [string, { from: string; to: string; count: number }] | undefined;
+    for (const target of targets) {
+      total += target[1].count;
+      if (!top || target[1].count > top[1].count) top = target;
+    }
+    const [b, entry] = top!;
+    // A clear majority: one hand-corrected fact doesn't undo a rename of hundreds.
+    if (entry.count < 2 || entry.count < 0.8 * total) continue;
     claimed.set(b, (claimed.get(b) ?? 0) + 1);
     renames.push({ from: entry.from, to: entry.to });
   }

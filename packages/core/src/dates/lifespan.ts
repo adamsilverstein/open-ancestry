@@ -14,6 +14,8 @@ export type LifeQualifier = 'abt' | 'bef' | 'aft' | 'est' | 'cal';
 export interface LifeDate {
   year: number;
   qualifier?: LifeQualifier | undefined;
+  /** New-style year of a dual date: `year` 1750 with `dualYear` 1751 reads `1750/51`. */
+  dualYear?: number | undefined;
 }
 
 export interface Lifespan {
@@ -58,11 +60,25 @@ export function lifeDate(
   if (kind === 'from') return { year, qualifier: 'aft' };
   if (kind === 'to') return { year, qualifier: 'bef' };
   const qualifier = ABBREVIATION[kind];
-  return qualifier ? { year, qualifier } : { year };
+  const date: LifeDate = qualifier ? { year, qualifier } : { year };
+  // A dual date reads as written elsewhere (`1750/51`), not as its sort year.
+  if (event.dateText?.includes('/')) {
+    const start = parseDate(event.dateText).start;
+    if (start?.dualYear !== undefined) {
+      date.year = start.year;
+      date.dualYear = start.dualYear;
+    }
+  }
+  return date;
 }
 
-export function formatLifeDate({ year, qualifier }: LifeDate): string {
-  const shown = year < 0 ? `${-year} B.C.` : String(year);
+export function formatLifeDate({ year, qualifier, dualYear }: LifeDate): string {
+  const shown =
+    year < 0
+      ? `${-year} B.C.`
+      : dualYear !== undefined
+        ? `${year}/${String(dualYear % 100).padStart(2, '0')}`
+        : String(year);
   return qualifier ? `${qualifier}. ${shown}` : shown;
 }
 

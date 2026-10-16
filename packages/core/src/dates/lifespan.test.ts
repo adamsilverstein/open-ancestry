@@ -22,6 +22,8 @@ describe('lifeDate', () => {
     ['1850s', { year: 1854, qualifier: 'abt' }],
     ['FROM 1890', { year: 1890, qualifier: 'aft' }],
     ['TO 1890', { year: 1890, qualifier: 'bef' }],
+    ['1750/51', { year: 1750, dualYear: 1751 }],
+    ['ABT 11 FEB 1731/32', { year: 1731, dualYear: 1732, qualifier: 'abt' }],
     ['05/28/1960', { year: 1960 }],
     ['44 B.C.', { year: -44 }],
   ])('%s -> %j', (text, date) => {
@@ -57,6 +59,12 @@ describe('formatLifespan', () => {
     [life('1820'), 'b. 1820'],
     [life(undefined, '1880'), 'd. 1880'],
     [life('44 B.C.', '10'), '44 B.C.–10'],
+    // Periods and ranges get a compact form; dual dates read as written.
+    [life('TO 1860'), 'b. bef. 1860'],
+    [life('FROM 1850', '1900'), 'aft. 1850–1900'],
+    [life('FROM 1850 TO 1860', '1900'), 'abt. 1855–1900'],
+    [life('1750/51', '11 FEB 1801/02'), '1750/51–1801/02'],
+    [life('1699/00', '1760'), '1699/00–1760'],
     [life(), ''],
   ])('%j -> %s', (lifespan, text) => {
     expect(formatLifespan(lifespan)).toBe(text);

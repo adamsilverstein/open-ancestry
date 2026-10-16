@@ -21,15 +21,30 @@ export class ReimportSessions {
   private readonly maxAgeMs: number;
 
   private readonly folders: ReimportFolders | undefined;
+  /**
+   * Expires reviews on a timer too, so an abandoned one frees its parsed tree
+   * and spill folder (up to 1 GiB) without waiting for the next re-import
+   * call. Unref'd: it never keeps the process alive.
+   */
+  readonly sweeping: ReturnType<typeof setInterval> | undefined;
 
   constructor({
     maxSessions = 4,
     maxAgeMs = 60 * 60 * 1000,
+    sweepMs = Math.min(maxAgeMs, 5 * 60 * 1000),
     folders,
-  }: { maxSessions?: number; maxAgeMs?: number; folders?: ReimportFolders } = {}) {
+  }: {
+    maxSessions?: number;
+    maxAgeMs?: number;
+    /** How often to look for expired reviews (default: every 5 minutes, or maxAgeMs). */
+    sweepMs?: number;
+    folders?: ReimportFolders;
+  } = {}) {
     this.maxSessions = maxSessions;
     this.maxAgeMs = maxAgeMs;
     this.folders = folders;
+    this.sweeping = setInterval(() => this.expire(), sweepMs);
+    this.sweeping.unref();
   }
 
   /** Whether a review of `tree` is open: the tree must not be renamed or deleted under it. */
@@ -79,6 +94,7 @@ export class ReimportSessions {
   }
 
   closeAll(): void {
+    clearInterval(this.sweeping);
     for (const id of [...this.sessions.keys()]) this.remove(id);
   }
 

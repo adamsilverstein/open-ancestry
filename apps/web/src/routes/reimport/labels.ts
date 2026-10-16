@@ -1,7 +1,7 @@
 import { formatDate } from '@open-ancestry/core';
 import { eventLabel } from '../../lib/timeline';
 import type { ImportProgress } from '../../library/api';
-import type { FactView, ReviewChange } from './api';
+import type { FactView, PlaceRename, ReviewChange } from './api';
 
 const SEX: Record<string, string> = { M: 'male', F: 'female', X: 'other', U: 'unknown' };
 const NAME_TYPES: Record<string, string> = {
@@ -137,4 +137,10 @@ export function compareProgress(progress: ImportProgress | null | undefined): st
       ? ` (${progress.done.toLocaleString('en-US')} of ${progress.total.toLocaleString('en-US')} records)`
       : '';
   return `${COMPARE_PHASES[progress.phase]}${counts}`;
+}
+
+/** "Place renamed: Millbrook → Millbrook Falls (6 facts)" */
+export function placeRenameText(rename: PlaceRename): string {
+  const n = rename.changeIds.length;
+  return `Place renamed: ${rename.from} → ${rename.to} (${n} fact${n === 1 ? '' : 's'})`;
 }

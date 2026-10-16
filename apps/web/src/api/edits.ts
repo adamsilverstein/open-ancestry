@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useToast } from '../components/Toast/Toast';
-import { isNotFound } from './client';
+import { ApiError, isNotFound, isStale } from './client';
 import { personQuery } from './queries';
 import type { PersonDetail } from './types';
 
@@ -34,10 +34,75 @@ export function onTreeChanged(listener: (tree: string) => void): () => void {
   return () => changeListeners.delete(listener);
 }
 
-/** Refetches every query of the tree (keys are `[kind, tree, ...]`) and notifies `onTreeChanged`. */
-export function invalidateTree(queryClient: QueryClient, tree: string) {
+const FIELD_LABELS: Record<string, string> = {
+  given: 'Given names',
+  surname: 'Surname',
+  surname_prefix: 'Surname prefix',
+  prefix: 'Prefix',
+  suffix: 'Suffix',
+  nickname: 'Nickname',
+  date_text: 'Date',
+  place: 'Place',
+  text: 'Note',
+};
+
+/** One field a server validation error names, e.g. `given`, with a plain sentence. */
+export interface FieldError {
+  field: string;
+  message: string;
+}
+
+/**
+ * Server validation errors read like `body/names/0/given must NOT have more
+ * than 200 characters, body/names/0/given must be null`: turn the first one
+ * we can name into a plain sentence for the form field it belongs to.
+ */
+export function fieldError(error: unknown): FieldError | null {
+  if (!(error instanceof ApiError) || error.status !== 400) return null;
+  const match = /body\/(?:\w+\/)*?(\w+) must NOT have more than (\d+) characters/.exec(
+    error.message,
+  );
+  if (!match) return null;
+  const [, field = '', max] = match;
+  const label = FIELD_LABELS[field] ?? 'This field';
+  return { field, message: `${label} can be at most ${max} characters.` };
+}
+
+/** What to tell the user about a failed edit: a plain sentence, never a schema dump. */
+export function friendlyMessage(error: unknown): string {
+  const field = fieldError(error);
+  if (field) return field.message;
+  if (error instanceof ApiError && error.status === 400 && error.code === 'validation_failed') {
+    return 'Some of the values are not valid.';
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Other tabs of the app on this origin; edits, undo and redo are tree-wide on the server. */
+const otherTabs = typeof BroadcastChannel === 'function' ? new BroadcastChannel('oa-tree') : null;
+
+/**
+ * Refetches every query of the tree (keys are `[kind, tree, ...]`), notifies
+ * `onTreeChanged`, and tells other tabs to do the same unless the change came from one.
+ */
+export function invalidateTree(
+  queryClient: QueryClient,
+  tree: string,
+  { fromOtherTab = false } = {},
+) {
   for (const listener of changeListeners) listener(tree);
+  if (!fromOtherTab) otherTabs?.postMessage({ tree });
   return queryClient.invalidateQueries({ predicate: (q) => q.queryKey[1] === tree });
+}
+
+/** Refreshes this tab's copy of a tree whenever another tab changes it; returns a stop function. */
+export function syncTreesAcrossTabs(queryClient: QueryClient): () => void {
+  const onMessage = (event: MessageEvent<unknown>) => {
+    const { tree } = (event.data ?? {}) as { tree?: unknown };
+    if (typeof tree === 'string') void invalidateTree(queryClient, tree, { fromOtherTab: true });
+  };
+  otherTabs?.addEventListener('message', onMessage);
+  return () => otherTabs?.removeEventListener('message', onMessage);
 }
 
 /** Every edit to `tree` shares this key, so they can be counted and awaited. */
@@ -87,11 +152,19 @@ export function useEdit(tree: string) {
         edit.onError?.(error);
         return;
       }
-      toast({
-        title: 'Could not save',
-        description: `${edit.label}: ${error instanceof Error ? error.message : String(error)}`,
-        variant: 'error',
-      });
+      toast(
+        isStale(error)
+          ? {
+              title: 'Not saved',
+              description: `${edit.label}: this changed in another window (or by undo) after you opened it, so nothing was saved.`,
+              variant: 'error',
+            }
+          : {
+              title: 'Could not save',
+              description: `${edit.label}: ${friendlyMessage(error)}`,
+              variant: 'error',
+            },
+      );
       edit.onError?.(error);
     },
     onSuccess: (result, { edit }) => edit.onDone?.(result),

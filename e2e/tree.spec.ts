@@ -1426,21 +1426,25 @@ test.describe('phone width (#139)', () => {
    * and tall around its center (the target may reach further one way than
    * the other, away from its card).
    */
-  async function reachable(page: Page, locator: Locator, size = 44) {
-    return locator.evaluate((el, min) => {
-      const box = el.getBoundingClientRect();
-      const [cx, cy] = [box.x + box.width / 2, box.y + box.height / 2];
-      const reach = (dx: number, dy: number) => {
-        let n = 0;
-        while (
-          n < 120 &&
-          el.contains(document.elementFromPoint(cx + dx * (n + 1), cy + dy * (n + 1)))
-        )
-          n++;
-        return n;
-      };
-      return reach(-1, 0) + reach(1, 0) + 1 >= min && reach(0, -1) + reach(0, 1) + 1 >= min;
-    }, size);
+  /** Whether a tap target spans `size` px across and `tall` px down (default: the same). */
+  async function reachable(page: Page, locator: Locator, size = 44, tall = size) {
+    return locator.evaluate(
+      (el, [min, minTall]) => {
+        const box = el.getBoundingClientRect();
+        const [cx, cy] = [box.x + box.width / 2, box.y + box.height / 2];
+        const reach = (dx: number, dy: number) => {
+          let n = 0;
+          while (
+            n < 120 &&
+            el.contains(document.elementFromPoint(cx + dx * (n + 1), cy + dy * (n + 1)))
+          )
+            n++;
+          return n;
+        };
+        return reach(-1, 0) + reach(1, 0) + 1 >= min && reach(0, -1) + reach(0, 1) + 1 >= minTall;
+      },
+      [size, tall] as const,
+    );
   }
 
   test('starts without the minimap, which the toolbar still shows', async ({ page }) => {
@@ -1532,21 +1536,35 @@ test.describe('phone width (#139)', () => {
   }) => {
     await open(page);
     await settled(page);
+    // Down to the last zoom that still mounts cards (just above 0.35), where the
+    // rows are closest and the targets largest.
     const zoomOut = toolbar(page).getByRole('button', { name: 'Zoom out' });
-    while ((await transform(page)).scale > 0.5) {
+    while ((await transform(page)).scale / 1.25 > 0.35) {
       await zoomOut.click();
       await settled(page);
     }
     expect((await transform(page)).scale).toBeGreaterThan(0.35);
-    const ada = card(page, 'Ada Vale');
-    const b = await box(ada);
-    // A quarter of the way down the card, right under its up chevron.
-    await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height * 0.25);
-    await expect(page.getByRole('dialog', { name: 'Ada Vale' })).toBeVisible();
-    await page.keyboard.press('Escape');
-    // The chevron itself still takes a 44px tap.
+    // A quarter of the way down a card, right under its up chevron, and under
+    // the down chevron of the row above.
+    for (const [name, key] of [
+      ['Ada Vale', ids.ada],
+      ['Wren Ash', ids.wren],
+    ] as const) {
+      const b = await box(canvas(page).locator(`[data-key="${key}"]`));
+      await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height * 0.25);
+      await expect(page.getByRole('dialog', { name })).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog', { name })).toHaveCount(0);
+    }
+    // The parent switcher's pill stays on its own card's corner.
+    const pill = await box(canvas(page).locator(`[data-switch="${ids.ada}"]`));
+    const ada = await box(canvas(page).locator(`[data-key="${ids.ada}"]`));
+    expect(pill.x).toBeLessThan(ada.x + ada.width);
+    expect(pill.x + pill.width).toBeGreaterThan(ada.x);
+    // The chevron still takes a 44px-wide tap; the rows leave room for 24px
+    // down (WCAG 2.5.8) without reaching into the next row's cards.
     const up = canvas(page).locator(`[data-chevron="up"][data-node="${ids.ada}"]`);
-    expect(await reachable(page, up)).toBe(true);
+    expect(await reachable(page, up, 44, 24)).toBe(true);
   });
 
   test('a double tap on a card re-centers on that person', async ({ page }) => {

@@ -356,7 +356,8 @@ describe('media', () => {
     const dir = join(tmp, 'h.oatree');
     const report = await importGedcom({ bytes: MEDIA_GED }, { dir }, { mediaDir: media });
     expect(existsSync(join(dir, 'media', 'photos', 'portrait.JPG'))).toBe(false);
-    expect(report.media.rejected).toBe(1);
+    // The hard link, and MEDIA_GED's ../../etc/passwd.
+    expect(report.media.rejected).toBe(2);
     expect(report.warnings).toContainEqual(
       expect.objectContaining({
         code: 'media-refused',

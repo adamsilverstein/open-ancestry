@@ -1,12 +1,15 @@
 import { toNFC, type MediaKind } from '@open-ancestry/db';
 import { safeEntryPath } from '@open-ancestry/gedcom';
 import {
+  closeSync,
+  constants,
+  fstatSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   readdirSync,
   realpathSync,
-  statSync,
   writeFileSync,
   type Stats,
 } from 'node:fs';
@@ -84,6 +87,38 @@ export function kindFromType(value: string | undefined): MediaKind | undefined {
   if (/video|film/.test(v)) return 'video';
   if (/photo|image|portrait|tombstone|picture/.test(v)) return 'photo';
   return 'document';
+}
+
+/** A media folder file that must not be copied: `reason` completes "Media file X ...". */
+export class MediaRefusedError extends Error {
+  readonly reason: string;
+
+  constructor(path: string, reason: string) {
+    super(`${path} ${reason}`);
+    this.name = 'MediaRefusedError';
+    this.reason = reason;
+  }
+}
+
+/**
+ * Reads a media folder file as the walk found it (#266): through a descriptor
+ * that won't follow a symlink, and only if it is still the same file and has
+ * no other hard link, so neither a link to another of the user's files nor a
+ * swap after the walk is copied into the tree.
+ */
+function readWalked(full: string, path: string, walked: Stats): Uint8Array {
+  // O_NOFOLLOW is 0 where the platform has none (Windows): the checks below still apply.
+  const fd = openSync(full, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    const opened = fstatSync(fd);
+    if (opened.dev !== walked.dev || opened.ino !== walked.ino || !opened.isFile()) {
+      throw new MediaRefusedError(path, 'changed after the media folder was read');
+    }
+    if (opened.nlink > 1) throw new MediaRefusedError(path, 'is a hard link');
+    return readFileSync(fd);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 interface SourceFile {
@@ -174,17 +209,9 @@ export class MediaSource {
         if (entry.isDirectory()) walk(full, rel, depth + 1);
         // A name with a backslash would not survive as a forward-slash relative path.
         else if (entry.isFile() && safeEntryPath(rel) === rel) {
-          files.push({
-            path: rel,
-            get size() {
-              try {
-                return statSync(full).size;
-              } catch {
-                return 0;
-              }
-            },
-            read: () => readFileSync(full),
-          });
+          const walked = lstatOrNull(full);
+          if (!walked?.isFile()) continue;
+          files.push({ path: rel, size: walked.size, read: () => readWalked(full, rel, walked) });
         }
       }
     };

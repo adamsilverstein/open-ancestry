@@ -52,6 +52,11 @@ export type ReimportChange =
       incomingEventId: string;
       before: FactView;
       after: FactView;
+      /**
+       * The user renamed the fact's place and the export still has its old
+       * name: apply keeps their place, changing only the rest.
+       */
+      keepPlace?: true;
     }
   | { kind: 'fact.missing'; existingEventId: string; fact: FactView }
   | {
@@ -124,8 +129,11 @@ export type ReviewChange = ReimportChange & {
   defaultAccept: boolean;
   /** False for information only (missing people and facts): never applied. */
   applicable: boolean;
-  /** The tree's value was edited locally since it was imported; kept unless overridden. */
-  conflict?: 'local-edit' | 'local-delete';
+  /**
+   * The tree's value was edited (or deleted) locally since it was imported,
+   * or its place renamed while the export moves it elsewhere; kept unless overridden.
+   */
+  conflict?: 'local-edit' | 'local-delete' | 'renamed-place';
   /** Change ids that must also be accepted (a new person this one depends on). */
   requires?: string[];
 };
@@ -223,6 +231,8 @@ export interface LocalHistory {
   base: Map<string, Record<string, unknown>>;
   /** Names (normalized) a person had before the user changed or removed them. */
   formerNames: Map<string, Set<string>>;
+  /** Places the user renamed: each one's name before that, as the export last gave it. */
+  renamedPlaces: Map<string, string>;
   /** People whose primary name the user changed or removed, with what it was (as written). */
   renamedPrimary: Map<string, string>;
   /** Names (normalized) the last re-import's export gave each person it offered names for. */
@@ -364,9 +374,11 @@ export function localHistory(store: TreeStore): LocalHistory {
     typeof id === 'string'
       ? (gone.get(`${entity}|${id}`) ?? (store.getRow(entity, id) as Image | undefined))
       : undefined;
+  const renamedPlaces = new Map<string, string>();
   // Facts are compared by place name, as the export names them: the place as it
   // was too, if the user renamed it since.
   for (const [key, row] of base) {
+    if (key.startsWith('place|')) renamedPlaces.set(key.slice(6), row.full_name as string);
     if (key.startsWith('event|') && row.place_id) {
       const place = base.get(`place|${row.place_id as string}`) ?? rowOf('place', row.place_id);
       base.set(key, { ...row, place_name: place?.full_name ?? null });
@@ -464,6 +476,7 @@ export function localHistory(store: TreeStore): LocalHistory {
     mediaBase,
     base,
     formerNames,
+    renamedPlaces,
     renamedPrimary,
     baseNames,
     deletedPeople,
@@ -640,8 +653,13 @@ interface Removed {
     incoming: FactImage,
   ): { state: 'same' | 'changed'; eventId: string } | false;
   citation(ownerId: string, c: SnapCitation): boolean;
-  /** The value the export last gave this event, if the user changed it since (#185). */
-  baseOf(eventId: string): FactImage | undefined;
+  /**
+   * The value the export last gave this event, if the user changed it, or the
+   * name of its place, since (#185).
+   */
+  baseOf(event: SnapEvent): FactImage | undefined;
+  /** The name the event's place had before the user renamed it, if they did. */
+  renamedPlace(event: SnapEvent): string | undefined;
   /**
    * Notes that a record still differs from the tree although nothing is offered
    * (the user's own change stands), so the exporter regenerates it.
@@ -727,14 +745,30 @@ function diffFacts(
     if (counterpart) {
       used.add(counterpart.row.id);
       // Three-way (#185): base = what the export last said for this fact.
-      const was = removed.baseOf(counterpart.row.id);
+      const was = removed.baseOf(counterpart);
       // The export still says what it said then: whatever the user did stands.
       if (was && sameImage(was, imageOf(ie))) {
         removed.hold(`person|${e.row.id}`);
         continue;
       }
+      // The user renamed its place (#259). If the export still has the old name, the
+      // rename stands and only the rest is offered; if it moves the fact, that's a conflict.
+      const former = removed.renamedPlace(counterpart);
+      const keepPlace = former !== undefined && sameText(ie.place, former);
+      const mine = keepPlace
+        ? { ...imageOf(counterpart), place_name: ie.place }
+        : imageOf(counterpart);
+      if (keepPlace && sameImage(mine, imageOf(ie))) {
+        removed.hold(`person|${e.row.id}`);
+        continue;
+      }
       // A conflict only if the user's value differs from it (an edit undone by hand is none).
-      const conflict = !!was && !sameImage(was, imageOf(counterpart));
+      const conflict: ReviewChange['conflict'] =
+        former !== undefined && !keepPlace
+          ? 'renamed-place'
+          : was && !sameImage(was, mine)
+            ? 'local-edit'
+            : undefined;
       add(
         {
           kind: 'fact.change',
@@ -742,8 +776,9 @@ function diffFacts(
           incomingEventId: ie.row.id,
           before: factOf(counterpart),
           after: factOf(ie),
+          ...(keepPlace ? { keepPlace: true as const } : {}),
         },
-        conflict ? { conflict: 'local-edit', defaultAccept: false } : {},
+        conflict ? { conflict, defaultAccept: false } : {},
       );
       diffCitations(counterpart, ie, add, undefined, removed, e.row.id);
     } else {
@@ -851,7 +886,15 @@ export function diffTrees(
       return changed ? { state: 'changed', eventId: changed } : false;
     },
     citation: (owner, c) => gone.citations.has(`${owner}|${c.sourceKey}|${norm(c.page)}`),
-    baseOf: (eventId) => local.base.get(`event|${eventId}`) as FactImage | undefined,
+    baseOf: (event) => {
+      const stored = local.base.get(`event|${event.row.id}`) as FactImage | undefined;
+      if (stored) return stored;
+      // A fact the user left alone, at a place they renamed: its base is the old name.
+      const former = removed.renamedPlace(event);
+      return former === undefined ? undefined : { ...imageOf(event), place_name: former };
+    },
+    renamedPlace: (event) =>
+      event.row.place_id ? local.renamedPlaces.get(event.row.place_id) : undefined,
   };
   const people: PersonReview[] = [];
   const reviews = new Map<string, PersonReview>();

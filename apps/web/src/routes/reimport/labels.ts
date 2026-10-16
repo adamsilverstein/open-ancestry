@@ -53,6 +53,9 @@ export function conflictText(change: ReviewChange, personName: string): string |
   if (change.conflict === 'local-delete') {
     return 'You deleted this in this tree; it stays deleted unless you tick this.';
   }
+  if (change.conflict === 'renamed-place') {
+    return 'You renamed this place in this tree, and the export moves this fact to another place. It stays at your place unless you tick this.';
+  }
   return undefined;
 }
 
@@ -73,7 +76,11 @@ export function describeChange(change: ReviewChange, personName: string): string
     case 'fact.add':
       return `Add ${change.owner === 'family' ? 'family fact' : 'fact'}: ${factText(change.fact)}`;
     case 'fact.change':
-      return changeText(change.before, change.after);
+      // A kept place (the user renamed it) isn't part of the change.
+      return changeText(
+        change.before,
+        change.keepPlace ? { ...change.after, place: change.before.place } : change.after,
+      );
     case 'fact.missing':
       return `Not in the new export: ${factText(change.fact)}`;
     case 'citation.add':

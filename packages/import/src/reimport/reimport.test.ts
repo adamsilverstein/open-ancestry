@@ -1602,6 +1602,85 @@ describe('three-way re-import, review findings (#224)', () => {
     }
   });
 
+  /** Renames the place of Josiah's death, residence and marriage, as the user. */
+  const renameElderford = () => {
+    const place = value<string>(
+      store,
+      'SELECT place_id FROM event WHERE id = ?',
+      eventIdOf('@I3@', 'DEAT'),
+    );
+    store.transact('Rename place', (tx) =>
+      tx.update('place', place, { full_name: 'Elderford, Ohio' } as never),
+    );
+  };
+
+  it('offers nothing for facts whose place the user renamed, if the export kept it', async () => {
+    renameElderford();
+    const s2 = await prepareReimport(store, { bytes: renumber(SAMPLE) }, { today: TODAY });
+    try {
+      expect(changesOf(s2, '@I3@').filter((c) => c.kind === 'fact.change')).toEqual([]);
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  it("offers Ancestry's other change to a fact at a renamed place, keeping the place", async () => {
+    renameElderford();
+    const death = eventIdOf('@I3@', 'DEAT');
+    const place = value<string>(store, 'SELECT place_id FROM event WHERE id = ?', death);
+    const s2 = await prepareReimport(store, { bytes: josiah1940() }, { today: TODAY });
+    try {
+      const changes = changesOf(s2, '@I3@').filter((c) => c.kind === 'fact.change');
+      expect(changes).toEqual([
+        expect.objectContaining({
+          after: expect.objectContaining({ type: 'DEAT', date: '1940' }),
+          keepPlace: true,
+          defaultAccept: true,
+        }),
+      ]);
+      expect(changes[0]!.conflict).toBeUndefined();
+      applyReimport(store, s2, defaults(s2), 'Re-import');
+    } finally {
+      closeReimport(s2);
+    }
+    // The date is Ancestry's; the place is still the user's renamed one, not a re-created copy.
+    expect(row(store, 'SELECT date_text, place_id FROM event WHERE id = ?', death)).toEqual({
+      date_text: '1940',
+      place_id: place,
+    });
+    expect(value(store, "SELECT count(*) FROM place WHERE full_name LIKE 'Elderford, Cask%'")).toBe(
+      0,
+    );
+  });
+
+  it('is a renamed-place conflict when Ancestry moves a fact at a renamed place elsewhere', async () => {
+    renameElderford();
+    let inDeath = false;
+    const moved = edited('@I3@', (l) => {
+      if (l.startsWith('1 ')) inDeath = l === '1 DEAT';
+      return inDeath && l.startsWith('2 PLAC ')
+        ? '2 PLAC Millbrook, Harlow County, Vermont, USA'
+        : l;
+    });
+    const s2 = await prepareReimport(store, { bytes: moved }, { today: TODAY });
+    try {
+      const changes = changesOf(s2, '@I3@').filter((c) => c.kind === 'fact.change');
+      expect(changes).toEqual([
+        expect.objectContaining({
+          after: expect.objectContaining({
+            type: 'DEAT',
+            place: 'Millbrook, Harlow County, Vermont, USA',
+          }),
+          conflict: 'renamed-place',
+          defaultAccept: false,
+        }),
+      ]);
+      expect(changes[0]).not.toHaveProperty('keepPlace');
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
   it('adds a name Ancestry added after a rename plainly, if it still has the old name (P5c)', async () => {
     const mercy = pidOf('@I2@');
     const name = value<string>(store, 'SELECT id FROM person_name WHERE person_id = ?', mercy);

@@ -95,6 +95,54 @@ describe('searchPeople', () => {
     store.close();
   });
 
+  it('finds names across common spelling equivalents, both ways (#199)', () => {
+    const store = memoryTree();
+    const pairs: [stored: string, queries: string[]][] = [
+      ['Yılmaz', ['Yilmaz', 'YILMAZ', 'yılmaz']],
+      ['Yilmaz', ['Yılmaz']],
+      ['Straße', ['Strasse', 'STRASSE', 'straße']],
+      ['Strasse', ['Straße', 'STRAẞE']],
+      ['כֹּהֵן', ['כהן']],
+      ['כהן', ['כֹּהֵן']],
+      ['عَلِيّ', ['علي']],
+      ['علي', ['عَلِيّ']],
+      ["O'Brien", ['OBrien', 'Obrien', 'O’Brien']],
+      ['OBrien', ["O'Brien"]],
+      ['小明', ['小', '小明']],
+      ['İnce', ['ince', 'Ince', 'INCE']],
+      ['Ince', ['İnce']],
+      ['Işıklar', ['isiklar', 'IŞIKLAR']],
+    ];
+    const ids = pairs.map(
+      ([surname]) =>
+        store.transact('add', (tx) => persons.create(tx, { names: [{ given: 'Tester', surname }] }))
+          .result.id,
+    );
+    pairs.forEach(([stored, queries], i) => {
+      for (const query of queries) {
+        expect(
+          searchPeople(store, query).map((r) => r.person.id),
+          `${query} -> ${stored}`,
+        ).toContain(ids[i]);
+      }
+    });
+    // The part after an apostrophe is still a word of its own.
+    const apostrophes = ["O'Brien", 'O’Neill', "D'Angelo"].map(
+      (surname) =>
+        store.transact('add', (tx) => persons.create(tx, { names: [{ given: 'Apos', surname }] }))
+          .result.id,
+    );
+    expect(searchPeople(store, 'Brien').map((r) => r.person.id)).toContain(apostrophes[0]);
+    expect(searchPeople(store, 'Neill').map((r) => r.person.id)).toContain(apostrophes[1]);
+    expect(searchPeople(store, 'angelo').map((r) => r.person.id)).toContain(apostrophes[2]);
+    expect(searchPeople(store, 'oneill').map((r) => r.person.id)).toContain(apostrophes[1]);
+    // The palette's total counts folded spellings too.
+    expect(countPeople(store, 'Yilmaz')).toBe(2);
+    // A lone Latin letter still only matches exactly (an initial), not every name it starts.
+    expect(searchPeople(store, 'Y').map((r) => r.person.id)).toEqual([]);
+    store.close();
+  });
+
   it('matches places and years', () => {
     const store = memoryTree();
     const f = seedSmallFamily(store);
@@ -319,6 +367,10 @@ describe('full search rebuild', () => {
     store.transact('edge cases', (tx) => {
       persons.create(tx, {}); // no names, no events
       persons.create(tx, { names: [{ given: 'Ada' }, { surname: 'Lyle', type: 'aka' }] });
+      // Names the spelling fold changes (#199): the set-wise rebuild must fold them too.
+      for (const surname of ['Yılmaz', 'Straße', "O'Brien"]) {
+        persons.create(tx, { names: [{ given: 'Fold', surname }] });
+      }
     });
     const docs = () =>
       store.db
@@ -335,6 +387,18 @@ describe('full search rebuild', () => {
     store.db.transaction(() => refreshSearch(store, ids))();
     expect(rebuilt).toEqual(docs());
     expect(rebuilt).toHaveLength(ids.length);
+    store.close();
+  });
+
+  it('folds spellings when a bulk load rebuilds the index', () => {
+    const store = memoryTree();
+    const data = generateSyntheticTree({ people: 20, seed: 3 });
+    const target = data.person_name[0]!;
+    target.surname = 'Yılmaz';
+    bulkInsert(store, data);
+    expect(searchPeople(store, 'Yilmaz').map((r) => r.person.id)).toContain(target.person_id);
+    rebuildSearchIndex(store);
+    expect(searchPeople(store, 'Yilmaz').map((r) => r.person.id)).toContain(target.person_id);
     store.close();
   });
 });

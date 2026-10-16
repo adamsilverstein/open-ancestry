@@ -1617,6 +1617,26 @@ describe('three-way re-import, review findings (#224)', () => {
     );
   };
 
+  it('takes only a new name as a renamed place, not new coordinates (#307 review)', async () => {
+    const place = value<string>(
+      store,
+      'SELECT place_id FROM event WHERE id = ?',
+      eventIdOf('@I3@', 'DEAT'),
+    );
+    store.transact('Map it', (tx) =>
+      tx.update('place', place, { latitude: 40.1, longitude: -82.9 } as never),
+    );
+    const s2 = await prepareReimport(store, { bytes: josiah1940() }, { today: TODAY });
+    try {
+      const [change] = changesOf(s2, '@I3@').filter((c) => c.kind === 'fact.change');
+      expect(change).toMatchObject({ defaultAccept: true });
+      expect(change!.conflict).toBeUndefined();
+      expect(change).not.toHaveProperty('keepPlace');
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
   it('offers nothing for facts whose place the user renamed, if the export kept it', async () => {
     renameElderford();
     const s2 = await prepareReimport(store, { bytes: renumber(SAMPLE) }, { today: TODAY });
@@ -2254,6 +2274,84 @@ describe('a place the export renamed (#279)', () => {
     } finally {
       closeReimport(s2);
     }
+  });
+
+  /** Applies every place rename the export offers, and nothing else. */
+  const applyRenames = async (text: string) => {
+    const s2 = await prepareReimport(store, { bytes: text }, { today: TODAY });
+    try {
+      const ids = s2.diff.exportPlaceRenames.flatMap((r) => r.changeIds);
+      expect(ids.length).toBeGreaterThan(0);
+      applyReimport(store, s2, new Set(ids), 'Re-import');
+    } finally {
+      closeReimport(s2);
+    }
+  };
+  const placeId = (name: string) =>
+    value<string>(store, 'SELECT id FROM place WHERE full_name = ?', name);
+
+  it('renames the places under it too (#307 review)', async () => {
+    const cemetery = `Old Cemetery, ${OLD}`;
+    store.transact('Add', (tx) =>
+      tx.insert('place', {
+        name: 'Old Cemetery',
+        full_name: cemetery,
+        parent_id: placeId(OLD),
+      } as never),
+    );
+    await applyRenames(renamed());
+    expect(value(store, 'SELECT count(*) FROM place WHERE full_name = ?', cemetery)).toBe(0);
+    expect(
+      value(store, 'SELECT parent_id FROM place WHERE full_name = ?', `Old Cemetery, ${NEW}`),
+    ).toBe(placeId(NEW));
+  });
+
+  it('merges into a place already named so without losing what the old one had (#307 review)', async () => {
+    const old = placeId(OLD);
+    store.transact('Prepare', (tx) => {
+      tx.update('place', old, { latitude: 43.1, longitude: -72.6 } as never);
+      tx.insert('place', {
+        name: 'Old Cemetery',
+        full_name: `Old Cemetery, ${OLD}`,
+        parent_id: old,
+      } as never);
+      // A place row of the new name nobody uses yet, without coordinates.
+      tx.insert('place', { name: 'Millbrook Falls', full_name: NEW } as never);
+      const note = tx.insert('note', { text: 'Founded 1790' } as never) as { id: string };
+      tx.insert('note_link', { note_id: note.id, owner_type: 'place', owner_id: old } as never);
+    });
+    await applyRenames(renamed());
+    const merged = placeId(NEW);
+    expect(value(store, 'SELECT count(*) FROM place WHERE full_name = ?', OLD)).toBe(0);
+    expect(row(store, 'SELECT latitude, longitude FROM place WHERE id = ?', merged)).toEqual({
+      latitude: 43.1,
+      longitude: -72.6,
+    });
+    expect(
+      value(
+        store,
+        "SELECT count(*) FROM note_link WHERE owner_type = 'place' AND owner_id = ?",
+        merged,
+      ),
+    ).toBe(1);
+    expect(
+      value(store, 'SELECT parent_id FROM place WHERE full_name = ?', `Old Cemetery, ${NEW}`),
+    ).toBe(merged);
+  });
+
+  it('moves facts rather than renaming a place whose county changed (#307 review)', async () => {
+    const ELDER = 'Elderford, Cask County, Ohio, USA';
+    const CO = 'Elderford, Cask Co., Ohio, USA';
+    await applyRenames(renumber(SAMPLE.replaceAll(ELDER, CO)));
+    // The old place keeps its name and parent; the new one sits under the new county.
+    expect(value(store, 'SELECT count(*) FROM place WHERE full_name = ?', ELDER)).toBe(1);
+    expect(
+      value(
+        store,
+        'SELECT p.full_name FROM place c JOIN place p ON p.id = c.parent_id WHERE c.full_name = ?',
+        CO,
+      ),
+    ).toBe('Cask Co., Ohio, USA');
   });
 
   it('leaves a one-off place change as an ordinary change', async () => {

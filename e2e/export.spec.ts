@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { APIRequestContext, Page } from '@playwright/test';
 import { openMemoryTree } from '../packages/db/src/index';
@@ -137,7 +136,7 @@ test('shows what an export could not carry over', async ({ page }, info) => {
   // An imported tree (written straight into the e2e library) whose person points at a
   // family that is not in the file: a GEDCOM 7 export cannot keep that line.
   const tree = treeName(info.title, info.project.name);
-  const library = join(tmpdir(), `oa-e2e-library-${process.env.E2E_PORT}`);
+  const library = process.env.OA_E2E_LIBRARY!;
   await importGedcom(
     {
       bytes: [

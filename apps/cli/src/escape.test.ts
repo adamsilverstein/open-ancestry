@@ -1,11 +1,11 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { openMemoryTree } from '@open-ancestry/db';
 import { importGedcom } from '@open-ancestry/import';
 import { describe, expect, it } from 'vitest';
 import { escapeControls } from './escape';
 import { exposureWarning, formatReport, main, run } from './main';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 /*
  * Issue #97: text from a GEDCOM (warnings, unmapped lines, media paths, the
@@ -30,7 +30,7 @@ describe('escapeControls', () => {
 });
 
 async function evilImport(fileName: string, ged: string) {
-  const dir = await mkdtemp(join(tmpdir(), 'oa-escape-'));
+  const dir = makeTempDir('oa-escape-');
   const file = join(dir, fileName);
   await writeFile(file, ged);
   const logs: string[] = [];

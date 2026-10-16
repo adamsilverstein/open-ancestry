@@ -9,7 +9,7 @@ import {
 } from '@open-ancestry/db';
 import { safeEntryPath } from '@open-ancestry/gedcom';
 import { Zip, ZipDeflate, ZipPassThrough, zipSync, type Zippable } from 'fflate';
-import { closeSync, readFileSync, type Stats } from 'node:fs';
+import { closeSync, fstatSync, readFileSync, type BigIntStats } from 'node:fs';
 import { Readable } from 'node:stream';
 import { buildGedcomExport } from './gedcom';
 import type { GedcomExport, GedzipExport, GedzipExportOptions } from './types';
@@ -50,10 +50,13 @@ interface PlannedFile {
   root: string;
   localPath: string;
   size: number;
-  mtimeMs: number;
-  /** Device and inode, so a file swapped for another of the same size and time is noticed. */
-  dev: number;
-  ino: number;
+  mtimeNs: bigint;
+  /**
+   * Device and inode, so a file swapped for another of the same size and time
+   * is noticed. Bigints, as a number can round a large inode into a match.
+   */
+  dev: bigint;
+  ino: bigint;
   level: 0 | 6;
 }
 
@@ -107,9 +110,10 @@ export function planGedzipExport(
       const found = checkMediaPathSync(root, path, (reason) => (refusal = reason));
       if (found?.info.isFile()) {
         const entry = entryName(scrub(path));
-        const { size, mtimeMs, dev, ino } = found.info;
+        const { mtimeNs, dev, ino } = found.info;
+        const size = Number(found.info.size);
         const level = STORED.test(entry) ? 0 : 6;
-        file = { entry, root, localPath: path, size, mtimeMs, dev, ino, level };
+        file = { entry, root, localPath: path, size, mtimeNs, dev, ino, level };
         files.set(media.id, file);
       } else {
         warnings.push(`Media file ${shown} was left out (${refusal})`);
@@ -211,10 +215,16 @@ async function* gedzipChunks(plan: GedzipPlan): AsyncGenerator<Uint8Array> {
         yield* flush();
       }
       entry.push(new Uint8Array(0), true);
-      if (read !== file.size) late.push(`Media file ${file.entry} changed during the export`);
+      // Its bytes are already sent, so a file rewritten in place while it was
+      // read (same inode, maybe the same length) can only be warned about.
+      if (read !== file.size || !asPlanned(file, await handle.stat({ bigint: true }))) {
+        late.push(
+          `Media file ${file.entry} changed while it was exported; its copy here may not match`,
+        );
+      }
       yield* flush();
     } finally {
-      await handle.close();
+      await handle.close().catch(() => {});
     }
   }
   if (late.length) {
@@ -238,17 +248,17 @@ async function openUnchanged(file: PlannedFile) {
   const opened = await openMediaFile(file.root, file.localPath);
   if (!opened) return undefined;
   if (asPlanned(file, opened.info)) return opened.handle;
-  await opened.handle.close();
+  await opened.handle.close().catch(() => {});
   return undefined;
 }
 
 /** The same file, unchanged since the plan: a swap of the same size and time is caught by inode. */
-function asPlanned(file: PlannedFile, info: Stats): boolean {
+function asPlanned(file: PlannedFile, info: BigIntStats): boolean {
   return (
     info.dev === file.dev &&
     info.ino === file.ino &&
-    info.size === file.size &&
-    info.mtimeMs === file.mtimeMs
+    Number(info.size) === file.size &&
+    info.mtimeNs === file.mtimeNs
   );
 }
 
@@ -272,11 +282,18 @@ export function buildGedzipExport(
     const opened = openMediaFileSync(file.root, file.localPath);
     try {
       if (!opened || !asPlanned(file, opened.info)) throw new Error('changed');
-      zip[file.entry] = [readFileSync(opened.fd), { level: file.level }];
+      const bytes = readFileSync(opened.fd);
+      // Rewritten in place while it was read: left out, unlike a streamed export.
+      if (!asPlanned(file, fstatSync(opened.fd, { bigint: true }))) throw new Error('changed');
+      zip[file.entry] = [bytes, { level: file.level }];
     } catch {
       result.warnings.push(`Media file ${file.entry} could not be read`);
     } finally {
-      if (opened) closeSync(opened.fd);
+      try {
+        if (opened) closeSync(opened.fd);
+      } catch {
+        // A failed close must not hide the warning or the rest of the archive.
+      }
     }
   }
   return { ...result, bytes: zipSync(zip, { level: 6 }) };

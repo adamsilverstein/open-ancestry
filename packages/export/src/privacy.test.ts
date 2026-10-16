@@ -1,13 +1,13 @@
 import { openTree, treePaths } from '@open-ancestry/db';
 import { importGedcom } from '@open-ancestry/import';
 import { unzipSync, zipSync } from 'fflate';
-import { chmodSync, linkSync, mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, linkSync, rmSync } from 'node:fs';
 import { buffer } from 'node:stream/consumers';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildGedcomExport, buildGedzipExport, planGedzipExport, streamGedzip } from './index';
 import { TODAY, ged, gedcom7Problems, importInto } from './test-helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 /*
  * Privatize beyond living people (security review 2026-10-14): records marked
@@ -92,7 +92,7 @@ afterEach(() => {
 });
 
 async function tree(gedcom: string[] = lines) {
-  const root = mkdtempSync(join(tmpdir(), 'oa-privacy-'));
+  const root = makeTempDir('oa-privacy-');
   dirs.push(root);
   const dir = join(root, 'Canaryfamilyname.oatree');
   const archive = zipSync({
@@ -387,7 +387,7 @@ describe('privatized exports remove withheld people named in other records (#195
     text.match(/zedekiah|quillon|zeddo|marriedname|\bzed\b|li wu|李明/gi) ?? [];
 
   it('5.5.1, 7 and GEDZIP name no withheld person, and keep the deceased name', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'oa-privacy-'));
+    const root = makeTempDir('oa-privacy-');
     dirs.push(root);
     const dir = join(root, 'Mentions.oatree');
     const archive = zipSync({
@@ -425,7 +425,7 @@ describe('privatized exports remove withheld people named in other records (#195
 
 describe('privatized GEDZIP warnings and entries never name a withheld person (#248, #251)', () => {
   it('scrubs refused, late and unreadable media file names', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'oa-privacy-'));
+    const root = makeTempDir('oa-privacy-');
     dirs.push(root);
     const dir = join(root, 'Links.oatree');
     const lines = [
@@ -485,7 +485,7 @@ describe('privatized GEDZIP warnings and entries never name a withheld person (#
   });
 
   it('scrubs a file that passes the plan but cannot be read by the in-memory build', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'oa-privacy-'));
+    const root = makeTempDir('oa-privacy-');
     dirs.push(root);
     const dir = join(root, 'Unreadable.oatree');
     const lines = [

@@ -1,12 +1,12 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createTree, treePaths } from '@open-ancestry/db';
 import { zipSync } from 'fflate';
-import { afterAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { importGedcom } from './import';
 import { ged, importInto, TODAY } from './test-helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 /** `ged` for record lists too long to spread into arguments. */
 const gedOf = (lines: string[]) =>
@@ -90,8 +90,7 @@ describe('import limits', () => {
 });
 
 describe('GEDZIP limits', () => {
-  const tmp = mkdtempSync(join(tmpdir(), 'oa-limits-'));
-  afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+  const tmp = makeTempDir('oa-limits-');
   const photo = randomBytes(64 * 1024); // incompressible
   const small = ged('0 @I1@ INDI', '1 NAME Ada /Vale/', '1 OBJE', '2 FILE photos/a.jpg');
 
@@ -144,7 +143,7 @@ describe('GEDZIP limits', () => {
 
 describe('after an import commits', () => {
   it('truncates the write-ahead log, which can be as large as the database', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'oa-wal-'));
+    const root = makeTempDir('oa-wal-');
     const dir = join(root, 'wal.oatree');
     const store = createTree(dir);
     try {

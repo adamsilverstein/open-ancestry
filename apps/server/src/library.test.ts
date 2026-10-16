@@ -7,13 +7,14 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { mkdtemp, readdir } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { readdir } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from './index';
 import { Library, defaultLibraryRoot, treeNameProblem } from './library';
 import { testApi, type TestApi } from './test/helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 describe('treeNameProblem', () => {
   it.each([
@@ -65,7 +66,7 @@ describe('defaultLibraryRoot', () => {
 
 describe('Library', () => {
   it('creates its root lazily and caches one store per tree', async () => {
-    const root = join(await mkdtemp(join(tmpdir(), 'oa-lib-')), 'nested');
+    const root = join(makeTempDir('oa-lib-'), 'nested');
     const library = new Library(root);
     expect(existsSync(root)).toBe(false);
     expect(library.list()).toEqual([]);
@@ -79,7 +80,7 @@ describe('Library', () => {
   });
 
   it('tells copied tree folders apart by folder name (#193)', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'oa-lib-'));
+    const root = makeTempDir('oa-lib-');
     const library = new Library(root);
     library.create('Smith');
     library.closeAll();
@@ -105,7 +106,7 @@ describe('Library', () => {
   });
 
   it('refuses to rename or delete a busy tree', async () => {
-    const library = new Library(await mkdtemp(join(tmpdir(), 'oa-lib-')));
+    const library = new Library(makeTempDir('oa-lib-'));
     library.create('Busy');
     let release!: () => void;
     const running = library.whileBusy('Busy', () => new Promise<void>((r) => (release = r)));
@@ -119,7 +120,7 @@ describe('Library', () => {
   });
 
   it('resolves an id to its folder as spelled on disk, without folding case', async () => {
-    const library = new Library(await mkdtemp(join(tmpdir(), 'oa-lib-')));
+    const library = new Library(makeTempDir('oa-lib-'));
     const created = library.create('Caf\u00e9');
     // NFD and NFC spellings are one tree: one connection, one busy state.
     expect(library.open('Cafe\u0301')).toBe(created);
@@ -217,7 +218,7 @@ describe.skipIf(process.platform === 'win32')('library permissions', () => {
   const mode = (path: string) => statSync(path).mode & 0o777;
   const temps: string[] = [];
   const temp = async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'oa-lib-'));
+    const dir = makeTempDir('oa-lib-');
     temps.push(dir);
     return dir;
   };

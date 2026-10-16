@@ -1,8 +1,6 @@
 import { parseDate } from '@open-ancestry/core';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   createTree,
   events,
@@ -17,16 +15,14 @@ import {
   undoLast,
   type TreeStore,
 } from './index';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 const HEBREW = '@#DHEBREW@ 1 TSH 5780';
 const FRENCH = '@#DFRENCH R@ BET 1 VEND 3 AND 5 FLOR 7';
 
 let root: string;
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'oa-derived-'));
-});
-afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  root = makeTempDir('oa-derived-');
 });
 
 const count = (store: TreeStore, table: string) =>

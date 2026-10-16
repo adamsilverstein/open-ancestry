@@ -1,6 +1,4 @@
 import fc from 'fast-check';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -18,6 +16,7 @@ import {
 } from './index';
 import { kinshipStats } from './kinship';
 import { memoryTree, seedSmallFamily } from './test/helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 describe('getRelationship (whole tree)', () => {
   it('names blood, spouse and in-law ties anywhere in the tree', () => {
@@ -228,7 +227,7 @@ describe('getRelationship keeps its graph current', () => {
   });
 
   it('reloads after a write from another connection', () => {
-    const dir = join(mkdtempSync(join(tmpdir(), 'oa-kin-')), 'k.oatree');
+    const dir = join(makeTempDir('oa-kin-'), 'k.oatree');
     const store = createTree(dir);
     const f = seedSmallFamily(store);
     expect(getRelationship(store, f.spouse, f.sister).name).toBe('sister-in-law');

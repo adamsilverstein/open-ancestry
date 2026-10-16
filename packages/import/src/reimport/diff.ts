@@ -70,6 +70,8 @@ export type ReimportChange =
     }
   | { kind: 'tag.add'; incomingTagId: string; tag: string }
   | { kind: 'media.add'; incomingMediaId: string; title: string | null }
+  /** A tree media placeholder (same Ancestry _OID, no file yet) that the export has a file for. */
+  | { kind: 'media.file'; existingMediaId: string; incomingMediaId: string; title: string | null }
   | {
       kind: 'family.add';
       incomingFamilyId: string;
@@ -529,12 +531,41 @@ function foldMerged(
       tag: t.category ? `${t.category}: ${t.name}` : t.name,
     });
   }
-  const media = new Set(e.media.map((x) => x.key));
-  for (const x of i.media) {
-    if (media.has(x.key)) continue;
-    media.add(x.key);
-    add({ kind: 'media.add', incomingMediaId: x.row.id, title: x.row.title });
+  for (const change of mediaChanges(e.media, i.media)) add(change);
+}
+
+/**
+ * The media changes for one person: media the export adds, and files for the
+ * tree's placeholders. Media whose bytes the person already has (same sha256,
+ * under another name or _OID) is the same media and is skipped.
+ */
+function mediaChanges(
+  existing: SnapPerson['media'],
+  incoming: SnapPerson['media'],
+): Extract<ReimportChange, { kind: 'media.add' | 'media.file' }>[] {
+  const byKey = new Map(existing.map((x) => [x.key, x.row]));
+  const hashes = new Set(existing.map((x) => x.row.sha256).filter(Boolean));
+  const changes: Extract<ReimportChange, { kind: 'media.add' | 'media.file' }>[] = [];
+  for (const x of incoming) {
+    const same = byKey.get(x.key);
+    if (same) {
+      if (!same.local_path && x.row.local_path && x.row.sha256 && !hashes.has(x.row.sha256)) {
+        changes.push({
+          kind: 'media.file',
+          existingMediaId: same.id,
+          incomingMediaId: x.row.id,
+          title: same.title ?? x.row.title,
+        });
+        hashes.add(x.row.sha256);
+      }
+      continue;
+    }
+    if (x.row.sha256 && hashes.has(x.row.sha256)) continue;
+    byKey.set(x.key, x.row);
+    if (x.row.sha256) hashes.add(x.row.sha256);
+    changes.push({ kind: 'media.add', incomingMediaId: x.row.id, title: x.row.title });
   }
+  return changes;
 }
 
 /** The person, the kind and every row id a change refers to (see `ReviewChange.key`). */
@@ -920,13 +951,12 @@ export function diffTrees(
           tag: t.category ? `${t.category}: ${t.name}` : t.name,
         });
     }
-    const media = new Set(e.media.map((x) => x.key));
-    for (const x of i.media) {
+    for (const change of mediaChanges(e.media, i.media)) {
+      const key = i.media.find((x) => x.row.id === change.incomingMediaId)!.key;
       // A photo the user unlinked and the export still has: their removal stands.
-      if (!media.has(x.key) && gone.media.has(`${e.row.id}|${x.key}`)) {
+      if (change.kind === 'media.add' && gone.media.has(`${e.row.id}|${key}`)) {
         held.add(`person|${e.row.id}`);
-      } else if (!media.has(x.key))
-        add({ kind: 'media.add', incomingMediaId: x.row.id, title: x.row.title });
+      } else add(change);
     }
     if (r.changes.length) {
       reviews.set(r.key, r);

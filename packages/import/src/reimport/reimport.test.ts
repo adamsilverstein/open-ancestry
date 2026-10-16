@@ -1376,6 +1376,21 @@ describe('trustworthy confidence and reasons (#159)', () => {
   });
 });
 
+describe('apply reports where new people went (#158)', () => {
+  it('maps each added person to their id in the tree', async () => {
+    const s2 = await prepareReimport(store, { bytes: updatedSample() }, { today: TODAY });
+    try {
+      const noah = s2.diff.people.find((p) => p.name === 'Noah Ashgrove')!;
+      const result = applyReimport(store, s2, defaults(s2), 'Re-import');
+      const id = result.newPeople[noah.incomingId!];
+      expect(id).toBeTruthy();
+      expect(value(store, 'SELECT given FROM person_name WHERE person_id = ?', id)).toBe('Noah');
+    } finally {
+      closeReimport(s2);
+    }
+  });
+});
+
 describe('three-way re-import (#185)', () => {
   const josiahDeath = () =>
     value<string>(

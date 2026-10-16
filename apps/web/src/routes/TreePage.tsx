@@ -1,9 +1,10 @@
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId } from 'react';
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { FileUp } from 'lucide-react';
 import { EmptyState } from '../components/EmptyState/EmptyState';
-import { CURRENT_TREE_KEY, currentTreeQuery } from '../api/queries';
+import { currentTreeQuery } from '../api/queries';
+import { useUrlTree } from '../app/useUrlTree';
 import { fetchHome, treeKeys } from '../tree/api';
 import { TreeView } from '../tree/TreeView';
 import styles from '../tree/TreeView.module.css';
@@ -25,29 +26,7 @@ export function TreePage() {
   });
 
   // A shared link opens its tree: make it the current one (top bar, next visit).
-  const queryClient = useQueryClient();
-  const synced = useRef<string | null>(null);
-  useEffect(() => {
-    if (!search.tree || synced.current === search.tree) return;
-    synced.current = search.tree;
-    try {
-      localStorage.setItem(CURRENT_TREE_KEY, search.tree);
-    } catch {
-      // Storage may be unavailable; the URL still says which tree.
-    }
-    queryClient.setQueryData(currentTreeQuery.queryKey, search.tree);
-  }, [search.tree, queryClient]);
-
-  // Switching trees from the top bar (current tree moves away from the one on
-  // screen) opens the new tree at its home person.
-  const previousCurrent = useRef(current.data);
-  useEffect(() => {
-    const before = previousCurrent.current;
-    previousCurrent.current = current.data;
-    if (!search.tree || before !== search.tree) return;
-    if (!current.data || current.data === search.tree) return;
-    void navigate({ to: '/tree/$personId', params: { personId: 'home' }, search: {} });
-  }, [current.data, search.tree, navigate]);
+  useUrlTree(search.tree);
 
   useEffect(() => {
     if (!wantsHome || !home.data || !tree) return;
@@ -86,6 +65,11 @@ export function TreePage() {
             level={2}
             title="No home person"
             description="Open someone's profile and choose More actions, then Set as home person, to open the tree there."
+            action={
+              <Link to="/people" className={styles.emptyLink}>
+                Open the people list
+              </Link>
+            }
           />
         </div>
       </div>

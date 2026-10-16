@@ -99,27 +99,29 @@ export function planGedzipExport(
   };
 
   /** Notes a media file for the archive, once, refusing anything outside the media folder. */
-  const filePath = (media: MediaRow): string | undefined => {
-    if (!media.local_path) return media.remote_url ?? undefined;
+  // `scrub` takes withheld people's names out of a privatized export's file names.
+  const filePath = (media: MediaRow, scrub: (text: string) => string): string | undefined => {
+    if (!media.local_path) return media.remote_url ? scrub(media.remote_url) : undefined;
     const path = safeEntryPath(media.local_path);
+    const shown = scrub(media.local_path);
     let file = files.get(media.id);
     if (!file && path && root) {
       let refusal: MediaRefusal = 'missing';
       const found = checkMediaPathSync(root, path, (reason) => (refusal = reason));
       if (found?.info.isFile()) {
-        const entry = entryName(path);
+        const entry = entryName(scrub(path));
         const { mtimeNs, dev, ino } = found.info;
         const size = Number(found.info.size);
         const level = STORED.test(entry) ? 0 : 6;
         file = { entry, root, localPath: path, size, mtimeNs, dev, ino, level };
         files.set(media.id, file);
       } else {
-        warnings.push(`Media file ${media.local_path} was left out (${refusal})`);
+        warnings.push(`Media file ${shown} was left out (${refusal})`);
       }
     } else if (!file) {
-      warnings.push(`Media file ${media.local_path} is not in this tree's media folder`);
+      warnings.push(`Media file ${shown} is not in this tree's media folder`);
     }
-    const target = file?.entry ?? path ?? media.local_path;
+    const target = file?.entry ?? (path ? scrub(path) : shown);
     return target.split('/').map(encodeURIComponent).join('/');
   };
 

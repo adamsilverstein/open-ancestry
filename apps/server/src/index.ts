@@ -19,6 +19,7 @@ import { checkRoutes } from './routes/checks';
 import { editRoutes } from './routes/edit';
 import { importRoutes, sweepStaleUploads } from './routes/imports';
 import { reimportRoutes } from './routes/reimports';
+import { ReimportFolders } from './reimport-folders';
 import { ReimportSessions } from './reimports';
 import { mediaRoutes } from './routes/media';
 import { peopleRoutes } from './routes/people';
@@ -80,7 +81,9 @@ export interface ServerOptions {
   mediaUploadLimit?: number;
   /** Concurrent imports (default 1) and how many may wait (default 4). */
   importConcurrency?: number;
-  maxQueuedImports?: number;
+  maxQueuedImports?: number | undefined;
+  /** Re-import reviews held in memory at once, each with its parsed export (default 4). */
+  maxReimports?: number | undefined;
 }
 
 export interface StartOptions extends ServerOptions {
@@ -170,6 +173,9 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   library.sweepInterruptedImports();
   void sweepStaleUploads();
   const importLimits = resolveImportLimits(options.importLimits);
+  // This server's re-import working folders; opening a tree sweeps others' leftovers.
+  const reimportFolders = new ReimportFolders();
+  library.reimportFolders = reimportFolders;
   const deps: Deps = {
     library,
     jobs,
@@ -178,7 +184,11 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     archiveUploadLimit: options.archiveUploadLimit ?? importLimits.maxArchiveBytes,
     mediaUploadLimit: options.mediaUploadLimit ?? DEFAULT_MEDIA_UPLOAD_LIMIT,
     thumbnails: new ThumbnailQueue(),
-    reimports: new ReimportSessions(),
+    reimports: new ReimportSessions({
+      maxSessions: options.maxReimports,
+      folders: reimportFolders,
+    }),
+    reimportFolders,
   };
 
   registerErrorHandling(app);
@@ -275,6 +285,7 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   app.addHook('preClose', drain);
   app.addHook('onClose', async () => {
     deps.reimports.closeAll();
+    reimportFolders.close();
     library.closeAll();
   });
 

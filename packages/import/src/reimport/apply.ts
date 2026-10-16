@@ -11,6 +11,7 @@ import {
   type Tx,
 } from '@open-ancestry/db';
 import { BASE_KEY, imageOfView } from './diff';
+import { MediaCopier } from './media';
 import type { ReimportSession } from './session';
 import { mediaKeys, norm, sourceKey } from './snapshot';
 
@@ -34,6 +35,13 @@ export interface ApplyResult {
   skipped: number;
   /** Changes not applied because a change they depend on was rejected. */
   blocked: string[];
+  /**
+   * Media rows whose files this apply copied into the tree (queue their
+   * thumbnails), and rows kept without a file because it could not be copied.
+   */
+  media: { copied: string[]; refused: string[] };
+  /** Each added person's incoming id to their id in the tree, for links to them. */
+  newPeople: Record<string, string>;
 }
 
 /**
@@ -69,6 +77,7 @@ export function applyReimport(
   session: ReimportSession,
   accepted: ReadonlySet<string>,
   label: string,
+  { maxMediaBytes = 256 * 1024 ** 2 }: { maxMediaBytes?: number } = {},
 ): ApplyResult {
   if (treeRevision(store) !== session.baseRevision) throw new ReimportStaleError();
   const inc = session.incoming;
@@ -96,7 +105,35 @@ export function applyReimport(
   const incAll = <T>(sql: string, ...params: unknown[]) =>
     inc.db.prepare(sql).all(...params) as T[];
 
-  const { batchId } = store.transact(label, (tx) => {
+  const copier = new MediaCopier(store, session.media, maxMediaBytes);
+  // Copy the files apply may need now, before the transaction takes the tree's write lock:
+  // new media (not already in the tree by key or bytes), and files for placeholders.
+  {
+    const have = new Set<string>();
+    const treeKey = mediaKeys(store);
+    const exportKey = mediaKeys(inc);
+    for (const m of store.db.prepare('SELECT * FROM media').all() as MediaRow[]) {
+      have.add(treeKey(m));
+      if (m.sha256 && m.local_path) have.add(`sha:${m.sha256}`);
+    }
+    const filling = new Set(
+      changes.flatMap((c) =>
+        c.kind === 'media.file' && chosen.has(c.id) ? [c.incomingMediaId] : [],
+      ),
+    );
+    copier.prepare(
+      incAll<MediaRow>('SELECT * FROM media WHERE local_path IS NOT NULL').filter(
+        (m) =>
+          filling.has(m.id) ||
+          !(have.has(exportKey(m)) || (m.sha256 && have.has(`sha:${m.sha256}`))),
+      ),
+    );
+  }
+  const copied: string[] = [];
+  const refused: string[] = [];
+
+  // Named rather than inline so a failed apply can discard the files it copied.
+  const write = (tx: Tx): number => {
     const has = (table: TableName, id: string) => !!tx.store.getRow(table, id);
     const insert = <T extends TableName>(table: T, row: Writable): string => {
       const id = row.id as string | undefined;
@@ -178,6 +215,7 @@ export function applyReimport(
     const incomingKey = mediaKeys(inc);
     for (const m of tx.store.db.prepare('SELECT * FROM media').all() as MediaRow[]) {
       existingMedia.set(existingKey(m), m.id);
+      if (m.sha256 && m.local_path) existingMedia.set(`sha:${m.sha256}`, m.id);
     }
     /** Existing media already matched to an incoming row. */
     const claimed = new Set<string>();
@@ -185,15 +223,24 @@ export function applyReimport(
       if (mediaMap.has(incomingId)) return mediaMap.get(incomingId)!;
       const m = get('media', incomingId)!;
       const key = incomingKey(m);
-      // Files are not copied by a re-import; a local path is kept only if the tree has it.
+      // The same scan under another _OID or name is the same media: reuse it by its bytes.
       // Two incoming media never share one row: the second one's lines would replace the first's.
-      const match = existingMedia.get(key);
-      const id =
-        match && !claimed.has(match)
-          ? match
-          : insert('media', { ...plain(m), local_path: localIfPresent(tx, m) });
+      const match =
+        existingMedia.get(key) ?? (m.sha256 ? existingMedia.get(`sha:${m.sha256}`) : undefined);
+      let id: string;
+      if (match && !claimed.has(match)) id = match;
+      else {
+        const file = copier.copy(m);
+        // A second copy of bytes the tree already has gets a row of its own (the
+        // claimed rule) but shares the tree's file: nothing was copied for it.
+        const shared = match ? (tx.store.getRow('media', match)?.local_path ?? null) : null;
+        id = insert('media', { ...plain(m), local_path: file?.local_path ?? shared });
+        if (file) copied.push(id);
+        else if (m.local_path && !shared) refused.push(id);
+      }
       claimed.add(id);
       existingMedia.set(key, id);
+      if (m.sha256) existingMedia.set(`sha:${m.sha256}`, id);
       mediaMap.set(incomingId, id);
       return id;
     };
@@ -467,6 +514,22 @@ export function applyReimport(
         case 'media.add':
           link('media_link', 'media_id', ensureMedia(c.incomingMediaId), 'person', person!);
           break;
+        case 'media.file': {
+          const m = get('media', c.incomingMediaId)!;
+          const file = copier.copy(m);
+          (file ? copied : refused).push(c.existingMediaId);
+          if (file) {
+            tx.update('media', c.existingMediaId, {
+              ...file,
+              sha256: m.sha256,
+              byte_size: m.byte_size,
+              width: m.width,
+              height: m.height,
+              ...(m.mime && { mime: m.mime }),
+            });
+          }
+          break;
+        }
         case 'family.add':
           familyFor(c.incomingFamilyId, true);
           break;
@@ -537,7 +600,15 @@ export function applyReimport(
         }
         case 'media': {
           const m = get('media', id);
-          return mediaMap.get(id) ?? (m ? (existingMedia.get(incomingKey(m)) ?? null) : null);
+          // Matched as ensureMedia matches: by identity key, else by the file's bytes.
+          return (
+            mediaMap.get(id) ??
+            (m
+              ? (existingMedia.get(incomingKey(m)) ??
+                (m.sha256 ? existingMedia.get(`sha:${m.sha256}`) : undefined) ??
+                null)
+              : null)
+          );
         }
         case 'note': {
           const n = get('note', id);
@@ -644,14 +715,27 @@ export function applyReimport(
     recordStale(tx, batch.id, stale);
     recordBase(tx, batch.id, session, written, incAll);
     return applied;
-  }) as { batchId: string; result: number };
+  };
+  let batchId: string;
+  try {
+    ({ batchId } = store.transact(label, write));
+  } catch (error) {
+    copier.discard();
+    throw error;
+  }
+  copier.keepUsed();
 
   const appliedCount = toApply.length;
+  const newPeople: Record<string, string> = {};
+  // New people keep their (fresh ULID) ids from the export's in-memory tree.
+  for (const c of toApply) if (c.kind === 'person.new') newPeople[c.incomingId] = c.incomingId;
   return {
     batchId,
     applied: appliedCount,
     skipped: changes.filter((c) => c.applicable).length - appliedCount,
     blocked,
+    media: { copied, refused },
+    newPeople,
   };
 }
 
@@ -732,10 +816,4 @@ function recordStale(tx: Tx, importBatchId: string, stale: Set<string>) {
       value: JSON.stringify([...stale].sort()),
     } as never);
   }
-}
-
-function localIfPresent(tx: Tx, m: MediaRow): string | null {
-  if (!m.local_path || !tx.store.dir) return null;
-  const known = tx.store.stmt('SELECT 1 FROM media WHERE local_path = ?').get(m.local_path);
-  return known ? m.local_path : null;
 }

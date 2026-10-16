@@ -1,10 +1,11 @@
 import { openTree, treePaths } from '@open-ancestry/db';
 import { importGedcom } from '@open-ancestry/import';
 import { unzipSync, zipSync } from 'fflate';
-import { rmSync } from 'node:fs';
+import { chmodSync, linkSync, rmSync } from 'node:fs';
+import { buffer } from 'node:stream/consumers';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildGedcomExport, buildGedzipExport } from './index';
+import { buildGedcomExport, buildGedzipExport, planGedzipExport, streamGedzip } from './index';
 import { TODAY, ged, gedcom7Problems, importInto } from './test-helpers';
 import { makeTempDir } from '../../../fixtures/temp-dir';
 
@@ -320,5 +321,213 @@ describe('privatized exports read RESN and pointers the way the strictest reader
     expect(gedcom7Problems(out).filter((p) => p.startsWith('bad RESN'))).toEqual([]);
     expect(out).toMatch(/^2 RESN CONFIDENTIAL$/m);
     store.close();
+  });
+});
+
+/*
+ * Issue #195: a living person named in free text on a deceased relative's
+ * record (a note, an event TYPE, a custom tag, a photo title or file name).
+ * Privatizing removes withheld people's names, in every form, from text on
+ * the records it writes, and leaves out imported custom tags, whose content
+ * nobody vetted. The deceased keep their own names, a shared surname too.
+ */
+const mentions = [
+  '0 HEAD',
+  '1 GEDC',
+  '2 VERS 5.5.1',
+  '1 CHAR UTF-8',
+  '0 @I1@ INDI',
+  '1 NAME Zedekiah Quillon /Livingson/',
+  '2 NICK Zeddo',
+  '1 NAME Zed /Marriedname/',
+  '2 TYPE married',
+  '1 BIRT',
+  '2 DATE 2001',
+  '1 FAMC @F1@',
+  '0 @I3@ INDI',
+  '1 NAME Li /Wu/',
+  '1 BIRT',
+  '2 DATE 2003',
+  '1 FAMC @F1@',
+  '0 @I4@ INDI',
+  '1 NAME 明 /李/',
+  '1 BIRT',
+  '2 DATE 2005',
+  '1 FAMC @F1@',
+  '0 @I2@ INDI',
+  '1 NAME Old /Livingson/',
+  '1 BIRT',
+  '2 DATE 1850',
+  '1 DEAT',
+  '2 DATE 1920',
+  '1 _MYNOTE My grandson Zeddo',
+  '1 EVEN Read by Quillon',
+  '2 TYPE Witnessed by Zedekiah Livingson',
+  '1 NOTE Zed (Zedekiah Marriedname) kept his watch.',
+  '1 NOTE Photo of Li Wu at school; 李明的照片; Zoe and zedekiah2015.',
+  '1 NOTE @N1@',
+  '1 OBJE @O1@',
+  '1 FAMS @F1@',
+  '0 @F1@ FAM',
+  '1 HUSB @I2@',
+  '1 CHIL @I1@',
+  '1 CHIL @I3@',
+  '1 CHIL @I4@',
+  '0 @N1@ NOTE Told by zedekiah, his great-grandson.',
+  '0 @O1@ OBJE',
+  '1 FILE photos/zedekiah-graduation.png',
+  '2 FORM png',
+  '2 TITL Zedekiah at graduation',
+  '0 TRLR',
+  '',
+];
+
+describe('privatized exports remove withheld people named in other records (#195)', () => {
+  const named = (text: string) =>
+    text.match(/zedekiah|quillon|zeddo|marriedname|\bzed\b|li wu|李明/gi) ?? [];
+
+  it('5.5.1, 7 and GEDZIP name no withheld person, and keep the deceased name', async () => {
+    const root = makeTempDir('oa-privacy-');
+    dirs.push(root);
+    const dir = join(root, 'Mentions.oatree');
+    const archive = zipSync({
+      'gedcom.ged': new TextEncoder().encode(mentions.join('\n')),
+      'photos/zedekiah-graduation.png': PNG,
+    });
+    await importGedcom({ gedzip: archive }, { dir }, { today: TODAY });
+    const store = openTree(dir);
+    for (const version of ['5.5.1', '7'] as const) {
+      const out = buildGedcomExport(store, { version, privatizeLiving: true, now: TODAY });
+      expect(named(out.text), version).toEqual([]);
+      expect(named(out.warnings.join('\n')), version).toEqual([]);
+      if (version === '7') expect(gedcom7Problems(out.text)).toEqual([]);
+      // The grandfather keeps his own name, though the surname is shared.
+      expect(out.text, version).toMatch(/^1 NAME Old \/Livingson\/$/m);
+      expect(out.text, version).toContain('kept his watch');
+      // Imported custom tags are left out: nobody vetted what they say.
+      expect(out.text, version).not.toContain('_MYNOTE');
+      expect(out.warnings.join('\n'), version).toMatch(/custom/);
+      // Without privatizing, everything is written as it was.
+      const full = buildGedcomExport(store, { version, now: TODAY }).text;
+      expect(full).toContain('Witnessed by Zedekiah Livingson');
+    }
+    const zip = buildGedzipExport(store, { privatizeLiving: true, now: TODAY });
+    const files = unzipSync(zip.bytes);
+    expect(named(Object.keys(files).join('\n'))).toEqual([]);
+    const ged = new TextDecoder().decode(files['gedcom.ged']);
+    expect(named(ged)).toEqual([]);
+    // The renamed file is still the one the FILE line points at.
+    const file = /^1 FILE (.+)$/m.exec(ged)![1]!;
+    expect(Object.keys(files)).toContain(file);
+    store.close();
+  });
+});
+
+describe('privatized GEDZIP warnings and entries never name a withheld person (#248, #251)', () => {
+  it('scrubs refused, late and unreadable media file names', async () => {
+    const root = makeTempDir('oa-privacy-');
+    dirs.push(root);
+    const dir = join(root, 'Links.oatree');
+    const lines = [
+      '0 HEAD',
+      '1 GEDC',
+      '2 VERS 5.5.1',
+      '0 @I1@ INDI',
+      '1 NAME Zedekiah /Livingson/',
+      '1 BIRT',
+      '2 DATE 2001',
+      '0 @I2@ INDI',
+      '1 NAME Old /Grandfather/',
+      '1 DEAT',
+      '2 DATE 1920',
+      '1 OBJE @O1@',
+      '1 OBJE @O2@',
+      '0 @O1@ OBJE',
+      '1 FILE photos/zedekiah-livingson-refused.jpg',
+      '2 FORM jpg',
+      '0 @O2@ OBJE',
+      '1 FILE photos/zedekiah-livingson-late.jpg',
+      '2 FORM jpg',
+      '0 TRLR',
+      '',
+    ];
+    const archive = zipSync({
+      'gedcom.ged': new TextEncoder().encode(lines.join('\n')),
+      'photos/zedekiah-livingson-refused.jpg': new Uint8Array([...PNG, 1]),
+      'photos/zedekiah-livingson-late.jpg': new Uint8Array([...PNG, 2]),
+    });
+    await importGedcom({ gedzip: archive }, { dir }, { today: TODAY });
+    const store = openTree(dir);
+    const media = treePaths(dir).media;
+    // Refused at planning: hard-linked from outside the media folder.
+    linkSync(
+      join(media, 'photos', 'zedekiah-livingson-refused.jpg'),
+      join(dir, 'refused-link.jpg'),
+    );
+    const named = (text: string) => text.match(/zedekiah|livingson/gi) ?? [];
+
+    const plan = planGedzipExport(store, { privatizeLiving: true, now: TODAY });
+    expect(plan.warnings.join('\n')).toMatch(/left out \(hard link\)/);
+    expect(named(plan.warnings.join('\n'))).toEqual([]);
+    expect(named(plan.files.map((f) => f.entry).join('\n'))).toEqual([]);
+    // Refused while streaming: hard-linked after the plan.
+    linkSync(join(media, 'photos', 'zedekiah-livingson-late.jpg'), join(dir, 'late-link.jpg'));
+    const files = unzipSync(await buffer(streamGedzip(plan)));
+    expect(files['warnings.txt']).toBeDefined();
+    expect(named(new TextDecoder().decode(files['warnings.txt']))).toEqual([]);
+    expect(named(Object.keys(files).join('\n'))).toEqual([]);
+    expect(named(new TextDecoder().decode(files['gedcom.ged']))).toEqual([]);
+    // The in-memory build, too.
+    const built = buildGedzipExport(store, { privatizeLiving: true, now: TODAY });
+    expect(named(built.warnings.join('\n'))).toEqual([]);
+    expect(named(Object.keys(unzipSync(built.bytes)).join('\n'))).toEqual([]);
+    store.close();
+  });
+
+  it('scrubs a file that passes the plan but cannot be read by the in-memory build', async () => {
+    const root = makeTempDir('oa-privacy-');
+    dirs.push(root);
+    const dir = join(root, 'Unreadable.oatree');
+    const lines = [
+      '0 HEAD',
+      '1 GEDC',
+      '2 VERS 5.5.1',
+      '0 @I1@ INDI',
+      '1 NAME Zedekiah /Livingson/',
+      '1 BIRT',
+      '2 DATE 2001',
+      '0 @I2@ INDI',
+      '1 NAME Old /Grandfather/',
+      '1 DEAT',
+      '2 DATE 1920',
+      '1 OBJE @O1@',
+      '0 @O1@ OBJE',
+      '1 FILE photos/zedekiah-livingson.jpg',
+      '2 FORM jpg',
+      '0 TRLR',
+      '',
+    ];
+    await importGedcom(
+      {
+        gedzip: zipSync({
+          'gedcom.ged': new TextEncoder().encode(lines.join('\n')),
+          'photos/zedekiah-livingson.jpg': new Uint8Array([...PNG, 3]),
+        }),
+      },
+      { dir },
+      { today: TODAY },
+    );
+    const store = openTree(dir);
+    const photo = join(treePaths(dir).media, 'photos', 'zedekiah-livingson.jpg');
+    // Still a regular file inside the media folder, so it passes the plan; reading it fails.
+    chmodSync(photo, 0o000);
+    try {
+      const built = buildGedzipExport(store, { privatizeLiving: true, now: TODAY });
+      expect(built.warnings.join('\n')).toMatch(/could not be read/);
+      expect(built.warnings.join('\n').match(/zedekiah|livingson/gi) ?? []).toEqual([]);
+    } finally {
+      chmodSync(photo, 0o644);
+      store.close();
+    }
   });
 });

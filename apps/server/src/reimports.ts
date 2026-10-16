@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { closeReimport, type ReimportSession } from '@open-ancestry/import';
+import type { ReimportFolders } from './reimport-folders';
 
 /*
  * Re-import sessions: an updated export compared with a tree, held in memory
@@ -19,14 +20,27 @@ export class ReimportSessions {
   private readonly maxSessions: number;
   private readonly maxAgeMs: number;
 
-  constructor({ maxSessions = 4, maxAgeMs = 60 * 60 * 1000 } = {}) {
+  private readonly folders: ReimportFolders | undefined;
+
+  constructor({
+    maxSessions = 4,
+    maxAgeMs = 60 * 60 * 1000,
+    folders,
+  }: { maxSessions?: number; maxAgeMs?: number; folders?: ReimportFolders } = {}) {
     this.maxSessions = maxSessions;
     this.maxAgeMs = maxAgeMs;
+    this.folders = folders;
+  }
+
+  /** Whether a review of `tree` is open: the tree must not be renamed or deleted under it. */
+  hasTree(tree: string): boolean {
+    this.expire();
+    return [...this.sessions.values()].some((s) => s.tree === tree);
   }
 
   add(tree: string, fileName: string, session: ReimportSession): StoredReimport {
     this.expire();
-    // Each holds a parsed tree in memory: keep only the newest few.
+    // Each holds a parsed tree in memory: keep only the few used most recently.
     while (this.sessions.size >= this.maxSessions) {
       this.remove([...this.sessions.keys()][0]!);
     }
@@ -46,7 +60,11 @@ export class ReimportSessions {
   get(id: string): StoredReimport | undefined {
     this.expire();
     const stored = this.sessions.get(id);
-    if (stored) stored.at = Date.now();
+    if (!stored) return undefined;
+    stored.at = Date.now();
+    // Least recently used first, so a full set drops the review left longest.
+    this.sessions.delete(id);
+    this.sessions.set(id, stored);
     return stored;
   }
 
@@ -55,6 +73,8 @@ export class ReimportSessions {
     if (!stored) return;
     this.sessions.delete(id);
     closeReimport(stored.session);
+    // Its working folder and owner file go with it.
+    this.folders?.release(stored.session.mediaDir);
   }
 
   closeAll(): void {

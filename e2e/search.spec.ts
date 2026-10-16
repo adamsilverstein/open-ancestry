@@ -36,6 +36,36 @@ async function search(page: Page, text: string) {
 const people = (dialog: ReturnType<Page['getByRole']>) =>
   dialog.getByRole('group', { name: 'People' }).getByRole('option');
 
+test('the first Cmd/Ctrl-K keeps a surname typed before the palette loads (#113)', async ({
+  page,
+}) => {
+  await page.route(/\/assets\/ShellCommandPalette-[^/]+\.js$/, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await route.continue();
+  });
+  await open(page);
+  await page.keyboard.press(`${modKey}+k`);
+  await page.keyboard.type('thackeray');
+  const dialog = page.getByRole('dialog', { name: 'Command palette' });
+  await expect(dialog.getByRole('combobox')).toHaveValue('thackeray');
+  await expect(people(dialog).first()).toContainText('Thackeray');
+});
+
+test('Enter typed before the palette loads opens the first result once it arrives', async ({
+  page,
+}) => {
+  await page.route(/\/assets\/ShellCommandPalette-[^/]+\.js$/, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await route.continue();
+  });
+  await open(page);
+  await page.keyboard.press(`${modKey}+k`);
+  await page.keyboard.type('wren thackeray');
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/person\//);
+  await expect(page.getByRole('heading', { level: 1, name: /Wren/ })).toBeVisible();
+});
+
 test('finds a person by name and opens the person page with Enter', async ({ page, request }) => {
   const wren = await personId(request, 'wren thackeray');
   await open(page);
@@ -46,7 +76,7 @@ test('finds a person by name and opens the person page with Enter', async ({ pag
   await expect(first).toContainText('Kestrel Cove, Saltmarsh');
   await expect(first).toHaveAttribute('aria-selected', 'true');
   await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(new RegExp(`/person/${wren}$`));
+  await expect(page).toHaveURL(new RegExp(`/person/${wren}(\\?tree=[^&]*)?$`));
   await expect(dialog).toBeHidden();
 });
 
@@ -137,7 +167,7 @@ test('Enter right after typing waits for this query, never the previous one', as
   await expect(people(dialog).first()).toContainText('Mabyn Thackeray');
   await dialog.getByRole('combobox').fill('ezra');
   await page.keyboard.press('Enter');
-  await expect(page).toHaveURL(new RegExp(`/person/${ezra}$`));
+  await expect(page).toHaveURL(new RegExp(`/person/${ezra}(\\?tree=[^&]*)?$`));
 
   const second = await search(page, 'mabyn');
   await expect(people(second).first()).toContainText('Mabyn Thackeray');
@@ -186,7 +216,7 @@ test('on the tree, Find focuses the tree and Alt+Enter opens the person page', a
   await dialog.getByRole('combobox').fill('ezra thackery');
   await expect(people(dialog).first()).toContainText('Ezra Thackery');
   await page.keyboard.press('Alt+Enter');
-  await expect(page).toHaveURL(new RegExp(`/person/${ezra}$`));
+  await expect(page).toHaveURL(new RegExp(`/person/${ezra}(\\?tree=[^&]*)?$`));
 });
 
 test('search answers within the budget on a 10k tree', async ({ request }) => {

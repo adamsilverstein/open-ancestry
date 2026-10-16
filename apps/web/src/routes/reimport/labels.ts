@@ -89,6 +89,8 @@ export function describeChange(change: ReviewChange, personName: string): string
       return `Add tag: ${change.tag}`;
     case 'media.add':
       return `Add media: ${change.title ?? 'untitled'}`;
+    case 'media.file':
+      return `Add the file for ${change.title ?? 'untitled media'}`;
     case 'family.add':
       return `Partner: ${list(change.partnerNames.filter((n) => n !== personName))}`;
     case 'child.add':

@@ -27,6 +27,7 @@ export type ReviewChange = {
   | { kind: 'citation.add'; source: string; page: string | null; apid: string | null }
   | { kind: 'tag.add'; tag: string }
   | { kind: 'media.add'; title: string | null }
+  | { kind: 'media.file'; title: string | null }
   | { kind: 'family.add'; partnerNames: string[] }
   | { kind: 'child.add'; parentNames: string[] }
   | { kind: 'person.missing' }
@@ -95,10 +96,13 @@ export const refreshReimport = (id: string) =>
   apiSend<ReimportReview>('POST', `/reimports/${seg(id)}/refresh`);
 
 export const applyReimport = (id: string, comparison: number, accept: string[]) =>
-  apiSend<{ batchId: string; applied: number; skipped: number; blocked: string[] }>(
-    'POST',
-    `/reimports/${seg(id)}/apply`,
-    { accept, comparison },
-  );
+  apiSend<{
+    batchId: string;
+    applied: number;
+    skipped: number;
+    blocked: string[];
+    /** Added people's incoming ids to their ids in the tree. */
+    newPeople: Record<string, string>;
+  }>('POST', `/reimports/${seg(id)}/apply`, { accept, comparison });
 
 export const discardReimport = (id: string) => apiSend<void>('DELETE', `/reimports/${seg(id)}`);

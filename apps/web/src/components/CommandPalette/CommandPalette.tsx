@@ -55,6 +55,18 @@ export interface CommandPaletteProps {
    * with nothing selectable highlighted, runs on the first result once they arrive.
    */
   pending?: boolean;
+  /**
+   * Called as the palette takes focus: text typed since it was asked to open
+   * (while its code loaded), which becomes the starting query, and whether
+   * Enter (or Shift/Alt+Enter) was pressed after it, to run on the first result.
+   */
+  takeTypeAhead?: () => TypeAhead;
+}
+
+/** Keys typed before the palette could take them. */
+export interface TypeAhead {
+  text: string;
+  enter?: { alt: boolean };
 }
 
 /** How long results must stay the same before their count is announced. */
@@ -73,6 +85,10 @@ export function describeResults(groups: PaletteGroup[], visible: PaletteAction[]
   return parts.length ? parts.join(', ') : 'No results';
 }
 
+/** Open modal dialogs and confirms; popovers (Radix popper content) also use role="dialog". */
+const OPEN_MODALS =
+  '[role="dialog"][data-state="open"]:not([data-radix-popper-content-wrapper] *), [role="alertdialog"][data-state="open"]';
+
 /** Item values are ids, so two people with the same name stay distinct. */
 const itemValue = (item: PaletteAction) => `${item.id}`;
 
@@ -88,6 +104,7 @@ export function CommandPalette({
   footer,
   loading = false,
   pending = false,
+  takeTypeAhead,
 }: CommandPaletteProps) {
   // Opened by shortcut, not a Radix trigger, so remember where focus was and restore it.
   const opener = useRef<HTMLElement | null>(null);
@@ -148,7 +165,7 @@ export function CommandPalette({
   }, [status]);
 
   // Enter pressed before the current query's results arrived.
-  const queued = useRef<{ alt: boolean } | null>(null);
+  const queued = useRef<{ alt: boolean; query?: string } | null>(null);
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key !== 'Enter') return;
     const alt = event.shiftKey || event.altKey;
@@ -167,9 +184,15 @@ export function CommandPalette({
     run(item, true);
   };
 
+  // An Enter typed ahead runs once results for its text are in, like one pressed while pending.
+  const queueEnter = (alt: boolean, text: string) => {
+    queued.current = { alt, query: text };
+  };
+
   const firstItem = visibleItems[0];
   useEffect(() => {
-    if (pending || !queued.current) return;
+    // An Enter typed ahead waits until its text is the query (it is set in the same commit).
+    if (pending || !queued.current || (queued.current.query ?? query) !== query) return;
     const { alt } = queued.current;
     queued.current = null;
     if (firstItem) run(firstItem, alt);
@@ -187,6 +210,12 @@ export function CommandPalette({
             // so fall back to the last control pressed.
             opener.current = captureOpener();
             outside.current = lastControlOutside();
+            const typed = takeTypeAhead?.();
+            if (typed?.text) {
+              setQuery(typed.text);
+              onQueryChange?.(typed.text);
+            }
+            if (typed?.enter) queueEnter(typed.enter.alt, typed.text);
           }}
           onCloseAutoFocus={(event) => {
             if (focusMoved.current) {
@@ -194,9 +223,17 @@ export function CommandPalette({
               event.preventDefault();
               return;
             }
-            // An action that opened a dialog (such as Add person) keeps the focus it moved there.
-            if (document.querySelector('[role="dialog"][data-state="open"]')) {
+            // An action that opened a dialog (such as Add person) keeps the focus it
+            // moved there; a dialog that holds the opener is the one the palette was
+            // opened over (Cmd/Ctrl-K in Edit person), so focus goes back into it.
+            // Every open dialog, not the first in DOM order (the one underneath):
+            // any that does not hold the opener is one an action opened, or the
+            // opener is gone.
+            const open = [...document.querySelectorAll<HTMLElement>(OPEN_MODALS)];
+            if (open.some((d) => !(opener.current?.isConnected && d.contains(opener.current)))) {
               event.preventDefault();
+              // Nothing took focus (the opener was removed): the topmost dialog does.
+              if (!open.some((d) => d.contains(document.activeElement))) open.at(-1)?.focus();
               return;
             }
             if (returnFocus(opener.current, outside.current)) event.preventDefault();

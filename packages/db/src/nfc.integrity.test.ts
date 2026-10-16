@@ -14,7 +14,7 @@ import {
 const NFD = (s: string) => s.normalize('NFD');
 const NFC = (s: string) => s.normalize('NFC');
 
-describe('adversarial: NFC on JSON import of a current-version document', () => {
+describe('NFC on JSON import of a current-version document', () => {
   it('stores names from a current-version backup as NFC', () => {
     const source = openMemoryTree();
     source.transact('add', (tx) =>
@@ -38,7 +38,7 @@ describe('adversarial: NFC on JSON import of a current-version document', () => 
   });
 });
 
-describe('adversarial: v3 NFC upgrade and places that were already identical', () => {
+describe('v3 NFC upgrade and places that were already identical', () => {
   it('keeps two ASCII places with the same name but different coordinates apart', () => {
     const db = new Database(':memory:');
     migrate(db, { to: 2 });
@@ -69,7 +69,7 @@ describe('adversarial: v3 NFC upgrade and places that were already identical', (
   });
 });
 
-describe('adversarial: URLs stay byte-exact', () => {
+describe('URLs stay byte-exact', () => {
   it('keeps citation and repository URLs verbatim, like media.remote_url', () => {
     const store = openMemoryTree();
     // A link to a file served from a macOS volume: its path is decomposed on the server.

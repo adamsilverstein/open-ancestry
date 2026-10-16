@@ -7,6 +7,7 @@ import { crc32, deflateSync } from 'node:zlib';
 import sharp from 'sharp';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { buildGedzipExport, planGedzipExport, streamGedzip } from './index';
+import { StripError, createStripper, strippableKind, stripBytes } from './strip-metadata';
 import { TODAY } from './test-helpers';
 import { makeTempDir } from '../../../fixtures/temp-dir';
 
@@ -167,5 +168,44 @@ describe('privatized GEDZIP media metadata (#263)', () => {
       expect(Buffer.from(files['papers/abner.pdf']!).equals(pdf)).toBe(true);
     }
     store.close();
+  });
+});
+
+describe('metadata strippers', () => {
+  it('give the same bytes however a file is split into pieces', async () => {
+    const progressive = await sharp({
+      create: { width: 40, height: 30, channels: 3, background: '#a52' },
+    })
+      .jpeg({ progressive: true })
+      .withExif(EXIF)
+      .toBuffer();
+    for (const [kind, bytes] of [
+      ['jpeg', jpeg],
+      ['jpeg', progressive],
+      ['png', png],
+      ['webp', webp],
+    ] as const) {
+      const whole = stripBytes(kind, bytes);
+      const removed = kind === 'webp' ? bytes.length - whole.length : 0;
+      for (const size of [1, 2, 3, 7, 64]) {
+        const stripper = createStripper(kind, removed);
+        const parts: Uint8Array[] = [];
+        for (let at = 0; at < bytes.length; at += size) {
+          parts.push(new Uint8Array(stripper.push(bytes.subarray(at, at + size))));
+        }
+        expect(() => stripper.end(), `${kind} in ${size}s`).not.toThrow();
+        expect(Buffer.concat(parts).equals(Buffer.from(whole)), `${kind} in ${size}s`).toBe(true);
+      }
+      expect(leaks(whole), kind).toEqual([]);
+      await sharp(Buffer.from(whole)).raw().toBuffer();
+    }
+  });
+
+  it('reject a file cut short or not the format it claims', () => {
+    expect(() => stripBytes('png', png.subarray(0, png.length - 20))).toThrow(StripError);
+    expect(() => stripBytes('jpeg', jpeg.subarray(0, 40))).toThrow(StripError);
+    expect(() => stripBytes('jpeg', png)).toThrow(StripError);
+    expect(strippableKind(pdf)).toBeUndefined();
+    expect(strippableKind(jpeg)).toBe('jpeg');
   });
 });

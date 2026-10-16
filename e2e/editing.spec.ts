@@ -90,8 +90,11 @@ test.describe('person', () => {
       .click();
     await expect(h1(page)).toHaveText('Tobias');
     await page.keyboard.press(`${mod}+z`);
-    await expect(page).toHaveURL(new RegExp(`/person/${seeded.rowan}$`));
-    await expect(toasts(page).filter({ hasText: 'Tobias is no longer in the tree' })).toBeVisible();
+    // To the nearest relative (a parent first), not back through history (#189).
+    await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}$`));
+    await expect(
+      toasts(page).filter({ hasText: 'Tobias was deleted (in another window or by undo)' }),
+    ).toBeVisible();
   });
 
   test('Cmd/Ctrl-Z does nothing while a dialog is open', async ({ page }) => {
@@ -216,14 +219,15 @@ test.describe('person', () => {
     await expect(confirm).toBeHidden();
     await dialog.getByRole('button', { name: 'Delete person' }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Delete person' }).click();
-    await expect(page).toHaveURL(/\/$/);
+    // Lands on a parent (#107); e2e/delete-person.spec.ts covers the other cases.
+    await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}$`));
     await expect(toasts(page).filter({ hasText: 'Deleted Rowan Ashdown' })).toBeVisible();
 
     await page.keyboard.press(`${mod}+z`);
     await expect(
       toasts(page).filter({ hasText: 'Undid Delete person: Rowan Ashdown' }),
     ).toBeVisible();
-    await page.goto(`/person/${seeded.rowan}`);
+    await expect(page).toHaveURL(new RegExp(`/person/${seeded.rowan}$`));
     await expect(h1(page)).toHaveText('Rowan Ashdown');
   });
 });

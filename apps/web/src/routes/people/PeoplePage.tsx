@@ -2,7 +2,8 @@ import { useRef } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { getRouteApi, Link } from '@tanstack/react-router';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { ArrowDown, ArrowUp, ArrowUpDown, FolderOpen, Users } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, FolderOpen, UserPlus, Users } from 'lucide-react';
+import { useAddPerson } from '../../app/addPerson';
 import { currentTreeQuery } from '../../api/queries';
 import {
   PEOPLE_PAGE_SIZE,
@@ -90,6 +91,9 @@ function PeopleTable({ tree }: { tree: string }) {
       scroller.current?.scrollTo({ top: 0 });
     });
   const filtered = Boolean(search.sex || search.living || search.tag);
+  const addPerson = useAddPerson();
+  // An empty tree shows the button in its empty state instead.
+  const empty = first.data !== undefined && total === 0 && !filtered;
 
   return (
     <>
@@ -114,6 +118,16 @@ function PeopleTable({ tree }: { tree: string }) {
           <Link to="/tags">Manage tags</Link>
           <Link to="/checker">Check tree</Link>
         </span>
+        {!empty && (
+          <Button
+            size="sm"
+            variant="secondary"
+            iconStart={<UserPlus size={16} aria-hidden />}
+            onClick={addPerson.open}
+          >
+            Add person
+          </Button>
+        )}
       </header>
 
       <div
@@ -160,6 +174,20 @@ function PeopleTable({ tree }: { tree: string }) {
         <EmptyState
           icon={<Users size={28} aria-hidden />}
           title={filtered ? 'No people match these filters' : 'No people in this tree yet'}
+          {...(empty
+            ? {
+                description: 'Add the first person by hand, or import a GEDCOM from the File menu.',
+                action: (
+                  <Button
+                    variant="primary"
+                    iconStart={<UserPlus size={16} aria-hidden />}
+                    onClick={addPerson.open}
+                  >
+                    Add person
+                  </Button>
+                ),
+              }
+            : {})}
         />
       )}
     </>

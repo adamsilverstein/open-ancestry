@@ -79,3 +79,19 @@ describe('a dialog opened from the command palette', () => {
     expect(document.activeElement).toBe(find);
   });
 });
+
+describe('a click that WebKit turns into focus on <main>', () => {
+  it('returns to the clicked button, not the tabindex=-1 landmark', () => {
+    trackFocus();
+    const main = document.createElement('main');
+    main.tabIndex = -1;
+    document.body.append(main);
+    const edit = button('Edit person', main);
+    // WebKit: pointerdown on the button, then focus lands on <main>.
+    edit.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    main.focus();
+    expect(document.activeElement).toBe(main);
+    expect(captureOpener()).toBe(edit);
+    expect(lastControlOutside()).toBe(edit);
+  });
+});

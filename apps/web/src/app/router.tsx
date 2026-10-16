@@ -50,21 +50,20 @@ const treeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/tree/$personId',
   // Shareable view state: which tree, which layout, how many generations.
-  validateSearch: (search: Record<string, unknown>): TreeSearch => {
-    const valid: TreeSearch = {};
-    if (typeof search.tree === 'string' && search.tree) valid.tree = search.tree;
-    if (treeLayouts.includes(search.layout as TreeLayoutKind)) {
-      valid.layout = search.layout as TreeLayoutKind;
-    }
-    // Set even when undefined: the root route passes the raw search through,
-    // so an unset key would let `up=abc` reach the view as a string.
-    valid.up = parseGenerations(search.up);
-    valid.down = parseGenerations(search.down);
-    if (typeof search.tag === 'string' && /^[0-9A-Za-z_-]{1,64}$/.test(search.tag)) {
-      valid.tag = search.tag;
-    }
-    return valid;
-  },
+  // Every key is set, undefined when invalid: TanStack Router merges this over
+  // the raw search, so an unset key would let `?layout=bogus` through.
+  validateSearch: (search: Record<string, unknown>): TreeSearch => ({
+    tree: typeof search.tree === 'string' && search.tree ? search.tree : undefined,
+    layout: treeLayouts.includes(search.layout as TreeLayoutKind)
+      ? (search.layout as TreeLayoutKind)
+      : undefined,
+    up: parseGenerations(search.up),
+    down: parseGenerations(search.down),
+    tag:
+      typeof search.tag === 'string' && /^[0-9A-Za-z_-]{1,64}$/.test(search.tag)
+        ? search.tag
+        : undefined,
+  }),
   component: lazyRouteComponent(() => import('../routes/TreePage'), 'TreePage'),
 });
 

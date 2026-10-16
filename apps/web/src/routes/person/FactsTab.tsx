@@ -1,7 +1,5 @@
 import { useMemo, useRef, useState, type RefObject } from 'react';
-import { useQueries } from '@tanstack/react-query';
 import { Pencil, Plus, SlidersHorizontal, UserPlus } from 'lucide-react';
-import { personQuery } from '../../api/queries';
 import type { ApiPersonSummary, EventDetail, PersonDetail } from '../../api/types';
 import { Button } from '../../components/Button/Button';
 import { Checkbox } from '../../components/Checkbox/Checkbox';
@@ -16,7 +14,7 @@ import {
 } from '../../components/RelationshipList/RelationshipList';
 import { SourceItem } from '../../components/SourceItem/SourceItem';
 import { TimelineItem } from '../../components/TimelineItem/TimelineItem';
-import { halfSiblings, parentIds } from '../../lib/halfSiblings';
+import { closest, siblingsOf, type Sibling, type SiblingKind } from '../../lib/kin';
 import { fullName, toPersonSummary } from '../../lib/person';
 import { collectCitations } from '../../lib/sources';
 import {
@@ -27,6 +25,7 @@ import {
   type TimelineEntry,
 } from '../../lib/timeline';
 import { AddRelativeDialog, RELATIVE_TITLES, type RelativeKind } from './edit/AddRelativeDialog';
+import { useOtherSiblings } from './useOtherSiblings';
 import { relationshipTypeLabel } from './edit/EditPersonDialog';
 import { EventDialog } from './edit/EventDialog';
 import { useRelationshipEdits } from './edit/RelationshipEdits';
@@ -74,17 +73,17 @@ function Entry({
 
 function TimelineColumn({
   detail,
-  half,
+  others,
   onEditEvent,
   addEventRef,
 }: {
   detail: PersonDetail;
-  half: ApiPersonSummary[];
+  others: Sibling[];
   /** Opens the event dialog; no item means a new event. */
   onEditEvent: (item?: EventDetail) => void;
   addEventRef: RefObject<HTMLButtonElement | null>;
 }) {
-  const entries = useMemo(() => buildTimeline(detail, { halfSiblings: half }), [detail, half]);
+  const entries = useMemo(() => buildTimeline(detail, { otherSiblings: others }), [detail, others]);
   const eventsById = useMemo(
     () =>
       new Map(
@@ -207,11 +206,10 @@ type GroupMenus = Pick<ReturnType<typeof useRelationshipEdits>, 'parentMenu' | '
 
 function relationshipGroups(
   detail: PersonDetail,
-  half: ApiPersonSummary[],
+  others: Sibling[],
   menus: GroupMenus,
 ): RelationshipGroup[] {
   const groups: RelationshipGroup[] = [];
-  const seen = new Set<string>();
   detail.parentFamilies.forEach((family, index) => {
     const rel = family.link.partner1_rel;
     const title =
@@ -226,22 +224,20 @@ function relationshipGroups(
         actions: menus.parentMenu(title, family),
       });
   });
-  const siblings = detail.parentFamilies
-    .flatMap((f) => f.siblings.map((s) => s.person))
-    .filter((p) => !seen.has(p.id) && seen.add(p.id));
-  if (siblings.length > 0) {
-    groups.push({
-      title: 'Siblings',
-      people: siblings.map((p) => toPersonSummary(p)),
-      collapsible: true,
-    });
-  }
-  if (half.length > 0) {
-    groups.push({
-      title: 'Half siblings',
-      people: half.map((p) => toPersonSummary(p)),
-      collapsible: true,
-    });
+  const siblings = closest([...siblingsOf(detail.parentFamilies), ...others]);
+  const ofKind = (kind: SiblingKind) =>
+    siblings.filter((s) => s.kind === kind).map((s) => s.person);
+  const kinds: [string, ApiPersonSummary[]][] = [
+    // Adopted siblings are siblings; their entries say "adopted brother".
+    ['Siblings', [...ofKind('full'), ...ofKind('adopted')]],
+    ['Half-siblings', ofKind('half')],
+    ['Step-siblings', ofKind('step')],
+    ['Foster siblings', ofKind('foster')],
+  ];
+  for (const [title, people] of kinds) {
+    if (people.length > 0) {
+      groups.push({ title, people: people.map((p) => toPersonSummary(p)), collapsible: true });
+    }
   }
   const many = detail.partnerFamilies.length > 1;
   for (const partnerFamily of detail.partnerFamilies) {
@@ -270,16 +266,16 @@ function relationshipGroups(
 function RelationshipsColumn({
   tree,
   detail,
-  half,
+  others,
   onAdd,
 }: {
   tree: string;
   detail: PersonDetail;
-  half: ApiPersonSummary[];
+  others: Sibling[];
   onAdd: (kind: RelativeKind) => void;
 }) {
   const { parentMenu, partnerMenu, dialogs } = useRelationshipEdits(tree, detail);
-  const groups = relationshipGroups(detail, half, { parentMenu, partnerMenu });
+  const groups = relationshipGroups(detail, others, { parentMenu, partnerMenu });
   return (
     <Panel
       title="Relationships"
@@ -317,26 +313,8 @@ function RelationshipsColumn({
 }
 
 /** Timeline, Sources and Relationships: three columns at lg, two at md, one below. */
-const NONE: ApiPersonSummary[] = [];
-
-/** All parent details, or null until every one has loaded. Module level so the result is memoized. */
-const allDetails = (results: { data?: PersonDetail | undefined }[]) =>
-  results.every((r) => r.data) ? results.map((r) => r.data as PersonDetail) : null;
-
-/**
- * Half siblings come from the parents' other partnerships, which only the
- * parents' own details carry; they load after the page renders.
- */
-function useHalfSiblings(tree: string, detail: PersonDetail): ApiPersonSummary[] {
-  const parents = useQueries({
-    queries: parentIds(detail).map((id) => personQuery(tree, id)),
-    combine: allDetails,
-  });
-  return useMemo(() => (parents ? halfSiblings(detail, parents) : NONE), [detail, parents]);
-}
-
 export function FactsTab({ tree, detail }: { tree: string; detail: PersonDetail }) {
-  const half = useHalfSiblings(tree, detail);
+  const others = useOtherSiblings(tree, detail);
   // Dialogs mount only while open, so each opening starts from fresh values.
   const [eventDialog, setEventDialog] = useState<{ item?: EventDetail | undefined } | null>(null);
   const [relative, setRelative] = useState<RelativeKind | null>(null);
@@ -346,12 +324,12 @@ export function FactsTab({ tree, detail }: { tree: string; detail: PersonDetail 
     <div className={styles.facts}>
       <TimelineColumn
         detail={detail}
-        half={half}
+        others={others}
         onEditEvent={(item) => setEventDialog({ item })}
         addEventRef={addEventRef}
       />
       <SourcesColumn detail={detail} />
-      <RelationshipsColumn tree={tree} detail={detail} half={half} onAdd={setRelative} />
+      <RelationshipsColumn tree={tree} detail={detail} others={others} onAdd={setRelative} />
       {eventDialog && (
         <EventDialog
           tree={tree}

@@ -100,8 +100,9 @@ export function PersonCard({
             decorative
           />
         )}
-        {/* Private cards withhold everything but the fact a person is there. */}
-        {!isPrivate && (
+        {/* Private cards withhold everything but the fact a person is there. A
+            photo hides the silhouette's tint, so the badge says the sex instead. */}
+        {!isPrivate && person.photoUrl && (
           <span className={styles.sexBadge}>
             <SexIcon size={12} strokeWidth={2.5} aria-hidden />
           </span>

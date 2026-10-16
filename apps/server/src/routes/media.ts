@@ -1,7 +1,6 @@
-import { createReadStream, realpathSync } from 'node:fs';
-import { open, realpath, stat } from 'node:fs/promises';
-import { resolve, sep } from 'node:path';
-import { treePaths } from '@open-ancestry/db';
+import type { FileHandle } from 'node:fs/promises';
+import { escapeControls } from '@open-ancestry/core';
+import { openMediaFile, treePaths, type MediaRefusal } from '@open-ancestry/db';
 import type { FastifyReply } from 'fastify';
 import type { Api, Deps } from '../context';
 import { errorBody, notFound } from '../errors';
@@ -45,47 +44,28 @@ export function sniffMediaType(bytes: Buffer): string | null {
   return null;
 }
 
-async function readHead(file: string): Promise<Buffer> {
-  const handle = await open(file, 'r');
-  try {
-    const buffer = Buffer.alloc(SNIFF_BYTES);
-    const { bytesRead } = await handle.read(buffer, 0, SNIFF_BYTES, 0);
-    return buffer.subarray(0, bytesRead);
-  } finally {
-    await handle.close();
-  }
+async function readHead(handle: FileHandle): Promise<Buffer> {
+  const buffer = Buffer.alloc(SNIFF_BYTES);
+  const { bytesRead } = await handle.read(buffer, 0, SNIFF_BYTES, 0);
+  return buffer.subarray(0, bytesRead);
 }
 
-/** `resolveMediaPath` for synchronous callers (the profile-photo check inside a transaction). */
-export function resolveMediaPathSync(mediaRoot: string, localPath: string): string | null {
-  const root = resolve(mediaRoot);
-  const candidate = resolve(root, localPath);
-  if (!candidate.startsWith(root + sep)) return null;
-  try {
-    // .native: the same realpath(3) the async version uses, so both agree on case.
-    const realRoot = realpathSync.native(root);
-    const realFile = realpathSync.native(candidate);
-    return realFile.startsWith(realRoot + sep) ? realFile : null;
-  } catch {
-    return null;
-  }
-}
+/** The media path rules live in @open-ancestry/db, shared with the GEDZIP export. */
+export {
+  openMediaFile,
+  resolveMediaPath,
+  resolveMediaPathSync,
+  type MediaRefusal,
+} from '@open-ancestry/db';
 
-/** Resolves a media.local_path inside the tree's media folder, following symlinks; null if it escapes. */
-export async function resolveMediaPath(
-  mediaRoot: string,
-  localPath: string,
-): Promise<string | null> {
-  const root = resolve(mediaRoot);
-  const candidate = resolve(root, localPath);
-  if (!candidate.startsWith(root + sep)) return null;
-  try {
-    const [realRoot, realFile] = await Promise.all([realpath(root), realpath(candidate)]);
-    return realFile.startsWith(realRoot + sep) ? realFile : null;
-  } catch {
-    return null;
-  }
-}
+/** Refusals worth a log line (a missing file is ordinary); each logged once per file. */
+const LOGGED_REASONS = new Set<MediaRefusal>([
+  'symlinked media folder',
+  'hard link',
+  'outside the media folder',
+  'changed',
+]);
+const logged = new Set<string>();
 
 /** Parses a single `bytes=` range; undefined for none or multi-range, null if unsatisfiable. */
 export function parseRange(
@@ -130,34 +110,55 @@ export function mediaRoutes(app: Api, { library }: Deps): void {
       const media = store.getRow('media', id);
       if (!media) throw notFound(`Media ${id} not found`);
       if (!media.local_path) throw notFound(`Media ${id} has no local file`);
-      const file = await resolveMediaPath(treePaths(library.dirOf(tree)).media, media.local_path);
-      const info = file ? await stat(file).catch(() => null) : null;
-      if (!file || !info?.isFile()) throw notFound(`Media ${id} file is missing`);
-
-      const etag = `"${info.size.toString(16)}-${Math.floor(info.mtimeMs).toString(16)}"`;
-      const sniffed = await readHead(file).then(sniffMediaType);
-      reply
-        .header('content-security-policy', MEDIA_CSP)
-        .header('x-content-type-options', 'nosniff')
-        .header('accept-ranges', 'bytes')
-        .header('etag', etag)
-        .header('last-modified', info.mtime.toUTCString())
-        .header('cache-control', 'private, no-cache')
-        .header('content-disposition', sniffed ? 'inline' : 'attachment')
-        .type(sniffed ?? OPAQUE_TYPE);
-      if (request.headers['if-none-match'] === etag) return reply.code(304).send();
-
-      const range = parseRange(request.headers.range, info.size);
-      if (range === null) return rangeNotSatisfiable(reply, info.size);
-      if (range) {
+      const opened = await openMediaFile(
+        treePaths(library.dirOf(tree)).media,
+        media.local_path,
+        (reason) => {
+          const key = `${tree}\0${id}\0${reason}`;
+          if (!LOGGED_REASONS.has(reason) || logged.has(key)) return;
+          if (logged.size > 10_000) logged.clear();
+          logged.add(key);
+          // console.warn, not app.log: the shipped CLI runs with logger: false. Values come
+          // from the tree, so control characters are escaped before reaching a terminal.
+          console.warn(
+            `open-ancestry: media file not served (${reason}): ${escapeControls(tree)} / ${escapeControls(media.local_path!)}`,
+          );
+        },
+      );
+      if (!opened) throw notFound(`Media ${id} file is missing`);
+      const { handle, info } = opened;
+      let streaming = false;
+      try {
+        const etag = `"${info.size.toString(16)}-${Math.floor(info.mtimeMs).toString(16)}"`;
+        const sniffed = sniffMediaType(await readHead(handle));
         reply
-          .code(206)
-          .header('content-range', `bytes ${range.start}-${range.end}/${info.size}`)
-          .header('content-length', range.end - range.start + 1);
-        return reply.send(createReadStream(file, range));
+          .header('content-security-policy', MEDIA_CSP)
+          .header('x-content-type-options', 'nosniff')
+          .header('accept-ranges', 'bytes')
+          .header('etag', etag)
+          .header('last-modified', info.mtime.toUTCString())
+          .header('cache-control', 'private, no-cache')
+          .header('content-disposition', sniffed ? 'inline' : 'attachment')
+          .type(sniffed ?? OPAQUE_TYPE);
+        if (request.headers['if-none-match'] === etag) return reply.code(304).send();
+
+        const range = parseRange(request.headers.range, info.size);
+        if (range === null) return rangeNotSatisfiable(reply, info.size);
+        if (range) {
+          reply
+            .code(206)
+            .header('content-range', `bytes ${range.start}-${range.end}/${info.size}`)
+            .header('content-length', range.end - range.start + 1);
+          streaming = true;
+          return reply.send(handle.createReadStream({ ...range, autoClose: true }));
+        }
+        reply.header('content-length', info.size);
+        streaming = true;
+        return reply.send(handle.createReadStream({ autoClose: true }));
+      } finally {
+        // The stream closes the handle when it ends; every other way out closes it here.
+        if (!streaming) await handle.close();
       }
-      reply.header('content-length', info.size);
-      return reply.send(createReadStream(file));
     },
   );
 }

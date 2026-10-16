@@ -3,6 +3,7 @@ import {
   familyChildren,
   getPersonSummary,
   events,
+  meta,
   noteLinks,
   notes,
   persons,
@@ -37,6 +38,7 @@ import { badRequest, conflict, notFound } from '../errors';
 import { mergePeople } from '../merge';
 import {
   addName,
+  checkSeen,
   createTag,
   deleteName,
   runOperation,
@@ -157,6 +159,11 @@ function familyPatchLabel(store: TreeStore, family: FamilyRow, body: PartnerPatc
   return `Edit relationship: ${familyLabel(store, family.id)}`;
 }
 
+function isOnlyPerson(store: TreeStore, id: string): boolean {
+  const others = store.stmt('SELECT 1 FROM person WHERE id <> ? LIMIT 1').get(id);
+  return others === undefined;
+}
+
 function ownerExists(store: TreeStore, table: string, id: string): void {
   if (!store.getRow(table as TableName, id)) throw notFound(`${table} ${id} not found`);
 }
@@ -172,9 +179,14 @@ export function editRoutes(app: Api, { library }: Deps): void {
     { schema: { params: TreeParams, body: PersonBody } },
     async (request, reply) => {
       const store = open(request.params.tree);
-      const { batchId, result } = edit(store, `Add person: ${bodyLabel(request.body)}`, (tx) =>
-        createPerson(tx, request.body),
-      );
+      const { batchId, result } = edit(store, `Add person: ${bodyLabel(request.body)}`, (tx) => {
+        const person = createPerson(tx, request.body);
+        // The first person in an empty tree is its home person, in the same undo step.
+        if (!meta.getHomePersonId(tx.store) && isOnlyPerson(tx.store, person.id)) {
+          meta.setHomePerson(tx, person.id);
+        }
+        return person;
+      });
       return reply.code(201).send({ batchId, person: summary(store, result.id) });
     },
   );
@@ -626,9 +638,10 @@ export function editRoutes(app: Api, { library }: Deps): void {
     async (request) => {
       const store = open(request.params.tree);
       const { label, operations } = request.body;
-      const { batchId, result } = edit(store, label, (tx) =>
-        operations.map((operation) => runOperation(tx, operation)),
-      );
+      const { batchId, result } = edit(store, label, (tx) => {
+        checkSeen(tx.store, operations);
+        return operations.map((operation) => runOperation(tx, operation));
+      });
       return { batchId, results: result };
     },
   );

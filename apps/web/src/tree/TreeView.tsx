@@ -42,6 +42,7 @@ import {
   type NeighborhoodRequest,
 } from './api';
 import { usePalette } from '../app/palette';
+import { FAN_RING_WIDTH } from './fanLabels';
 import { lifeEvent, toPersonSummary } from './format';
 import { onTreeChanged } from '../api/edits';
 import { GraphCache } from './graphCache';
@@ -253,7 +254,12 @@ function layoutOptions(
   view: Pick<ViewState, 'expanded' | 'collapsed' | 'parents'>,
 ): LayoutRequest['options'] {
   return kind === 'fan'
-    ? { generations: up + 1, collapsed: view.collapsed, selectedParentFamilies: view.parents }
+    ? {
+        generations: up + 1,
+        ringWidth: FAN_RING_WIDTH,
+        collapsed: view.collapsed,
+        selectedParentFamilies: view.parents,
+      }
     : {
         ancestorsDepth: up,
         descendantsDepth: down,
@@ -309,7 +315,9 @@ export function TreeView({
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const kind: LayoutKind = search.layout ?? 'family';
+  // Only a known layout: never trust an inherited key like `toString`.
+  const kind: LayoutKind =
+    search.layout && Object.hasOwn(DEFAULT_DEPTH, search.layout) ? search.layout : 'family';
   // Hand-edited URLs can hold anything: clamp to what the server serves.
   const requestedUp = parseGenerations(search.up) ?? DEFAULT_DEPTH[kind].up;
   const fanCapped = kind === 'fan' && requestedUp > MAX_FAN_GENERATIONS;
@@ -740,7 +748,10 @@ export function TreeView({
         h: () => void goHome(),
         f: palette.open,
         l: () => setMenuOpen(true),
-        m: () => setMinimapVisible((v) => !v),
+        // The fan has no minimap.
+        m: () => {
+          if (kind !== 'fan') setMinimapVisible((v) => !v);
+        },
       };
       const action = actions[event.key.length === 1 ? event.key.toLowerCase() : event.key];
       if (!action) return;
@@ -751,14 +762,15 @@ export function TreeView({
     return () => {
       window.removeEventListener('keydown', onKey);
     };
-  }, [goHome, palette]);
+  }, [goHome, palette, kind]);
 
   const anchor = useMemo<QuickViewAnchor | null>(
     () =>
       popoverKey
         ? {
             getBoundingClientRect: () => canvas.current?.clientRect(popoverKey) ?? new DOMRect(),
-            focus: () => canvas.current?.focusCard(popoverKey),
+            // Closing the quick view returns focus to its card without moving the view.
+            focus: () => canvas.current?.focusCard(popoverKey, { reveal: false }),
             isConnected: true,
           }
         : null,
@@ -836,7 +848,7 @@ export function TreeView({
         onZoomOut={() => canvas.current?.zoomBy(1 / ZOOM_STEP)}
         onFit={() => canvas.current?.fit()}
         minimapVisible={minimapVisible}
-        onToggleMinimap={() => setMinimapVisible((v) => !v)}
+        onToggleMinimap={kind === 'fan' ? undefined : () => setMinimapVisible((v) => !v)}
       />
       <TreeCanvas
         ref={canvas}
@@ -947,7 +959,13 @@ export function TreeView({
           if (!open) setPopoverKey(null);
         }}
         onMakeFocus={(p) => goTo(p.id)}
-        onEdit={(p) => void navigate({ to: '/person/$personId', params: { personId: p.id } })}
+        onEdit={(p) =>
+          void navigate({
+            to: '/person/$personId',
+            params: { personId: p.id },
+            search: { edit: true },
+          })
+        }
       />
     </>
   );

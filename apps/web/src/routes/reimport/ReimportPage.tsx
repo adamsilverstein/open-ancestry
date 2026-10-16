@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { CircleHelp, TriangleAlert } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '../../api/client';
 import { invalidateTree } from '../../api/edits';
@@ -23,6 +24,7 @@ import {
   type ReimportReview,
   type ReviewChange,
 } from './api';
+import { groupReview, QUESTIONS, type GroupId } from './group';
 import { describeChange } from './labels';
 import styles from './Reimport.module.css';
 
@@ -76,14 +78,16 @@ function PersonCard({
   active: Set<string>;
   onToggle: (change: ReviewChange, on: boolean) => void;
 }) {
+  // An article per card: the four groups stay the only regions (landmarks).
   return (
-    <section aria-label={person.name} className={styles.card} data-status={person.status}>
+    // Named by the person alone (the heading also shows their lifespan).
+    <article aria-label={person.name} className={styles.card} data-status={person.status}>
       <header className={styles.cardHeader}>
         <div>
-          <h2 className={styles.name}>
+          <h3 className={styles.name}>
             {person.name}
             {person.lifespan && <span className={styles.lifespan}> {person.lifespan}</span>}
-          </h2>
+          </h3>
           <p className={styles.meta}>
             {STATUS[person.status]}
             {person.confidence !== null && ` · ${Math.round(person.confidence * 100)}% match`}
@@ -100,6 +104,11 @@ function PersonCard({
           if (!change.applicable) {
             return (
               <li key={change.id} className={styles.info}>
+                {QUESTIONS.has(change.kind) && (
+                  <span className={styles.flag}>
+                    <CircleHelp aria-hidden size={14} /> Check
+                  </span>
+                )}
                 {label}
                 {change.kind === 'person.missing' && '. Kept in your tree.'}
               </li>
@@ -107,19 +116,25 @@ function PersonCard({
           }
           const waiting = change.requires?.some((r) => !active.has(r)) ?? false;
           return (
-            <li key={change.id}>
+            <li key={change.id} className={change.conflict ? styles.conflict : undefined}>
               <Checkbox
                 label={label}
                 checked={active.has(change.id)}
                 disabled={waiting}
                 description={
-                  change.conflict === 'local-edit'
-                    ? 'Edited in this tree since the last import; your edit is kept unless you tick this.'
-                    : change.conflict === 'local-delete'
-                      ? 'You deleted this in this tree; it stays deleted unless you tick this.'
-                      : waiting
-                        ? 'Needs the new person above.'
-                        : undefined
+                  change.conflict ? (
+                    // The marker is part of the description, so it is announced with the checkbox.
+                    <>
+                      <span className={styles.flag}>
+                        <TriangleAlert aria-hidden size={14} /> Conflict
+                      </span>
+                      {change.conflict === 'local-edit'
+                        ? 'Edited in this tree since the last import; your edit is kept unless you tick this.'
+                        : 'You deleted this in this tree; it stays deleted unless you tick this.'}
+                    </>
+                  ) : waiting ? (
+                    'Needs the new person above.'
+                  ) : undefined
                 }
                 onChange={(event) => onToggle(change, event.target.checked)}
               />
@@ -127,7 +142,7 @@ function PersonCard({
           );
         })}
       </ul>
-    </section>
+    </article>
   );
 }
 
@@ -144,6 +159,15 @@ function Review({ review }: { review: ReimportReview }) {
   const [comparing, setComparing] = useState(false);
   // A large export can change thousands of people: render cards in pages.
   const [shown, setShown] = useState(PAGE);
+  const [filter, setFilter] = useState<GroupId | 'all'>('all');
+  const groups = useMemo(() => groupReview(review.diff.people), [review]);
+  const visible = groups.filter((g) => g.people.length && (filter === 'all' || g.id === filter));
+  const listed = visible.reduce((n, g) => n + g.people.length, 0);
+  // Matched people without a card: nothing in the export changed them.
+  const unchanged = Math.max(
+    0,
+    review.diff.counts.matched - review.diff.people.filter((p) => p.status === 'matched').length,
+  );
   const active = useMemo(() => effective(review, selected), [review, selected]);
   const { counts } = review.diff;
 
@@ -290,9 +314,8 @@ function Review({ review }: { review: ReimportReview }) {
       )}
       <section aria-label="Summary" className={styles.summary}>
         <span>
-          {counts.matched} matched ({counts.highConfidence} high confidence)
+          In the export: {counts.matched} matched ({unchanged} unchanged, not listed)
         </span>
-        <span>{counts.changedPeople} with changes</span>
         <span>{counts.newPeople} new</span>
         <span>{counts.missingPeople} missing</span>
       </section>
@@ -310,13 +333,62 @@ function Review({ review }: { review: ReimportReview }) {
         </p>
       ) : (
         <>
-          {review.diff.people.slice(0, shown).map((person) => (
-            <PersonCard key={person.key} person={person} active={active} onToggle={toggle} />
-          ))}
-          {review.diff.people.length > shown && (
+          <div role="group" aria-label="Filter the review" className={styles.filters}>
+            {[
+              { id: 'all' as const, title: 'All', count: review.diff.people.length },
+              ...groups
+                .filter((g) => g.people.length)
+                .map((g) => ({ id: g.id, title: g.title, count: g.people.length })),
+            ].map((f) => (
+              <Button
+                key={f.id}
+                size="sm"
+                variant="secondary"
+                className={styles.filter}
+                aria-pressed={filter === f.id}
+                onClick={() => {
+                  setFilter(f.id);
+                  setShown(PAGE);
+                }}
+              >
+                {f.title} {f.count}
+              </Button>
+            ))}
+          </div>
+          {(() => {
+            // Pages run through the groups in reading order.
+            let left = shown;
+            return visible.map((g) => {
+              const people = g.people.slice(0, Math.max(0, left));
+              left -= people.length;
+              if (!people.length) return null;
+              return (
+                <section
+                  key={g.id}
+                  aria-labelledby={`group-${g.id}`}
+                  data-group={g.id}
+                  className={styles.group}
+                >
+                  <h2 id={`group-${g.id}`} className={styles.groupTitle}>
+                    {g.id === 'decide' && <TriangleAlert aria-hidden size={18} />}
+                    {g.title} ({g.people.length})
+                  </h2>
+                  {people.map((person) => (
+                    <PersonCard
+                      key={person.key}
+                      person={person}
+                      active={active}
+                      onToggle={toggle}
+                    />
+                  ))}
+                </section>
+              );
+            });
+          })()}
+          {listed > shown && (
             <Button onClick={() => setShown((n) => n + PAGE)}>
-              Show {Math.min(PAGE, review.diff.people.length - shown)} more (
-              {review.diff.people.length - shown} not shown; bulk choices include them)
+              Show {Math.min(PAGE, listed - shown)} more ({listed - shown} not shown; bulk choices
+              include them)
             </Button>
           )}
         </>
@@ -383,9 +455,8 @@ export function ReimportPage() {
   /** Stops the comparison, or discards its review if it finished in the meantime. */
   async function cancel() {
     setCancelling(true);
-    try {
-      await cancelJob(jobId);
-    } catch {
+    // False (409): the comparison already finished, so discard its review.
+    if (!(await cancelJob(jobId).catch(() => false))) {
       const latest = await getJob(jobId).catch(() => null);
       const done = latest?.result as unknown as { reimportId?: string } | undefined;
       if (done?.reimportId) await discardReimport(done.reimportId).catch(() => {});

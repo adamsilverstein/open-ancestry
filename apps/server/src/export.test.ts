@@ -209,7 +209,7 @@ describe('JSON export history (#197)', () => {
     // Untouched records keep their imported text, so a re-export can still copy them.
     expect(tables.raw_record.some((r) => r.raw_text.includes('Bastien'))).toBe(true);
     // The full backup keeps everything.
-    expect((await api.get(`${base}/export.json`)).body).toMatch(/SECRET-INLINE-NOTE/);
+    expect((await api.get(`${base}/export.json?history=1`)).body).toMatch(/SECRET-INLINE-NOTE/);
   });
 
   it('with history=0 leaves out places, notes, media and citations only deleted records used (#267)', async () => {
@@ -294,15 +294,25 @@ describe('JSON export history (#197)', () => {
     // Still a whole document: it loads into an empty tree.
     expect(() => importJsonString(openMemoryTree(), res.body)).not.toThrow();
     // The full backup keeps every place, as the history may restore them.
-    expect((await api.get(`${base}/export.json`)).body).toContain('SECRET-HAMLET');
+    expect((await api.get(`${base}/export.json?history=1`)).body).toContain('SECRET-HAMLET');
   });
 
-  it('keeps the history by default, as a full backup', async () => {
+  it('leaves the history out by default, like the export dialog', async () => {
     await deletedNote();
     const res = await api.get(`${s.base}/export.json`);
     const { tables } = res.json() as { tables: Record<string, unknown[]> };
-    expect(tables.change_log!.length).toBeGreaterThan(0);
-    expect(res.body).toContain('SECRET-DELETED-NOTE');
+    expect(Object.keys(tables)).not.toContain('change_log');
+    expect(res.body).not.toContain('SECRET-DELETED-NOTE');
+  });
+
+  it('keeps the history, as a full backup, only when asked with history=1 or true', async () => {
+    await deletedNote();
+    for (const flag of ['1', 'true']) {
+      const res = await api.get(`${s.base}/export.json?history=${flag}`);
+      const { tables } = res.json() as { tables: Record<string, unknown[]> };
+      expect(tables.change_log!.length, flag).toBeGreaterThan(0);
+      expect(res.body, flag).toContain('SECRET-DELETED-NOTE');
+    }
     expect((await api.get(`${s.base}/export.json?history=nope`)).statusCode).toBe(400);
   });
 });

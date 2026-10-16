@@ -40,7 +40,7 @@ export interface ExportOptions {
   /**
    * Include change_batch and change_log (default true). Without them, import
    * warnings (which can quote imported lines) are left out too, and so are
-   * places no remaining event uses (a deleted record's whereabouts).
+   * places, notes and media that only deleted records used.
    */
   history?: boolean;
   /**
@@ -106,12 +106,52 @@ function unusedPlaces(store: TreeStore): Set<string> {
   return new Set([...parent.keys()].filter((id) => !used.has(id)));
 }
 
+/**
+ * Rows a history-free export leaves out because only deleted records used
+ * them: places no remaining event uses, then media and notes no remaining
+ * record links to. A deleted person's links go with them, but these shared
+ * rows stay, and would otherwise keep their text and whereabouts.
+ */
+function orphans(store: TreeStore): Record<'place' | 'media' | 'note', Set<string>> {
+  const place = unusedPlaces(store);
+  const ids = (sql: string) => store.db.prepare(sql).pluck().all() as string[];
+  // Links still counted: those whose owner is not itself left out.
+  const linkedBy = (table: 'media_link' | 'note_link', column: string, gone: Set<string>[]) => {
+    const rows = store.db
+      .prepare(`SELECT ${column} AS id, owner_type, owner_id FROM ${table}`)
+      .all() as { id: string; owner_type: string; owner_id: string }[];
+    const owners: Record<string, Set<string>> = { place, media: gone[0] ?? new Set() };
+    return new Set(rows.filter((r) => !owners[r.owner_type]?.has(r.owner_id)).map((r) => r.id));
+  };
+  const primary = new Set(
+    ids('SELECT primary_media_id FROM person WHERE primary_media_id IS NOT NULL'),
+  );
+  const mediaLinked = linkedBy('media_link', 'media_id', []);
+  const media = new Set(
+    ids('SELECT id FROM media').filter((id) => !mediaLinked.has(id) && !primary.has(id)),
+  );
+  const noteLinked = linkedBy('note_link', 'note_id', [media]);
+  const note = new Set(ids('SELECT id FROM note').filter((id) => !noteLinked.has(id)));
+  return { place, media, note };
+}
+
+/** Whether a row is one of `gone`, or belongs to one (a link, citation link or imported text). */
+function belongsTo(name: string, row: Record<string, unknown>, gone: Record<string, Set<string>>) {
+  if (gone[name]?.has(String(row.id))) return true;
+  if (typeof row.owner_type === 'string' && gone[row.owner_type]?.has(String(row.owner_id)))
+    return true;
+  return (
+    (name === 'media_link' && gone.media!.has(String(row.media_id))) ||
+    (name === 'note_link' && gone.note!.has(String(row.note_id)))
+  );
+}
+
 export function exportJson(
   store: TreeStore,
   { history = true, omitImportedText }: ExportOptions = {},
 ): OaJsonDocument {
   const tables: Record<string, unknown[]> = {};
-  const dropPlaces = history ? new Set<string>() : unusedPlaces(store);
+  const gone = history ? null : orphans(store);
   for (const name of exportedTables(store, history)) {
     let rows = store.db
       .prepare(`SELECT * FROM ${name} ORDER BY ${store.plan(name).key}`)
@@ -124,12 +164,7 @@ export function exportJson(
       );
     }
     if (!history && name === 'import_batch') rows = rows.map(withoutImportedLines);
-    if (dropPlaces.size) {
-      if (name === 'place') rows = rows.filter((r) => !dropPlaces.has(String(r.id)));
-      // Links, notes' and media's owners, and imported text that belong to those places.
-      else
-        rows = rows.filter((r) => r.owner_type !== 'place' || !dropPlaces.has(String(r.owner_id)));
-    }
+    if (gone) rows = rows.filter((r) => !belongsTo(name, r, gone));
     tables[name] = rows;
   }
   return {

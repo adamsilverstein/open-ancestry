@@ -88,8 +88,16 @@ async function stats(page: Page) {
   };
 }
 
-async function refocusCount(page: Page) {
-  return page.evaluate(() => performance.getEntriesByName('oa-tree-refocus', 'measure').length);
+/**
+ * Which re-focus measure is the latest (its end time), to wait for the next.
+ * Not a count: the app keeps at most 100 and starts over, so a long session
+ * would see the count drop back to 1.
+ */
+async function refocusStamp(page: Page) {
+  return page.evaluate(() => {
+    const last = performance.getEntriesByName('oa-tree-refocus', 'measure').at(-1);
+    return last ? last.startTime + last.duration : -1;
+  });
 }
 
 async function lastRefocus(page: Page) {
@@ -249,9 +257,9 @@ for (const tree of trees) {
           // Warm: rest on the card past the prefetch dwell, as a user reading it
           // would, so its layout is prepared. Cold: Enter at once, as after Find.
           if (warm) await page.waitForTimeout(300);
-          const before = await refocusCount(page);
+          const before = await refocusStamp(page);
           await page.keyboard.press('Enter');
-          await expect.poll(() => refocusCount(page)).toBeGreaterThan(before);
+          await expect.poll(() => refocusStamp(page)).not.toBe(before);
           await ready(page);
           await settled(page);
           const now = await stats(page);
@@ -304,9 +312,9 @@ for (const tree of trees) {
       await ready(page);
       const refocusOn = async (key: string) => {
         await canvas(page).locator(`[data-key="${key}"]`).focus();
-        const before = await refocusCount(page);
+        const before = await refocusStamp(page);
         await page.keyboard.press('Enter');
-        await expect.poll(() => refocusCount(page)).toBeGreaterThan(before);
+        await expect.poll(() => refocusStamp(page)).not.toBe(before);
         await ready(page);
         await settled(page);
         return lastRefocus(page);
@@ -333,9 +341,9 @@ for (const tree of trees) {
         await canvas(page).locator(`[data-key="${from}"]`).focus();
         const step = async (key: string) => {
           await page.keyboard.press(key);
-          const before = await refocusCount(page);
+          const before = await refocusStamp(page);
           await page.keyboard.press('Enter');
-          await expect.poll(() => refocusCount(page)).toBeGreaterThan(before);
+          await expect.poll(() => refocusStamp(page)).not.toBe(before);
           await ready(page);
           await settled(page);
           return lastRefocus(page);
@@ -451,9 +459,9 @@ for (const tree of trees) {
       const round = async () => {
         for (const key of ['ArrowDown', 'ArrowUp', 'ArrowDown', 'ArrowUp']) {
           await page.keyboard.press(key);
-          const before = await refocusCount(page);
+          const before = await refocusStamp(page);
           await page.keyboard.press('Enter');
-          await expect.poll(() => refocusCount(page)).toBeGreaterThan(before);
+          await expect.poll(() => refocusStamp(page)).not.toBe(before);
           await ready(page);
           await settled(page);
         }
@@ -500,9 +508,9 @@ test.describe('one family with 2,000 children', { tag: '@perf' }, () => {
     await canvas(page).locator(`[data-key="${fatherId}"]`).focus();
     const refocus = async (key: string) => {
       await page.keyboard.press(key);
-      const before = await refocusCount(page);
+      const before = await refocusStamp(page);
       await page.keyboard.press('Enter');
-      await expect.poll(() => refocusCount(page)).toBeGreaterThan(before);
+      await expect.poll(() => refocusStamp(page)).not.toBe(before);
       await ready(page);
       await settled(page);
       return lastRefocus(page);

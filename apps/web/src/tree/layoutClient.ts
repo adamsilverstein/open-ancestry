@@ -41,6 +41,19 @@ interface Pending {
  * new one seeded with `snapshot()`, the merged graph so far, and re-sends any
  * unanswered requests.
  */
+/**
+ * The worker's time for each layout, as an `oa-tree-layout` measure, so tests
+ * (and the browser's performance panel) can see it; at most 100 are kept, like
+ * the re-focus measures.
+ */
+function recordLayoutTime(ms: number) {
+  if (performance.getEntriesByName('oa-tree-layout', 'measure').length >= 100) {
+    performance.clearMeasures('oa-tree-layout');
+  }
+  const end = performance.now();
+  performance.measure('oa-tree-layout', { start: Math.max(0, end - ms), end });
+}
+
 export class LayoutClient {
   private worker: Worker | null = null;
   private nextId = 1;
@@ -71,6 +84,7 @@ export class LayoutClient {
       this.pending.delete(event.data.id);
       this.posted.delete(event.data.id);
       this.drain();
+      recordLayoutTime(event.data.ms);
       if (!request) return;
       if (event.data.error) request.reject(new Error(`Layout failed: ${event.data.error}`));
       else request.resolve(event.data);

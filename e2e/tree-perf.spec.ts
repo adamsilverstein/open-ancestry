@@ -329,7 +329,7 @@ for (const tree of trees) {
                 y: card.getBoundingClientRect().y,
               }))
               .filter((c) => !c.key.includes('~'))
-              .sort((x, y) => y.y - x.y)
+              .sort((x, y) => x.y - y.y)
               .map((c) => c.key),
           );
       /**
@@ -337,8 +337,17 @@ for (const tree of trees) {
        * back, by keyboard as in the re-focus checks (the relative is always on
        * screen, unlike a card picked by position): p95 and median of 40.
        */
-      const roundTrip = async (from: string, [there, back]: [string, string]) => {
-        await canvas(page).locator(`[data-key="${from}"]`).focus();
+      const roundTrip = async (from: string) => {
+        // Down to a child and back, or up to a parent when there is no child.
+        const card = canvas(page).locator(`[data-key="${from}"]`);
+        await card.focus();
+        await page.keyboard.press('ArrowDown');
+        const moved = await page.evaluate(
+          (key) => (document.activeElement as HTMLElement | null)?.dataset.key !== key,
+          from,
+        );
+        const [there, back] = moved ? ['ArrowDown', 'ArrowUp'] : ['ArrowUp', 'ArrowDown'];
+        await card.focus();
         const step = async (key: string) => {
           await page.keyboard.press(key);
           const before = await refocusStamp(page);
@@ -359,9 +368,22 @@ for (const tree of trees) {
         return { p95: percentile(durations, 0.95), median: percentile(durations, 0.5) };
       };
 
-      const start = await roundTrip(tree.wideId, ['ArrowDown', 'ArrowUp']);
-      // Browse: re-focus on 50 different people, each the lowest card on screen
-      // not visited yet, so every visit reaches new descendants.
+      const start = await roundTrip(tree.wideId);
+      // Browse: re-focus on 50 different people, each the topmost card on screen
+      // not visited yet. Going up reaches ancestors and their siblings, whose
+      // seven generations of descendants each merge a large new slice.
+      // The worker's own time for every layout it runs while browsing
+      // (oa-tree-layout measures, taken and cleared after each visit).
+      const takeLayoutTimes = () =>
+        page.evaluate(() => {
+          const times = performance
+            .getEntriesByName('oa-tree-layout', 'measure')
+            .map((e) => e.duration);
+          performance.clearMeasures('oa-tree-layout');
+          return times;
+        });
+      await takeLayoutTimes();
+      const layoutTimes: number[][] = [];
       const seen = new Set<string>([tree.wideId]);
       let current = tree.wideId;
       for (let visit = 0; visit < 50; visit++) {
@@ -370,10 +392,10 @@ for (const tree of trees) {
         expect(next, `visit ${visit}: a card to move to`).toBeTruthy();
         seen.add(next!);
         await refocusOn(next!);
+        layoutTimes.push(await takeLayoutTimes());
         current = next!;
       }
-      // The last person visited may have no children; every one has a parent on screen.
-      const end = await roundTrip(current, ['ArrowUp', 'ArrowDown']);
+      const end = await roundTrip(current);
 
       const budget = 50 * factor;
       // Laying out from everything merged made each re-focus slower as the
@@ -386,8 +408,23 @@ for (const tree of trees) {
         `end p95 < ${budget}ms; end median < ${allowed.toFixed(0)}ms`,
         end.p95 < budget && end.median < allowed,
       );
+
+      // The regression check (#210): the worker's layout time, first ten visits
+      // against the last ten. Laying out from everything merged made it grow
+      // with the session; laid out from the cache's index it does not.
+      const early = percentile(layoutTimes.slice(0, 10).flat(), 0.5);
+      const late = percentile(layoutTimes.slice(-10).flat(), 0.5);
+      const slack = early * 1.5 + 2 * factor;
+      report(
+        tree,
+        'Worker layout time while browsing 50 people, median of visits 1-10 vs 41-50',
+        `${early.toFixed(1)}ms vs ${late.toFixed(1)}ms`,
+        `late < ${slack.toFixed(0)}ms`,
+        late < slack,
+      );
       expect(end.median).toBeLessThan(allowed);
       expect(end.p95).toBeLessThan(budget);
+      expect(late).toBeLessThan(slack);
     });
 
     for (const scenario of [

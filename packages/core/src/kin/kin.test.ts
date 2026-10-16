@@ -168,3 +168,29 @@ describe('lineQualifier', () => {
     expect(lineQualifier(['adopted'], 'adopted')).toBe('adopted');
   });
 });
+
+describe('siblingKind with a shared parent who is birth parent to neither (#296 review)', () => {
+  it('is full when both are adopted or step to the other parent', () => {
+    expect(
+      siblingKind([
+        ['biological', 'biological'],
+        ['adopted', 'adopted'],
+      ]),
+    ).toBe('full');
+    expect(
+      siblingKind([
+        ['biological', 'biological'],
+        ['step', 'step'],
+      ]),
+    ).toBe('full');
+  });
+
+  it('is half when that parent is birth parent to exactly one', () => {
+    expect(
+      siblingKind([
+        ['biological', 'biological'],
+        ['adopted', 'biological'],
+      ]),
+    ).toBe('half');
+  });
+});

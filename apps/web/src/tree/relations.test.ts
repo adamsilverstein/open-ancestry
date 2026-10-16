@@ -100,7 +100,7 @@ describe('kinship', () => {
     const r = buildRelations(l);
     const sex = (key: string) => (key === 'nico' ? 'M' : 'F');
     expect(kinship(r, 'ada', 'nico', sex)).toBe('nephew');
-    expect(kinship(r, 'ada', 'cass', sex)).toBe('cousin');
+    expect(kinship(r, 'ada', 'cass', sex)).toBe('1st cousin');
   });
 
   it('returns null for the focus person and strangers', () => {
@@ -275,7 +275,7 @@ describe('step, adoptive and foster links', () => {
     expect(k.leopold).toBe('stepfather');
     expect(k.max).toBe('stepbrother');
     expect(k.hilda).toBe('step-aunt');
-    expect(k.karl).toBe('step-cousin');
+    expect(k.karl).toBe('step-first cousin');
     expect(k.iris).toBe('half-sister');
   });
 
@@ -301,7 +301,7 @@ describe('step, adoptive and foster links', () => {
     }
   });
 
-  it('treats guardian and other links like birth for siblings, as for parents', () => {
+  it('names guardian links as the relationship calculator does', () => {
     const g: TreeGraph = {
       people: kin.people,
       families: [
@@ -317,8 +317,9 @@ describe('step, adoptive and foster links', () => {
     };
     const l = layoutFamily(g, 'peter', {});
     const k = kinshipLabels(buildRelations(l, g), l.focusKey!, sexOfKin);
-    expect(k.harold).toBe('father');
-    expect(k.thomas).toBe('brother');
+    // Guardianship is care, not parenthood: guardian, and the guardian's child a foster brother.
+    expect(k.harold).toBe('guardian');
+    expect(k.thomas).toBe('foster brother');
   });
 
   it('treats a missing relationship as by birth', () => {
@@ -433,7 +434,8 @@ describe('labels in a blended family', () => {
       ivy: 'half-sister',
       cal: 'half-brother',
     });
-    expect(labels('cal', true)).toMatchObject({ ivy: 'stepsister', ben: 'half-brother' });
+    // Ben is Dad's son only by adoption: an adopted brother, as the calculator says.
+    expect(labels('cal', true)).toMatchObject({ ivy: 'stepsister', ben: 'adopted brother' });
     expect(labels('dad', true)).toMatchObject({ ben: 'adopted son', ivy: 'stepdaughter' });
     expect(labels('ivy', true)).toMatchObject({ dad: 'stepfather', cal: 'stepbrother' });
     expect(labels('ben', true)).toMatchObject({ dad: 'adoptive father', ann: 'adopted sister' });

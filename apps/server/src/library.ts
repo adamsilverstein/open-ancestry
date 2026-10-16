@@ -154,10 +154,10 @@ function processAlive(pid: number): boolean {
   }
 }
 
-/** A file's inode, or undefined when it is gone. */
-function inodeOf(path: string): number | undefined {
+/** A lock file's inode and content, or undefined when it is gone. */
+function fingerprint(path: string): string | undefined {
   try {
-    return statSync(path).ino;
+    return `${statSync(path).ino}:${readFileSync(path, 'utf8')}`;
   } catch {
     return undefined;
   }
@@ -689,8 +689,11 @@ export class Library {
       if (attempt === 0 && (!held || this.lockStale(id, held))) {
         // Take over a stale lock: move it aside, then retry the create. Another
         // server may have taken it over in between, so check that the file moved
-        // is the one judged stale (same inode); if not, put it back and refuse.
-        const judged = inodeOf(path);
+        // is the one judged stale; if not, put it back and refuse. The inode
+        // alone is not enough: Linux reuses a freed inode for the next file at
+        // once, so the other server's fresh lock can have the old one's number.
+        // Its content (owner id and time) always differs.
+        const judged = fingerprint(path);
         this.testHooks.beforeLockTakeover?.();
         this.testHooks.beforeLockTakeover = undefined;
         const aside = `${path}.stale-${randomUUID()}`;
@@ -699,7 +702,7 @@ export class Library {
         } catch {
           continue; // Another server moved it first; the retry decides.
         }
-        if (inodeOf(aside) !== judged) {
+        if (judged === undefined || fingerprint(aside) !== judged) {
           try {
             linkSync(aside, path);
           } catch {

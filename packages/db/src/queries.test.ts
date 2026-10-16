@@ -107,6 +107,23 @@ describe('person summaries', () => {
     expect([f.me, f.dad, f.mom, f.kid].map(local)).toEqual([true, false, false, false]);
     store.close();
   });
+
+  it('versions the primary photo by its bytes, so a replaced file gets a new URL', () => {
+    const store = memoryTree();
+    const f = seedSmallFamily(store);
+    store.transact('photos', (tx) => {
+      const photo = media.create(tx, {
+        kind: 'photo',
+        local_path: 'photos/a.png',
+        sha256: 'c0ffee'.repeat(10) + 'beef',
+      });
+      tx.update('person', f.me, { primary_media_id: photo.id });
+    });
+    const version = (id: string) => getPersonSummaries(store, [id])[0]!.primaryPhotoVersion;
+    expect(version(f.me)).toBe('c0ffeec0ffeec0ff');
+    expect(version(f.kid)).toBeNull();
+    store.close();
+  });
 });
 
 describe('person detail', () => {

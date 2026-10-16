@@ -86,9 +86,8 @@ async function replaceInTree(dir: string, color: string) {
   store.close();
 }
 
-async function startReimport(page: Page, tree: string, color: string) {
-  await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
-  await page.goto('/');
+/** Re-imports from the File menu of the page already open (no reload). */
+async function startReimport(page: Page, color: string) {
   await page.getByRole('button', { name: 'File' }).click();
   const chooser = page.waitForEvent('filechooser');
   await page.getByRole('menuitem', { name: /Re-import updated export/ }).click();
@@ -123,8 +122,8 @@ async function shownColor(image: Locator): Promise<'red' | 'green' | 'blue'> {
   return r! > g! && r! > b! ? 'red' : g! > b! ? 'green' : 'blue';
 }
 
-async function galleryPhoto(page: Page, person: string) {
-  await page.goto(`/person/${person}?tab=gallery`);
+async function galleryPhoto(page: Page, person?: string) {
+  if (person) await page.goto(`/person/${person}?tab=gallery`);
   await expect(page.getByRole('tab', { name: 'Gallery', selected: true })).toBeVisible();
   return page
     .getByRole('region', { name: 'Gallery' })
@@ -132,16 +131,7 @@ async function galleryPhoto(page: Page, person: string) {
     .locator('img');
 }
 
-test('a photo changed only in the export is offered ticked and shown once applied', async ({
-  page,
-}) => {
-  const { name, person } = await seed('export');
-  // Seen first, so the browser holds the old thumbnail.
-  await page.addInitScript((t) => localStorage.setItem('oa-tree', t), name);
-  expect(await shownColor(await galleryPhoto(page, person))).toBe('red');
-
-  const replace = await startReimport(page, name, BLUE);
-  await expect(replace).toBeChecked();
+async function apply(page: Page) {
   await page.getByRole('button', { name: /^Apply \d+ changes?$/ }).click();
   await expect(
     page
@@ -149,19 +139,41 @@ test('a photo changed only in the export is offered ticked and shown once applie
       .getByRole('listitem')
       .filter({ hasText: /Applied \d+ change/ }),
   ).toBeVisible({ timeout: 30_000 });
+}
 
-  const photo = await galleryPhoto(page, person);
-  await expect(photo).toHaveAttribute('src', /\/thumb\/sm$/);
+test('a photo changed only in the export is offered ticked and shown once applied', async ({
+  page,
+}) => {
+  const { name, person } = await seed('export');
+  await page.addInitScript((t) => localStorage.setItem('oa-tree', t), name);
+  // Seen first, so this document already holds the old thumbnail.
+  expect(await shownColor(await galleryPhoto(page, person))).toBe('red');
+  // Everything after this stays in the one page: no reload may clear the image cache.
+  await page.evaluate(() => ((window as unknown as { stayed: boolean }).stayed = true));
+
+  const replace = await startReimport(page, BLUE);
+  await expect(replace).toBeChecked();
+  await apply(page);
+
+  // Back through the app's own history to the gallery seen before.
+  await expect(page).toHaveURL(/\/tree\//);
+  await page.goBack();
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`/person/${person}`));
+  const photo = await galleryPhoto(page);
   await expect.poll(() => shownColor(photo)).toBe('blue');
+  expect(await page.evaluate(() => (window as unknown as { stayed?: boolean }).stayed)).toBe(true);
 });
 
-test("a photo changed in both is an unticked conflict, and the tree's photo stays", async ({
+test('a photo changed in both is an unticked conflict, applied only when ticked', async ({
   page,
 }) => {
   const { name, dir, person } = await seed('both');
   await replaceInTree(dir, GREEN);
+  await page.addInitScript((t) => localStorage.setItem('oa-tree', t), name);
+  expect(await shownColor(await galleryPhoto(page, person))).toBe('green');
 
-  const replace = await startReimport(page, name, BLUE);
+  const replace = await startReimport(page, BLUE);
   await expect(replace).not.toBeChecked();
   const row = page
     .getByRole('article', { name: 'Wren Halloway', exact: true })
@@ -169,8 +181,10 @@ test("a photo changed in both is an unticked conflict, and the tree's photo stay
     .filter({ has: page.getByRole('checkbox', { name: REPLACE }) });
   await expect(row).toContainText('Conflict');
   await expect(row).toContainText('Edited in this tree since the last import');
-
-  // Nothing is ticked by default, so the tree's own photo is what it keeps.
   await expect(page.getByRole('button', { name: 'Apply 0 changes' })).toBeDisabled();
-  await expect.poll(async () => shownColor(await galleryPhoto(page, person))).toBe('green');
+
+  // Ticked, the export's photo replaces the tree's.
+  await replace.check();
+  await apply(page);
+  await expect.poll(async () => shownColor(await galleryPhoto(page, person))).toBe('blue');
 });

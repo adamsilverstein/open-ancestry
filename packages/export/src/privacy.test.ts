@@ -1,7 +1,7 @@
 import { openTree, treePaths } from '@open-ancestry/db';
 import { importGedcom } from '@open-ancestry/import';
 import { unzipSync, zipSync } from 'fflate';
-import { linkSync, mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, linkSync, mkdtempSync, rmSync } from 'node:fs';
 import { buffer } from 'node:stream/consumers';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -482,5 +482,52 @@ describe('privatized GEDZIP warnings and entries never name a withheld person (#
     expect(named(built.warnings.join('\n'))).toEqual([]);
     expect(named(Object.keys(unzipSync(built.bytes)).join('\n'))).toEqual([]);
     store.close();
+  });
+
+  it('scrubs a file that passes the plan but cannot be read by the in-memory build', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'oa-privacy-'));
+    dirs.push(root);
+    const dir = join(root, 'Unreadable.oatree');
+    const lines = [
+      '0 HEAD',
+      '1 GEDC',
+      '2 VERS 5.5.1',
+      '0 @I1@ INDI',
+      '1 NAME Zedekiah /Livingson/',
+      '1 BIRT',
+      '2 DATE 2001',
+      '0 @I2@ INDI',
+      '1 NAME Old /Grandfather/',
+      '1 DEAT',
+      '2 DATE 1920',
+      '1 OBJE @O1@',
+      '0 @O1@ OBJE',
+      '1 FILE photos/zedekiah-livingson.jpg',
+      '2 FORM jpg',
+      '0 TRLR',
+      '',
+    ];
+    await importGedcom(
+      {
+        gedzip: zipSync({
+          'gedcom.ged': new TextEncoder().encode(lines.join('\n')),
+          'photos/zedekiah-livingson.jpg': new Uint8Array([...PNG, 3]),
+        }),
+      },
+      { dir },
+      { today: TODAY },
+    );
+    const store = openTree(dir);
+    const photo = join(treePaths(dir).media, 'photos', 'zedekiah-livingson.jpg');
+    // Still a regular file inside the media folder, so it passes the plan; reading it fails.
+    chmodSync(photo, 0o000);
+    try {
+      const built = buildGedzipExport(store, { privatizeLiving: true, now: TODAY });
+      expect(built.warnings.join('\n')).toMatch(/could not be read/);
+      expect(built.warnings.join('\n').match(/zedekiah|livingson/gi) ?? []).toEqual([]);
+    } finally {
+      chmodSync(photo, 0o644);
+      store.close();
+    }
   });
 });

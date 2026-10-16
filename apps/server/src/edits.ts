@@ -1,4 +1,10 @@
-import { ancestorWord, descendantWord, inferLiving, replaceNickname } from '@open-ancestry/core';
+import {
+  ancestorWord,
+  descendantWord,
+  inferLiving,
+  replaceNickname,
+  unsafeTextReason,
+} from '@open-ancestry/core';
 import {
   ancestorGenerations,
   events,
@@ -59,6 +65,14 @@ export function gedcomName(name: Partial<NameParts>): string | null {
   return text || null;
 }
 
+/** Refuses text that would display as something else: control characters, bidi overrides (#190). */
+export function refuseUnsafeText(field: string, text: string | null | undefined): void {
+  const reason = text ? unsafeTextReason(text) : null;
+  if (reason) throw badRequest(`${field} ${reason}`);
+}
+
+const NAME_PARTS = ['prefix', 'given', 'nickname', 'surname_prefix', 'surname', 'suffix'] as const;
+
 /**
  * Name body to row. `existing` is the stored row on an edit, so derived
  * columns are computed from the name as it will be after the patch.
@@ -67,6 +81,7 @@ export function nameRow(
   body: NameBody,
   existing?: PersonNameRow,
 ): Omit<InsertRow<'person_name'>, 'person_id'> {
+  for (const part of NAME_PARTS) refuseUnsafeText(part, body[part]);
   const { is_primary, ...fields } = body;
   const row: Omit<InsertRow<'person_name'>, 'person_id'> = { ...fields };
   if (is_primary !== undefined) row.is_primary = is_primary ? 1 : 0;
@@ -84,6 +99,7 @@ export function nameRow(
 
 /** Date columns as the importer fills them; blank text clears them. */
 export function dateColumns(dateText: string | null | undefined) {
+  refuseUnsafeText('date', dateText);
   if (!dateText?.trim()) {
     return {
       date_text: null,
@@ -98,6 +114,7 @@ export function dateColumns(dateText: string | null | undefined) {
 
 /** Finds a place by its full name (case-insensitive) or creates it. */
 export function placeId(tx: Tx, fullName: string | null | undefined): string | null {
+  refuseUnsafeText('place', fullName);
   // NFC so a decomposed spelling finds the stored (NFC) place instead of adding a twin.
   const name = fullName === null || fullName === undefined ? undefined : toNFC(fullName.trim());
   if (!name) return null;

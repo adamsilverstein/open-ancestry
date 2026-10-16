@@ -27,6 +27,7 @@ import { RelationshipCalculator } from './RelationshipCalculator';
 import { formatDate } from '@open-ancestry/core';
 import type { EventBrief } from '../../api/types';
 import styles from './PersonPage.module.css';
+import { PersonName } from '../../components/PersonName/PersonName';
 
 function Vital({
   label,
@@ -58,6 +59,8 @@ function Vital({
 interface RelationshipToHome {
   /** `father of Rowan Ashdown`, `Home person`; null while loading or unrelated. */
   text: string | null;
+  /** The home person's name after `text` ("father of "), shown isolated. */
+  of?: string;
   /** One mini chart per connecting path (several with pedigree collapse). */
   charts: RelationshipChartPath[];
 }
@@ -76,7 +79,7 @@ function useRelationshipToHome(tree: string, detail: PersonDetail): Relationship
   const homePerson = data?.people.find((p) => p.id === home);
   if (!data || !homePerson) return { text: null, charts: [] };
   const { name, charts } = relationshipCharts(data);
-  if (name) return { text: `${name} of ${fullName(homePerson)}`, charts };
+  if (name) return { text: `${name} of `, of: fullName(homePerson), charts };
   // The search stopped at its limits: say so rather than look unrelated.
   return data.complete
     ? { text: null, charts: [] }
@@ -141,7 +144,9 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
         className={styles.avatar}
       />
       <div className={styles.identity}>
-        <h1 className={styles.name}>{name}</h1>
+        <h1 className={styles.name}>
+          <PersonName name={name} />
+        </h1>
         {/* The primary name's nickname, saved in Edit person but shown nowhere before (#280). */}
         {nickname && (
           <p className={styles.nickname} data-testid="nickname">
@@ -161,6 +166,8 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
         <div className={styles.relationshipRow}>
           <p className={styles.relationship} data-testid="relationship">
             {relationship.text}
+            {/* Isolated, so a right-to-left name keeps "father of" in order. */}
+            {relationship.of && <PersonName name={relationship.of} />}
           </p>
           {relationship.charts.length > 0 && (
             <Popover>

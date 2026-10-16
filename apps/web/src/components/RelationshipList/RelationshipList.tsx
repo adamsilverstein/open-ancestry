@@ -7,6 +7,7 @@ import { Avatar } from '../Avatar/Avatar';
 import { Button } from '../Button/Button';
 import { LifespanText } from '../LifespanText/LifespanText';
 import styles from './RelationshipList.module.css';
+import { PersonName } from '../PersonName/PersonName';
 
 export interface RelationshipGroup {
   /** Unique within the list: it names the group's region. */
@@ -43,7 +44,7 @@ function Row({ person }: { person: PersonSummary }) {
       >
         <Avatar name={person.name} sex={person.sex} src={person.photoUrl} size={40} decorative />
         <span className={styles.text}>
-          <span className={styles.name}>{person.name}</span>
+          <PersonName className={styles.name} name={person.name} />
           <LifespanText className={styles.lifespan} {...person} />
         </span>
       </Link>

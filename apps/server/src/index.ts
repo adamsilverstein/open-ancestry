@@ -37,7 +37,7 @@ import { sendShell } from './shell';
 import { staticFileIndex } from './static-files';
 import { lazyValidatorFactory, plainSerializerFactory } from './validation';
 
-export { Library, defaultLibraryRoot, treeNameProblem } from './library';
+export { Library, defaultLibraryRoot, newTreeNameProblem, treeNameProblem } from './library';
 export {
   JobManager,
   type Importer,

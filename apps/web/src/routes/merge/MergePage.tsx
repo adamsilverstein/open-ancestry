@@ -10,6 +10,7 @@ import type { EventDetail, PersonDetail } from '../../api/types';
 import { Button } from '../../components/Button/Button';
 import { ConfirmDialog } from '../../components/ConfirmDialog/ConfirmDialog';
 import { EmptyState } from '../../components/EmptyState/EmptyState';
+import { PersonName } from '../../components/PersonName/PersonName';
 import { Skeleton } from '../../components/Skeleton/Skeleton';
 import { useToast } from '../../components/Toast/Toast';
 import { fullName, isLivingStatus } from '../../lib/person';
@@ -213,8 +214,12 @@ export function MergePage() {
               <thead>
                 <tr>
                   <th scope="col">Detail</th>
-                  <th scope="col">Keep: {nameA}</th>
-                  <th scope="col">Merge in: {nameB}</th>
+                  <th scope="col">
+                    Keep: <PersonName name={nameA} />
+                  </th>
+                  <th scope="col">
+                    Merge in: <PersonName name={nameB} />
+                  </th>
                 </tr>
               </thead>
               <tbody>

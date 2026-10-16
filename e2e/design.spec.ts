@@ -258,7 +258,18 @@ test('select picks an option with the keyboard', async ({ page }) => {
   const trigger = region.getByRole('combobox', { name: 'Event type' });
   await trigger.focus();
   await page.keyboard.press('Enter');
-  await page.getByRole('option', { name: 'Death' }).click();
+  // Keys only: a click on an item-aligned option far down this long page could
+  // wait forever in WebKit, which keeps the page scroll-locked while it is open.
+  await expect(page.getByRole('option', { name: 'Birth' })).toBeFocused();
+  // The list can drop a key pressed while it is still positioning, so step until
+  // Death has focus; past it is only the disabled Burial, so extra presses stay put.
+  const death = page.getByRole('option', { name: 'Death' });
+  await expect(async () => {
+    await page.keyboard.press('ArrowDown');
+    await expect(death).toBeFocused({ timeout: 250 });
+  }).toPass();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('listbox')).toHaveCount(0);
   await expect(trigger).toContainText('Death');
   await expect(region.getByRole('combobox', { name: 'Disabled select' })).toBeDisabled();
 });

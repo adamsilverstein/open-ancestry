@@ -22,6 +22,7 @@ import { Skeleton } from '../../components/Skeleton/Skeleton';
 import { fullName, toPersonSummary } from '../../lib/person';
 import { toPeopleParams, type PeopleSearch } from './search';
 import styles from './PeoplePage.module.css';
+import { PersonName } from '../../components/PersonName/PersonName';
 
 const route = getRouteApi('/people');
 
@@ -255,11 +256,11 @@ function PersonRow({
           className={styles.name}
           aria-label={fullName(person)}
         >
-          {person.given || 'Unknown'}
+          <PersonName name={person.given || 'Unknown'} />
         </Link>
       </div>
       <div role="cell" className={styles.cell} data-column="surname">
-        {person.surname}
+        {person.surname && <PersonName name={person.surname} />}
       </div>
       <div role="cell" className={styles.cell} data-column="birth">
         {person.birth?.dateText ? formatDate(person.birth.dateText) : null}

@@ -17,6 +17,7 @@ import { Skeleton } from '../../components/Skeleton/Skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/Tabs/Tabs';
 import { fullName, toPersonSummary } from '../../lib/person';
 import styles from './CheckerPage.module.css';
+import { PersonName } from '../../components/PersonName/PersonName';
 
 type Tab = CheckCategory | 'dismissed';
 
@@ -48,7 +49,7 @@ function IssueRow({
             return (
               <li key={person.id}>
                 <Link to="/person/$personId" params={{ personId: person.id }}>
-                  {fullName(person)}
+                  <PersonName name={fullName(person)} />
                 </Link>{' '}
                 <LifespanText className={styles.lifespan} {...summary} />
               </li>

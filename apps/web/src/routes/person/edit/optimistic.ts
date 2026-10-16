@@ -1,3 +1,4 @@
+import { displayText } from '@open-ancestry/core';
 import type { NameType, PersonNameRow, Sex, LivingStatus } from '@open-ancestry/db';
 import type { PersonDetail } from '../../../api/types';
 
@@ -22,17 +23,31 @@ export const NAME_FIELDS = ['prefix', 'given', 'surname', 'suffix', 'nickname'] 
 
 const orNull = (value: string) => (value.trim() ? value.trim() : null);
 
+/**
+ * A stored name as a form draft. Characters the server now refuses (an
+ * override in an imported name, #190) are cleaned out, so saving removes them
+ * instead of failing on a character nobody can see.
+ */
 export function toDraft(name: PersonNameRow): NameDraft {
+  const field = (value: string | null) => (value ? displayText(value) : '');
   return {
     id: name.id,
     type: name.type,
-    prefix: name.prefix ?? '',
-    given: name.given ?? '',
-    surname: name.surname ?? '',
-    suffix: name.suffix ?? '',
-    nickname: name.nickname ?? '',
+    prefix: field(name.prefix),
+    given: field(name.given),
+    surname: field(name.surname),
+    suffix: field(name.suffix),
+    nickname: field(name.nickname),
     isPrimary: name.is_primary === 1,
   };
+}
+
+/** Whether `toDraft` had to clean any of the name's fields. */
+export function needsCleaning(name: PersonNameRow): boolean {
+  return NAME_FIELDS.some((f) => {
+    const value = name[f];
+    return !!value && displayText(value) !== value;
+  });
 }
 
 /** Fields of a draft that differ from the stored row, as an API body. */

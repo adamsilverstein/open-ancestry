@@ -15,6 +15,15 @@ import {
 const rowan = fixtureDetail('rowan');
 
 describe('names', () => {
+  it('cleans unsafe characters out of a stored name, so saving removes them (#190)', () => {
+    const row = { ...rowan.names[0]!, given: 'Evil\u202e', surname: 'Ash\tdown' };
+    const draft = toDraft(row);
+    expect(draft).toMatchObject({ given: 'Evil', surname: 'Ash down' });
+    expect(nameChanges(draft, row)).toMatchObject({ given: 'Evil', surname: 'Ash down' });
+    // A clean name round-trips unchanged.
+    expect(nameChanges(toDraft(rowan.names[0]!), rowan.names[0]!)).toEqual({});
+  });
+
   it('diffs a draft against the stored row', () => {
     const row = rowan.names[0]!;
     const draft = toDraft(row);

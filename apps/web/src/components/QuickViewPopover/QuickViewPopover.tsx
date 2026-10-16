@@ -10,6 +10,7 @@ import { LifespanText } from '../LifespanText/LifespanText';
 import { usePhoneLayout } from '../../lib/useMediaQuery';
 import { Popover, PopoverAnchor, PopoverContent } from '../Popover/Popover';
 import styles from './QuickViewPopover.module.css';
+import { PersonName } from '../PersonName/PersonName';
 
 export interface LifeEvent {
   /** Display date, e.g. `5 Sep 1911` or `abt. 1890`. */
@@ -134,7 +135,9 @@ export function QuickViewPopover({
         <div className={styles.header}>
           <Avatar name={person.name} sex={person.sex} src={person.photoUrl} size={64} decorative />
           <div className={styles.title}>
-            <p className={styles.name}>{person.name}</p>
+            <p className={styles.name}>
+              <PersonName name={person.name} />
+            </p>
             <LifespanText className={styles.lifespan} {...person} />
           </div>
         </div>

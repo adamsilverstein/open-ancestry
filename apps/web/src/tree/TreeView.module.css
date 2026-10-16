@@ -305,6 +305,7 @@
 }
 
 .fanSegment text {
+  unicode-bidi: isolate;
   fill: var(--oa-text);
   font: var(--oa-text-xs);
   pointer-events: none;

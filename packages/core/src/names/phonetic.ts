@@ -15,14 +15,19 @@ const SPECIAL: Record<string, string> = {
 
 /** Lower-case, accent-free, punctuation-free text for search: `Émile O'Brien` -> `emile obrien`. */
 export function normalizeForSearch(text: string): string {
-  return text
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '')
-    .replace(/[ßæœøłđðþı]/g, (c) => SPECIAL[c]!)
-    .replace(/['’`]/g, '')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim();
+  return (
+    text
+      // Invisible format characters (zero-width space and joiner, soft hyphen, bidi
+      // controls) would otherwise split a word: "Ro\u200bwan" must match "Rowan".
+      .replace(/\p{Cf}/gu, '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '')
+      .replace(/[ßæœøłđðþı]/g, (c) => SPECIAL[c]!)
+      .replace(/['’`]/g, '')
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim()
+  );
 }
 
 const lettersOnly = (text: string): string => normalizeForSearch(text).replace(/[^a-z]/g, '');

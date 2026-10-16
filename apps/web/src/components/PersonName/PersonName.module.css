@@ -1,0 +1,4 @@
+/* <bdi> isolates by default; stated here so a class that changes display keeps it. */
+.name {
+  unicode-bidi: isolate;
+}

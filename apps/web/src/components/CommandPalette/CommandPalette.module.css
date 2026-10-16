@@ -77,6 +77,8 @@
 }
 
 .itemTitle {
+  /* Titles are often names: keep a right-to-left one from reordering the row (#190). */
+  unicode-bidi: isolate;
   font-weight: var(--oa-weight-medium);
 }
 

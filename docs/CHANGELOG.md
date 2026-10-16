@@ -58,6 +58,7 @@ PR numbers point to the change on GitHub.
 - **Add, edit and delete** people, names, events (with a live preview of how the date is read), notes, tags and relationships. (#48)
 - **Relationship fixes**: set or change a partnership's type, and remove a wrong parent, partner or child link. People are never deleted by these. (#165)
 - **Merge duplicate people** in one step. Each merge is recorded, so a later re-import still recognizes the person who was merged away. (#70, #219)
+- **Several tabs stay in sync**: an edit, undo or re-import in one tab refreshes the others, and a save based on data another tab (or an undo) has since changed is refused with a clear message instead of mixing old and new values. (#203)
 - **Edits run in order**: each change to a tree waits for the one before it, undo waits for edits still on their way, and a save that gets no answer gives up after 30 seconds with a clear message. (#205)
 - **Undo and redo everything**: Cmd/Ctrl-Z, Shift-Cmd/Ctrl-Z, and a History panel listing recent changes. Each dialog save is one undo step, and history survives app upgrades. (#48, #148)
 - **A failed save keeps the dialog open**, with what you typed and the reason, so you can try again. (#177)
@@ -80,7 +81,7 @@ PR numbers point to the change on GitHub.
 - The server listens on `127.0.0.1` only. Requests are checked by Host and Origin, every change needs a per-session token, and a strict Content Security Policy is sent with no inline scripts. Nothing in the app trips that policy, and every end-to-end test fails if anything does. (#29, #34, #47, #174)
 - GEDCOM files are treated as untrusted. Values cannot inject extra GEDCOM lines on export, text that looks like a pointer stays text, coordinates are parsed safely, and control characters are escaped in command-line output. (#26, #150, #166, #179)
 - Media is served without path traversal, hard-linked media files and a symlinked media folder are refused, and uploads have size limits. (#29, #51, #236)
-- The library's files are private to your user account, and the API refuses navigations from other sites, so another site can't drop an export into Downloads. open-ancestry assumes one user per computer: a running app answers anyone on that machine at `127.0.0.1`. (#151)
+- The library's files are private to your user account, and the API refuses navigations from other sites, so another site can't drop an export into Downloads. open-ancestry assumes one user per computer: a running app answers anyone on that machine at `127.0.0.1`. A library folder that other accounts can write to is refused unless you start the app with `--shared-library`. (#151, #237)
 
 ### Performance
 
@@ -100,5 +101,6 @@ Other speed-ups include faster imports that build indexes once at the end and ba
 
 ### For contributors
 
-- Property tests for round-trips and undo in the data layer, and fixes for the root causes of flaky tests. (#94, #105, #242)
+- Property tests for round-trips and undo in the data layer, and fixes for the root causes of flaky tests. (#94, #105, #242, #249)
+- Benchmarks run in their own CI job. (#253)
 - `downgradeTree` rewrites a tree as an older schema version, so migration tests run the real migrations. (#229)

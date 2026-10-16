@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, readFile, rm, utimes } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { startServer } from './index';
@@ -576,5 +576,21 @@ describe('startup sweeps', () => {
     await utimes(join(dir, 'unrelated-old'), past, past);
     expect(await sweepStaleUploads(Date.now(), dir)).toBe(1);
     expect((await readdir(dir)).sort()).toEqual([`${UPLOAD_PREFIX}fresh`, 'unrelated-old']);
+  });
+
+  it('also sweeps stale photo-attach folders, and never follows a link (L5, #267)', async () => {
+    api = await testApi();
+    const dir = makeTempDir('oa-sweep-');
+    const past = new Date(Date.now() - STALE_UPLOAD_MS - 60_000);
+    await mkdir(join(dir, 'oa-attach-old'));
+    await utimes(join(dir, 'oa-attach-old'), past, past);
+    // A link named like an upload folder is not a folder of ours: left alone.
+    const target = makeTempDir('oa-sweep-target-');
+    await writeFile(join(target, 'keep.txt'), 'keep');
+    await utimes(target, past, past);
+    await symlink(target, join(dir, `${UPLOAD_PREFIX}link`));
+    expect(await sweepStaleUploads(Date.now(), dir)).toBe(1);
+    expect((await readdir(dir)).sort()).toEqual([`${UPLOAD_PREFIX}link`]);
+    expect(await readdir(target)).toEqual(['keep.txt']);
   });
 });

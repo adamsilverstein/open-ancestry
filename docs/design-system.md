@@ -142,7 +142,7 @@ Code: `apps/web/src/components/<Name>/<Name>.tsx` + `<Name>.module.css`, re-expo
 | `Combobox` | `label`, `options`, `value`, `onValueChange`, `placeholder`, `searchLabel`, `emptyText`, `disabled`, `onSearchChange`, `selectedLabel` | Button trigger (`role="combobox"`) opening a filterable cmdk list in a popover. With `onSearchChange` it shows server results as given (no client filtering); `selectedLabel` names a selection that is no longer in `options`. |
 | `Checkbox` | `label`, `description`, `indeterminate`, native props | Native input with `accent-color`. |
 | `Switch` | `label`, native props | Native checkbox with `role="switch"`; state shown by knob position. |
-| `Menu`, `MenuTrigger`, `MenuContent`, `MenuItem`, `MenuRadioGroup`, `MenuRadioItem`, `MenuSeparator` | Radix DropdownMenu props | Used by the File menu and the layout switch. |
+| `Menu`, `MenuTrigger`, `MenuContent`, `MenuItem`, `MenuRadioGroup`, `MenuRadioItem`, `MenuSeparator`, `MenuLabel` | Radix DropdownMenu props | Used by the File menu and the layout switch. An item that is unavailable but should say why stays focusable with `aria-disabled` (dimmed) and points `aria-describedby` at a `MenuLabel` with the reason, since Radix skips `disabled` items in keyboard navigation. |
 | `Skeleton` | `width`, `height`, `shape` (text/rect/circle) | Decorative (`aria-hidden`); the container sets `aria-busy`. Size to the final content. |
 | `EmptyState` | `icon`, `title`, `level` (1-3), `description`, `action` | `level={1}` when the empty state is the page (serif title). |
 | `Panel` | `title`, `actions`, `variant` (raised/sunken), `headingLevel` | Titled panels are labelled regions. |

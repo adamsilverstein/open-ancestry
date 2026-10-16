@@ -23,6 +23,7 @@ export {
   MenuItem,
   MenuRadioGroup,
   MenuRadioItem,
+  MenuLabel,
   MenuSeparator,
   MenuTrigger,
 } from './Menu/Menu';

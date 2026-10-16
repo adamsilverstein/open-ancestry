@@ -2,6 +2,7 @@ import { openTree, undoLast, type TreeStore } from '@open-ancestry/db';
 import { zipSync } from 'fflate';
 import {
   existsSync,
+  linkSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -324,5 +325,39 @@ describe('a second copy of bytes the tree has (#246 review)', () => {
     // Both copies point at the file the tree already has; no row is left without it.
     expect(paths.every((p) => p === 'scans/old.jpg')).toBe(true);
     expect(existsSync(join(dir, 'media', 'again'))).toBe(false);
+  });
+});
+
+describe('a hard link in a re-import media folder (#266 review)', () => {
+  it('is refused, said in the review, and never copied', async () => {
+    const folder = join(tmp, 'export-media');
+    mkdirSync(join(folder, 'photos'), { recursive: true });
+    mkdirSync(join(folder, 'copies'));
+    writeFileSync(join(folder, 'photos', 'portrait.jpg'), 'PORTRAIT');
+    writeFileSync(join(folder, 'copies', 'old-again.jpg'), 'OLD');
+    // Another of the user's files, linked in as the new photo.
+    writeFileSync(join(tmp, 'secret.txt'), 'SECRET');
+    linkSync(join(tmp, 'secret.txt'), join(folder, 'photos', 'new.jpg'));
+    const session = await prepareReimport(
+      store,
+      { bytes: LATER },
+      { today: TODAY, mediaDir: folder },
+    );
+    try {
+      expect(session.report.warnings).toContainEqual(
+        expect.objectContaining({
+          code: 'media-refused',
+          message: 'Media file "photos/new.jpg" is a hard link; not copied',
+        }),
+      );
+      applyReimport(store, session, acceptAll(session), 'Re-import');
+    } finally {
+      closeReimport(session);
+    }
+    const files = readdirSync(join(dir, 'media'), { recursive: true, withFileTypes: true })
+      .filter((f) => f.isFile())
+      .map((f) => join(f.parentPath, f.name));
+    expect(files.some((f) => f.endsWith('new.jpg'))).toBe(false);
+    for (const f of files) expect(readFileSync(f, 'utf8')).not.toBe('SECRET');
   });
 });

@@ -35,7 +35,11 @@ export function reimportRoutes(app: Api, { library, reimports, thumbnails }: Dep
       /** The tree changed since the comparison: apply would be refused (#163). */
       stale: isReimportStale(library.open(tree), session),
       // familyMatches is apply's bookkeeping; the review doesn't need it.
-      diff: { people: session.diff.people, counts: session.diff.counts },
+      diff: {
+        people: session.diff.people,
+        counts: session.diff.counts,
+        exportPlaceRenames: session.diff.exportPlaceRenames,
+      },
     };
   };
 

@@ -18,6 +18,19 @@
   margin-left: auto;
 }
 
+/* Unavailable but still focusable (aria-disabled), so it can say why: dims like a disabled item. */
+.item[aria-disabled='true'] {
+  color: var(--oa-text-muted);
+  cursor: not-allowed;
+}
+
+.label {
+  max-width: 280px;
+  padding: var(--oa-space-1) var(--oa-space-2);
+  color: var(--oa-text-muted);
+  font: var(--oa-text-sm);
+}
+
 .separator {
   height: 1px;
   margin: var(--oa-space-1) 0;

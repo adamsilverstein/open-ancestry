@@ -1,5 +1,6 @@
 import {
   familyChildren,
+  places,
   type EventRow,
   type FamilyRow,
   type MediaRow,
@@ -465,6 +466,21 @@ export function applyReimport(
     for (const p of session.diff.people) {
       for (const c of p.changes) owners.set(c.id, p.existingId ?? p.incomingId);
     }
+    // A place the export renamed, accepted whole (#307 review): rename the place itself,
+    // so every fact there follows (family and undated ones too) and the tree keeps one
+    // row for it. Its fact changes below then find the place under its new name.
+    const byId = new Map(changes.map((c) => [c.id, c]));
+    for (const rename of session.diff.exportPlaceRenames) {
+      if (!rename.changeIds.every((id) => chosen.has(id))) continue;
+      const olds = new Set<string>();
+      for (const id of rename.changeIds) {
+        const c = byId.get(id);
+        if (c?.kind !== 'fact.change') continue;
+        const placeId = tx.store.getRow('event', c.existingEventId)?.place_id;
+        if (placeId) olds.add(placeId);
+      }
+      renamePlaces(tx, olds, rename.from, rename.to);
+    }
     let applied = 0;
     /** Changes whose rows this batch wrote: those rows are the next comparison's base. */
     const written = new Set<string>();
@@ -851,4 +867,116 @@ function recordStale(tx: Tx, importBatchId: string, stale: Set<string>) {
       value: JSON.stringify([...stale].sort()),
     } as never);
   }
+}
+
+/**
+ * Links a place can own (the owner_type CHECKs allow place for these), and what they point
+ * at. Places have no records of their own in a GEDCOM, so no raw_record or unmapped_line
+ * names one as its owner: there is nothing of that kind to move.
+ */
+const PLACE_LINKS = [
+  ['media_link', 'media_id'],
+  ['note_link', 'note_id'],
+] as const;
+
+/**
+ * Applies a place the export renamed (#307 review) to the place rows `olds`:
+ * each is renamed to `to`, or merged into a row already of that name. Only a
+ * change to the place's own name is applied this way: when a county or
+ * anything above changed, the place would sit under the old parents, so its
+ * facts are moved one by one instead (by their fact changes, onto the
+ * export's place chain).
+ */
+function renamePlaces(tx: Tx, olds: Set<string>, from: string, to: string) {
+  const above = (name: string) =>
+    name
+      .split(',')
+      .slice(1)
+      .map((part) => norm(part))
+      .join(',');
+  if (above(from) !== above(to)) return;
+  let target = (
+    tx.store.stmt('SELECT id FROM place WHERE full_name = ? ORDER BY id LIMIT 1').get(to) as
+      { id: string } | undefined
+  )?.id;
+  for (const old of olds) {
+    if (!tx.store.getRow('place', old) || old === target) continue;
+    if (target) mergePlace(tx, old, target);
+    else {
+      renamePlace(tx, old, to);
+      tx.update('place', old, { name: to.split(',')[0]!.trim() || to });
+      target = old;
+    }
+  }
+}
+
+const childrenOf = (tx: Tx, id: string) =>
+  tx.store.stmt('SELECT * FROM place WHERE parent_id = ? ORDER BY id').all(id) as PlaceRow[];
+
+/** A child's full name under a renamed parent: its own part, then the parent's new name. */
+const childName = (child: PlaceRow, oldParent: string, newParent: string) =>
+  child.full_name.endsWith(`, ${oldParent}`)
+    ? `${child.full_name.slice(0, -oldParent.length - 2)}, ${newParent}`
+    : `${child.name}, ${newParent}`;
+
+/**
+ * Renames a place and, through parent_id, every place under it ("Old Cemetery,
+ * Millbrook, ..."). `seen` stops at a place already visited: corrupt data can
+ * make a place its own ancestor.
+ */
+function renamePlace(tx: Tx, id: string, fullName: string, seen = new Set<string>()) {
+  if (seen.has(id)) return;
+  seen.add(id);
+  const row = tx.store.getRow('place', id) as PlaceRow;
+  tx.update('place', id, { full_name: fullName });
+  for (const child of childrenOf(tx, id)) {
+    renamePlace(tx, child.id, childName(child, row.full_name, fullName), seen);
+  }
+}
+
+/**
+ * Merges place `old` into `target`, losing nothing: its facts, notes and media
+ * move there (a link both already have is kept once), its coordinates fill a
+ * target that has none, and its child places move under the target, merging
+ * into a child of the same name already there.
+ */
+function mergePlace(tx: Tx, old: string, target: string, seen = new Set<string>()) {
+  // A parent_id cycle (corrupt data) must not merge or rename forever.
+  if (seen.has(old) || old === target) return;
+  seen.add(old);
+  const row = tx.store.getRow('place', old) as PlaceRow;
+  const kept = tx.store.getRow('place', target) as PlaceRow;
+  if (kept.latitude == null && kept.longitude == null && row.latitude != null) {
+    tx.update('place', target, { latitude: row.latitude, longitude: row.longitude });
+  }
+  for (const [table, column] of PLACE_LINKS) {
+    const links = (owner: string) =>
+      tx.store
+        .stmt(
+          `SELECT id, ${column} AS linked FROM ${table} WHERE owner_type = 'place' AND owner_id = ?`,
+        )
+        .all(owner) as { id: string; linked: string }[];
+    const has = new Set(links(target).map((l) => l.linked));
+    for (const link of links(old)) {
+      if (has.has(link.linked)) tx.delete(table, link.id);
+      else tx.update(table, link.id, { owner_id: target });
+    }
+  }
+  for (const id of tx.store
+    .stmt('SELECT id FROM event WHERE place_id = ? ORDER BY id')
+    .pluck()
+    .all(old) as string[]) {
+    tx.update('event', id, { place_id: target });
+  }
+  const twins = new Map(childrenOf(tx, target).map((c) => [c.full_name, c.id]));
+  for (const child of childrenOf(tx, old)) {
+    const name = childName(child, row.full_name, kept.full_name);
+    const twin = twins.get(name);
+    if (twin) mergePlace(tx, child.id, twin, seen);
+    else if (!seen.has(child.id)) {
+      tx.update('place', child.id, { parent_id: target });
+      renamePlace(tx, child.id, name, seen);
+    }
+  }
+  places.delete(tx, old);
 }

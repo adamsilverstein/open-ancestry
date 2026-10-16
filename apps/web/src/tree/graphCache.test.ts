@@ -9,6 +9,7 @@ const summary = (id: string, extra: Partial<ApiPersonSummary> = {}): ApiPersonSu
   privacy: 'public',
   primaryMediaId: null,
   primaryPhotoLocal: false,
+  primaryPhotoVersion: null,
   given: id,
   surname: 'Vale',
   surnamePrefix: null,

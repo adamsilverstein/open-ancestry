@@ -108,6 +108,17 @@ if (unit.length === 0 && e2e.length === 0) {
   console.error('No coverage found. Run `npm test` and `npm run e2e:coverage` first.');
   process.exit(1);
 }
+console.log(`Merging ${unit.length} unit and ${e2e.length} e2e coverage file(s).`);
+// CI's e2e shards upload their coverage separately: none arriving means the
+// artifacts went missing, and the merged numbers would quietly be unit-only.
+if (unit.length > 0 && e2e.length === 0) {
+  const message = `No e2e coverage in ${e2eRawDir}; the merged report would be unit-only.`;
+  if (process.env.CI) {
+    console.error(message);
+    process.exit(1);
+  }
+  console.warn(`${message} Run \`npm run e2e:coverage\` to include it.`);
+}
 
 const mergedDir = await report(
   'merged',

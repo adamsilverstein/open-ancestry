@@ -49,6 +49,8 @@ export interface PersonSummary {
    * file missing at import), so clients can request its thumbnail.
    */
   primaryPhotoLocal: boolean;
+  /** The primary photo's bytes, shortened (sha256 prefix), so its URLs change with its file. */
+  primaryPhotoVersion: string | null;
   given: string | null;
   surname: string | null;
   surnamePrefix: string | null;
@@ -66,6 +68,7 @@ interface SummaryRow {
   privacy: Privacy;
   primary_media_id: string | null;
   primary_local: number;
+  primary_version: string | null;
   given: string | null;
   surname: string | null;
   surname_prefix: string | null;
@@ -100,6 +103,7 @@ export function getPersonSummaries(store: TreeStore, ids: readonly string[]): Pe
     .stmt(
       `SELECT p.id, p.sex, p.living, p.privacy, p.primary_media_id,
               m.local_path IS NOT NULL AS primary_local,
+              substr(m.sha256, 1, 16) AS primary_version,
               n.given, n.surname, n.surname_prefix, n.prefix, n.suffix, n.nickname
        FROM person p LEFT JOIN person_name n ON n.person_id = p.id AND n.is_primary = 1
        LEFT JOIN media m ON m.id = p.primary_media_id
@@ -133,6 +137,7 @@ export function getPersonSummaries(store: TreeStore, ids: readonly string[]): Pe
       privacy: r.privacy,
       primaryMediaId: r.primary_media_id,
       primaryPhotoLocal: r.primary_local === 1,
+      primaryPhotoVersion: r.primary_version,
       given: r.given,
       surname: r.surname,
       surnamePrefix: r.surname_prefix,

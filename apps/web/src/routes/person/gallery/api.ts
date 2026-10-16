@@ -1,7 +1,7 @@
 import { queryOptions } from '@tanstack/react-query';
 import type { EventRow, MediaRow } from '@open-ancestry/db';
 import { apiGet, apiSend, seg } from '../../../api/client';
-import { thumbUrl } from '../../../lib/media';
+import { thumbUrl, versioned } from '../../../lib/media';
 
 export type MediaOwner =
   | { type: 'person'; id: string }
@@ -27,10 +27,10 @@ export const personMediaQuery = (tree: string, personId: string) =>
       ).then((r) => r.items),
   });
 
-export { thumbUrl, type ThumbSize } from '../../../lib/media';
+export { mediaVersion, thumbUrl, type ThumbSize } from '../../../lib/media';
 
-export const originalUrl = (tree: string, mediaId: string) =>
-  `/api/trees/${seg(tree)}/media/${seg(mediaId)}`;
+export const originalUrl = (tree: string, mediaId: string, version?: string | null) =>
+  versioned(`/api/trees/${seg(tree)}/media/${seg(mediaId)}`, version);
 
 /** Copies a file into the tree and attaches it to a person or event. */
 export function attachMedia(
@@ -121,15 +121,16 @@ export function tileImage(
   tree: string,
   mediaId: string,
   size: { width: number; height: number } | null,
+  version?: string | null,
 ): { src: string; srcSet?: string; sizes?: string } {
-  const src = thumbUrl(tree, mediaId, 'sm');
+  const src = thumbUrl(tree, mediaId, 'sm', version);
   if (size && Math.max(size.width, size.height) <= EDGES.sm) return { src };
   const [sm, md] = size
     ? [thumbWidth(size, EDGES.sm), thumbWidth(size, EDGES.md)]
     : [EDGES.sm, EDGES.md];
   return {
     src,
-    srcSet: `${src} ${sm}w, ${thumbUrl(tree, mediaId, 'md')} ${md}w`,
+    srcSet: `${src} ${sm}w, ${thumbUrl(tree, mediaId, 'md', version)} ${md}w`,
     sizes: `${TILE_WIDTH}px`,
   };
 }

@@ -42,9 +42,14 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: ci,
   retries: ci ? 1 : 0,
+  // A broken flow fails many tests, each waiting out its timeout twice with the
+  // retry: stop early so the run reports the breakage instead of timing out (#261).
+  maxFailures: ci ? 10 : 0,
   reporter: [
     [ci ? 'github' : 'list'],
     ['html', { outputFolder: '../playwright-report', open: 'never' }],
+    // Per-test durations for CI's "Slowest spec files" summary (scripts/e2e-timings.ts).
+    ...(ci ? [['json', { outputFile: '../test-results/e2e-results.json' }] as const] : []),
   ],
   // Visual baselines are Chromium on Linux only (see design.spec.ts), so the
   // path drops the default project and platform suffixes.

@@ -1,23 +1,201 @@
+import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
+  readFileSync,
+  readdirSync,
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { readdir } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { getSchemaVersion, migrate } from '@open-ancestry/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from './index';
-import { Library, defaultLibraryRoot, treeNameProblem } from './library';
+import {
+  Library,
+  MAX_TREE_NAME_BYTES,
+  MAX_TREE_NAME_LENGTH,
+  defaultLibraryRoot,
+  treeNameFromFile,
+  treeNameProblem,
+} from './library';
 import { testApi, type TestApi } from './test/helpers';
 import { makeTempDir } from '../../../fixtures/temp-dir';
+
+describe('tree name length in bytes (#275 P1)', () => {
+  // ext4 and most Linux file systems allow 255 bytes per name, and the folder
+  // adds ".oatree" (and a timestamp in the trash): count UTF-8 bytes, not characters.
+  it('refuses a name past the byte cap, even under the character cap', () => {
+    const cjk = '漢'.repeat(MAX_TREE_NAME_LENGTH); // 100 characters, 300 bytes
+    expect(treeNameProblem(cjk)).toMatch(/too long/);
+    expect(treeNameProblem('漢'.repeat(MAX_TREE_NAME_BYTES / 3))).toBeNull();
+    expect(
+      Buffer.byteLength(`${'漢'.repeat(MAX_TREE_NAME_BYTES / 3)} 2026-10-16T12-00-00.000Z.oatree`),
+    ).toBeLessThanOrEqual(255);
+  });
+
+  it('shortens a file-derived name to fit, at a character boundary', () => {
+    const name = treeNameFromFile(`${'漢'.repeat(150)}.ged`);
+    expect(treeNameProblem(name)).toBeNull();
+    // Room left for a " 2" ... " 1000" suffix.
+    expect(Buffer.byteLength(`${name} 1000`)).toBeLessThanOrEqual(MAX_TREE_NAME_BYTES);
+    expect(name).toBe('漢'.repeat([...name].length));
+    expect(treeNameFromFile(`${'😀'.repeat(100)}.ged`)).not.toMatch(/\uFFFD/);
+  });
+});
+
+describe('a tree busy in another server on the same library (#275 P3)', () => {
+  it('refuses rename, delete and writes while the other server imports', () => {
+    const root = makeTempDir('oa-two-servers-');
+    const first = new Library(root);
+    const second = new Library(root);
+    first.create('Shared');
+    first.closeAll();
+    const release = first.markBusy('Shared');
+    // Same process, separate Library objects: only the lock file can tell.
+    expect(() => second.rename('Shared', 'Moved')).toThrow(/busy in another/);
+    expect(() => second.delete('Shared')).toThrow(/busy in another/);
+    expect(() => second.assertIdle('Shared')).toThrow(expect.objectContaining({ statusCode: 409 }));
+    // The server holding the lock reports its own import, not another server's.
+    expect(() => first.assertIdle('Shared')).toThrow(/is busy; try again/);
+    const again = first.markBusy('Shared');
+    release();
+    expect(() => second.assertIdle('Shared')).toThrow(/busy in another/);
+    again();
+    expect(existsSync(join(root, 'Shared.oatree', 'busy.lock'))).toBe(false);
+    second.rename('Shared', 'Moved');
+    expect(second.list().map((t) => t.id)).toEqual(['Moved']);
+    second.closeAll();
+  });
+
+  it('lets only one server hold the lock when two mark the tree busy (#289 c)', () => {
+    const root = makeTempDir('oa-lock-race-');
+    const first = new Library(root);
+    const second = new Library(root);
+    const third = new Library(root);
+    first.create('Race');
+    first.closeAll();
+    // Both passed assertIdle before either marked: markBusy itself must decide.
+    const release = first.markBusy('Race');
+    expect(() => second.markBusy('Race')).toThrow(expect.objectContaining({ statusCode: 409 }));
+    expect(second.isBusy('Race')).toBe(false);
+    // The loser's refusal left the winner's lock in place.
+    expect(() => third.assertIdle('Race')).toThrow(/busy in another/);
+    release();
+    second.markBusy('Race')();
+    for (const library of [first, second, third]) library.closeAll();
+  });
+
+  it('never moves aside a fresh lock another server just took over (#289)', () => {
+    // A and B both judge an old lock stale. A moves it aside and creates its
+    // own; B, a moment later, must not move A's fresh lock aside too.
+    const root = makeTempDir('oa-lock-takeover-');
+    const a = new Library(root);
+    const b = new Library(root);
+    a.create('T');
+    a.closeAll();
+    const lock = join(root, 'T.oatree', 'busy.lock');
+    writeFileSync(lock, JSON.stringify({ pid: 4242, host: 'gone', owner: 'old', at: '' }));
+    const then = new Date(Date.now() - 10 * 60_000);
+    utimesSync(lock, then, then);
+    let releaseA: (() => void) | undefined;
+    b.testHooks.beforeLockTakeover = () => {
+      releaseA = a.markBusy('T');
+    };
+    expect(() => b.markBusy('T')).toThrow(/busy in another/);
+    expect(JSON.parse(readFileSync(lock, 'utf8')).owner).not.toBe('old');
+    expect(() => b.assertIdle('T')).toThrow(/busy in another/);
+    expect(readdirSync(join(root, 'T.oatree')).filter((n) => n.includes('stale'))).toEqual([]);
+    releaseA!();
+    a.closeAll();
+    b.closeAll();
+  });
+
+  describe('lock liveness: a heartbeat, not the host or a day (#289 a)', () => {
+    const lockOf = (root: string, tree: string) => join(root, `${tree}.oatree`, 'busy.lock');
+    const plant = (root: string, tree: string, lock: object, ageMs: number) => {
+      writeFileSync(lockOf(root, tree), JSON.stringify({ owner: 'other', at: '', ...lock }));
+      const then = new Date(Date.now() - ageMs);
+      utimesSync(lockOf(root, tree), then, then);
+    };
+    const tree = () => {
+      const root = makeTempDir('oa-lock-live-');
+      const library = new Library(root);
+      library.create('T');
+      library.closeAll();
+      return { root, library };
+    };
+
+    it('trusts a fresh lock from any host, and takes over one silent for minutes', () => {
+      const { root, library } = tree();
+      plant(root, 'T', { pid: 4242, host: 'renamed-container' }, 10_000);
+      expect(() => library.markBusy('T')).toThrow(/busy in another/);
+      plant(root, 'T', { pid: 4242, host: 'renamed-container' }, 6 * 60_000);
+      const release = library.markBusy('T');
+      expect(JSON.parse(readFileSync(lockOf(root, 'T'), 'utf8')).owner).not.toBe('other');
+      release();
+      library.closeAll();
+    });
+
+    it('does not let a reused pid on this host keep a silent lock alive', () => {
+      // A container restarts as pid 1 every time: the old lock names a live pid.
+      const { root, library } = tree();
+      plant(root, 'T', { pid: process.pid, host: hostname() }, 6 * 60_000);
+      expect(() => library.assertIdle('T')).not.toThrow();
+      library.markBusy('T')();
+      library.closeAll();
+    });
+
+    it('frees at once a lock whose process on this host is gone', () => {
+      const { root, library } = tree();
+      const dead = spawnSync(process.execPath, ['-e', '0']).pid!;
+      plant(root, 'T', { pid: dead, host: hostname() }, 0);
+      expect(() => library.assertIdle('T')).not.toThrow();
+      library.closeAll();
+    });
+
+    it('keeps its own lock fresh with a heartbeat while busy', () => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+      try {
+        const { root, library } = tree();
+        const release = library.markBusy('T');
+        const old = new Date(Date.now() - 4 * 60_000);
+        utimesSync(lockOf(root, 'T'), old, old);
+        vi.advanceTimersByTime(30_000);
+        expect(Date.now() - statSync(lockOf(root, 'T')).mtimeMs).toBeLessThan(60_000);
+        release();
+        library.closeAll();
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  it('ignores a lock left by a server process that has exited', () => {
+    const root = makeTempDir('oa-stale-lock-');
+    const library = new Library(root);
+    library.create('Left');
+    library.closeAll();
+    const dead = spawnSync(process.execPath, ['-e', '0']).pid!;
+    writeFileSync(
+      join(root, 'Left.oatree', 'busy.lock'),
+      JSON.stringify({ pid: dead, host: hostname(), owner: 'gone', at: new Date().toISOString() }),
+    );
+    expect(() => library.assertIdle('Left')).not.toThrow();
+    expect(existsSync(join(root, 'Left.oatree', 'busy.lock'))).toBe(false);
+    library.rename('Left', 'Right');
+    library.closeAll();
+  });
+});
 
 describe('treeNameProblem', () => {
   it.each([

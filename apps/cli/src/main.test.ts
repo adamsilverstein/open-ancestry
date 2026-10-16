@@ -350,6 +350,28 @@ describe('import', () => {
     expect(existsSync(join(library, 'ancestry-sample.oatree'))).toBe(false);
   });
 
+  it('holds the tree busy for other servers while it imports (#289)', async () => {
+    // A long CLI import must not be renamed, deleted or swept by a server on the same library.
+    const library = makeTempDir('oa-cli-lock-');
+    const lock = join(library, 'Locked.oatree', 'busy.lock');
+    let seen = false;
+    await run(['import', fixture, '--name', 'Locked', '--library', library], {
+      log: () => {},
+      progress: () => {
+        seen ||= existsSync(lock);
+      },
+    });
+    expect(seen).toBe(true);
+    expect(existsSync(lock)).toBe(false);
+    // A failed import leaves neither the lock nor an empty folder.
+    const bad = join(makeTempDir('oa-cli-bad-ged-'), 'notes.ged');
+    await writeFile(bad, 'hello, not a gedcom\n');
+    await expect(
+      run(['import', bad, '--name', 'Failed', '--library', library], { log: () => {} }),
+    ).rejects.toThrow(/GEDCOM/);
+    expect(existsSync(join(library, 'Failed.oatree'))).toBe(false);
+  });
+
   it('writes progress lines when asked (stderr on a terminal)', async () => {
     const library = makeTempDir('oa-cli-progress-');
     const chunks: string[] = [];

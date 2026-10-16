@@ -212,7 +212,7 @@ describe('JSON export history (#197)', () => {
     expect((await api.get(`${base}/export.json`)).body).toMatch(/SECRET-INLINE-NOTE/);
   });
 
-  it('with history=0 leaves out places only deleted records used (#267)', async () => {
+  it('with history=0 leaves out places, notes and media only deleted records used (#267)', async () => {
     const base = await createTestTree(api, 'Places');
     const store = openTree(join(api.root, 'Places.oatree'));
     await importGedcom(
@@ -225,7 +225,11 @@ describe('JSON export history (#197)', () => {
           '1 NAME Odile /Fernsby/',
           '1 BIRT',
           '2 PLAC SECRET-HAMLET, SECRET-PARISH, Kerry',
-          '1 NOTE x',
+          '3 NOTE SECRET-PLACE-NOTE',
+          '1 NOTE SECRET-PERSON-NOTE',
+          '1 OBJE',
+          '2 FILE secret/SECRET-PORTRAIT.jpg',
+          '2 TITL SECRET-PHOTO-TITLE',
           '0 @I2@ INDI',
           '1 NAME Bastien /Corlew/',
           '1 BIRT',

@@ -575,3 +575,47 @@ describe('listPeople', () => {
     store.close();
   });
 });
+
+describe('getNeighborhood childrenLoaded', () => {
+  it('lists the people whose children are all in the slice, and only them', () => {
+    const store = memoryTree();
+    const ids = store.transact('seed', (tx) => {
+      const p = (given: string) => persons.create(tx, { names: [{ given, surname: 'Synth' }] }).id;
+      const [gp, gm, dad, mom, aunt, me, kid, cousin, w2, half] = [
+        p('Gp'),
+        p('Gm'),
+        p('Dad'),
+        p('Mom'),
+        p('Aunt'),
+        p('Me'),
+        p('Kid'),
+        p('Cousin'),
+        p('W2'),
+        p('Half'),
+      ];
+      families.create(tx, {
+        partner1_id: gp,
+        partner2_id: gm,
+        children: [{ child_id: dad }, { child_id: aunt }],
+      });
+      families.create(tx, { partner1_id: dad, partner2_id: mom, children: [{ child_id: me }] });
+      families.create(tx, { partner1_id: dad, partner2_id: w2, children: [{ child_id: half }] });
+      families.create(tx, { partner1_id: aunt, children: [{ child_id: cousin }] });
+      families.create(tx, { partner1_id: me, children: [{ child_id: kid }] });
+      return { gp, dad, aunt, me, kid };
+    }).result;
+    // Parents' families (with half siblings) are complete at siblingsDepth 1;
+    // the grandparents' are not (only Dad, the line child, would be certain).
+    const n = getNeighborhood(store, ids.me, { up: 2, down: 1, siblingsDepth: 1 });
+    expect(n.childrenLoaded).toEqual(expect.arrayContaining([ids.me, ids.dad]));
+    expect(n.childrenLoaded).not.toContain(ids.gp);
+    // Aunt is a leaf sibling of Dad only at siblingsDepth 2: her children are not loaded.
+    const wide = getNeighborhood(store, ids.me, { up: 2, down: 1, siblingsDepth: 2 });
+    expect(wide.childrenLoaded).toContain(ids.gp);
+    expect(wide.childrenLoaded).not.toContain(ids.aunt);
+    expect(wide.moreDown).toContain(ids.aunt);
+    // The bottom generation's children are past `down`.
+    expect(getNeighborhood(store, ids.me, { up: 0, down: 0 }).childrenLoaded).toEqual([]);
+    store.close();
+  });
+});

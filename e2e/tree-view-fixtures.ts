@@ -29,6 +29,8 @@ import type { BulkData } from '@open-ancestry/db';
 
 export interface SeedInfo {
   family: { tree: string; ids: Record<string, string> };
+  /** A grandparent with children in two families, partly loaded (see childrenGapGedcom). */
+  childrenGap: { tree: string; ids: Record<string, string> };
   /** Six generations of hard-to-fit names for the fan (see fanNamesGedcom). */
   fanNames: { tree: string; focusId: string };
   /** fixtures/ancestry-sample.ged, imported: ids by given name. */
@@ -43,6 +45,42 @@ export interface SeedInfo {
 export const FAMILY_TREE = 'e2e tree view family';
 export const SAMPLE_TREE = 'e2e tree view sample';
 export const FAN_NAMES_TREE = 'e2e tree view fan names';
+export const CHILDREN_GAP_TREE = 'e2e tree view children gap';
+
+/**
+ * Gil has children with Wa (Par, Una) and with Wb (Hal); his brother Sim's
+ * son is Yul. In Zed's view Gil is a great-grandfather, so only Par is
+ * loaded; in Yul's he is an uncle whose children were not fetched. Every
+ * name is invented.
+ */
+export function childrenGapGedcom(): string {
+  const people = ['Ggf M', 'Ggm F', 'Gil M', 'Sim M', 'Sw F', 'Wa F', 'Wb F', 'Par M', 'Pw F'];
+  people.push('Una F', 'Hal M', 'Xan M', 'Xw F', 'Zed M', 'Yul M');
+  const n = (given: string) => people.findIndex((p) => p.startsWith(`${given} `)) + 1;
+  const fams: [string, string, string[]][] = [
+    ['Ggf', 'Ggm', ['Gil', 'Sim']],
+    ['Sim', 'Sw', ['Yul']],
+    ['Gil', 'Wa', ['Par', 'Una']],
+    ['Gil', 'Wb', ['Hal']],
+    ['Par', 'Pw', ['Xan']],
+    ['Xan', 'Xw', ['Zed']],
+  ];
+  const lines = ['0 HEAD', '1 GEDC', '2 VERS 5.5.1', '1 CHAR UTF-8'];
+  people.forEach((p, i) => {
+    const [given, sex] = p.split(' ');
+    lines.push(`0 @I${i + 1}@ INDI`, `1 NAME ${given} /Synth/`, `1 SEX ${sex}`);
+    fams.forEach(([husb, wife, kids], f) => {
+      if (kids.includes(given!)) lines.push(`1 FAMC @F${f + 1}@`);
+      if (husb === given || wife === given) lines.push(`1 FAMS @F${f + 1}@`);
+    });
+  });
+  fams.forEach(([husb, wife, kids], f) => {
+    lines.push(`0 @F${f + 1}@ FAM`, `1 HUSB @I${n(husb)}@`, `1 WIFE @I${n(wife)}@`);
+    for (const kid of kids) lines.push(`1 CHIL @I${n(kid)}@`);
+  });
+  lines.push('0 TRLR');
+  return lines.join('\n') + '\n';
+}
 
 /** Names that are hard to fit in a fan segment. Every one is invented. */
 const HARD_NAMES = [

@@ -1774,6 +1774,31 @@ test.describe('fan labels (#137)', () => {
   });
 });
 
+test.describe('children of a partly loaded grandparent (#270)', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  test('an uncle seen first as a great-grandparent still shows and fetches all his children', async ({
+    page,
+  }) => {
+    const { tree, ids } = seed.childrenGap;
+    const url = (key: string) => `/tree/${ids[key]}?tree=${encodeURIComponent(tree)}`;
+    // Zed's view loads Gil as a great-grandfather, with only Par, his line child.
+    await page.goto(url('Zed'));
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    await expect(card(page, 'Gil Synth')).toBeAttached();
+    // On to Yul in the same view (same cache), where Gil is an uncle.
+    await page.evaluate((next) => {
+      history.pushState(history.state, '', next);
+      window.dispatchEvent(new PopStateEvent('popstate', { state: history.state }));
+    }, url('Yul'));
+    await expect(card(page, 'Yul Synth')).toHaveAccessibleName(/focus person/);
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    await canvas(page).getByRole('button', { name: 'Show children of Gil Synth' }).click();
+    await expect(card(page, 'Una Synth')).toBeAttached();
+    await expect(card(page, 'Hal Synth')).toBeAttached();
+  });
+});
+
 test.describe('visual snapshots', () => {
   // Baselines are Linux Chromium only, like design.spec.ts.
   test.skip(

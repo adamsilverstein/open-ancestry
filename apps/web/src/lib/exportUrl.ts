@@ -4,10 +4,10 @@ export const EXPORT_FORMATS: { value: ExportFormat; label: string }[] = [
   { value: 'gedcom-5.5.1', label: 'GEDCOM 5.5.1 (Ancestry)' },
   { value: 'gedcom-7', label: 'GEDCOM 7' },
   { value: 'gedzip', label: 'GEDZIP (GEDCOM 7 with media)' },
-  { value: 'json', label: 'JSON (full backup)' },
+  { value: 'json', label: 'JSON' },
 ];
 
-/** Whether a format can leave out living people (JSON is a full backup, so it cannot). */
+/** Whether a format can leave out living people (JSON always includes everyone, so it cannot). */
 export const canPrivatize = (format: ExportFormat) => format !== 'json';
 
 /**

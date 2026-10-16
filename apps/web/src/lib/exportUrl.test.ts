@@ -26,7 +26,7 @@ describe('exportUrl', () => {
     );
   });
 
-  it('never privatizes JSON, which is a full backup', () => {
+  it('never privatizes JSON, which always includes everyone', () => {
     expect(canPrivatize('json')).toBe(false);
     expect(exportUrl('Vale', 'json', true)).toBe('/api/trees/Vale/export.json');
   });

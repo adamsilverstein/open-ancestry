@@ -233,6 +233,8 @@ describe('JSON export history (#197)', () => {
           '2 TITL SECRET-PHOTO-TITLE',
           '1 SOUR @S1@',
           '2 PAGE SECRET-CITATION-PAGE',
+          '1 SOUR @S2@',
+          '2 PAGE p. 4',
           '1 NOTE @N9@',
           '1 OBJE @O9@',
           '0 @I2@ INDI',
@@ -251,6 +253,15 @@ describe('JSON export history (#197)', () => {
           '1 FILE secret/SECRET-SCAN.jpg',
           '1 SOUR @S1@',
           '2 PAGE SECRET-MEDIA-CITATION',
+          '0 @R1@ REPO',
+          '1 NAME County Archive',
+          '0 @S2@ SOUR',
+          '1 TITL SECRET-SOURCE-TITLE',
+          '1 REPO @R1@',
+          '0 @N7@ NOTE Never linked research note',
+          '0 @O7@ OBJE',
+          '1 FILE loose/never-linked.jpg',
+          '1 TITL Never linked photo',
           '0 @S1@ SOUR',
           '1 TITL Parish register of Tralee',
           '0 TRLR',
@@ -270,6 +281,11 @@ describe('JSON export history (#197)', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body).not.toContain('SECRET');
     const { tables } = res.json() as { tables: { place: { name: string }[] } };
+    // Records never linked to anything are the user's, not a deleted record's: kept.
+    expect(res.body).toContain('Never linked research note');
+    expect(res.body).toContain('Never linked photo');
+    // A repository stays as reference data, though its only source went with the delete.
+    expect(res.body).toContain('County Archive');
     // The source a remaining citation uses stays, with that citation.
     expect(res.body).toContain('Parish register of Tralee');
     expect(res.body).toContain('Entry 12');

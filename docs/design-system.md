@@ -10,6 +10,7 @@ Implementation: CSS custom properties in `apps/web/src/design/tokens.css`, consu
 2. **People first.** Names, faces and dates get the largest type and highest contrast. Controls recede until hovered or focused.
 3. **Never color alone.** Sex, relationship type and status are conveyed with icon or text as well as color. WCAG 2.2 AA contrast minimum everywhere.
 4. **Keyboard complete.** Every action reachable by keyboard; visible focus ring on everything.
+   Touch targets are 44 × 44 at the default zoom and above, and at least 44 wide by 24 tall (WCAG 2.5.8) when zoomed out, where taller would cover a card.
 5. **Uncertainty is visible.** Approximate dates (`abt. 1890`), alternate facts, and unsourced facts have distinct, consistent treatments.
 
 ## Tokens

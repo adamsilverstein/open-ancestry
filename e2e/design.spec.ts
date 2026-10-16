@@ -418,7 +418,7 @@ test('source item links to the external record', async ({ page }) => {
 
 test('tree toolbar buttons and layout menu', async ({ page }) => {
   const region = section(page, 'TreeToolbar');
-  const toolbar = region.getByRole('toolbar', { name: 'Tree tools' });
+  const toolbar = region.getByRole('toolbar', { name: 'Tree tools' }).first();
   for (const name of [
     'Find in tree',
     'Go to home person',
@@ -432,6 +432,16 @@ test('tree toolbar buttons and layout menu', async ({ page }) => {
   await toolbar.getByRole('button', { name: /Layout/ }).click();
   await page.getByRole('menuitemradio', { name: 'Pedigree' }).click();
   await expect(region.getByRole('status')).toHaveText('Layout: pedigree');
+});
+
+test('tree toolbar lies along the bottom on phones, arrows moving across', async ({ page }) => {
+  const toolbars = section(page, 'TreeToolbar').getByRole('toolbar', { name: 'Tree tools' });
+  await expect(toolbars.first()).toHaveAttribute('aria-orientation', 'vertical');
+  const horizontal = toolbars.nth(1);
+  await expect(horizontal).toHaveAttribute('aria-orientation', 'horizontal');
+  await horizontal.getByRole('button', { name: 'Find in tree' }).focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(horizontal.getByRole('button', { name: 'Go to home person' })).toBeFocused();
 });
 
 test('minimap navigates by click and keyboard and can be dismissed', async ({ page }) => {

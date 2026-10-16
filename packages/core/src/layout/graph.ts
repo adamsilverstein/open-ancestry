@@ -16,6 +16,8 @@ export interface GraphIndex {
   children(family: TreeFamily): string[];
   /** The child's entry in the family, found in constant time. */
   entry(family: TreeFamily, childId: string): TreeFamilyChild | undefined;
+  /** A family by id. */
+  family(id: string): TreeFamily | undefined;
 }
 
 const NONE: readonly TreeFamily[] = [];
@@ -78,6 +80,7 @@ export function indexGraph(graph: TreeGraph): GraphIndex {
         list.sort((x, y) => x.order - y.order).map((x) => x.family),
       ]),
     );
+  const byId = new Map(graph.families.map((f) => [f.id, f]));
   const parents = sorted(asChild);
   const partnerOf = sorted(asPartner);
 
@@ -88,6 +91,7 @@ export function indexGraph(graph: TreeGraph): GraphIndex {
     partners: (family) => indexed.get(family)!.partners,
     children: (family) => indexed.get(family)!.children,
     entry: (family, childId) => indexed.get(family)!.entries.get(childId),
+    family: (id) => byId.get(id),
   };
 }
 

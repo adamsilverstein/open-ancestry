@@ -274,6 +274,7 @@ export class GraphCache {
       partners: (f) => ix(f).partners,
       children: (f) => ix(f).children,
       entry: (f, childId) => ix(f).entries.get(childId),
+      family,
     };
   }
 }

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { indexGraph, layoutFamily, layoutFan, layoutPedigree } from '@open-ancestry/core';
+import {
+  indexGraph,
+  layoutFamily,
+  layoutFan,
+  layoutPedigree,
+  type ChildRelation,
+} from '@open-ancestry/core';
 import { GraphCache } from './graphCache';
 import { buildRelations, kinshipLabels } from './relations';
 import type { ApiNeighborhood, ApiPersonSummary } from './api';
@@ -133,7 +139,7 @@ function random(seed: number) {
   };
 }
 
-const RELS = ['biological', 'biological', 'adopted', 'step', 'foster', 'unknown'] as const;
+const RELS: ChildRelation[] = ['biological', 'biological', 'adopted', 'step', 'foster', 'unknown'];
 
 /** Messy slices: missing partners, a person as both partners, children of unloaded families. */
 function randomSlices(seed: number, count: number): ApiNeighborhood[] {

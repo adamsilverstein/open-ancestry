@@ -162,7 +162,7 @@ test('a name from a re-imported file is isolated in its review line (#264)', asy
   // The override is gone, and the name is isolated from the text after it.
   const add = page.getByRole('checkbox', { name: 'Add name: Evil Ashdown', exact: true });
   await expect(add).toBeVisible();
-  const label = page.locator('label').filter({ has: add });
+  const label = page.locator('label', { hasText: 'Add name: Evil Ashdown' });
   await expect(label.locator('bdi')).toHaveText('Evil Ashdown');
   expect(await label.textContent()).not.toMatch(/[‪-‮⁦-⁩]/);
 });

@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   utimesSync,
   writeFileSync,
@@ -26,7 +27,12 @@ import { join } from 'node:path';
  * trusted only on the machine that wrote it. How old the folder is never
  * decides, so a review kept open all day is never swept, and right after this
  * server wakes from sleep nothing is removed by heartbeat: the owner may have
- * slept too.
+ * slept too. On the owner's own machine a live process is enough (a failing
+ * touch doesn't condemn it); the heartbeat matters for owners elsewhere.
+ *
+ * Across machines the heartbeat compares the owner file's modification time
+ * (set by the file system as the owner touches it) with this machine's clock,
+ * so it assumes their clocks agree to well within SILENT_MS (five minutes).
  */
 
 export type ReimportFolderKind = 'media' | 'export';
@@ -81,7 +87,13 @@ export class ReimportFolders {
     const at = new Date(now);
     for (const path of this.owned) {
       try {
-        utimesSync(`${path}.owner`, at, at);
+        try {
+          utimesSync(`${path}.owner`, at, at);
+        } catch (error) {
+          // Lost (removed by hand, or by an old sweep): write it again.
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          this.writeOwner(path);
+        }
         this.failures.delete(path);
       } catch (error) {
         const count = (this.failures.get(path) ?? 0) + 1;
@@ -105,11 +117,25 @@ export class ReimportFolders {
       treeDir,
       `.reimport-${kind}-${randomUUID()}${kind === 'export' ? '.oatree' : ''}`,
     );
-    const owner: Owner = { serverId: this.serverId, pid: process.pid, host: this.host };
-    writeFileSync(`${path}.owner`, JSON.stringify(owner), { flag: 'wx' });
+    this.writeOwner(path);
     if (kind === 'media') mkdirSync(path);
     this.owned.add(path);
     return path;
+  }
+
+  /**
+   * Writes the owner file whole: to a temporary name, then renamed into
+   * place, so a sweep never reads it half-written.
+   */
+  private writeOwner(path: string): void {
+    const owner: Owner = { serverId: this.serverId, pid: process.pid, host: this.host };
+    const temp = `${path}.owner-${randomUUID()}.tmp`;
+    try {
+      writeFileSync(temp, JSON.stringify(owner), { flag: 'wx' });
+      renameSync(temp, `${path}.owner`);
+    } finally {
+      rmSync(temp, { force: true });
+    }
   }
 
   /** Removes a folder this server no longer needs, with its owner file. */
@@ -193,8 +219,9 @@ export class ReimportFolders {
     }
     // Ours but not in use: leaked by a failed or abandoned review.
     if (owner.serverId === this.serverId) return false;
-    // A pid means something only on the machine that wrote it.
-    if (owner.host === this.host && !alive(owner.pid)) return false;
+    // A pid means something only on the machine that wrote it: there, a live
+    // process is enough, even if its touch is failing.
+    if (owner.host === this.host) return alive(owner.pid);
     if (now - touched < SILENT_MS) return true;
     // Silent: but if this server has just woken, the owner may have slept too.
     return now - this.lastTick > 2 * HEARTBEAT_MS;

@@ -50,7 +50,7 @@ describe('two connections upgrading one tree at once', () => {
 
 describe('upgrade lock wait', () => {
   it('waits longer for the lock while migrating than the caller does for requests', () => {
-    let db!: Database.Database;
+    const db = new Database(':memory:');
     let during = 0;
     const chain: Migration[] = MIGRATIONS.map((m, i) =>
       i !== MIGRATIONS.length - 1
@@ -63,7 +63,6 @@ describe('upgrade lock wait', () => {
             },
           },
     );
-    db = new Database(':memory:');
     const store = new TreeStore(db, null, { busyTimeoutMs: 50, migrations: chain });
     expect(during).toBeGreaterThanOrEqual(30_000);
     expect(db.pragma('busy_timeout', { simple: true })).toBe(50);

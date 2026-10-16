@@ -21,6 +21,11 @@ export type TableRowsByName = Record<string, Record<string, unknown>[]>;
 export interface Migration {
   version: number;
   name: string;
+  /**
+   * DDL run inside the step's transaction. A `PRAGMA` that only takes effect
+   * outside a transaction (such as `foreign_keys = OFF` for a table rebuild) is
+   * silently ignored here.
+   */
   sql: string;
   /**
    * Data step in JS, run after `sql` in the same transaction: for rewrites SQL
@@ -165,27 +170,44 @@ export function migrate(db: Database, options: MigrateOptions = {}): number[] {
     throw new Error(`Migrations are forward-only: database is at ${current}, asked for ${target}.`);
   }
   const applied: number[] = [];
-  for (const migration of migrations) {
-    if (migration.version <= current || migration.version > target) continue;
-    const sql = migration.sql;
-    // Another process (a second server, the CLI) may open the same tree and
-    // upgrade it after our first read. BEGIN IMMEDIATE takes the write lock
-    // before we look again, so a step that is already applied is skipped
-    // instead of failing on "table already exists".
-    const ran = db
-      .transaction(() => {
-        if (getSchemaVersion(db) >= migration.version) return false;
-        db.exec(sql);
-        migration.run?.(db);
-        db.prepare(
-          "INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-        ).run(String(migration.version));
-        return true;
-      })
-      .immediate();
-    if (ran) applied.push(migration.version);
+  if (target === current) return applied;
+  // The server waits only briefly for locks so requests fail fast, but another
+  // process may be part way through a slow step (v3 rewrites every text
+  // column). Wait longer for the upgrade, then put the caller's limit back.
+  const busyTimeout = db.pragma('busy_timeout', { simple: true }) as number;
+  db.pragma(`busy_timeout = ${Math.max(busyTimeout, MIGRATION_BUSY_TIMEOUT_MS)}`);
+  try {
+    for (const migration of migrations) {
+      if (migration.version <= current || migration.version > target) continue;
+      if (applyStep(db, migration)) applied.push(migration.version);
+    }
+  } finally {
+    db.pragma(`busy_timeout = ${busyTimeout}`);
   }
   return applied;
+}
+
+/** How long an upgrade waits for another connection's lock. */
+const MIGRATION_BUSY_TIMEOUT_MS = 30_000;
+
+/** Applies one step unless another connection already has; returns whether it ran. */
+function applyStep(db: Database, migration: Migration): boolean {
+  const sql = migration.sql;
+  // Another process (a second server, the CLI) may open the same tree and
+  // upgrade it after our first read. BEGIN IMMEDIATE takes the write lock
+  // before we look again, so a step that is already applied is skipped
+  // instead of failing on "table already exists".
+  return db
+    .transaction(() => {
+      if (getSchemaVersion(db) >= migration.version) return false;
+      db.exec(sql);
+      migration.run?.(db);
+      db.prepare(
+        "INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+      ).run(String(migration.version));
+      return true;
+    })
+    .immediate();
 }
 
 export interface TableInfo {

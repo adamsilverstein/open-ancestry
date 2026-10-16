@@ -55,6 +55,18 @@ export interface CommandPaletteProps {
    * with nothing selectable highlighted, runs on the first result once they arrive.
    */
   pending?: boolean;
+  /**
+   * Called as the palette takes focus: text typed since it was asked to open
+   * (while its code loaded), which becomes the starting query, and whether
+   * Enter (or Shift/Alt+Enter) was pressed after it, to run on the first result.
+   */
+  takeTypeAhead?: () => TypeAhead;
+}
+
+/** Keys typed before the palette could take them. */
+export interface TypeAhead {
+  text: string;
+  enter?: { alt: boolean };
 }
 
 /** How long results must stay the same before their count is announced. */
@@ -88,6 +100,7 @@ export function CommandPalette({
   footer,
   loading = false,
   pending = false,
+  takeTypeAhead,
 }: CommandPaletteProps) {
   // Opened by shortcut, not a Radix trigger, so remember where focus was and restore it.
   const opener = useRef<HTMLElement | null>(null);
@@ -148,7 +161,7 @@ export function CommandPalette({
   }, [status]);
 
   // Enter pressed before the current query's results arrived.
-  const queued = useRef<{ alt: boolean } | null>(null);
+  const queued = useRef<{ alt: boolean; query?: string } | null>(null);
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key !== 'Enter') return;
     const alt = event.shiftKey || event.altKey;
@@ -167,9 +180,15 @@ export function CommandPalette({
     run(item, true);
   };
 
+  // An Enter typed ahead runs once results for its text are in, like one pressed while pending.
+  const queueEnter = (alt: boolean, text: string) => {
+    queued.current = { alt, query: text };
+  };
+
   const firstItem = visibleItems[0];
   useEffect(() => {
-    if (pending || !queued.current) return;
+    // An Enter typed ahead waits until its text is the query (it is set in the same commit).
+    if (pending || !queued.current || (queued.current.query ?? query) !== query) return;
     const { alt } = queued.current;
     queued.current = null;
     if (firstItem) run(firstItem, alt);
@@ -187,6 +206,12 @@ export function CommandPalette({
             // so fall back to the last control pressed.
             opener.current = captureOpener();
             outside.current = lastControlOutside();
+            const typed = takeTypeAhead?.();
+            if (typed?.text) {
+              setQuery(typed.text);
+              onQueryChange?.(typed.text);
+            }
+            if (typed?.enter) queueEnter(typed.enter.alt, typed.text);
           }}
           onCloseAutoFocus={(event) => {
             if (focusMoved.current) {

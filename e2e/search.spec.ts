@@ -36,6 +36,36 @@ async function search(page: Page, text: string) {
 const people = (dialog: ReturnType<Page['getByRole']>) =>
   dialog.getByRole('group', { name: 'People' }).getByRole('option');
 
+test('the first Cmd/Ctrl-K keeps a surname typed before the palette loads (#113)', async ({
+  page,
+}) => {
+  await page.route(/\/assets\/ShellCommandPalette-[^/]+\.js$/, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await route.continue();
+  });
+  await open(page);
+  await page.keyboard.press(`${modKey}+k`);
+  await page.keyboard.type('thackeray');
+  const dialog = page.getByRole('dialog', { name: 'Command palette' });
+  await expect(dialog.getByRole('combobox')).toHaveValue('thackeray');
+  await expect(people(dialog).first()).toContainText('Thackeray');
+});
+
+test('Enter typed before the palette loads opens the first result once it arrives', async ({
+  page,
+}) => {
+  await page.route(/\/assets\/ShellCommandPalette-[^/]+\.js$/, async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await route.continue();
+  });
+  await open(page);
+  await page.keyboard.press(`${modKey}+k`);
+  await page.keyboard.type('wren thackeray');
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/person\//);
+  await expect(page.getByRole('heading', { level: 1, name: /Wren/ })).toBeVisible();
+});
+
 test('finds a person by name and opens the person page with Enter', async ({ page, request }) => {
   const wren = await personId(request, 'wren thackeray');
   await open(page);

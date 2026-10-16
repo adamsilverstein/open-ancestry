@@ -34,9 +34,10 @@ const EXPORT = ged(
   '2 TITL Letter',
   '1 _OID 222',
 );
-const exportWith = (letter: string, place = 'Millbrook') =>
+/** `name`: another name the export gives Ada (a change a re-import can decline). */
+const exportWith = (letter: string, name?: string) =>
   zipSync({
-    'gedcom.ged': enc(EXPORT.replace('2 PLAC Millbrook', `2 PLAC ${place}`)),
+    'gedcom.ged': enc(name ? EXPORT.replace('1 SEX F', `1 NAME ${name}\n1 SEX F`) : EXPORT),
     'scans/letter.jpg': enc(letter),
   });
 
@@ -90,8 +91,8 @@ function replaceInTree(text: string) {
   );
 }
 
-async function reimport(text: string, place?: string) {
-  return prepareReimport(store, { gedzip: exportWith(text, place) }, { today: TODAY });
+async function reimport(text: string, name?: string) {
+  return prepareReimport(store, { gedzip: exportWith(text, name) }, { today: TODAY });
 }
 
 describe('re-importing media whose bytes changed (#75)', () => {
@@ -227,27 +228,23 @@ describe('re-importing media whose bytes changed (#75)', () => {
   });
 
   it('reads the edit history for media the stored baseline does not hold', async () => {
-    // A re-import that stores a baseline for Ada's birth, and none for the letter.
-    const first = await reimport('LETTER V1', 'Millbrook, Westmere');
-    applyReimport(
-      store,
-      first,
-      new Set(first.diff.people.flatMap((p) => p.changes).map((c) => c.id)),
-      'Re-import',
-    );
+    // A re-import that stores a baseline for Ada's names (the new name declined;
+    // an applied one is settled by its write), and none for the letter.
+    const first = await reimport('LETTER V1', 'Ada /Hale/');
+    applyReimport(store, first, new Set(), 'Re-import');
     closeReimport(first);
     expect(
       store.db.prepare("SELECT value FROM meta WHERE key LIKE 'reimport.base:%'").pluck().all(),
     ).toEqual([expect.not.stringContaining('media|')]);
     // Unchanged in the tree since: the export's new bytes are a plain update.
-    const plain = await reimport('LETTER V2', 'Millbrook, Westmere');
+    const plain = await reimport('LETTER V2', 'Ada /Hale/');
     expect(mediaChanges(plain)).toEqual([
       { kind: 'media.replace', conflict: undefined, defaultAccept: true, applicable: true },
     ]);
     closeReimport(plain);
     // Replaced here since: the history's first edit gives the base, so it is a conflict.
     replaceInTree('MY BETTER SCAN');
-    const both = await reimport('LETTER V2', 'Millbrook, Westmere');
+    const both = await reimport('LETTER V2', 'Ada /Hale/');
     expect(mediaChanges(both)).toEqual([
       { kind: 'media.replace', conflict: 'local-edit', defaultAccept: false, applicable: true },
     ]);

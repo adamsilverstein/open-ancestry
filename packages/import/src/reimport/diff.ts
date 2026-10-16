@@ -364,10 +364,12 @@ export function localHistory(store: TreeStore): LocalHistory {
     typeof id === 'string'
       ? (gone.get(`${entity}|${id}`) ?? (store.getRow(entity, id) as Image | undefined))
       : undefined;
-  // Facts are compared by place name, as the export names them.
+  // Facts are compared by place name, as the export names them: the place as it
+  // was too, if the user renamed it since.
   for (const [key, row] of base) {
     if (key.startsWith('event|') && row.place_id) {
-      base.set(key, { ...row, place_name: rowOf('place', row.place_id)?.full_name ?? null });
+      const place = base.get(`place|${row.place_id as string}`) ?? rowOf('place', row.place_id);
+      base.set(key, { ...row, place_name: place?.full_name ?? null });
     }
   }
   const mediaKeyOf = mediaKeys(store);
@@ -828,7 +830,10 @@ export function diffTrees(
     hold: (owner) => held.add(owner),
     // A deleted fact the export still has: by its base (what the export last said), the
     // same fact unchanged, or the same fact changed: same type, and for facts a person can
-    // have many of (residence), the same date, place or value.
+    // have many of (residence), the same date, place or value. This is a heuristic: one
+    // whose date and place both changed (and has no value) shares nothing with the deleted
+    // fact, so it comes back as a plain addition. Family events carry no place name here,
+    // so for them only the date or value can tie the two together.
     fact: (owner, incoming) => {
       let changed: string | undefined;
       for (const f of gone.facts.get(owner) ?? []) {

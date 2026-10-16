@@ -80,7 +80,7 @@ export interface ServerOptions {
   mediaUploadLimit?: number;
   /** Concurrent imports (default 1) and how many may wait (default 4). */
   importConcurrency?: number;
-  maxQueuedImports?: number;
+  maxQueuedImports?: number | undefined;
   /** Re-import reviews held in memory at once, each with its parsed export (default 4). */
   maxReimports?: number | undefined;
 }

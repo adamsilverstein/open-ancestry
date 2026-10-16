@@ -40,7 +40,9 @@ const SERVE_OPTIONS = `Options for serve:
   --open               Open it even when output is not a terminal
   --static-dir <dir>   Built web app to serve (default: bundled build)
   --import-heap-mb <n> Memory for each import's worker, in MB (default 2048; $OA_IMPORT_HEAP_MB)
-  $OA_MAX_REIMPORTS    Re-import reviews kept open at once, each in memory (default 4)`;
+  $OA_MAX_REIMPORTS    Re-import reviews kept open at once, each in memory (default 4)
+  $OA_MAX_QUEUED_IMPORTS
+                       Imports that may wait for the one running (default 4)`;
 
 const IMPORT_OPTIONS = `Options for import:
   --name <tree>        Tree name (default: the file name)
@@ -115,6 +117,8 @@ export type CliCommand =
       importHeapMb: number | undefined;
       /** Re-import reviews held at once (default 4; OA_MAX_REIMPORTS). */
       maxReimports: number | undefined;
+      /** Imports that may wait behind the running one (default 4; OA_MAX_QUEUED_IMPORTS). */
+      maxQueuedImports: number | undefined;
       sharedLibrary: boolean;
     }
   | {
@@ -231,6 +235,7 @@ export function parseCliArgs(
     sharedLibrary,
     importHeapMb: megabytes('import-heap-mb', values['import-heap-mb'], env, 'OA_IMPORT_HEAP_MB'),
     maxReimports: count(env, 'OA_MAX_REIMPORTS'),
+    maxQueuedImports: count(env, 'OA_MAX_QUEUED_IMPORTS'),
   };
 }
 
@@ -537,6 +542,7 @@ export async function run(
     library: cli.library,
     sharedLibrary: cli.sharedLibrary,
     maxReimports: cli.maxReimports,
+    maxQueuedImports: cli.maxQueuedImports,
     staticDir: cli.staticDir ?? bundledStaticDir(),
     importer: serverImporter(cli.importLimits, cli.importHeapMb),
     importLimits: cli.importLimits,

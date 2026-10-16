@@ -8,7 +8,7 @@
  */
 import { Builder, settingsFrom } from './build';
 import type { Card, FamilyLink, Role, Unit } from './build';
-import { indexGraph } from './graph';
+import { asIndex, type GraphSource } from './graph';
 import {
   boundsOf,
   DEFAULT_CARD,
@@ -26,7 +26,6 @@ import type {
   LayoutEdge,
   LayoutOptions,
   Point,
-  TreeGraph,
   TreeLayout,
 } from './types';
 
@@ -50,7 +49,7 @@ const DESCENDANT_CHEVRONS: Chevrons = {
 
 /** Focus person and spouses in the middle row, ancestors above, descendants below. */
 export function layoutFamily(
-  graph: TreeGraph,
+  graph: GraphSource,
   focusId: string,
   options: LayoutOptions = {},
 ): TreeLayout {
@@ -59,7 +58,7 @@ export function layoutFamily(
 
 /** The lower half of the family view: focus person, spouses and descendants. */
 export function layoutDescendants(
-  graph: TreeGraph,
+  graph: GraphSource,
   focusId: string,
   options: LayoutOptions = {},
 ): TreeLayout {
@@ -67,12 +66,12 @@ export function layoutDescendants(
 }
 
 function layoutVertical(
-  graph: TreeGraph,
+  graph: GraphSource,
   focusId: string,
   options: LayoutOptions,
   withAncestors: boolean,
 ): TreeLayout {
-  const index = indexGraph(graph);
+  const index = asIndex(graph);
   if (!index.person(focusId)) return emptyLayout();
   const size = { ...DEFAULT_CARD, ...options.cardSize };
   const gaps = { ...DEFAULT_GAPS, ...options.gaps };

@@ -40,6 +40,16 @@ describe('parseCliArgs', () => {
     expect(() => parseCliArgs(['serve'], { OA_MAX_REIMPORTS: '0' })).toThrow(/OA_MAX_REIMPORTS/);
   });
 
+  it('reads how many imports may wait from OA_MAX_QUEUED_IMPORTS', () => {
+    expect(parseCliArgs(['serve'], {})).toMatchObject({ maxQueuedImports: undefined });
+    expect(parseCliArgs(['serve'], { OA_MAX_QUEUED_IMPORTS: '32' })).toMatchObject({
+      maxQueuedImports: 32,
+    });
+    expect(() => parseCliArgs(['serve'], { OA_MAX_QUEUED_IMPORTS: 'many' })).toThrow(
+      /OA_MAX_QUEUED_IMPORTS/,
+    );
+  });
+
   it('reads import size and heap limits from flags, then OA_ variables', () => {
     const MiB = 1024 * 1024;
     expect(

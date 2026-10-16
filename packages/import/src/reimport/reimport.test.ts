@@ -1651,6 +1651,47 @@ describe('three-way re-import, review findings (#224)', () => {
       closeReimport(s2);
     }
   });
+
+  const baseImages = () =>
+    rows<{ key: string; value: string }>(
+      store,
+      "SELECT key, value FROM meta WHERE key LIKE 'reimport.base:%'",
+    ).map((r) => Object.keys(JSON.parse(r.value) as object).sort());
+
+  it('records no base for changes it applied: the written row is the base', async () => {
+    const s2 = await prepareReimport(store, { bytes: josiah1940() }, { today: TODAY });
+    expect(changesOf(s2, '@I3@')).toEqual([expect.objectContaining({ kind: 'fact.change' })]);
+    applyReimport(store, s2, defaults(s2), 'Re-import');
+    closeReimport(s2);
+    expect(baseImages()).toEqual([]);
+    // The next re-import still follows Ancestry from the applied value.
+    const later = edited('@I3@', (l) => (l === '2 DATE 1939' ? '2 DATE 1941' : l), 200);
+    const s3 = await prepareReimport(store, { bytes: later }, { today: TODAY });
+    try {
+      const [change] = changesOf(s3, '@I3@');
+      expect(change).toMatchObject({ kind: 'fact.change', defaultAccept: true });
+      expect(change!.conflict).toBeUndefined();
+    } finally {
+      closeReimport(s3);
+    }
+  });
+
+  it('records the base only for the changes it declined', async () => {
+    const death = eventIdOf('@I3@', 'DEAT');
+    const s2 = await prepareReimport(
+      store,
+      {
+        bytes: edited('@I3@', (l) =>
+          l === '2 DATE 1939' ? '2 DATE 1940' : l === '1 SEX M' ? '1 SEX F' : l,
+        ),
+      },
+      { today: TODAY },
+    );
+    const sex = changesOf(s2, '@I3@').find((c) => c.kind === 'sex')!;
+    applyReimport(store, s2, new Set([sex.id]), 'Re-import, death declined');
+    closeReimport(s2);
+    expect(baseImages()).toEqual([[`event|${death}`]]);
+  });
 });
 
 describe('dates compared by meaning (#194)', () => {

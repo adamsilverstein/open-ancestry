@@ -113,8 +113,8 @@ export const MIN_PREFIX_LENGTH = 2;
 export const MAX_SEARCH_WORDS = 8;
 /** A year in the query also matches events this many years either side (prefix tier and below). */
 export const YEAR_SLACK = 2;
-/** Rows read by score, per row wanted, before near-ties are put in name order. */
-export const TIEBREAK_WINDOW = 3;
+/** Most rows read by score before near-ties are put in name order; past it, ties go by id. */
+export const TIEBREAK_CAP = 2000;
 
 /** FTS5 expression for one query word in one tier, or null if the word cannot match in it. */
 function wordMatch(word: string, tier: SearchMatch, keys: string[]): string {
@@ -205,17 +205,25 @@ export function searchPeople(
   const hits: { id: string; match: SearchMatch; score: number }[] = [];
   // Scores within a tenth of each other are the same match to a reader (a longer
   // document scores a little lower), so those go by name: predictable, not by
-  // when each person was added (#280). The name order applies within the best
-  // TIEBREAK_WINDOW times as many rows as wanted, taken by score from the index
-  // alone, so a common surname does not join and sort every match.
+  // when each person was added (#280). Score every match once (FTS alone), find
+  // the rounded score of the last row wanted, and name-sort every row from that
+  // bucket up, so a tie that straddles the cut is settled by name (#305). Past
+  // TIEBREAK_CAP rows the bucket is cut in search-document order first.
   const statement = store.stmt(
-    `SELECT w.id, w.score FROM (
-       SELECT d.person_id AS id, -bm25(person_search, 10.0, 5.0, 1.0, 1.0) AS score
-       FROM person_search JOIN search_doc d ON d.doc_id = person_search.rowid
-       WHERE person_search MATCH @match ORDER BY score DESC LIMIT @window
-     ) w
-     LEFT JOIN person_sort ps ON ps.person_id = w.id
-     ORDER BY round(w.score, 1) DESC, ps.surname COLLATE NOCASE, ps.given COLLATE NOCASE, w.id
+    `WITH s AS MATERIALIZED (
+       SELECT rowid AS doc, -bm25(person_search, 10.0, 5.0, 1.0, 1.0) AS score
+       FROM person_search WHERE person_search MATCH @match
+     ),
+     cut AS (SELECT round(score, 1) AS bucket FROM s ORDER BY score DESC, doc LIMIT 1 OFFSET @last),
+     b AS (
+       SELECT doc, score FROM s
+       WHERE round(score, 1) >= coalesce((SELECT bucket FROM cut), -1e300)
+       ORDER BY score DESC, doc LIMIT @cap
+     )
+     SELECT d.person_id AS id, b.score FROM b
+     JOIN search_doc d ON d.doc_id = b.doc
+     LEFT JOIN person_sort ps ON ps.person_id = d.person_id
+     ORDER BY round(b.score, 1) DESC, ps.surname COLLATE NOCASE, ps.given COLLATE NOCASE, d.person_id
      LIMIT @limit`,
   );
   TIERS.forEach((tier, rank) => {
@@ -223,7 +231,7 @@ export function searchPeople(
     const match = parsed.match(tier);
     // Ask for enough rows to fill the limit after skipping earlier tiers' hits.
     const wanted = limit + seen.size;
-    const rows = statement.all({ match, window: wanted * TIEBREAK_WINDOW, limit: wanted }) as {
+    const rows = statement.all({ match, cap: TIEBREAK_CAP, last: wanted - 1, limit: wanted }) as {
       id: string;
       score: number;
     }[];

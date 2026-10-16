@@ -1,8 +1,7 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { rm } from 'node:fs/promises';
 import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from 'fastify';
 import { createServer, type ServerOptions } from '../index';
+import { makeTempDir } from '../../../../fixtures/temp-dir';
 
 export const TOKEN = 'test-token-0123456789';
 export const HOST = '127.0.0.1:4317';
@@ -24,7 +23,7 @@ export interface TestApi {
 
 /** A server over a fresh temporary library. */
 export async function testApi(options: ServerOptions = {}): Promise<TestApi> {
-  const root = await mkdtemp(join(tmpdir(), 'oa-lib-'));
+  const root = makeTempDir('oa-lib-');
   const app = createServer({ library: root, token: TOKEN, ...options });
   await app.ready();
   const write = (method: 'POST' | 'PUT' | 'PATCH' | 'DELETE') => (url: string, body?: unknown) =>

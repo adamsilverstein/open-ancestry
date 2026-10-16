@@ -1,7 +1,6 @@
 import { createTree } from '@open-ancestry/db';
 import {
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -9,9 +8,8 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { importGedcom } from './import';
 import {
   classifyFile,
@@ -25,6 +23,7 @@ import { coordinate, placeParts, Places } from './places';
 import { childRelationship, morePrivate, nameType, privacy, relationshipStatus } from './tags';
 import { dateColumns, surnameKey } from './index';
 import { ged } from './test-helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 describe('tags', () => {
   it('maps child relationships case-insensitively', () => {
@@ -184,10 +183,7 @@ describe('media helpers', () => {
 describe('media folder edge cases', () => {
   let tmp: string;
   beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), 'oa-media-'));
-  });
-  afterEach(() => {
-    rmSync(tmp, { recursive: true, force: true });
+    tmp = makeTempDir('oa-media-');
   });
 
   it('skips file names that cannot be stored and reports copy failures as warnings', async () => {
@@ -259,10 +255,7 @@ describe('storing media in a tree', () => {
   let root: string;
   const hash = (b: Uint8Array) => Buffer.from(b).toString('hex');
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'oa-store-'));
-  });
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
+    root = makeTempDir('oa-store-');
   });
 
   it.skipIf(process.platform === 'win32')('writes media private to the owner (0600)', () => {
@@ -294,7 +287,7 @@ describe('storing media in a tree', () => {
   });
 
   it('never writes through or reuses a symlink inside the media folder', () => {
-    const outside = mkdtempSync(join(tmpdir(), 'oa-outside-'));
+    const outside = makeTempDir('oa-outside-');
     try {
       symlinkSync(outside, join(root, 'linked'));
       const enc = (t: string) => new TextEncoder().encode(t);

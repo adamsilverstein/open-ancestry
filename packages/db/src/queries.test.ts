@@ -1,5 +1,3 @@
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -33,6 +31,7 @@ import {
   type TreeStore,
 } from './index';
 import { memoryTree, seedSmallFamily } from './test/helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 describe('person summaries', () => {
   it('returns primary name and vital events', () => {
@@ -532,7 +531,7 @@ describe('listPeople', () => {
   });
 
   it('sees writes made through another connection to the same tree', () => {
-    const dir = join(mkdtempSync(join(tmpdir(), 'oa-list-')), 'a.oatree');
+    const dir = join(makeTempDir('oa-list-'), 'a.oatree');
     const store = createTree(dir);
     seedSmallFamily(store);
     expect(listPeople(store, { sort: 'given' }).total).toBe(9);

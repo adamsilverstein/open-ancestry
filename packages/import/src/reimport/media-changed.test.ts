@@ -253,4 +253,39 @@ describe('re-importing media whose bytes changed (#75)', () => {
     ]);
     closeReimport(both);
   });
+
+  it('stores a base only for a replacement left undone: declined, not applied', async () => {
+    const stored = () =>
+      (
+        store.db
+          .prepare("SELECT value FROM meta WHERE key LIKE 'reimport.base:%'")
+          .pluck()
+          .all() as string[]
+      ).filter((v) => v.includes('media|')).length;
+    const applied = await reimport('LETTER V2');
+    applyReimport(store, applied, replaceIds(applied), 'Re-import');
+    closeReimport(applied);
+    // Its media row write settles it; a stored image would only repeat it.
+    expect(stored()).toBe(0);
+    const declined = await reimport('LETTER V3');
+    applyReimport(store, declined, new Set(), 'Re-import');
+    closeReimport(declined);
+    expect(stored()).toBe(1);
+  });
+
+  it('offers a ticked replacement again, ticked, when its copy was refused', async () => {
+    const session = await reimport('LETTER V2');
+    // Too large to copy: the user wanted it, but it did not happen.
+    const result = applyReimport(store, session, replaceIds(session), 'Re-import', {
+      maxMediaBytes: 1,
+    });
+    closeReimport(session);
+    expect(result.media.refused).toEqual([letter().id]);
+    expect(fileOf(letter())).toBe('LETTER V1');
+    const again = await reimport('LETTER V2');
+    expect(mediaChanges(again)).toEqual([
+      { kind: 'media.replace', conflict: undefined, defaultAccept: true, applicable: true },
+    ]);
+    closeReimport(again);
+  });
 });

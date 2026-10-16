@@ -1,3 +1,4 @@
+import { formatDate } from '@open-ancestry/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -58,7 +59,7 @@ const titleOf = (media: MediaRow) => media.title || media.description || 'Untitl
 function ownerLabel(owner: MediaOwner): string | null {
   if (owner.type !== 'event') return null;
   const label = eventLabel(owner.event.type, owner.event.custom_type);
-  return owner.event.date_text ? `${label}, ${owner.event.date_text}` : label;
+  return owner.event.date_text ? `${label}, ${formatDate(owner.event.date_text)}` : label;
 }
 
 /** "Birth" / "Birth, 1898" for media attached to events; nothing for the person alone. */
@@ -257,7 +258,7 @@ function Lightbox({
           {media.date_text && (
             <>
               <dt>Date</dt>
-              <dd>{media.date_text}</dd>
+              <dd>{formatDate(media.date_text)}</dd>
             </>
           )}
           {where && (

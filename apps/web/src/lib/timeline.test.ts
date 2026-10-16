@@ -234,7 +234,13 @@ describe('lifetime window', () => {
           ...withSummary('1880', '4 NOV 1911').summary,
           death: { ...brief('4 NOV 1911', 19111104), type: 'DEAT' },
         },
-        events: detail.events.filter((e) => e.event.type === 'DEAT'),
+        // The person's own death, on the date the summary gives.
+        events: detail.events
+          .filter((e) => e.event.type === 'DEAT')
+          .map((e) => ({
+            ...e,
+            event: { ...e.event, date_text: '4 NOV 1911', date_sort: 19111104 },
+          })),
         parentFamilies: [],
         partnerFamilies: [
           {

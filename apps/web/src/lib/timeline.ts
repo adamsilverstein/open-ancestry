@@ -142,7 +142,6 @@ export function buildTimeline(
   // dates never drop an event that might fall inside it.
   const lifeStart = dateRange(birthText)?.[0] ?? -Infinity;
   const lifeEnd = dateRange(detail.summary.death?.dateText)?.[1] ?? Infinity;
-  const deathSort = detail.summary.death?.dateSort ?? null;
   // `25`, or `about 31` when either date is imprecise. No age at zero (a
   // same-year sibling would read "about 0") or after the death.
   const ageFor = (text: string | null | undefined) => {
@@ -216,9 +215,9 @@ export function buildTimeline(
     if (!overlaps(range, [lifeStart, afterDeath ? Infinity : lifeEnd])) return;
     seen.add(id);
     // An open-ended date (`bef. 1920`) that only partly overlaps the life may
-    // fall after the death: it sorts just before the death and gets no age.
+    // fall after the death: it gets no age, and sorts by its date like
+    // everything else (#278), so "bef. 1920" follows a 1911 death.
     const mayFollowDeath = !afterDeath && range[1] > lifeEnd;
-    const clamp = mayFollowDeath && deathSort !== null && event.dateSort >= deathSort;
     entries.push({
       id,
       kind: 'family',
@@ -231,7 +230,7 @@ export function buildTimeline(
       sourceCount: 0,
       personId: relative.id,
       alternates: [],
-      sortKey: clamp ? deathSort - 0.5 : event.dateSort,
+      sortKey: event.dateSort,
     });
   };
 

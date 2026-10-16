@@ -272,10 +272,40 @@ describe('readGedzip', () => {
       expect(() => readGedzip(archive)).toThrow(/a\.bin is named x\.bin in its local header/);
     });
 
+    it('compares the name bytes, so bit 11 set in only one header is no mismatch', () => {
+      const archive = handZip([
+        ged,
+        { name: 'photos/Zoë.bin', data: deflateSync(GED), size: GED.length },
+      ]);
+      // Some writers flag UTF-8 in the central directory only.
+      patchCentral(archive, 'photos/Zoë.bin', 8, 0x800, 2);
+      expect([...readGedzip(archive).media.keys()]).toEqual(['photos/Zoë.bin']);
+    });
+
     it('still reads an honest archive of distinct records', () => {
       const archive = handZip([ged, photo]);
       expect(readGedzip(archive).media.get('a.bin')).toEqual(sparse);
     });
+  });
+
+  it('reads UTF-8 names stored without bit 11, as Info-ZIP and macOS write them (#287)', () => {
+    const archive = handZip([
+      { name: 'gedcom.ged', data: deflateSync(GED), size: GED.length },
+      { name: 'photos/Müller.jpg', data: deflateSync(GED), size: GED.length },
+    ]);
+    expect(readGedzip(archive).mediaPaths).toEqual(['photos/Müller.jpg']);
+  });
+
+  it('still reads a CP437 name that is not valid UTF-8', () => {
+    const archive = handZip([{ name: 'gedcom.ged', data: deflateSync(GED), size: GED.length }]);
+    const legacy = handZip([
+      { name: 'gedcom.ged', data: deflateSync(GED), size: GED.length },
+      { name: 'photos/M_ller.jpg', data: deflateSync(GED), size: GED.length },
+    ]);
+    // 0xFC is ü in Windows-1252 and not a UTF-8 sequence on its own.
+    for (let p = 0; p < legacy.length; p++) if (legacy[p] === 0x5f) legacy[p] = 0xfc;
+    expect(readGedzip(legacy).mediaPaths).toEqual(['photos/Müller.jpg']);
+    expect(readGedzip(archive).mediaPaths).toEqual([]);
   });
 
   it('rejects many small high-ratio entries by the aggregate ratio', () => {

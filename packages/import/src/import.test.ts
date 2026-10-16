@@ -307,6 +307,18 @@ describe('media', () => {
     store.close();
   });
 
+  it.each(['infozip-utf8-names.zip', 'ditto-utf8-names.zip'])(
+    'links a photo with a non-ASCII name from %s (#287)',
+    async (name) => {
+      const gedzip = readFileSync(join(FIXTURES, 'gedzip', name));
+      const report = await importGedcom({ gedzip, fileName: name }, openMemoryTree(), {
+        today: TODAY,
+      });
+      expect(report.media.linked).toBe(1);
+      expect(report.media.missing).toEqual([]);
+    },
+  );
+
   it('detects a GEDZIP by content when given bytes or a path', async () => {
     const zip = zipSync({ 'gedcom.ged': sample() });
     const file = join(tmp, 'export.zip');

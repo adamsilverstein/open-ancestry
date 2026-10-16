@@ -6,6 +6,7 @@ import { BulkWriter } from './bulk';
 import { refreshDerivedColumns } from './derived';
 import { ENUM_COLUMNS } from './enums';
 import { listTables, migrate, upgradeRow, type TableRowsByName } from './migrations/index';
+import { nfcRow } from './nfc';
 import type { TreeStore } from './store';
 import { parseLogImage } from './undo';
 import type { ChangeBatchRow, ChangeLogRow, TableRows } from './types';
@@ -234,7 +235,9 @@ export function importJson(
         [];
       for (const row of rows) {
         if (name === 'meta' && row.key === 'schema_version') continue;
-        writer.insertAny(name, row);
+        // Text is stored as NFC (#164). An old document got that from the v3
+        // upgrade step; a current one written by another tool may still be NFD.
+        writer.insertAny(name, nfcRow(name, row));
       }
     }
   } catch (error) {

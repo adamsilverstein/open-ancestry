@@ -397,6 +397,8 @@ export function applyReimport(
       for (const c of p.changes) owners.set(c.id, p.existingId ?? p.incomingId);
     }
     let applied = 0;
+    /** Changes whose rows this batch wrote: those rows are the next comparison's base. */
+    const written = new Set<string>();
     for (const c of toApply.filter((x) => x.kind === 'person.new')) {
       copyPerson((c as { incomingId: string }).incomingId);
       applied++;
@@ -494,6 +496,7 @@ export function applyReimport(
           break;
         }
       }
+      written.add(c.id);
       applied++;
     }
 
@@ -636,7 +639,7 @@ export function applyReimport(
       for (const u of lines) tx.insert('unmapped_line', { ...u, id: undefined } as never);
     }
     recordStale(tx, batch.id, stale);
-    recordBase(tx, batch.id, session, chosen, incAll);
+    recordBase(tx, batch.id, session, written, incAll);
     return applied;
   }) as { batchId: string; result: number };
 
@@ -664,10 +667,11 @@ const SAME_ANYWAY = new Set([
 ]);
 
 /**
- * What the export said for each row it offered a change to that was not
- * applied: the base of the next re-import's three-way comparison (#224).
- * Without it a declined change would come back as a conflict every time.
- * An applied change needs none, since the row this batch wrote is its base.
+ * What the export said for each row it offered a change to whose row this
+ * batch did not write: the base of the next re-import's three-way comparison
+ * (#224). Without it a declined change would come back as a conflict every
+ * time. A written row needs none, since the write is its base; a change that
+ * was chosen but wrote nothing (a refused copy) keeps its image.
  * Written in the re-import's batch, so undo removes it.
  *
  * One meta row per re-import, never pruned: `localHistory` reads these from
@@ -678,13 +682,13 @@ function recordBase(
   tx: Tx,
   importBatchId: string,
   session: ReimportSession,
-  applied: ReadonlySet<string>,
+  written: ReadonlySet<string>,
   incAll: <T>(sql: string, ...params: unknown[]) => T[],
 ) {
   const images: Record<string, unknown> = {};
   for (const person of session.diff.people) {
     for (const c of person.changes) {
-      if (applied.has(c.id)) continue;
+      if (written.has(c.id)) continue;
       if (c.kind === 'fact.change') images[`event|${c.existingEventId}`] = imageOfView(c.after);
       else if (c.kind === 'fact.add' && c.deletedEventId) {
         images[`event|${c.deletedEventId}`] = imageOfView(c.fact);

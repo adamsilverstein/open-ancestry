@@ -61,6 +61,11 @@ test('imports the Ancestry sample through the file picker and opens the tree', a
     /\/person\/[0-9A-Z]{26}$/,
   );
 
+  // A link styled as a button reads as a button: no underline (#280).
+  await expect(page.getByRole('link', { name: 'Open tree' })).toHaveCSS(
+    'text-decoration-line',
+    'none',
+  );
   await page.getByRole('link', { name: 'Open tree' }).click();
   await expect(page).toHaveURL(/\/tree\/[0-9A-Z]{26}$/);
   await expect(page.getByRole('banner').getByRole('button', { name: /Tree:/ })).toContainText(name);

@@ -113,6 +113,9 @@ function useSetHome(tree: string, detail: PersonDetail) {
 export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDetail }) {
   const { summary } = detail;
   const name = fullName(summary);
+  const nickname = (
+    detail.names.find((n) => n.is_primary === 1) ?? detail.names[0]
+  )?.nickname?.trim();
   const relationship = useRelationshipToHome(tree, detail);
   const sex = summary.sex === 'M' || summary.sex === 'F' ? summary.sex : 'U';
   const [editing, setEditing] = useState(false);
@@ -146,6 +149,13 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
       />
       <div className={styles.identity}>
         <h1 className={styles.name}>{name}</h1>
+        {/* The primary name's nickname, saved in Edit person but shown nowhere before (#280). */}
+        {nickname && (
+          <p className={styles.nickname} data-testid="nickname">
+            {/* Isolated, so a right-to-left nickname keeps the quotes around it in order. */}
+            Known as “<bdi>{nickname}</bdi>”
+          </p>
+        )}
         <div className={styles.vitals}>
           <Vital label="Birth" event={summary.birth} />
           <Vital

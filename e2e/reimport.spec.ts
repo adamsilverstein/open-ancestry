@@ -647,9 +647,19 @@ test('a place the export renamed is one item, and keeps matches sure (#279)', as
     1,
   );
   await expect(card(page, 'Josiah Ashgrove').getByText(/different birth place/)).toHaveCount(0);
+  // The rename has a filter of its own and counts as one change, however many facts it covers.
+  await expect(
+    page
+      .getByRole('group', { name: 'Filter the review' })
+      .getByRole('button', { name: 'Places renamed 1' }),
+  ).toBeVisible();
+  const applyButton = page.getByRole('button', { name: /^Apply \d+ changes?$/ });
+  const count = async () => Number(/\d+/.exec((await applyButton.textContent()) ?? '')![0]);
+  const withRename = await count();
   // Unticked, nothing moves; ticked again, every fact goes to the new name.
   await rename.uncheck();
   await expect(rename).not.toBeChecked();
+  expect(await count()).toBe(withRename - 1);
   await rename.check();
   await page.getByRole('button', { name: /^Apply \d+ changes?$/ }).click();
   await expect(

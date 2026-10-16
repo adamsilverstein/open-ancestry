@@ -2182,26 +2182,33 @@ describe('a place the export renamed (#279)', () => {
         (c) => c.kind === 'fact.change' && c.before.place === OLD && c.after.place === NEW,
       );
       expect(atPlace.length).toBeGreaterThanOrEqual(2);
-      expect(s2.diff.placeRenames).toEqual([
+      expect(s2.diff.exportPlaceRenames).toEqual([
         { key: `${OLD}→${NEW}`, from: OLD, to: NEW, changeIds: atPlace.map((c) => c.id) },
       ]);
       // Each member names its rename, so the review can show them as one item.
-      for (const c of atPlace) expect(c).toMatchObject({ placeRename: `${OLD}→${NEW}` });
+      for (const c of atPlace) expect(c).toMatchObject({ exportPlaceRename: `${OLD}→${NEW}` });
       // Accepting them all moves every fact to the new name.
       applyReimport(store, s2, new Set(atPlace.map((c) => c.id)), 'Re-import');
     } finally {
       closeReimport(s2);
     }
-    // People's facts; a marriage's place isn't compared yet (family events pair by date, #268).
+    // The place itself was renamed: every fact there follows, a marriage included,
+    // and the tree has one row for the town, not two (#307 review).
+    expect(value(store, 'SELECT count(*) FROM place WHERE full_name = ?', OLD)).toBe(0);
+    expect(value(store, 'SELECT count(*) FROM place WHERE full_name = ?', NEW)).toBe(1);
     expect(
       value(
         store,
         `SELECT count(*) FROM event e JOIN place p ON p.id = e.place_id
            JOIN event_role r ON r.event_id = e.id
-          WHERE p.full_name = ? AND r.person_id IS NOT NULL`,
-        OLD,
+          WHERE p.full_name = ? AND r.family_id IS NOT NULL`,
+        NEW,
       ),
-    ).toBe(0);
+    ).toBe(1);
+    expect(value(store, 'SELECT name FROM place WHERE full_name = ?', NEW)).toBe('Millbrook Falls');
+    // One undo puts the old name back.
+    undoLast(store);
+    expect(value(store, 'SELECT count(*) FROM place WHERE full_name = ?', OLD)).toBe(1);
   });
 
   it("doesn't count the rename against a match", async () => {
@@ -2224,6 +2231,31 @@ describe('a place the export renamed (#279)', () => {
     }
   });
 
+  it('still finds a rename when one fact went somewhere else, leaving that one alone', async () => {
+    const ELDER = 'Elderford, Cask County, Ohio, USA';
+    const CITY = 'Elderford City, Cask County, Ohio, USA';
+    let first = true;
+    const text = renumber(
+      SAMPLE.replaceAll(ELDER, () => {
+        if (!first) return CITY;
+        first = false;
+        return 'Brandnew, Cask County, Ohio, USA';
+      }),
+    );
+    const s2 = await prepareReimport(store, { bytes: text }, { today: TODAY });
+    try {
+      expect(s2.diff.exportPlaceRenames.map((r) => [r.from, r.to])).toEqual([[ELDER, CITY]]);
+      // The stray is an ordinary change of its own.
+      const stray = s2.diff.people
+        .flatMap((p) => p.changes)
+        .filter((c) => c.kind === 'fact.change' && c.after.place?.startsWith('Brandnew'));
+      expect(stray).toHaveLength(1);
+      expect(stray[0]!.exportPlaceRename).toBeUndefined();
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
   it('leaves a one-off place change as an ordinary change', async () => {
     let first = true;
     const text = renumber(
@@ -2235,7 +2267,7 @@ describe('a place the export renamed (#279)', () => {
     );
     const s2 = await prepareReimport(store, { bytes: text }, { today: TODAY });
     try {
-      expect(s2.diff.placeRenames).toEqual([]);
+      expect(s2.diff.exportPlaceRenames).toEqual([]);
     } finally {
       closeReimport(s2);
     }

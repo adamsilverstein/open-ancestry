@@ -307,6 +307,38 @@ describe('media', () => {
     store.close();
   });
 
+  it("maps our own export's _WDTH, _HGHT and _SIZE when the file gives the real values (#279)", async () => {
+    // A 3x2 PNG header: the copied file's own size wins, and the tags are still mapped.
+    const png = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0,
+      3, 0, 0, 0, 2, 8, 2, 0, 0, 0,
+    ]);
+    const text = ged(
+      '0 @I1@ INDI',
+      '1 OBJE @O1@',
+      '0 @O1@ OBJE',
+      '1 FILE photos/a.png',
+      '2 FORM image/png',
+      '1 _WDTH 30',
+      '1 _HGHT 20',
+      `1 _SIZE ${png.length}`,
+    );
+    const dir = join(tmp, 'w.oatree');
+    const report = await importGedcom(
+      { gedzip: zipSync({ 'gedcom.ged': enc(text), 'photos/a.png': png }) },
+      { dir },
+      { today: TODAY },
+    );
+    expect(report.unmapped).toEqual([]);
+    const store = openTree(dir);
+    expect(row(store, 'SELECT width, height, byte_size FROM media')).toEqual({
+      width: 3,
+      height: 2,
+      byte_size: png.length,
+    });
+    store.close();
+  });
+
   it('detects a GEDZIP by content when given bytes or a path', async () => {
     const zip = zipSync({ 'gedcom.ged': sample() });
     const file = join(tmp, 'export.zip');

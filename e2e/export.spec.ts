@@ -202,6 +202,30 @@ test('privatize starts on for a tree with living people and warns when turned of
   );
 });
 
+test('privatize turns back on for each new export and each format (#277)', async ({
+  page,
+  request,
+  baseURL,
+}, info) => {
+  const tree = treeName(info.title, info.project.name);
+  await seedTree(request, baseURL!, tree);
+  // One export with privatize turned off...
+  await exportFrom(page, tree, 'GEDCOM 7', false);
+  // ...and the next time the dialog opens, it is on again.
+  await page.getByRole('button', { name: 'File' }).click();
+  await page.getByRole('menuitem', { name: /Export/ }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export tree' });
+  await dialog.getByRole('combobox', { name: 'Tree' }).click();
+  await page.getByRole('option', { name: tree, exact: true }).click();
+  const privatize = dialog.getByRole('checkbox', { name: /^Privatize/ });
+  await expect(privatize).toBeChecked();
+  // Turning it off for one format does not carry over to another.
+  await privatize.uncheck();
+  await dialog.getByRole('combobox', { name: 'Format' }).click();
+  await page.getByRole('option', { name: 'GEDZIP (GEDCOM 7 with media)', exact: true }).click();
+  await expect(privatize).toBeChecked();
+});
+
 test('a privatized export hides a deceased person marked confidential', async ({
   request,
   baseURL,

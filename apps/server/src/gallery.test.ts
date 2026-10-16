@@ -3,7 +3,7 @@ import { mkdir, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import sharp from 'sharp';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TreeStore } from '@open-ancestry/db';
 import { Library } from './library';
 import { THUMB_SIZES, ThumbnailQueue } from './thumbnails';
@@ -316,6 +316,35 @@ describe('attaching media', () => {
     } finally {
       await capped.app.close();
     }
+  });
+
+  it('holds the tree busy while it writes the attached file (#289)', async () => {
+    // A delete in the gap before the copy would leave media/attached in a
+    // database-less folder under the tree's name: it must be refused instead.
+    const exists = library.exists.bind(library);
+    let refused: unknown;
+    const spy = vi.spyOn(library, 'exists').mockImplementation((id: string) => {
+      if (id === 'Test' && refused === undefined) {
+        try {
+          library.delete('Test');
+          refused = null;
+        } catch (error) {
+          refused = error;
+        }
+      }
+      return exists(id);
+    });
+    try {
+      const res = await attach(
+        { owner_type: 'person', owner_id: s.ada },
+        { name: 'a.png', bytes: png },
+      );
+      expect(res.statusCode).toBe(201);
+      expect(refused).toMatchObject({ statusCode: 409 });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(library.list().map((t) => t.id)).toContain('Test');
   });
 
   it('deduplicates by sha256 and can attach to an event', async () => {

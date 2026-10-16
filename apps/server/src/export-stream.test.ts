@@ -1,11 +1,11 @@
-import { mkdtempSync, readdirSync, rmSync, truncateSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readdirSync, truncateSync } from 'node:fs';
 import { join } from 'node:path';
 import { treePaths } from '@open-ancestry/db';
 import { importGedcom } from '@open-ancestry/import';
 import { zipSync } from 'fflate';
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { startServer } from './index';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 /*
  * Issue #198: a GEDZIP export of a tree with gigabytes of media must not hold
@@ -13,8 +13,7 @@ import { startServer } from './index';
  * photos without using disk.
  */
 
-const root = mkdtempSync(join(tmpdir(), 'oa-gdz-big-'));
-afterAll(() => rmSync(root, { recursive: true, force: true }));
+const root = makeTempDir('oa-gdz-big-');
 
 const FILES = 4;
 const SIZE = 512 * 1024 * 1024;

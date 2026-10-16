@@ -1,15 +1,17 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ReimportFolders } from './reimport-folders';
 
@@ -61,14 +63,14 @@ describe('re-import folder ownership', () => {
     expect(existsSync(`${leaked}.owner`)).toBe(false);
   });
 
-  it("keeps another live server's folders, and removes a dead or silent server's", () => {
+  it("keeps another live server's folders, and removes a dead server's", () => {
     const other = new ReimportFolders();
     const theirs = other.create(tree, 'media');
     // A crashed server: its process is gone.
     const dead = join(tree, '.reimport-media-00000000-0000-4000-8000-000000000001');
     mkdirSync(dead);
     owner(dead, { serverId: 'gone', pid: 999_999_999, host: hostname() });
-    // A server whose process id was reused: alive pid, but its heartbeat stopped.
+    // Same machine, live process, heartbeat stopped (its touch failing): still live (review-27).
     const silent = join(tree, '.reimport-media-00000000-0000-4000-8000-000000000002');
     mkdirSync(silent);
     owner(silent, { serverId: 'silent', pid: process.pid, host: hostname() });
@@ -77,7 +79,8 @@ describe('re-import folder ownership', () => {
     // No owner file at all: a crash before it was written.
     const orphan = join(tree, '.reimport-media-00000000-0000-4000-8000-000000000003');
     mkdirSync(orphan);
-    expect(folders.sweep(tree).sort()).toEqual([dead, silent, orphan].sort());
+    expect(folders.sweep(tree).sort()).toEqual([dead, orphan].sort());
+    expect(existsSync(silent)).toBe(true);
     expect(existsSync(theirs)).toBe(true);
     other.close();
   });
@@ -166,11 +169,40 @@ describe('re-import folder ownership across machines and sleep (#246 review)', (
     const warnings: string[] = [];
     const noisy = new ReimportFolders({ warn: (message) => warnings.push(message) });
     const path = noisy.create(tree, 'media');
+    // The owner file is gone and can't be rewritten: the tree's folder is read-only.
     rmSync(`${path}.owner`);
-    rmSync(path, { recursive: true });
-    for (let n = 0; n < 5; n++) noisy.tick();
+    chmodSync(tree, 0o555);
+    try {
+      for (let n = 0; n < 5; n++) noisy.tick();
+    } finally {
+      chmodSync(tree, 0o755);
+    }
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toMatch(/heartbeat/);
     noisy.close();
+  });
+});
+
+describe('owner files written whole, and rewritten when lost (review-27)', () => {
+  it('never leaves a half-written owner file: it appears by rename, complete', () => {
+    const path = folders.create(tree, 'media');
+    // Only the folder and its complete owner file: no temporary file left behind.
+    expect(readdirSync(tree).sort()).toEqual([basename(path), `${basename(path)}.owner`].sort());
+    expect(JSON.parse(readFileSync(`${path}.owner`, 'utf8'))).toMatchObject({
+      serverId: folders.serverId,
+      pid: process.pid,
+      host: hostname(),
+    });
+  });
+
+  it('rewrites an owner file the heartbeat finds missing', () => {
+    const path = folders.create(tree, 'media');
+    rmSync(`${path}.owner`);
+    folders.tick();
+    expect(JSON.parse(readFileSync(`${path}.owner`, 'utf8')).serverId).toBe(folders.serverId);
+    // So another server's sweep still sees an owner.
+    const other = new ReimportFolders();
+    expect(other.sweep(tree)).toEqual([]);
+    other.close();
   });
 });

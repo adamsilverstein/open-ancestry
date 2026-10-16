@@ -92,8 +92,11 @@ function deletedRefs(store: TreeStore) {
   };
   const rows = store.db
     .prepare(
-      `SELECT entity, before_json FROM change_log WHERE op = 'delete'
-       AND entity IN ('note_link', 'media_link', 'citation_link', 'event', 'citation')`,
+      // Only deletes in effect: an undone batch's delete was put back.
+      `SELECT l.entity, l.before_json FROM change_log l
+       JOIN change_batch b ON b.id = l.batch_id AND b.state = 'applied'
+       WHERE l.op = 'delete'
+       AND l.entity IN ('note_link', 'media_link', 'citation_link', 'event', 'citation')`,
     )
     .all() as { entity: string; before_json: string }[];
   for (const { entity, before_json } of rows) {

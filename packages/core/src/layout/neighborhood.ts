@@ -3,6 +3,7 @@
  * core cannot depend on db, so the input is described structurally here; the
  * db `Neighborhood` type satisfies it.
  */
+import { formatLifespan, lifeDate } from '../dates';
 import type {
   ChildRelation,
   PartnerRelationship,
@@ -22,8 +23,16 @@ export interface NeighborhoodPerson {
   prefix?: string | null;
   suffix?: string | null;
   surnamePrefix?: string | null;
-  birth: { dateSort: number | null } | null;
-  death: { dateSort: number | null } | null;
+  birth: {
+    dateSort: number | null;
+    dateQualifier?: string | null;
+    dateText?: string | null;
+  } | null;
+  death: {
+    dateSort: number | null;
+    dateQualifier?: string | null;
+    dateText?: string | null;
+  } | null;
 }
 
 export interface NeighborhoodInput {
@@ -49,17 +58,6 @@ export interface NeighborhoodInput {
   moreDown: string[];
 }
 
-const year = (event: { dateSort: number | null } | null) =>
-  event?.dateSort ? Math.floor(event.dateSort / 10000) : undefined;
-
-/** `1911–1957`, `1947–Living`, `b. 1820`, `d. 1900`, or nothing (LifespanText style). */
-function lifespan(born: number | undefined, died: number | undefined, living: boolean) {
-  if (born !== undefined && died !== undefined) return `${born}–${died}`;
-  if (born !== undefined) return living ? `${born}–Living` : `b. ${born}`;
-  if (died !== undefined) return `d. ${died}`;
-  return living ? 'Living' : undefined;
-}
-
 /** One person as the layout sees them; `moreParents`/`moreChildren` are the hasMore hints. */
 export function toTreePerson(
   p: NeighborhoodPerson,
@@ -71,7 +69,12 @@ export function toTreePerson(
     .filter((part) => part)
     .join(' ');
   const person: TreePerson = { id: p.id, sex: p.sex, name, living };
-  const span = lifespan(year(p.birth), year(p.death), living);
+  // The shared formatter, so cards keep qualifiers like every other view.
+  const span = formatLifespan({
+    birth: lifeDate(p.birth),
+    death: lifeDate(p.death),
+    living: living && !p.death?.dateSort,
+  });
   if (span) person.lifespan = span;
   if (p.birth?.dateSort) person.birthSortKey = p.birth.dateSort;
   if (moreParents) person.hasMoreParents = true;

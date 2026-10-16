@@ -6,3 +6,5 @@ export type { DateStyle, GedcomVersion } from './format';
 export { parseDate } from './parse';
 export { UNDATED_SORT_KEY } from './sort-key';
 export type { Calendar, DateInput, DatePoint, DateQualifier, ParsedDate } from './types';
+export { formatLifeDate, formatLifespan, lifeDate } from './lifespan';
+export type { LifeDate, LifeQualifier, Lifespan } from './lifespan';

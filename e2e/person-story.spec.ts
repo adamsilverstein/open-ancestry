@@ -63,14 +63,15 @@ test.describe('timeline', () => {
     await expect(titles.filter({ hasText: /Birth of sister/ })).toHaveCount(0);
   });
 
-  test('keeps a family event that may follow the death before it, without an age', async ({
+  test('sorts a family event that may follow the death by its date, without an age', async ({
     page,
   }) => {
     await open(page, 'Thaddeus Ashgrove');
     const titles = await timeline(page).locator('[data-title]').allTextContents();
-    const wife = titles.indexOf('Death of wife Mercy Bellweather');
-    expect(wife).toBeGreaterThan(-1);
-    expect(wife).toBeLessThan(titles.indexOf('Death'));
+    const wife = titles.indexOf('Death of wife Mercy Bellweather (may be after his death)');
+    // "bef. 1920" sorts after his 1911 death (#278), but gets no age.
+    expect(titles.indexOf('Death')).toBeGreaterThan(-1);
+    expect(wife).toBeGreaterThan(titles.indexOf('Death'));
     const row = timeline(page).filter({ hasText: 'Death of wife Mercy Bellweather' });
     await expect(row).not.toContainText('Age');
     // Undated facts stay at the end.

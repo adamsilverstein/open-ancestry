@@ -34,6 +34,8 @@ export interface ApplyResult {
   skipped: number;
   /** Changes not applied because a change they depend on was rejected. */
   blocked: string[];
+  /** Each added person's incoming id to their id in the tree, for links to them. */
+  newPeople: Record<string, string>;
 }
 
 /**
@@ -646,11 +648,15 @@ export function applyReimport(
   }) as { batchId: string; result: number };
 
   const appliedCount = toApply.length;
+  const newPeople: Record<string, string> = {};
+  // New people keep their (fresh ULID) ids from the export's in-memory tree.
+  for (const c of toApply) if (c.kind === 'person.new') newPeople[c.incomingId] = c.incomingId;
   return {
     batchId,
     applied: appliedCount,
     skipped: changes.filter((c) => c.applicable).length - appliedCount,
     blocked,
+    newPeople,
   };
 }
 

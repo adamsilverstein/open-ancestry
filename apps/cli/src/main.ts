@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, rmdirSync, statSync } from 'node:fs';
 import { basename, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { getPersonSummary, openTree } from '@open-ancestry/db';
+import { ensurePrivateDir, getPersonSummary, openTree } from '@open-ancestry/db';
 import {
   importGedcom,
   type ImportLimits,
@@ -465,6 +465,15 @@ const stderrProgress = process.stderr.isTTY
   ? (text: string) => void process.stderr.write(text)
   : undefined;
 
+/** Removes `dir` if it is empty (a folder made for an import that failed). */
+function rmEmptyDir(dir: string): void {
+  try {
+    rmdirSync(dir);
+  } catch {
+    // Not empty, or gone already.
+  }
+}
+
 async function importCommand(
   cli: Extract<CliCommand, { command: 'import' }>,
   log: (line: string) => void,
@@ -492,15 +501,36 @@ async function importCommand(
     );
   }
   log(`Importing ${escapeControls(cli.file)} ...`);
-  const report = await importGedcom(
-    { path: cli.file },
-    { dir, name },
-    {
-      limits: cli.importLimits,
-      ...(cli.media && { mediaDir: cli.media }),
-      ...(progress && { onProgress: progressReporter(progress) }),
-    },
-  );
+  // The folder first, so the import holds the same busy lock a server's does:
+  // no server on this library renames, deletes or sweeps it meanwhile (#289).
+  ensurePrivateDir(dir);
+  let release: () => void;
+  try {
+    release = library.markBusy(name);
+  } catch (error) {
+    rmEmptyDir(dir);
+    throw error;
+  }
+  let report: ImportReport;
+  try {
+    report = await importGedcom(
+      { path: cli.file },
+      { dir, name },
+      {
+        limits: cli.importLimits,
+        ...(cli.media && { mediaDir: cli.media }),
+        ...(progress && { onProgress: progressReporter(progress) }),
+      },
+    );
+  } catch (error) {
+    release();
+    // The importer removed what it wrote; the folder made here goes too.
+    rmEmptyDir(dir);
+    throw error;
+  } finally {
+    library.closeAll();
+  }
+  release();
   const store = openTree(dir);
   let homePerson: string | null = null;
   try {

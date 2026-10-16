@@ -651,6 +651,12 @@ interface Removed {
   fact(
     ownerId: string,
     incoming: FactImage,
+    /**
+     * The incoming fact is the only unpaired one of its kind, and the tree has
+     * none of that kind left: the only deleted one of that kind is its earlier
+     * version, whatever changed (see `lone` in diffFacts).
+     */
+    lone?: boolean,
   ): { state: 'same' | 'changed'; eventId: string } | false;
   citation(ownerId: string, c: SnapCitation): boolean;
   /**
@@ -749,8 +755,11 @@ function diffFacts(
    * is the same fact, if the tree's came from an import (one the user typed in
    * is theirs, not an earlier version of the export's).
    */
+  /** The only unpaired incoming fact of its kind, for a family (see `lone`). */
+  const onlyOfKind = (ie: SnapEvent) =>
+    o.pairLoneByKind && pending.filter((x) => sameKind(x, ie)).length === 1;
   const lone = (ie: SnapEvent): SnapEvent | undefined => {
-    if (!o.pairLoneByKind || pending.filter((x) => sameKind(x, ie)).length !== 1) return undefined;
+    if (!onlyOfKind(ie)) return undefined;
     const left = o.existing.filter((ee) => !used.has(ee.row.id) && sameKind(ee, ie));
     return left.length === 1 && left[0]!.row.import_batch_id ? left[0] : undefined;
   };
@@ -810,7 +819,12 @@ function diffFacts(
       );
       diffCitations(counterpart, ie, add, undefined, removed, o.id);
     } else {
-      const deleted = removed.fact(o.id, imageOf(ie));
+      // Nothing of its kind left in the tree: a deleted one may be its earlier version.
+      const deleted = removed.fact(
+        o.id,
+        imageOf(ie),
+        onlyOfKind(ie) && !o.existing.some((ee) => !used.has(ee.row.id) && sameKind(ee, ie)),
+      );
       if (deleted && deleted.state === 'same') {
         removed.hold(o.hold);
         continue;
@@ -897,13 +911,15 @@ export function diffTrees(
     // whose date and place both changed (and has no value) shares nothing with the deleted
     // fact, so it comes back as a plain addition. Family events carry no place name here,
     // so for them only the date or value can tie the two together.
-    fact: (owner, incoming) => {
+    fact: (owner, incoming, lone = false) => {
       let changed: string | undefined;
+      const ofKind: string[] = [];
       for (const f of gone.facts.get(owner) ?? []) {
         if (f.type !== incoming.type) continue;
         const was = local.base.get(`event|${f.eventId}`) as Partial<FactImage> | undefined;
         if (!was) continue;
         if (sameImage(was, incoming)) return { state: 'same', eventId: f.eventId };
+        if (sameText(was.custom_type ?? null, incoming.custom_type)) ofKind.push(f.eventId);
         const related =
           SINGULAR.has(incoming.type) ||
           sameDate(was.date_text ?? null, incoming.date_text) ||
@@ -911,6 +927,7 @@ export function diffTrees(
           (!!incoming.value && sameText(was.value ?? null, incoming.value));
         if (related) changed ??= f.eventId;
       }
+      if (!changed && lone && ofKind.length === 1) changed = ofKind[0];
       return changed ? { state: 'changed', eventId: changed } : false;
     },
     citation: (owner, c) => gone.citations.has(`${owner}|${c.sourceKey}|${norm(c.page)}`),

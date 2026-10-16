@@ -10,6 +10,8 @@
  * pieces took 8.5 ms (review of #286).
  */
 
+import { crc32 } from 'node:zlib';
+
 /** Photo formats whose metadata can be removed; anything else is left out of a privatized export. */
 export type StripKind = 'jpeg' | 'png' | 'webp';
 
@@ -267,6 +269,45 @@ const PNG_KEEP = new Set(
   ),
 );
 
+/**
+ * The sizes the PNG specification allows for fixed-size chunks: one of
+ * another size could carry anything, so it is dropped.
+ */
+const PNG_SIZES: Record<string, readonly number[]> = {
+  IHDR: [13],
+  gAMA: [4],
+  cHRM: [32],
+  sRGB: [1],
+  pHYs: [9],
+  sBIT: [1, 2, 3, 4],
+  bKGD: [1, 2, 6],
+  cICP: [4],
+  mDCV: [24],
+  cLLI: [8],
+  acTL: [8],
+  fcTL: [26],
+  IEND: [0],
+};
+
+/** What iCCP's free-text profile name becomes (#286 review). */
+const ICC_NAME = 'ICC Profile';
+
+/** An iCCP chunk with its profile name replaced, and its CRC recomputed. */
+function renamedIccp(chunk: Uint8Array): Uint8Array | undefined {
+  const data = chunk.subarray(8, chunk.length - 4);
+  const nul = data.indexOf(0);
+  if (nul < 1 || nul > 79) return undefined;
+  const rest = data.subarray(nul);
+  const out = new Uint8Array(12 + ICC_NAME.length + rest.length);
+  const view = new DataView(out.buffer);
+  view.setUint32(0, ICC_NAME.length + rest.length);
+  out.set(chunk.subarray(4, 8), 4);
+  for (let i = 0; i < ICC_NAME.length; i++) out[8 + i] = ICC_NAME.charCodeAt(i);
+  out.set(rest, 8 + ICC_NAME.length);
+  view.setUint32(out.length - 4, crc32(out.subarray(4, out.length - 4)));
+  return out;
+}
+
 class PngStripper extends StreamStripper {
   private state: 'signature' | 'chunk' | 'done' = 'signature';
 
@@ -283,8 +324,18 @@ class PngStripper extends StreamStripper {
     const length = ((buf[0]! << 24) >>> 0) + (buf[1]! << 16) + (buf[2]! << 8) + buf[3]!;
     const type = String.fromCharCode(buf[4]!, buf[5]!, buf[6]!, buf[7]!);
     const total = 12 + length;
-    if (PNG_KEEP.has(type)) this.keep(total);
-    else this.drop(total);
+    const sizes = PNG_SIZES[type];
+    if (!PNG_KEEP.has(type) || (sizes && !sizes.includes(length))) {
+      this.drop(total);
+    } else if (type === 'iCCP') {
+      // Read whole (a compressed profile, small) to give it a fixed name.
+      if (buf.length < total) return null;
+      const renamed = renamedIccp(buf.subarray(0, total));
+      if (renamed) this.out.push(renamed);
+      return total;
+    } else {
+      this.keep(total);
+    }
     if (type === 'IEND') this.state = 'done';
     return 0;
   }

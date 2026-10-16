@@ -39,7 +39,8 @@ export interface OaJsonDocument {
 export interface ExportOptions {
   /**
    * Include change_batch and change_log (default true). Without them, import
-   * warnings (which can quote imported lines) are left out too.
+   * warnings (which can quote imported lines) are left out too, and so are
+   * places no remaining event uses (a deleted record's whereabouts).
    */
   history?: boolean;
   /**
@@ -77,11 +78,40 @@ function exportedTables(store: TreeStore, history: boolean): string[] {
     .map((t) => t.name);
 }
 
+/**
+ * Places no remaining event uses, directly or as a parent of a used place.
+ * A deleted record's events go, but its places stay as shared rows; without
+ * the history, they must not keep saying where that record was.
+ */
+function unusedPlaces(store: TreeStore): Set<string> {
+  const parent = new Map(
+    (
+      store.db.prepare('SELECT id, parent_id FROM place').all() as {
+        id: string;
+        parent_id: string | null;
+      }[]
+    ).map((p) => [p.id, p.parent_id]),
+  );
+  const used = new Set<string>();
+  const direct = store.db
+    .prepare('SELECT DISTINCT place_id FROM event WHERE place_id IS NOT NULL')
+    .pluck()
+    .all() as string[];
+  for (let id of direct as (string | null | undefined)[]) {
+    while (id && !used.has(id)) {
+      used.add(id);
+      id = parent.get(id);
+    }
+  }
+  return new Set([...parent.keys()].filter((id) => !used.has(id)));
+}
+
 export function exportJson(
   store: TreeStore,
   { history = true, omitImportedText }: ExportOptions = {},
 ): OaJsonDocument {
   const tables: Record<string, unknown[]> = {};
+  const dropPlaces = history ? new Set<string>() : unusedPlaces(store);
   for (const name of exportedTables(store, history)) {
     let rows = store.db
       .prepare(`SELECT * FROM ${name} ORDER BY ${store.plan(name).key}`)
@@ -94,6 +124,12 @@ export function exportJson(
       );
     }
     if (!history && name === 'import_batch') rows = rows.map(withoutImportedLines);
+    if (dropPlaces.size) {
+      if (name === 'place') rows = rows.filter((r) => !dropPlaces.has(String(r.id)));
+      // Links, notes' and media's owners, and imported text that belong to those places.
+      else
+        rows = rows.filter((r) => r.owner_type !== 'place' || !dropPlaces.has(String(r.owner_id)));
+    }
     tables[name] = rows;
   }
   return {

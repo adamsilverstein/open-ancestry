@@ -61,7 +61,7 @@ describe('a tree busy in another server on the same library (#275 P3)', () => {
     expect(() => second.rename('Shared', 'Moved')).toThrow(/busy in another/);
     expect(() => second.delete('Shared')).toThrow(/busy in another/);
     expect(() => second.assertIdle('Shared')).toThrow(expect.objectContaining({ statusCode: 409 }));
-    // The server holding the lock is not blocked by its own file.
+    // The server holding the lock reports its own import, not another server's.
     expect(() => first.assertIdle('Shared')).toThrow(/an import is running/);
     const again = first.markBusy('Shared');
     release();

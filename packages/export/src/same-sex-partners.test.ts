@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildGedcomExport } from './index';
-import { TODAY, ged, importInto, recordText, rows } from './test-helpers';
+import { TODAY, ged, importInto, pid, recordText, rows } from './test-helpers';
 
 /*
  * Issue #273: a regenerated 5.5.1 family wrote partner1 as HUSB and partner2
@@ -92,5 +92,18 @@ describe('5.5.1 same-sex couples keep their partner tags (#273)', () => {
     expect(slots(again)).toEqual(slots(store));
     again.db.exec('DELETE FROM raw_record');
     expect(buildGedcomExport(again, { version: '5.5.1', now: TODAY }).text).toBe(first);
+  });
+
+  it("rewrites the family's tags when a partner's sex is changed in the app", async () => {
+    // Imported as a man and a woman; then the second partner's sex is corrected to M.
+    const store = await importInto(family('M', 'F', ['HUSB', 'WIFE']));
+    const id = pid(store, '@I2@');
+    store.transact('Edit sex', (tx) => tx.update('person', id, { sex: 'M' }));
+    const out = buildGedcomExport(store, { version: '5.5.1', now: TODAY });
+    expect(
+      recordText(out.text, '@F1@')!
+        .split('\n')
+        .filter((l) => /^1 (HUSB|WIFE) /.test(l)),
+    ).toEqual(['1 HUSB @I1@', '1 HUSB @I2@']);
   });
 });

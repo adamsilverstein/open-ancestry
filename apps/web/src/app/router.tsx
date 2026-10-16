@@ -4,6 +4,7 @@ import {
   createRouter,
   lazyRouteComponent,
   notFound,
+  redirect,
 } from '@tanstack/react-router';
 import { isNotFound, isValidId } from '../api/client';
 import { currentTreeQuery, personQuery } from '../api/queries';
@@ -49,18 +50,16 @@ const treeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/tree/$personId',
   // Shareable view state: which tree, which layout, how many generations.
-  validateSearch: (search: Record<string, unknown>): TreeSearch => {
-    const valid: TreeSearch = {};
-    if (typeof search.tree === 'string' && search.tree) valid.tree = search.tree;
-    if (treeLayouts.includes(search.layout as TreeLayoutKind)) {
-      valid.layout = search.layout as TreeLayoutKind;
-    }
-    // Set even when undefined: the root route passes the raw search through,
-    // so an unset key would let `up=abc` reach the view as a string.
-    valid.up = parseGenerations(search.up);
-    valid.down = parseGenerations(search.down);
-    return valid;
-  },
+  // Every key is set, undefined when invalid: TanStack Router merges this over
+  // the raw search, so an unset key would let `?layout=bogus` through.
+  validateSearch: (search: Record<string, unknown>): TreeSearch => ({
+    tree: typeof search.tree === 'string' && search.tree ? search.tree : undefined,
+    layout: treeLayouts.includes(search.layout as TreeLayoutKind)
+      ? (search.layout as TreeLayoutKind)
+      : undefined,
+    up: parseGenerations(search.up),
+    down: parseGenerations(search.down),
+  }),
   component: lazyRouteComponent(() => import('../routes/TreePage'), 'TreePage'),
 });
 
@@ -68,9 +67,24 @@ const personRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/person/$personId',
   validateSearch: validatePersonSearch,
-  // Runs on hover/focus preload too, so the detail is usually cached by the click.
-  loader: async ({ params }) => {
+  // The URL names the tree, so Back after switching trees, or a shared link, opens the
+  // person in the tree they belong to, never a same-id person in the current one.
+  beforeLoad: async ({ params, search }) => {
+    if (search.tree) return;
     const tree = await queryClient.ensureQueryData(currentTreeQuery);
+    if (tree) {
+      throw redirect({
+        to: '/person/$personId',
+        params,
+        search: { ...search, tree },
+        replace: true,
+      });
+    }
+  },
+  loaderDeps: ({ search }) => ({ tree: search.tree }),
+  // Runs on hover/focus preload too, so the detail is usually cached by the click.
+  loader: async ({ params, deps }) => {
+    const tree = deps.tree ?? (await queryClient.ensureQueryData(currentTreeQuery));
     if (!tree) throw notFound({ data: { reason: 'no-tree' } });
     // An id that cannot exist (from a hand-typed or mangled URL) is simply not found.
     if (!isValidId(params.personId)) throw notFound();

@@ -37,22 +37,113 @@ function all<R>(store: TreeStore, sql: string, ...params: unknown[]): R[] {
 
 /** Deletes rows that hang off an owner: citation/media/note/tag links and preserved GEDCOM. */
 function deleteOwned(tx: Tx, ownerType: string, ownerId: string): void {
-  for (const table of [
-    'citation_link',
-    'media_link',
-    'note_link',
-    'tag_link',
-    'raw_record',
-    'unmapped_line',
+  const linked: [kind: 'citation' | 'media' | 'note', id: string][] = [];
+  // Pointers kept only as imported text (a NOTE inside an ASSO, an OBJE in a custom
+  // subtree) have no link row: their records are checked like linked ones (#245).
+  const pointed = textPointers(tx, ownerType, ownerId);
+  for (const [table, target, kind] of [
+    ['citation_link', 'citation_id', 'citation'],
+    ['media_link', 'media_id', 'media'],
+    ['note_link', 'note_id', 'note'],
+    ['tag_link', null, null],
+    ['raw_record', null, null],
+    ['unmapped_line', null, null],
   ] as const) {
-    for (const { id } of all<{ id: string }>(
+    for (const row of all<{ id: string; target: string | null }>(
       tx.store,
-      `SELECT id FROM ${table} WHERE owner_type = ? AND owner_id = ? ORDER BY id`,
+      `SELECT id, ${target ?? 'NULL'} AS target FROM ${table} WHERE owner_type = ? AND owner_id = ? ORDER BY id`,
       ownerType,
       ownerId,
-    ))
-      tx.delete(table, id);
+    )) {
+      tx.delete(table, row.id);
+      if (kind && row.target) linked.push([kind, row.target]);
+    }
   }
+  // Notes, media and citations exist to be attached: one left with no attachment
+  // goes with its last link (in the same batch, so undo brings it back).
+  for (const [kind, id] of linked) deleteIfUnused(tx, kind, id);
+  for (const [kind, id] of pointed) {
+    if (kind === 'source') deleteSourceIfUnused(tx, id);
+    else deleteIfUnused(tx, kind, id);
+  }
+}
+
+/** A pointer line to a NOTE, OBJE or SOUR record: `2 NOTE @N5@` (padding allowed). */
+const POINTER_LINE = /^\s*\d+\s+(?:@[^@\s]+@\s+)?(NOTE|SNOTE|OBJE|SOUR)\s+(@[^@#\s][^@\s]*@)\s*$/;
+const POINTED_KIND = { NOTE: 'note', SNOTE: 'note', OBJE: 'media', SOUR: 'source' } as const;
+
+/** The records an owner's unmapped lines point to, from the same import. */
+function textPointers(
+  tx: Tx,
+  ownerType: string,
+  ownerId: string,
+): [kind: 'media' | 'note' | 'source', id: string][] {
+  const found: [kind: 'media' | 'note' | 'source', id: string][] = [];
+  for (const row of all<{ line: string; import_batch_id: string }>(
+    tx.store,
+    'SELECT line, import_batch_id FROM unmapped_line WHERE owner_type = ? AND owner_id = ? ORDER BY id',
+    ownerType,
+    ownerId,
+  )) {
+    const m = POINTER_LINE.exec(row.line);
+    if (!m) continue;
+    const kind = POINTED_KIND[m[1] as keyof typeof POINTED_KIND];
+    const id = tx.store
+      .stmt(`SELECT id FROM ${kind} WHERE external_id = ? AND import_batch_id = ?`)
+      .pluck()
+      .get(m[2], row.import_batch_id) as string | undefined;
+    if (id) found.push([kind, id]);
+  }
+  return found;
+}
+
+/** Deletes a note, media or citation nothing links to any more. */
+function deleteIfUnused(tx: Tx, kind: 'citation' | 'media' | 'note', id: string): void {
+  if (!tx.store.getRow(kind, id)) return;
+  const used =
+    kind === 'note'
+      ? tx.store.stmt('SELECT 1 FROM note_link WHERE note_id = ?').get(id)
+      : kind === 'media'
+        ? tx.store.stmt('SELECT 1 FROM media_link WHERE media_id = ?').get(id) ||
+          tx.store.stmt('SELECT 1 FROM person WHERE primary_media_id = ?').get(id)
+        : tx.store.stmt('SELECT 1 FROM citation_link WHERE citation_id = ?').get(id);
+  if (used || (kind !== 'citation' && pointedToInText(tx, kind, id))) return;
+  if (kind === 'note') notes.delete(tx, id);
+  else if (kind === 'media') media.delete(tx, id);
+  else {
+    const { source_id } = tx.store.getRow('citation', id)!;
+    citations.delete(tx, id);
+    deleteSourceIfUnused(tx, source_id);
+  }
+}
+
+/**
+ * Whether another imported record's text still points to a NOTE, OBJE or SOUR
+ * record: ASSO and custom subtrees are kept as text, not as links.
+ */
+function pointedToInText(tx: Tx, kind: 'media' | 'note' | 'source', id: string): boolean {
+  const xref = tx.store.getRow(kind, id)?.external_id;
+  if (!xref) return false;
+  return !!tx.store
+    .stmt(`SELECT 1 FROM raw_record WHERE xref IS NOT ? AND instr(raw_text, ' ' || ?) > 0 LIMIT 1`)
+    .get(xref, xref);
+}
+
+/**
+ * A source whose last citation a delete removed goes too, unless it is shared
+ * reference data: kept in a repository, or with notes or media of its own.
+ */
+function deleteSourceIfUnused(tx: Tx, id: string): void {
+  const source = tx.store.getRow('source', id);
+  if (!source || source.repository_id) return;
+  const used =
+    tx.store.stmt('SELECT 1 FROM citation WHERE source_id = ?').get(id) ||
+    tx.store
+      .stmt(
+        "SELECT 1 FROM note_link WHERE owner_type = 'source' AND owner_id = ? UNION ALL SELECT 1 FROM media_link WHERE owner_type = 'source' AND owner_id = ?",
+      )
+      .get(id, id);
+  if (!used && !pointedToInText(tx, 'source', id)) sources.delete(tx, id);
 }
 
 /** Deletes events that no longer have any role. */
@@ -152,6 +243,12 @@ export const persons = {
    */
   delete(tx: Tx, id: string) {
     if (!tx.store.getRow('person', id)) throw new NotFoundError('person', id);
+    // Aliases record who was merged into this person; they go with the person.
+    const aliases = tx.store
+      .stmt('SELECT id FROM person_alias WHERE person_id = ?')
+      .pluck()
+      .all(id) as string[];
+    for (const alias of aliases) tx.delete('person_alias', alias);
     for (const n of names.list(tx.store, id)) {
       deleteOwned(tx, 'person_name', n.id);
       tx.delete('person_name', n.id);
@@ -173,7 +270,11 @@ export const persons = {
       if (!updated.partner1_id && !updated.partner2_id && !hasChildren)
         families.delete(tx, family.id);
     }
+    // Their primary photo goes with them unless someone else uses it.
+    const photo = tx.store.getRow('person', id)!.primary_media_id;
+    if (photo) tx.update('person', id, { primary_media_id: null });
     deleteOwned(tx, 'person', id);
+    if (photo) deleteIfUnused(tx, 'media', photo);
     if (meta.getHomePersonId(tx.store) === id) tx.delete('meta', 'home_person_id');
     return tx.delete('person', id);
   },

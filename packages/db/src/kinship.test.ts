@@ -1,6 +1,4 @@
 import fc from 'fast-check';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -18,6 +16,7 @@ import {
 } from './index';
 import { kinshipStats } from './kinship';
 import { memoryTree, seedSmallFamily } from './test/helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 describe('getRelationship (whole tree)', () => {
   it('names blood, spouse and in-law ties anywhere in the tree', () => {
@@ -137,6 +136,9 @@ describe('getRelationship keeps its graph current', () => {
     store.transact('tag', (tx) => tags.create(tx, { name: 'Research' }));
     store.transact('meta', (tx) => meta.setHomePerson(tx, f.me));
     store.transact('note', (tx) => notes.create(tx, { text: 'A note' }));
+    // Columns the graph does not read.
+    store.transact('living', (tx) => tx.update('person', f.dad, { living: 'dead' }));
+    store.transact('privacy', (tx) => tx.update('family', f.parentsFamily, { privacy: 'private' }));
     expect(getRelationship(store, f.kid, f.dad).name).toBe('grandson');
     expect(kinshipStats).toEqual(before);
   });
@@ -225,7 +227,7 @@ describe('getRelationship keeps its graph current', () => {
   });
 
   it('reloads after a write from another connection', () => {
-    const dir = join(mkdtempSync(join(tmpdir(), 'oa-kin-')), 'k.oatree');
+    const dir = join(makeTempDir('oa-kin-'), 'k.oatree');
     const store = createTree(dir);
     const f = seedSmallFamily(store);
     expect(getRelationship(store, f.spouse, f.sister).name).toBe('sister-in-law');

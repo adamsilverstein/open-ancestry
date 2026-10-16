@@ -9,6 +9,7 @@ import type {
 import type { Importer, JobManager } from './jobs';
 import type { Library } from './library';
 import type { ThumbnailQueue } from './thumbnails';
+import type { ReimportFolders } from './reimport-folders';
 import type { ReimportSessions } from './reimports';
 
 export type Api = FastifyInstance<
@@ -34,4 +35,6 @@ export interface Deps {
   thumbnails: ThumbnailQueue;
   /** Re-imports waiting for review. */
   reimports: ReimportSessions;
+  /** This server's re-import working folders (see reimport-folders.ts). */
+  reimportFolders: ReimportFolders;
 }

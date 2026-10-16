@@ -74,6 +74,28 @@ function yearScore(a: number | null, b: number | null): number | null {
 }
 
 /**
+ * How far apart two people's births are, in years, counting a range
+ * (`BET 1940 AND 1949`, BEF, AFT) as every year it covers: 0 when they
+ * overlap. Null when either is unknown or a range too wide to say anything.
+ */
+function birthGapOf(a: SnapPerson, b: SnapPerson): number | null {
+  if (a.birthYear === null || b.birthYear === null) return null;
+  const aStart = a.birthRange?.start ?? a.birthYear;
+  const aEnd = a.birthRange?.end ?? a.birthYear;
+  const bStart = b.birthRange?.start ?? b.birthYear;
+  const bEnd = b.birthRange?.end ?? b.birthYear;
+  if (aEnd - aStart > MAX_RANGE_YEARS || bEnd - bStart > MAX_RANGE_YEARS) return null;
+  return Math.max(0, aStart - bEnd, bStart - aEnd);
+}
+
+/** Birth agreement, 0..1: the same year scores 1; overlapping a range scores as a year or two off. */
+function birthScore(a: SnapPerson, b: SnapPerson, gap = birthGapOf(a, b)): number | null {
+  if (gap === null) return null;
+  if (gap === 0 && !a.birthRange && !b.birthRange) return 1;
+  return gap <= 2 ? 0.7 : gap <= 5 ? 0.3 : 0;
+}
+
+/**
  * Evidence score of a pair, without relatives. `corroboration` counts the
  * independent agreements beyond the name (birth year, death year, birth
  * place; a shared Ancestry record counts twice).
@@ -148,9 +170,11 @@ function baseScore(
   const reasons: string[] = [];
   const shared = [...i.apids].filter((apid) => e.apids.has(apid));
   const name = nameMatch(e, i);
+  const gap = birthGapOf(e, i);
+  const birth = birthScore(e, i, gap);
   const parts: [number, number | null][] = [
     [0.5, name.score],
-    [0.2, yearScore(e.birthYear, i.birthYear)],
+    [0.2, birth],
     [0.15, yearScore(e.deathYear, i.deathYear)],
     [0.15, e.birthPlace && i.birthPlace ? (e.birthPlace === i.birthPlace ? 1 : 0.2) : null],
   ];
@@ -163,7 +187,7 @@ function baseScore(
   }
   let score = total / weight;
   if (name.reason) reasons.push(name.reason);
-  if (e.birthYear !== null && e.birthYear === i.birthYear) reasons.push('same birth year');
+  if (birth === 1) reasons.push('same birth year');
   if (e.deathYear !== null && e.deathYear === i.deathYear) reasons.push('same death year');
   if (e.birthPlace && e.birthPlace === i.birthPlace) reasons.push('same birth place');
   const sexKnown = e.row.sex !== 'U' && i.row.sex !== 'U';
@@ -171,8 +195,7 @@ function baseScore(
     score *= 0.3;
     reasons.push('different sex');
   }
-  const birthGap =
-    e.birthYear !== null && i.birthYear !== null ? Math.abs(e.birthYear - i.birthYear) : 0;
+  const birthGap = gap ?? 0;
   // A corrected birth year is common; matched relatives (second pass) can still confirm the pair.
   if (birthGap > 10) score *= 0.5;
   if (shared.length && !(sexKnown && e.row.sex !== i.row.sex)) {
@@ -194,7 +217,7 @@ function baseScore(
     }
   }
   const corroboration =
-    ((yearScore(e.birthYear, i.birthYear) ?? 0) >= 0.7 ? 1 : 0) +
+    ((birth ?? 0) >= 0.7 ? 1 : 0) +
     ((yearScore(e.deathYear, i.deathYear) ?? 0) >= 0.7 ? 1 : 0) +
     (e.birthPlace && e.birthPlace === i.birthPlace ? 1 : 0) +
     (shared.length ? 2 : 0);
@@ -202,22 +225,252 @@ function baseScore(
 }
 
 /**
- * Blocking keys: only people sharing one are compared. Given and surname
- * sounds (for every name the person has, so married names meet birth names),
- * and surname sound with birth year (for a changed given name).
+ * Blocking: only people who share a key are compared. Comparing everyone who
+ * shares a name sound made matching quadratic in how common a name is (#202),
+ * so every key below takes a bounded number of tree people, nearest first,
+ * however a file's dates are arranged (review-39). For one incoming person:
+ *
+ * - Same-name tree people by birth year: those within NEAR_YEARS (at most
+ *   MAX_SAME_YEARS), then outward up to YEAR_WINDOW years until MAX_NEAR.
+ * - Same-name tree people who died the same year, the MAX_NEAR nearest by
+ *   birth year, however far: an export that turns "BET 1920 AND 1929" into
+ *   "1 JAN 1929" moves the birth year further than the nearest few reach.
+ * - Same-name tree people born in a range (`BET 1940 AND 1949`, or 30 years
+ *   before BEF / after AFT) that covers this birth year, the MAX_RANGE_HITS
+ *   whose range ends nearest it (a range is usually refined to its end).
+ *   A range wider than MAX_RANGE_YEARS says too little and counts as undated.
+ * - Same-name tree people without a birth year, at most MAX_UNDATED.
+ * - A name with at most SMALL_BLOCK tree people is compared in full: rare
+ *   names reach any birth year, so a typo like 1857 for 1875 still finds them.
+ * - Surname sound with the exact birth year finds a changed given name; a
+ *   crowded key is used only for people with no namesake born nearby, and
+ *   at most MAX_SURNAME_YEAR of it.
  */
-const blockKeys = (p: SnapPerson): string[] => {
-  const keys = new Set<string>();
-  const given = p.given ? soundex(p.given) : '';
-  const surnames = new Set([p.surname, ...p.names.map((n) => norm(n.surname))].filter(Boolean));
-  for (const surname of surnames) {
-    const s = soundex(surname);
-    keys.add(`n:${given}:${s}`);
-    if (p.birthYear !== null) keys.add(`y:${s}:${p.birthYear}`);
+const NEAR_YEARS = 2;
+const YEAR_WINDOW = 15;
+const MAX_NEAR = 8;
+const MAX_SAME_YEARS = 12;
+const MAX_RANGE_YEARS = 30;
+const MAX_RANGE_HITS = 12;
+const SMALL_BLOCK = 16;
+const MAX_UNDATED = 64;
+const MAX_SURNAME_YEAR = 64;
+/** An Ancestry record id held by more tree people than this is not a blocking key. */
+const MAX_APID_HOLDERS = 32;
+
+/**
+ * Given and surname sounds, for every name the person has: married names meet
+ * birth names, and an alternate given name ("Joe" for Joseph) meets records
+ * that use it (#234). Initials ("J.") are left out: their sound is too broad.
+ * Each key gets the same bounded walk, so a common nickname stays cheap.
+ */
+function nameKeys(p: SnapPerson): { names: string[]; surnames: string[] } {
+  // Names normalized once per person (see prepare), not on every call.
+  const prepared = prepare(p).names;
+  const raw = new Set([p.given, ...prepared.map((n) => n.given)].filter(Boolean));
+  const givens = [...new Set([...raw].filter((g) => g.length >= 2).map((g) => soundex(g)))];
+  if (!givens.length) givens.push(p.given ? soundex(p.given) : '');
+  const surnames = [
+    ...new Set(
+      [p.surname, ...prepared.map((n) => n.surname)].filter(Boolean).map((s) => soundex(s)),
+    ),
+  ];
+  const names = surnames.flatMap((s) => givens.map((g) => `${g}:${s}`));
+  if (!names.length) for (const g of givens) if (g) names.push(`${g}:`);
+  return { names, surnames };
+}
+
+/** The birth year blocking uses: none for a range too wide to say anything. */
+function blockingYear(p: SnapPerson): number | null {
+  if (p.birthYear === null) return null;
+  const range = p.birthRange;
+  return range && range.end - range.start > MAX_RANGE_YEARS ? null : p.birthYear;
+}
+
+/** Tree people sorted by birth year, and those without one. */
+interface YearList {
+  years: number[];
+  ids: string[];
+  undated: string[];
+}
+
+const emptyList = (): YearList => ({ years: [], ids: [], undated: [] });
+
+function push<K>(map: Map<K, string[]>, key: K, id: string): void {
+  const list = map.get(key);
+  if (list) list.push(id);
+  else map.set(key, [id]);
+}
+
+/** Adds up to `max` ids from `ids` to `into`. */
+function takeSome(ids: string[] | undefined, max: number, into: Set<string>): void {
+  if (!ids) return;
+  for (let k = 0; k < ids.length && k < max; k++) into.add(ids[k]!);
+}
+
+/** The tree's people indexed by blocking key. */
+class Blocks {
+  private readonly byName = new Map<string, YearList>();
+  private readonly byNameDeath = new Map<string, YearList>();
+  /** People born in a range, sorted by the range's last year. */
+  private readonly byNameRange = new Map<
+    string,
+    { ends: number[]; starts: number[]; ids: string[] }
+  >();
+  private readonly bySurnameYear = new Map<string, string[]>();
+
+  constructor(people: Iterable<SnapPerson>) {
+    const dated = new Map<YearList, { year: number; id: string }[]>();
+    const ranged = new Map<string, { start: number; end: number; id: string }[]>();
+    const add = (map: Map<string, YearList>, key: string, year: number | null, id: string) => {
+      let list = map.get(key);
+      if (!list) {
+        list = emptyList();
+        map.set(key, list);
+        dated.set(list, []);
+      }
+      if (year === null) list.undated.push(id);
+      else dated.get(list)!.push({ year, id });
+    };
+    for (const p of people) {
+      const id = p.row.id;
+      const year = blockingYear(p);
+      const { names, surnames } = nameKeys(p);
+      for (const name of names) {
+        add(this.byName, name, year, id);
+        if (p.deathYear !== null) add(this.byNameDeath, `${name}@${p.deathYear}`, year, id);
+        const range = p.birthRange;
+        if (year !== null && range) {
+          const list = ranged.get(name);
+          if (list) list.push({ ...range, id });
+          else ranged.set(name, [{ ...range, id }]);
+        }
+      }
+      if (year !== null) for (const s of surnames) push(this.bySurnameYear, `${s}:${year}`, id);
+    }
+    for (const [list, entries] of dated) {
+      entries.sort((a, b) => a.year - b.year);
+      list.years = entries.map((x) => x.year);
+      list.ids = entries.map((x) => x.id);
+    }
+    for (const [name, entries] of ranged) {
+      entries.sort((a, b) => a.end - b.end);
+      this.byNameRange.set(name, {
+        ends: entries.map((x) => x.end),
+        starts: entries.map((x) => x.start),
+        ids: entries.map((x) => x.id),
+      });
+    }
   }
-  if (!surnames.size && given) keys.add(`n:${given}:`);
-  return [...keys];
-};
+
+  /** Adds the tree people worth comparing with an incoming person to `into`. */
+  candidates(p: SnapPerson, into: Set<string>): void {
+    const { names, surnames } = nameKeys(p);
+    const year = blockingYear(p);
+    /** Whether a same-name tree person was born within NEAR_YEARS. */
+    let nearby = false;
+    for (const name of names) {
+      const block = this.byName.get(name);
+      if (!block) continue;
+      if (block.ids.length + block.undated.length <= SMALL_BLOCK) {
+        for (const id of block.ids) into.add(id);
+        for (const id of block.undated) into.add(id);
+        if (year !== null) nearby ||= block.years.some((y) => Math.abs(y - year) <= NEAR_YEARS);
+        continue;
+      }
+      takeSome(block.undated, MAX_UNDATED, into);
+      if (p.deathYear !== null) {
+        const sameDeath = this.byNameDeath.get(`${name}@${p.deathYear}`);
+        if (sameDeath) {
+          if (year === null) takeSome(sameDeath.ids, MAX_NEAR, into);
+          else nearestByYear(sameDeath, year, into, Infinity);
+          takeSome(sameDeath.undated, MAX_NEAR, into);
+        }
+      }
+      if (year === null) continue;
+      nearby = nearestByYear(block, year, into, YEAR_WINDOW) || nearby;
+      // A range refined to one of its years ("BET 1940 AND 1949" to 1949) is still near.
+      const ranges = this.byNameRange.get(name);
+      if (ranges) rangesCovering(ranges, year, into);
+    }
+    if (year === null) return;
+    for (const s of surnames) {
+      const ids = this.bySurnameYear.get(`${s}:${year}`) ?? [];
+      // A crowded surname-and-year key is only a fallback, for someone with no
+      // same-name tree person nearby (their given name may have changed).
+      if (ids.length <= MAX_NEAR || !nearby) takeSome(ids, MAX_SURNAME_YEAR, into);
+    }
+  }
+}
+
+/**
+ * Adds up to MAX_RANGE_HITS people whose birth range covers `year` (give or
+ * take NEAR_YEARS), those whose range ends nearest it first.
+ */
+function rangesCovering(
+  ranges: { ends: number[]; starts: number[]; ids: string[] },
+  year: number,
+  into: Set<string>,
+): void {
+  const { ends, starts, ids } = ranges;
+  // First range that ends no earlier than year - NEAR_YEARS.
+  let lo = 0;
+  let hi = ends.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (ends[mid]! < year - NEAR_YEARS) lo = mid + 1;
+    else hi = mid;
+  }
+  let hits = 0;
+  // A range is at most MAX_RANGE_YEARS long, so one ending later cannot start
+  // in time. The scan is bounded too: crafted ranges that all start too late
+  // must not be walked one by one for every incoming person.
+  const stop = Math.min(ends.length, lo + 4 * MAX_RANGE_HITS);
+  for (let k = lo; k < stop && ends[k]! <= year + NEAR_YEARS + MAX_RANGE_YEARS; k++) {
+    if (starts[k]! > year + NEAR_YEARS) continue;
+    into.add(ids[k]!);
+    if (++hits >= MAX_RANGE_HITS) return;
+  }
+}
+
+/**
+ * Walks out from `year` in both directions, nearest birth year first: those
+ * within NEAR_YEARS (at most MAX_SAME_YEARS), then outward up to `window`
+ * years until MAX_NEAR are taken. Returns whether anyone was born within
+ * NEAR_YEARS.
+ */
+function nearestByYear(list: YearList, year: number, into: Set<string>, window: number): boolean {
+  const { years, ids } = list;
+  // First index with a birth year >= `year`.
+  let lo = 0;
+  let hi = years.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (years[mid]! < year) lo = mid + 1;
+    else hi = mid;
+  }
+  let left = lo - 1;
+  let right = lo;
+  let taken = 0;
+  let near = false;
+  for (;;) {
+    const dl = left >= 0 ? year - years[left]! : Infinity;
+    const dr = right < years.length ? years[right]! - year : Infinity;
+    const d = Math.min(dl, dr);
+    if (d === Infinity || d > window || taken >= MAX_SAME_YEARS) return near;
+    if (d > NEAR_YEARS && taken >= MAX_NEAR) return near;
+    if (d <= NEAR_YEARS) near = true;
+    if (dl <= dr) into.add(ids[left--]!);
+    else into.add(ids[right++]!);
+    taken++;
+  }
+}
+
+/** Counters for tests and profiling. */
+export interface MatchStats {
+  /** Pairs scored. */
+  comparisons: number;
+}
 
 interface Candidate {
   e: string;
@@ -255,7 +508,14 @@ function assign(
   const byIncoming = new Map<string, Candidate>();
   const taken = new Map<string, number>();
   for (const c of [...candidates].sort(
-    (x, y) => y.score - x.score || (x.i < y.i ? -1 : x.i > y.i ? 1 : 0),
+    // On equal scores, more agreeing facts win: a namesake with no birth year
+    // scores as high on what little it has, but is the weaker pairing.
+    (x, y) =>
+      y.score - x.score ||
+      y.corroboration - x.corroboration ||
+      (x.i < y.i ? -1 : x.i > y.i ? 1 : 0) ||
+      // Same incoming record: by tree id, so the result never depends on insertion order.
+      (x.e < y.e ? -1 : x.e > y.e ? 1 : 0),
   )) {
     const used = taken.get(c.e) ?? 0;
     if (c.score < MATCH_THRESHOLD || byIncoming.has(c.i) || used >= capacity(c.e)) continue;
@@ -274,22 +534,22 @@ export function matchPeople(
   existing: Snapshot,
   incoming: Snapshot,
   nearMisses?: Map<string, NearMiss>,
+  stats?: MatchStats,
 ): Map<string, PersonMatch> {
-  // Candidate pairs: same surname sound, same given-name sound and birth year, or a shared record.
-  const blocks = new Map<string, string[]>();
+  // Candidate pairs: same name sounds and birth era, same surname sound and birth year, or a shared record.
+  const blocks = new Blocks(existing.people.values());
   const byApid = new Map<string, string[]>();
   for (const e of existing.people.values()) {
-    for (const key of blockKeys(e)) {
-      const list = blocks.get(key);
-      if (list) list.push(e.row.id);
-      else blocks.set(key, [e.row.id]);
-    }
     for (const apid of e.apids) {
       const list = byApid.get(apid);
       if (list) list.push(e.row.id);
       else byApid.set(apid, [e.row.id]);
     }
   }
+  // A record cited by many tree people (a census household, a book page, or a
+  // crafted file) says little about any one of them, and pairing everyone who
+  // cites it would be quadratic: such ids are not used for blocking.
+  for (const [apid, ids] of byApid) if (ids.length > MAX_APID_HOLDERS) byApid.delete(apid);
   const capacity = new Map<string, number>();
   for (const owner of existing.importXrefs.values())
     capacity.set(owner, (capacity.get(owner) ?? 0) + 1);
@@ -301,9 +561,10 @@ export function matchPeople(
     // Ancestry sometimes keeps xrefs between exports: the last import's mapping is a hint.
     const sameXref = i.row.external_id ? existing.importXrefs.get(i.row.external_id) : undefined;
     if (sameXref) ids.add(sameXref);
-    for (const key of blockKeys(i)) for (const id of blocks.get(key) ?? []) ids.add(id);
+    blocks.candidates(i, ids);
     for (const apid of i.apids) for (const id of byApid.get(apid) ?? []) ids.add(id);
     for (const id of ids) {
+      if (stats) stats.comparisons++;
       const base = baseScore(existing.people.get(id)!, i);
       let { score } = base;
       const reasons = [...base.reasons];

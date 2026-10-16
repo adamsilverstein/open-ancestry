@@ -163,6 +163,17 @@ test('the cancelled page has its heading focused and no accessibility violations
   await expect(heading).toBeVisible({ timeout: 30_000 });
   await expect(heading).toBeFocused();
   // Let the toast's entrance animation finish: mid-fade colors fail contrast.
+  // Wait for the toast itself first: it mounts a render after the heading, so
+  // document.getAnimations() alone could run before its fade has started.
+  const toast = page
+    .getByRole('region', { name: /Notifications/ })
+    .getByRole('listitem')
+    .filter({ hasText: 'Import cancelled' });
+  await expect(toast).toBeVisible();
+  await toast.evaluate((el) =>
+    Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished.catch(() => undefined))),
+  );
+  await expect(toast).toHaveCSS('opacity', '1');
   await page.evaluate(() =>
     Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined))),
   );

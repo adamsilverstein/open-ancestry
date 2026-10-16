@@ -1,10 +1,10 @@
-import { mkdir, mkdtemp, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { link, mkdir, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Library } from './library';
 import { MEDIA_CSP, parseRange, resolveMediaPath, sniffMediaType } from './routes/media';
 import { createTestTree, testApi, type TestApi } from './test/helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 let api: TestApi;
 let base: string;
@@ -20,7 +20,7 @@ function addMedia(fields: { local_path?: string | null; mime?: string | null }) 
 
 describe('with a tree', () => {
   beforeEach(async () => {
-    const root = await mkdtemp(join(tmpdir(), 'oa-lib-'));
+    const root = makeTempDir('oa-lib-');
     library = new Library(root);
     api = await testApi({ library });
     base = await createTestTree(api);
@@ -121,13 +121,39 @@ describe('with a tree', () => {
     });
 
     it('refuses symlinks that escape the media folder', async () => {
-      const outside = join(await mkdtemp(join(tmpdir(), 'oa-secret-')), 'secret.txt');
+      const outside = join(makeTempDir('oa-secret-'), 'secret.txt');
       await writeFile(outside, 'secret');
       await symlink(outside, join(library.root, 'Test.oatree', 'media', 'link.txt'));
       const id = addMedia({ local_path: 'link.txt' });
       const res = await api.get(`${base}/media/${id}`);
       expect(res.statusCode).toBe(404);
       expect(res.body).not.toContain('secret');
+    });
+
+    it('refuses a hard-linked file and logs why, once per file (#207)', async () => {
+      const outside = join(makeTempDir('oa-secret-'), 'secret.jpg');
+      await writeFile(outside, BYTES);
+      // A name with an escape character: the log line must not pass it to the terminal.
+      const name = 'hard\u001b[31m.jpg';
+      await link(outside, join(library.root, 'Test.oatree', 'media', name));
+      const id = addMedia({ local_path: name });
+      // The shipped CLI runs with logger: false, so the refusal goes to stderr itself.
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        for (let i = 0; i < 2; i++) {
+          const res = await api.get(`${base}/media/${id}`);
+          expect(res.statusCode).toBe(404);
+          expect(res.rawPayload.equals(BYTES)).toBe(false);
+        }
+        const logged = warn.mock.calls
+          .map((call) => call.join(' '))
+          .filter((l) => l.includes('hard link'));
+        expect(logged).toHaveLength(1);
+        expect(logged[0]).toContain('hard\\x1b[31m.jpg');
+        expect(logged[0]).not.toContain('\u001b');
+      } finally {
+        warn.mockRestore();
+      }
     });
 
     it('accepts only the named thumbnail sizes', async () => {

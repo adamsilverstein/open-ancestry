@@ -1,6 +1,5 @@
 import { existsSync, statSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -8,6 +7,7 @@ import type { TreeStore } from '@open-ancestry/db';
 import { Library } from './library';
 import { THUMB_SIZES, ThumbnailQueue } from './thumbnails';
 import { MUTATION_HEADERS, seed, testApi, type Seeded, type TestApi } from './test/helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 let api: TestApi;
 let library: Library;
@@ -75,7 +75,7 @@ function attach(
 }
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'oa-gallery-'));
+  root = makeTempDir('oa-gallery-');
   library = new Library(root);
   api = await testApi({ library });
   s = await seed(api);
@@ -107,6 +107,10 @@ describe('thumbnails', () => {
       expect(meta.format).toBe('webp');
       expect(Math.max(meta.width!, meta.height!)).toBe(Math.min(edge, 400));
       expect(existsSync(join(treeDir(), 'thumbs', `${id}-${size}.webp`))).toBe(true);
+      // Private whatever the process umask (#85).
+      if (process.platform !== 'win32') {
+        expect(statSync(join(treeDir(), 'thumbs', `${id}-${size}.webp`)).mode & 0o777).toBe(0o600);
+      }
     }
     const cached = join(treeDir(), 'thumbs', `${id}-sm.webp`);
     const before = statSync(cached).mtimeMs;
@@ -148,7 +152,7 @@ describe('thumbnails', () => {
   });
 
   it('runs after an import job completes', async () => {
-    const lib = new Library(await mkdtemp(join(tmpdir(), 'oa-gallery-import-')));
+    const lib = new Library(makeTempDir('oa-gallery-import-'));
     const imported = await testApi({
       library: lib,
       importer: async (_path, store) => {
@@ -253,6 +257,10 @@ describe('attaching media', () => {
     });
     expect(media.local_path).toMatch(/^attached\/[0-9a-f]{12}-Ada at 20\.png$/);
     expect(existsSync(join(treeDir(), 'media', ...media.local_path.split('/')))).toBe(true);
+    if (process.platform !== 'win32') {
+      const stored = join(treeDir(), 'media', ...media.local_path.split('/'));
+      expect(statSync(stored).mode & 0o777).toBe(0o600);
+    }
     const listed = (await api.get(`${s.base}/people/${s.ada}/media`)).json();
     expect(listed.items.map((i: { media: { id: string } }) => i.media.id)).toContain(media.id);
   });
@@ -367,7 +375,7 @@ describe('attaching media', () => {
 
 describe('containment', () => {
   it('never writes thumbnails or attachments through a symlinked folder', async () => {
-    const outside = await mkdtemp(join(tmpdir(), 'oa-outside-'));
+    const outside = makeTempDir('oa-outside-');
     await rm(join(treeDir(), 'thumbs'), { recursive: true, force: true });
     await symlink(outside, join(treeDir(), 'thumbs'));
     const id = addMedia({ local_path: 'photos/big.png' });
@@ -383,7 +391,7 @@ describe('containment', () => {
   });
 
   it('does not serve a thumbnail that is a symlink out of the tree', async () => {
-    const outside = await mkdtemp(join(tmpdir(), 'oa-outside-'));
+    const outside = makeTempDir('oa-outside-');
     await writeFile(join(outside, 'secret.webp'), 'secret');
     const id = addMedia({ local_path: 'photos/letter.pdf', kind: 'document' });
     await mkdir(join(treeDir(), 'thumbs'), { recursive: true });

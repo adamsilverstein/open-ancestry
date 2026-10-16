@@ -28,7 +28,8 @@ export function HomePage() {
       const { homePersonId } = await getTree(id);
       if (homePersonId)
         await navigate({ to: '/tree/$personId', params: { personId: homePersonId } });
-      else toast({ title: `“${id}” has no people yet` });
+      // An empty tree opens on its people list, which offers Add person.
+      else await navigate({ to: '/people' });
     } catch (error) {
       toast({ title: 'Could not open the tree', description: String(error), variant: 'error' });
     }
@@ -58,7 +59,7 @@ export function HomePage() {
                     iconStart={<TreeDeciduous size={16} aria-hidden />}
                     onClick={() => void open(tree.id)}
                   >
-                    {tree.name}
+                    {tree.label}
                   </Button>
                 ))}
               </nav>

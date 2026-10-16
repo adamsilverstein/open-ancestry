@@ -1,3 +1,5 @@
+import { cpSync } from 'node:fs';
+import { join } from 'node:path';
 import AxeBuilder from '@axe-core/playwright';
 import type { Locator, Page } from '@playwright/test';
 import { expect, test } from './fixtures';
@@ -146,7 +148,44 @@ test.describe('family view', () => {
     await expect(quick).toContainText('Died 5 Sep 1957');
     await expect(card(page, 'Bram Vale')).toHaveAttribute('aria-expanded', 'true');
     await quick.getByRole('link', { name: 'Profile' }).click();
-    await expect(page).toHaveURL(new RegExp(`/person/${ids.bram}$`));
+    await expect(page).toHaveURL(new RegExp(`/person/${ids.bram}(\\?tree=[^&]*)?$`));
+  });
+
+  test('quick view Edit opens the editor, not just the profile (#134)', async ({ page }) => {
+    await open(page);
+    await card(page, 'Bram Vale').click();
+    await page
+      .getByRole('dialog', { name: 'Bram Vale' })
+      .getByRole('button', { name: 'Edit' })
+      .click();
+    await expect(page).toHaveURL(new RegExp(`/person/${ids.bram}\\?edit=true(&tree=[^&]*)?$`));
+    const editor = page.getByRole('dialog', { name: 'Edit person' });
+    await expect(editor).toBeVisible();
+    // Closing the editor leaves the plain profile URL, so reload does not reopen it.
+    await page.keyboard.press('Escape');
+    await expect(editor).toHaveCount(0);
+    await expect(page).toHaveURL(new RegExp(`/person/${ids.bram}(\\?tree=[^&]*)?$`));
+    // Focus lands on the header's Edit person button, not lost on the page.
+    await expect(page.getByRole('button', { name: 'Edit person' })).toBeFocused();
+  });
+
+  test('quick view says Living once (#134)', async ({ page }) => {
+    await open(page);
+    await card(page, 'Wren Ash').click();
+    const quick = page.getByRole('dialog', { name: 'Wren Ash' });
+    await expect(quick).toContainText('Living');
+    await expect(quick.getByText(/Living/)).toHaveCount(1);
+  });
+
+  test('cards without a photo show a silhouette tinted by sex, without a badge (#134)', async ({
+    page,
+  }) => {
+    await open(page);
+    for (const name of ['Bram Vale', 'Elsa Hale']) {
+      const c = card(page, name);
+      await expect(c.locator('[data-fallback="silhouette"] svg.lucide-user-round')).toHaveCount(1);
+      await expect(c.locator('svg.lucide-mars, svg.lucide-venus')).toHaveCount(0);
+    }
   });
 
   test('Escape closes the quick view and returns focus to the card', async ({ page }) => {
@@ -195,6 +234,90 @@ test.describe('family view', () => {
         return Math.abs(b.x + b.width / 2 - (viewport.x + viewport.width / 2));
       })
       .toBeLessThan(2);
+  });
+
+  for (const motion of ['reduce', 'no-preference'] as const) {
+    test(`the view reads as settled only once its cards are final (motion: ${motion})`, async ({
+      page,
+    }) => {
+      // Fit lands just under the light-card zoom, so the cards swap elements. In
+      // CI the swap could commit after data-animating cleared, detaching a card a
+      // test had just found ("not visible"). Watch the moment it clears: the
+      // cards must already match the zoom. Reduced motion jumps straight there;
+      // otherwise the last animation frame ends it, which is where CI raced.
+      await page.emulateMedia({ reducedMotion: motion });
+      if (motion === 'no-preference') {
+        // Frames as late as on a loaded CI runner: each one is stamped a second
+        // on, so the animation's first frame is its last and crosses the
+        // light-card zoom itself, the case that raced.
+        await page.addInitScript(() => {
+          const raf = window.requestAnimationFrame.bind(window);
+          window.requestAnimationFrame = (callback) => raf((time) => callback(time + 1000));
+        });
+      }
+      await open(page);
+      await page.evaluate((key) => {
+        const w = window as unknown as { __atSettle: string[] };
+        w.__atSettle = [];
+        const world = document.querySelector<HTMLElement>('[data-testid="tree-world"]')!;
+        new MutationObserver(() => {
+          if ('animating' in world.dataset) return;
+          const light = Number(world.dataset.scale) < 0.6;
+          const el = world.querySelector<HTMLElement>(`[data-key="${key}"]`);
+          const shown = el?.className.includes('lightCard') ?? false;
+          w.__atSettle.push(light === shown ? 'final' : 'pending');
+        }).observe(world, { attributes: true, attributeFilter: ['data-animating'] });
+      }, ids.ada);
+      for (const name of ['Fit to screen', 'Zoom in', 'Fit to screen']) {
+        await page.getByRole('button', { name }).click();
+        await settled(page);
+        await expect(card(page, 'Ada Vale')).toBeVisible();
+      }
+      const states = await page.evaluate(
+        () => (window as unknown as { __atSettle: string[] }).__atSettle,
+      );
+      expect(states).toEqual(['final', 'final', 'final']);
+    });
+  }
+
+  test('a re-focus reads as settled only once the new focus card is shown', async ({ page }) => {
+    // With reduced motion the re-focus ends synchronously, before the new
+    // person's cards are even queued: the settle must wait for them, not for
+    // the old cards that happen to cover the same grid cells.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await open(page);
+    await page.evaluate((key) => {
+      const w = window as unknown as { __atSettle: string[] };
+      w.__atSettle = [];
+      // The whole page: the re-focus may give the canvas a new world element.
+      new MutationObserver((records) => {
+        const world = records.at(-1)!.target as HTMLElement;
+        if (world.dataset.testid !== 'tree-world' || 'animating' in world.dataset) return;
+        // The focus card: a CSS-module class at card zoom, data-focus as a canvas dot.
+        const el = world.querySelector<HTMLElement>(`[data-key="${key}"]`);
+        const shown = !!el && (el.className.includes('focusPerson') || 'focus' in el.dataset);
+        w.__atSettle.push(shown ? 'final' : 'pending');
+      }).observe(document.body, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['data-animating'],
+      });
+    }, ids.bram);
+    await card(page, 'Ada Vale').focus();
+    await page.keyboard.press('ArrowUp');
+    await expect(card(page, 'Bram Vale')).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
+    // The new layout arrives from the worker after the URL changes: wait for it
+    // (and its settle) before reading what the observer saw at the settle.
+    await expect(
+      canvas(page).locator(`[data-key="${ids.bram}"][class*="focusPerson"]`),
+    ).toBeAttached();
+    await settled(page);
+    const states = await page.evaluate(
+      () => (window as unknown as { __atSettle: string[] }).__atSettle,
+    );
+    expect(states).toEqual(['final']);
   });
 
   test('expanding ancestors reveals fetched generations and lazy-loads more without moving the focus card', async ({
@@ -491,6 +614,8 @@ test.describe('family view', () => {
 
     // Single-key shortcuts only act while focus is in the tree (WCAG 2.1.4).
     await expect(card(page, 'Ada Vale')).toHaveAccessibleName(/focus person/);
+    // Keyboard focus follows the re-focus to Ada; let it land before moving on.
+    await expect(card(page, 'Ada Vale')).toBeFocused();
     await card(page, 'Bram Vale').focus();
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
@@ -759,6 +884,199 @@ test.describe('family view', () => {
     await expect(card(page, 'Ada Vale')).toHaveCount(0);
   });
 
+  test('switching trees from a tree view opened without ?tree opens the new tree', async ({
+    page,
+  }) => {
+    // The family tree is the current one (runs after the fixture's own init script).
+    await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+    await page.goto(`/tree/${ids.ada}?layout=pedigree&up=3`);
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    const switcher = page.getByRole('banner').getByRole('button', { name: /Tree:/ });
+    await switcher.click();
+    await page.getByRole('menuitemradio', { name: seed.perf.tree }).click();
+    await expect(page).toHaveURL(new RegExp(`/tree/${seed.perf.focusId}(\\?|$)`));
+    // The view keeps its layout and generations in the new tree.
+    await expect(page).toHaveURL(/layout=pedigree/);
+    await expect(page).toHaveURL(/up=3/);
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    await expect(card(page, 'Ada Vale')).toHaveCount(0);
+    await expect(page.getByText('Person not found')).toHaveCount(0);
+  });
+
+  test('switching trees from a person page opens the new tree, never the old person', async ({
+    page,
+  }) => {
+    await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+    await page.goto(`/person/${ids.ada}`);
+    await expect(page.getByRole('heading', { level: 1, name: /Ada Vale/ })).toBeVisible();
+    const switcher = page.getByRole('banner').getByRole('button', { name: /Tree:/ });
+    await switcher.click();
+    await page.getByRole('menuitemradio', { name: seed.perf.tree }).click();
+    await expect(page).toHaveURL(new RegExp(`/tree/${seed.perf.focusId}(\\?|$)`));
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    await expect(page.getByText('Ada Vale')).toHaveCount(0);
+  });
+
+  test('Back to a person page after switching trees shows that tree, even with shared ids', async ({
+    page,
+    request,
+    baseURL,
+  }, testInfo) => {
+    const { token } = (await (await request.get('/api/session')).json()) as { token: string };
+    const headers = { origin: baseURL!, 'x-oa-token': token };
+    // A copied tree folder keeps every id: the same person id names a person in both trees.
+    const library = process.env.OA_E2E_LIBRARY!;
+    const folder = `copy ${testInfo.workerIndex} ${Date.now()}`;
+    const copy = `${folder} b`;
+    cpSync(join(library, `${tree}.oatree`), join(library, `${folder}.oatree`), { recursive: true });
+    const api = `/api/trees/${encodeURIComponent(copy)}`;
+    try {
+      const renamed = await request.patch(`/api/trees/${encodeURIComponent(folder)}`, {
+        data: { name: copy },
+        headers,
+      });
+      expect(renamed.ok(), await renamed.text()).toBe(true);
+      const detail = await (await request.get(`${api}/people/${ids.ada}`)).json();
+      const nameId = detail.names[0].id as string;
+      expect(
+        (
+          await request.patch(`${api}/names/${nameId}`, { data: { given: 'Adacopy' }, headers })
+        ).ok(),
+      ).toBe(true);
+
+      await page.addInitScript((t) => localStorage.setItem('oa-tree', t), copy);
+      await page.goto(`/person/${ids.ada}`);
+      await expect(page.getByRole('heading', { level: 1, name: /Adacopy Vale/ })).toBeVisible();
+      // The person URL names its tree, so history entries stay in that tree.
+      await expect(page).toHaveURL(new RegExp(`/person/${ids.ada}\\?.*tree=`));
+      const switcher = page.getByRole('banner').getByRole('button', { name: /Tree:/ });
+      await switcher.click();
+      await page.getByRole('menuitemradio', { name: tree, exact: true }).click();
+      // The family tree's home person (Ada) opens in the tree view.
+      await expect(page).toHaveURL(new RegExp(`/tree/${ids.ada}\\?`));
+      await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+      await expect(switcher).toContainText(tree);
+
+      await page.goBack();
+      await expect(page.getByRole('heading', { level: 1, name: /Adacopy Vale/ })).toBeVisible();
+      // The copy is current again, so edits from here go to it.
+      await expect(switcher).toContainText(copy);
+      await page.reload();
+      await expect(page.getByRole('heading', { level: 1, name: /Adacopy Vale/ })).toBeVisible();
+    } finally {
+      await request.delete(api, { headers });
+    }
+  });
+
+  test('a tree without a home person points to the people list', async ({
+    page,
+    request,
+    baseURL,
+  }, testInfo) => {
+    const { token } = (await (await request.get('/api/session')).json()) as { token: string };
+    const headers = { origin: baseURL!, 'x-oa-token': token };
+    const empty = `empty ${testInfo.workerIndex} ${Date.now()}`;
+    expect((await request.post('/api/trees', { data: { name: empty }, headers })).ok()).toBe(true);
+    try {
+      await page.goto(`/tree/home?tree=${encodeURIComponent(empty)}`);
+      await expect(page.getByRole('heading', { name: 'No home person' })).toBeVisible();
+      await page.getByRole('link', { name: 'Open the people list' }).click();
+      await expect(page).toHaveURL(/\/people/);
+    } finally {
+      await request.delete(`/api/trees/${encodeURIComponent(empty)}`, { headers });
+    }
+  });
+
+  test('renaming the open tree keeps the person page working', async ({
+    page,
+    request,
+    baseURL,
+  }, testInfo) => {
+    const { token } = (await (await request.get('/api/session')).json()) as { token: string };
+    const headers = { origin: baseURL!, 'x-oa-token': token };
+    const library = process.env.OA_E2E_LIBRARY!;
+    const folder = `rename ${testInfo.workerIndex} ${Date.now()}`;
+    const renamed = `${folder} renamed`;
+    cpSync(join(library, `${tree}.oatree`), join(library, `${folder}.oatree`), { recursive: true });
+    try {
+      await page.addInitScript((t) => localStorage.setItem('oa-tree', t), folder);
+      await page.goto(`/person/${ids.ada}`);
+      await expect(page.getByRole('heading', { level: 1, name: /Ada Vale/ })).toBeVisible();
+      const switcher = page.getByRole('banner').getByRole('button', { name: /Tree:/ });
+      await switcher.click();
+      await page.getByRole('menuitem', { name: 'Rename tree…' }).click();
+      const dialog = page.getByRole('dialog', { name: 'Rename tree' });
+      await dialog.getByLabel('Tree name').fill(renamed);
+      await dialog.getByRole('button', { name: 'Rename' }).click();
+      await expect(dialog).toBeHidden();
+      // The URL follows the tree's new name, so a reload (or an edit) still finds it.
+      await expect(page).toHaveURL(
+        new RegExp(`tree=${encodeURIComponent(renamed).replace(/%20/g, '(\\+|%20)')}`),
+      );
+      await page.reload();
+      await expect(page.getByRole('heading', { level: 1, name: /Ada Vale/ })).toBeVisible();
+      await expect(switcher).toContainText(renamed);
+    } finally {
+      await request.delete(`/api/trees/${encodeURIComponent(renamed)}`, { headers });
+      await request.delete(`/api/trees/${encodeURIComponent(folder)}`, { headers });
+    }
+  });
+
+  test('a new tree made from a person page opens it, never the old person', async ({
+    page,
+    request,
+    baseURL,
+  }, testInfo) => {
+    const { token } = (await (await request.get('/api/session')).json()) as { token: string };
+    const headers = { origin: baseURL!, 'x-oa-token': token };
+    const created = `new ${testInfo.workerIndex} ${Date.now()}`;
+    try {
+      await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+      await page.goto(`/person/${ids.ada}`);
+      await expect(page.getByRole('heading', { level: 1, name: /Ada Vale/ })).toBeVisible();
+      const switcher = page.getByRole('banner').getByRole('button', { name: /Tree:/ });
+      await switcher.click();
+      await page.getByRole('menuitem', { name: 'New tree…' }).click();
+      const dialog = page.getByRole('dialog', { name: 'New tree' });
+      await dialog.getByLabel('Tree name').fill(created);
+      await dialog.getByRole('button', { name: 'Create tree' }).click();
+      await expect(dialog).toBeHidden();
+      await expect(switcher).toContainText(created);
+      // The empty tree opens on its people list, ready to add someone.
+      await expect(page).toHaveURL(/\/people$/);
+      await expect(page.getByRole('button', { name: 'Add person' })).toBeVisible();
+      await expect(page.getByText('Ada Vale')).toHaveCount(0);
+    } finally {
+      await request.delete(`/api/trees/${encodeURIComponent(created)}`, { headers });
+    }
+  });
+
+  test('changing tabs on a person page keeps the tree in the URL', async ({ page }) => {
+    // Dropping ?tree= would redirect against whichever tree is current.
+    await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+    await page.goto(`/person/${ids.ada}`);
+    await expect(page).toHaveURL(/[?&]tree=/);
+    await page.getByRole('tab', { name: 'Sources' }).click();
+    await expect(page).toHaveURL(/[?&]tab=sources/);
+    await expect(page).toHaveURL(
+      new RegExp(`[?&]tree=${encodeURIComponent(tree).replace(/%20/g, '(%20|\\+)')}`),
+    );
+    await page.getByRole('tab', { name: 'Facts' }).click();
+    await expect(page).not.toHaveURL(/[?&]tab=/);
+    await expect(page).toHaveURL(/[?&]tree=/);
+  });
+
+  test('switching trees on the people list stays on the people list', async ({ page }) => {
+    await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+    await page.goto('/people');
+    await expect(page.getByRole('cell', { name: 'Abel Vale' })).toBeVisible();
+    const switcher = page.getByRole('banner').getByRole('button', { name: /Tree:/ });
+    await switcher.click();
+    await page.getByRole('menuitemradio', { name: seed.perf.tree }).click();
+    await expect(page).toHaveURL(/\/people/);
+    await expect(page.getByRole('cell', { name: 'Abel Vale' })).toHaveCount(0);
+  });
+
   test('/tree/home opens the home person', async ({ page }) => {
     await page.goto(`/tree/home?tree=${encodeURIComponent(tree)}`);
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.ada}\\?`));
@@ -878,6 +1196,20 @@ test.describe('pedigree, descendant and fan views', () => {
     await expect(empty).not.toHaveCount(0);
     await expect(empty.first()).toHaveAttribute('aria-hidden', 'true');
   });
+});
+
+test.describe('hand-edited layouts (#146)', () => {
+  for (const layout of ['bogus', 'descendant', 'toString', '__proto__']) {
+    test(`layout=${layout} opens the family view`, async ({ page }) => {
+      await open(page, 'ada', `&layout=${layout}`);
+      await expect(page.getByRole('heading', { name: 'Something went wrong' })).toHaveCount(0);
+      await expect(page.getByText('Could not load the tree')).toHaveCount(0);
+      await expect(card(page, 'Ada Vale')).toBeAttached();
+      await expect(
+        page.getByRole('toolbar', { name: 'Tree tools' }).getByRole('button', { name: /Layout/ }),
+      ).toHaveAccessibleName('Layout: Family view');
+    });
+  }
 });
 
 test.describe('generation depth in the URL', () => {
@@ -1007,6 +1339,155 @@ test.describe('fan chart keyboard', () => {
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?.*layout=fan`));
     await expect(segment(page, 'Bram Vale')).toHaveAccessibleName(/focus person/);
     await expect(segment(page, 'Bram Vale')).toBeFocused();
+  });
+});
+
+for (const [width, height] of [
+  [320, 568],
+  [390, 844],
+  [568, 320],
+  [680, 900],
+  [844, 390],
+] as const) {
+  test.describe(`quick view at ${width}x${height}`, () => {
+    test.use({ viewport: { width, height }, hasTouch: true });
+
+    test('stays on screen, below the top bar, off its card, with reachable actions', async ({
+      page,
+    }) => {
+      // Four cards, each opened, measured and closed.
+      test.slow();
+      await open(page);
+      await settled(page);
+      // The minimap picks its corner after the view settles; measure after that,
+      // or a card clear of it now can be under it in the next fresh view.
+      await minimapRested(page);
+      const topBar = (await page.getByRole('banner').boundingBox())!;
+      const top = topBar.y + topBar.height;
+      const touchTargets = await page.evaluate(
+        () => window.matchMedia('(pointer: coarse), (max-width: 640px)').matches,
+      );
+      // The leftmost, rightmost, topmost and bottommost cards fully on screen and
+      // not under the toolbar or minimap.
+      const onScreen = await page.evaluate(
+        ({ top, width, height }) =>
+          [...document.querySelectorAll<HTMLElement>('[role="application"] [data-key]')]
+            .map((el) => ({ key: el.dataset.key!, b: el.getBoundingClientRect() }))
+            .filter(({ key, b }) => {
+              if (b.x < 0 || b.y < top || b.right > width || b.bottom > height) return false;
+              const hit = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+              return hit?.closest<HTMLElement>('[data-key]')?.dataset.key === key;
+            })
+            .map(({ key, b }) => ({ key, x: b.x, y: b.y })),
+        { top, width, height },
+      );
+      expect(onScreen.length).toBeGreaterThanOrEqual(1);
+      const by = (f: (o: (typeof onScreen)[number]) => number) =>
+        [...onScreen].sort((a, b) => f(a) - f(b))[0]!.key;
+      const picks = [
+        ...new Set([by((o) => o.x), by((o) => -o.x), by((o) => o.y), by((o) => -o.y)]),
+      ].map((key) => canvas(page).locator(`[data-key="${key}"]`));
+      for (const [i, target] of picks.entries()) {
+        // Each from a fresh view: closing with Escape returns keyboard focus to the
+        // card, which may scroll the view to show it.
+        if (i > 0) {
+          await open(page);
+          await settled(page);
+          await minimapRested(page);
+        }
+        const name = (await target.getAttribute('aria-label'))!.split(',')[0]!;
+        const cardBox = await box(target);
+        await target.tap();
+        const quick = page.getByRole('dialog', { name });
+        await expect(quick).toBeVisible();
+        // Let the positioning settle (it can take a frame or two after opening).
+        let b = await box(quick);
+        await expect
+          .poll(async () => {
+            const now = await box(quick);
+            const same = now.x === b.x && now.y === b.y && now.height === b.height;
+            b = now;
+            return same;
+          })
+          .toBe(true);
+        expect(b.x, name).toBeGreaterThanOrEqual(0);
+        expect(b.y, name).toBeGreaterThanOrEqual(top);
+        expect(b.x + b.width, name).toBeLessThanOrEqual(width);
+        expect(b.y + b.height, name).toBeLessThanOrEqual(height);
+        // It does not cover the card it describes.
+        const overlap =
+          b.x < cardBox.x + cardBox.width &&
+          cardBox.x < b.x + b.width &&
+          b.y < cardBox.y + cardBox.height &&
+          cardBox.y < b.y + b.height;
+        expect(
+          overlap,
+          `${name} covered by its quick view: ${JSON.stringify({ b, cardBox })}`,
+        ).toBe(false);
+        // The name stays in sight, not scrolled under the actions.
+        const title = quick.getByText(name, { exact: true });
+        const t = await box(title);
+        const shown = await page.evaluate(
+          ({ x, y }) => document.elementFromPoint(x, y)?.textContent ?? '',
+          { x: t.x + Math.min(t.width / 2, 20), y: t.y + t.height / 2 },
+        );
+        expect(shown, `${name} hidden in its quick view`).toBe(name);
+        const actions = [
+          quick.getByRole('link', { name: 'Profile' }),
+          quick.getByRole('button', { name: 'Make focus' }),
+          quick.getByRole('button', { name: 'Edit' }),
+        ];
+        // Initial focus is on the first action.
+        await expect(actions[0]!).toBeFocused();
+        for (const action of actions) {
+          const a = await box(action);
+          expect(a.x, name).toBeGreaterThanOrEqual(0);
+          expect(a.y, name).toBeGreaterThanOrEqual(top);
+          expect(a.x + a.width, name).toBeLessThanOrEqual(width);
+          expect(a.y + a.height, name).toBeLessThanOrEqual(height);
+          if (touchTargets) {
+            expect(a.height).toBeGreaterThanOrEqual(44);
+            expect(a.width).toBeGreaterThanOrEqual(44);
+          }
+        }
+        await page.keyboard.press('Escape');
+        await expect(quick).toHaveCount(0);
+      }
+    });
+  });
+}
+
+test.describe('quick view above a bottom toolbar', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+  test('keeps clear of the phone layout bottom bar', async ({ page }) => {
+    await open(page);
+    await settled(page);
+    // Stand in for the phone toolbar: the layout publishes its height on the tree region.
+    const bar = 120;
+    await page.evaluate((height) => {
+      document
+        .querySelector<HTMLElement>('[data-tree-region]')!
+        .style.setProperty('--oa-tree-bottom-bar', `${height}px`);
+    }, bar);
+    // Pan so Ada's card ends where the popover fits below it on the bare screen
+    // but not above the bar.
+    const ada = await box(card(page, 'Ada Vale'));
+    const dy = 500 - (ada.y + ada.height);
+    await page.mouse.move(200, 400);
+    await page.mouse.down();
+    await page.mouse.move(200, 400 + dy, { steps: 5 });
+    await page.mouse.up();
+    const lowest = ids.ada;
+    expect(lowest).toBeTruthy();
+    const target = canvas(page).locator(`[data-key="${lowest}"]`);
+    const name = (await target.getAttribute('aria-label'))!.split(',')[0]!;
+    await target.tap();
+    const quick = page.getByRole('dialog', { name });
+    await expect(quick).toBeVisible();
+    await expect
+      .poll(async () => (await box(quick)).y + (await box(quick)).height)
+      .toBeLessThanOrEqual(844 - bar);
   });
 });
 
@@ -1197,6 +1678,15 @@ test.describe('wide descendant charts (#74)', () => {
     // The minimap re-checks its corner 150ms after each pan settles.
     await expect(check).toPass({ timeout: 2000 });
   });
+});
+
+test('the fan has no minimap, so its toolbar offers none (#134)', async ({ page }) => {
+  await open(page, 'ada', '&layout=fan');
+  const tools = page.getByRole('toolbar', { name: 'Tree tools' });
+  await expect(tools.getByRole('button', { name: 'Fit to screen' })).toBeVisible();
+  await expect(tools.getByRole('button', { name: 'Minimap' })).toHaveCount(0);
+  await page.keyboard.press('m');
+  await expect(page.getByTestId('tree-minimap')).toHaveCount(0);
 });
 
 test.describe('fan labels (#137)', () => {

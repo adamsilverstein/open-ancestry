@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from 'react';
-import { useNavigate } from '@tanstack/react-router';
+import { useRef, useState, type FormEvent } from 'react';
+import { useLocation, useNavigate } from '@tanstack/react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Button } from '../components/Button/Button';
@@ -15,6 +15,7 @@ import {
   MenuTrigger,
 } from '../components/Menu/Menu';
 import { useToast } from '../components/Toast/Toast';
+import type { TreeLayout } from '../components/TreeToolbar/TreeToolbar';
 import {
   createTree,
   currentTreeQuery,
@@ -42,26 +43,73 @@ export default function TreeSwitcher() {
   const [name, setName] = useState('');
   const [error, setError] = useState<string | undefined>();
   const [pending, setPending] = useState(false);
+  const nameInput = useRef<HTMLInputElement>(null);
 
-  const currentName = trees.find((t) => t.id === current)?.name ?? current;
+  const currentTree = trees.find((t) => t.id === current);
+  const currentName = currentTree?.label ?? current;
+  const pathname = useLocation({ select: (l) => l.pathname });
+  const urlTree = useLocation({ select: (l) => (l.search as { tree?: unknown }).tree });
+
+  /**
+   * Makes `id` the open tree; create, rename and switch all come through here.
+   * A page that shows one person (the tree view, a person page) moves to the
+   * new tree's home person when another tree opens: it must never go on
+   * showing, or editing, someone from the tree that was open. Pages about the
+   * whole tree (people list, home) stay and follow the current tree. A rename
+   * keeps the page and rewrites its `?tree=`, which names the old folder.
+   */
+  async function goToTree(id: string, how: 'open' | 'rename') {
+    // setCurrentTree updates the current tree before it awaits anything, so the
+    // home route below already resolves the new tree.
+    const switched = setCurrentTree(queryClient, id);
+    if (how === 'rename') {
+      if (urlTree) {
+        await navigate({
+          to: '.',
+          search: (prev: Record<string, unknown>) => ({ ...prev, tree: id }),
+          replace: true,
+        });
+      }
+    } else if (/^\/(tree|person)\//.test(pathname)) {
+      // The tree view keeps its layout and generations; the new tree's home person is the focus.
+      await navigate({
+        to: '/tree/$personId',
+        params: { personId: 'home' },
+        search: (prev) => {
+          const { layout, up, down } = prev as { layout?: TreeLayout; up?: number; down?: number };
+          return { layout, up, down };
+        },
+      });
+    }
+    await switched;
+  }
 
   function open(next: Mode) {
     setMode(next);
     setError(undefined);
-    setName(next === 'rename' ? (currentName ?? '') : '');
+    // Rename edits the stored name, not the label with its folder suffix.
+    setName(next === 'rename' ? (currentTree?.name ?? current ?? '') : '');
   }
 
   async function submit(event?: FormEvent) {
     event?.preventDefault();
+    if (mode !== 'delete' && !name.trim()) {
+      // Spaces pass `required`; say what is missing instead of sending it.
+      setError('Enter a tree name');
+      nameInput.current?.focus();
+      return;
+    }
     setPending(true);
     setError(undefined);
     try {
       if (mode === 'create') {
         const tree = await createTree(name.trim());
         await setCurrentTree(queryClient, tree.id);
+        // A new tree is empty: its people list offers Add person.
+        await navigate({ to: '/people' });
       } else if (mode === 'rename' && current) {
         const tree = await renameTree(current, name.trim());
-        await setCurrentTree(queryClient, tree.id);
+        await goToTree(tree.id, 'rename');
       } else if (mode === 'delete' && current) {
         await deleteTree(current);
         const rest = trees.filter((t) => t.id !== current);
@@ -110,11 +158,11 @@ export default function TreeSwitcher() {
               <MenuSeparator />
               <MenuRadioGroup
                 value={current ?? ''}
-                onValueChange={(id) => void setCurrentTree(queryClient, id)}
+                onValueChange={(id) => void goToTree(id, 'open')}
               >
                 {trees.map((tree) => (
                   <MenuRadioItem key={tree.id} value={tree.id}>
-                    {tree.name}
+                    {tree.label}
                   </MenuRadioItem>
                 ))}
               </MenuRadioGroup>
@@ -139,6 +187,7 @@ export default function TreeSwitcher() {
       >
         <form id="tree-name-form" onSubmit={(event) => void submit(event)}>
           <Input
+            ref={nameInput}
             label="Tree name"
             value={name}
             onChange={(event) => setName(event.target.value)}

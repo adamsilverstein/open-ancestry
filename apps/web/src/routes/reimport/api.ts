@@ -15,18 +15,20 @@ export type ReviewChange = {
   key: string;
   defaultAccept: boolean;
   applicable: boolean;
-  conflict?: 'local-edit' | 'local-delete';
+  conflict?: 'local-edit' | 'local-delete' | 'renamed-place';
   requires?: string[];
 } & (
   | { kind: 'person.new'; incomingId: string }
   | { kind: 'sex'; before: string; after: string }
-  | { kind: 'name.add'; name: string; nameType: string }
+  | { kind: 'name.add'; name: string; nameType: string | null; was?: string }
   | { kind: 'fact.add'; fact: FactView; owner: 'person' | 'family' }
-  | { kind: 'fact.change'; before: FactView; after: FactView }
+  | { kind: 'fact.change'; before: FactView; after: FactView; keepPlace?: true }
   | { kind: 'fact.missing'; fact: FactView }
   | { kind: 'citation.add'; source: string; page: string | null; apid: string | null }
   | { kind: 'tag.add'; tag: string }
   | { kind: 'media.add'; title: string | null }
+  | { kind: 'media.file'; title: string | null }
+  | { kind: 'media.replace'; title: string | null }
   | { kind: 'family.add'; partnerNames: string[] }
   | { kind: 'child.add'; parentNames: string[] }
   | { kind: 'person.missing' }
@@ -95,10 +97,13 @@ export const refreshReimport = (id: string) =>
   apiSend<ReimportReview>('POST', `/reimports/${seg(id)}/refresh`);
 
 export const applyReimport = (id: string, comparison: number, accept: string[]) =>
-  apiSend<{ batchId: string; applied: number; skipped: number; blocked: string[] }>(
-    'POST',
-    `/reimports/${seg(id)}/apply`,
-    { accept, comparison },
-  );
+  apiSend<{
+    batchId: string;
+    applied: number;
+    skipped: number;
+    blocked: string[];
+    /** Added people's incoming ids to their ids in the tree. */
+    newPeople: Record<string, string>;
+  }>('POST', `/reimports/${seg(id)}/apply`, { accept, comparison });
 
 export const discardReimport = (id: string) => apiSend<void>('DELETE', `/reimports/${seg(id)}`);

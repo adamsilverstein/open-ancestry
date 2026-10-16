@@ -9,7 +9,7 @@ import type {
   RelationshipType,
   Sex,
 } from '@open-ancestry/db';
-import { seg } from '../../../api/client';
+import { isNotFound, seg } from '../../../api/client';
 import { useEdit } from '../../../api/edits';
 import { ApiError, apiSend } from '../../../api/client';
 import { rememberDeletedPerson, undoRedo } from '../../../api/history';
@@ -25,6 +25,8 @@ import { useToast } from '../../../components/Toast/Toast';
 import { fullName, isLivingStatus, nearestRelative } from '../../../lib/person';
 import { useOpenRestored } from '../../../lib/useOpenRestored';
 import { applyNames, applyPerson, nameChanges, toDraft, type NameDraft } from './optimistic';
+import { useDirtyForm } from './dirty';
+import { rebaseNames, rebaseValue } from './rebase';
 import { SaveError, useSaveState } from './SaveError';
 import styles from './Edit.module.css';
 
@@ -69,6 +71,15 @@ export const CHILD_RELATIONSHIPS: { value: ChildRelationship; label: string }[] 
 
 type LivingChoice = 'infer' | 'living' | 'dead';
 
+const LIVING_LABELS: Record<LivingChoice, string> = {
+  infer: 'Work out from dates',
+  living: 'Living',
+  dead: 'Deceased',
+};
+
+const optionLabel = (options: { value: string; label: string }[], value: string) =>
+  options.find((o) => o.value === value)?.label ?? value;
+
 function livingChoice(status: LivingStatus): LivingChoice {
   return status === 'living' ? 'living' : status === 'dead' ? 'dead' : 'infer';
 }
@@ -110,10 +121,21 @@ interface EditPersonDialogProps {
   detail: PersonDetail;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Where focus goes on close (call `event.preventDefault()` and focus it yourself). */
+  onCloseAutoFocus?: (event: Event) => void;
 }
 
 /** Names (all types), sex, living status, relationship to each parent, and delete. */
-export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPersonDialogProps) {
+export function EditPersonDialog({
+  tree,
+  detail: opened,
+  open,
+  onOpenChange,
+  onCloseAutoFocus,
+}: EditPersonDialogProps) {
+  // The person as the form opened: a save is a diff against it and carries it as
+  // `expect`, so a change from another tab meanwhile is refused, not overwritten.
+  const [detail, setDetail] = useState(opened);
   const id = detail.person.id;
   const base = `/trees/${seg(tree)}`;
   const edit = useEdit(tree);
@@ -128,6 +150,11 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
   const [living, setLiving] = useState<LivingChoice>(livingChoice(detail.person.living));
   const [links, setLinks] = useState<ParentLink[]>(() => parentLinks(detail));
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // After Reload form: fields both sides changed, what changed, and a reload that failed.
+  const [conflicts, setConflicts] = useState<Map<string, string>>(() => new Map());
+  const [notice, setNotice] = useState<string | null>(null);
+  const [reloadError, setReloadError] = useState<string | null>(null);
+  useDirtyForm({ names, sex, living, links });
   // Given names is what people edit most, so focus starts there.
   const firstGiven = useRef<HTMLInputElement>(null);
   const name = fullName(detail.summary);
@@ -144,19 +171,21 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
     // draft, so the "nothing changed" check below would close the dialog and lose the
     // edits if that save then fails.
     if (edit.isPending) return;
+    setNotice(null);
     const removed = detail.names.filter((row) => !names.some((n) => n.id === row.id));
     const operations: Record<string, unknown>[] = names.flatMap((draft) => {
       const row = detail.names.find((n) => n.id === draft.id);
       const body = nameChanges(draft, row);
       if (row && Object.keys(body).length === 0) return [];
+      // `expect`: the row as this form saw it, so the server refuses a save made from old data.
       return [
         row
-          ? { op: 'name.update', id: row.id, name: body }
+          ? { op: 'name.update', id: row.id, name: body, expect: row }
           : { op: 'name.add', personId: id, name: body },
       ];
     });
     // Removed after the adds, so a person never has no name mid-batch.
-    for (const row of removed) operations.push({ op: 'name.delete', id: row.id });
+    for (const row of removed) operations.push({ op: 'name.delete', id: row.id, expect: row });
     const personPatch: { sex?: Sex; living?: LivingStatus } = {};
     if (sex !== detail.person.sex) personPatch.sex = sex;
     // `unknown` asks the server to infer the status from dates again.
@@ -164,16 +193,23 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
       personPatch.living = living === 'infer' ? 'unknown' : living;
     }
     if (Object.keys(personPatch).length > 0) {
-      operations.push({ op: 'person.update', id, patch: personPatch });
+      operations.push({
+        op: 'person.update',
+        id,
+        patch: personPatch,
+        expect: { updated_at: detail.person.updated_at },
+      });
     }
     const before = parentLinks(detail);
-    for (const link of links.filter((l, i) => l.rel !== before[i]?.rel)) {
+    links.forEach((link, i) => {
+      if (link.rel === before[i]?.rel) return;
       operations.push({
         op: 'familyChild.update',
         id: link.linkId,
         patch: { [link.slot]: link.rel },
+        expect: { [link.slot]: before[i]!.rel },
       });
-    }
+    });
 
     if (operations.length === 0) return onOpenChange(false);
     const label = `Edit person: ${name}`;
@@ -188,6 +224,75 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
       ...saveState.handlers(),
     });
   }
+
+  /** After a stale refusal: the latest data, with what the user changed kept (rebase.ts). */
+  async function reload() {
+    setReloadError(null);
+    let latest: PersonDetail;
+    try {
+      latest = await queryClient.fetchQuery({ ...personQuery(tree, id), staleTime: 0 });
+    } catch (error) {
+      setReloadError(
+        isNotFound(error)
+          ? `${name} was deleted (in another window or by undo), so the form cannot reload.`
+          : `Could not reload the form: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return;
+    }
+    const found = new Map<string, string>();
+    const rebased = rebaseNames(names, detail.names, latest.names);
+    for (const [key, value] of rebased.conflicts) {
+      const field = key.slice(key.lastIndexOf(':') + 1);
+      found.set(key, field === 'type' ? optionLabel(NAME_TYPES, value) : value);
+    }
+    setNames(rebased.names);
+    const nextSex = rebaseValue(sex, detail.person.sex, latest.person.sex);
+    if (nextSex.conflict) found.set('sex', optionLabel(SEX_OPTIONS, latest.person.sex));
+    setSex(nextSex.value);
+    const nextLiving = rebaseValue(
+      living,
+      livingChoice(detail.person.living),
+      livingChoice(latest.person.living),
+    );
+    if (nextLiving.conflict) found.set('living', LIVING_LABELS[livingChoice(latest.person.living)]);
+    setLiving(nextLiving.value);
+    const opened = parentLinks(detail);
+    setLinks(
+      parentLinks(latest).map((link) => {
+        const was = opened.find((l) => l.linkId === link.linkId && l.slot === link.slot);
+        const mine = links.find((l) => l.linkId === link.linkId && l.slot === link.slot);
+        if (!was || !mine) return link;
+        const rel = rebaseValue(mine.rel, was.rel, link.rel);
+        if (rel.conflict) {
+          found.set(`link:${link.linkId}:${link.slot}`, optionLabel(CHILD_RELATIONSHIPS, link.rel));
+        }
+        return { ...link, rel: rel.value };
+      }),
+    );
+    setConflicts(found);
+    setNotice(
+      [
+        'Reloaded with the latest data; your changes are kept.',
+        found.size > 0 &&
+          `${found.size === 1 ? 'One field was' : `${found.size} fields were`} also changed elsewhere; check the marked ${found.size === 1 ? 'field' : 'fields'} before saving.`,
+        rebased.primaryDropped &&
+          'The name you made primary was deleted elsewhere, so the primary name is unchanged.',
+      ]
+        .filter(Boolean)
+        .join(' '),
+    );
+    setDetail(latest);
+    saveState.reset();
+    firstGiven.current?.focus();
+  }
+
+  /** Marks a field the user and someone else both changed (after Reload form). */
+  const elsewhere = (key: string) => {
+    const other = conflicts.get(key);
+    return other === undefined
+      ? undefined
+      : `Also changed elsewhere, to “${other || 'blank'}”. Saving keeps your value.`;
+  };
 
   function deletePerson() {
     onOpenChange(false);
@@ -238,6 +343,7 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
   return (
     <>
       <Dialog
+        {...(onCloseAutoFocus ? { onCloseAutoFocus } : {})}
         open={open}
         onOpenChange={onOpenChange}
         title="Edit person"
@@ -281,33 +387,39 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
               <div className={styles.grid}>
                 <Select
                   label="Name type"
+                  hint={draft.id && elsewhere(`${draft.id}:type`)}
                   value={draft.type}
                   onValueChange={(value) => setName(index, { type: value as NameType })}
                   options={NAME_TYPES}
                 />
                 <Input
                   label="Given names"
+                  hint={draft.id && elsewhere(`${draft.id}:given`)}
                   ref={index === 0 ? firstGiven : undefined}
                   value={draft.given}
                   onChange={(e) => setName(index, { given: e.currentTarget.value })}
                 />
                 <Input
                   label="Surname"
+                  hint={draft.id && elsewhere(`${draft.id}:surname`)}
                   value={draft.surname}
                   onChange={(e) => setName(index, { surname: e.currentTarget.value })}
                 />
                 <Input
                   label="Prefix"
+                  hint={draft.id && elsewhere(`${draft.id}:prefix`)}
                   value={draft.prefix}
                   onChange={(e) => setName(index, { prefix: e.currentTarget.value })}
                 />
                 <Input
                   label="Suffix"
+                  hint={draft.id && elsewhere(`${draft.id}:suffix`)}
                   value={draft.suffix}
                   onChange={(e) => setName(index, { suffix: e.currentTarget.value })}
                 />
                 <Input
                   label="Nickname"
+                  hint={draft.id && elsewhere(`${draft.id}:nickname`)}
                   value={draft.nickname}
                   onChange={(e) => setName(index, { nickname: e.currentTarget.value })}
                 />
@@ -344,6 +456,7 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
           <div className={styles.grid}>
             <Select
               label="Sex"
+              hint={elsewhere('sex')}
               value={sex}
               onValueChange={(value) => setSex(value as Sex)}
               options={SEX_OPTIONS}
@@ -352,7 +465,10 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
               label="Living status"
               value={living}
               onValueChange={(value) => setLiving(value as LivingChoice)}
-              hint="Worked out from dates unless you choose. Living people stay private in exports."
+              hint={
+                elsewhere('living') ??
+                'Worked out from dates unless you choose. Living people stay private in exports.'
+              }
               options={[
                 {
                   value: 'infer',
@@ -372,6 +488,7 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
                   <Select
                     key={`${link.linkId}:${link.slot}`}
                     label={`Relationship to ${link.parentName}`}
+                    hint={elsewhere(`link:${link.linkId}:${link.slot}`)}
                     value={link.rel}
                     onValueChange={(value) =>
                       setLinks((list) =>
@@ -387,7 +504,21 @@ export function EditPersonDialog({ tree, detail, open, onOpenChange }: EditPerso
             </fieldset>
           )}
           {/* Lets Enter in a field submit the form. */}
-          <SaveError error={saveState.error} />
+          {notice && (
+            <p role="status" className={styles.notice}>
+              {notice}
+            </p>
+          )}
+          {reloadError && (
+            <p role="alert" className={styles.error}>
+              {reloadError}
+            </p>
+          )}
+          <SaveError
+            error={saveState.error}
+            stale={saveState.stale}
+            onReload={() => void reload()}
+          />
           <button type="submit" hidden />
         </form>
       </Dialog>

@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { basename, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -26,32 +26,85 @@ import { escapeControls } from './escape';
 
 export const DEFAULT_PORT = 4317;
 
-const USAGE = `Usage: open-ancestry <command> [options]
+const LIMIT_OPTIONS = `Import size limits:
+  --max-gedcom-mb <n>  Largest GEDCOM text, also inside a GEDZIP (default 64; $OA_MAX_GEDCOM_MB)
+  --max-archive-mb <n> Largest GEDZIP with its photos (default 1024; $OA_MAX_ARCHIVE_MB)`;
 
-Commands:
-  serve                Start the app on http://127.0.0.1:${DEFAULT_PORT}
-  import <file>        Import a GEDCOM (.ged) or GEDZIP (.zip, .gdz) file into a new tree
-  help                 Show this message
-
-Options for serve:
+const SERVE_OPTIONS = `Options for serve:
   --port <n>           Port to listen on (default ${DEFAULT_PORT})
   --host <host>        Interface to bind (default ${DEFAULT_HOST}; loopback only)
   --library <dir>      Folder holding your trees (default $OA_LIBRARY or ~/OpenAncestry)
-  --open               Open the app in your browser
+  --shared-library     Open trees even if other accounts can write to the library folder
+                       (also OA_SHARED_LIBRARY=1); they could swap a tree while it is open
+  --no-open            Do not open the app in your browser (opened by default on a terminal)
+  --open               Open it even when output is not a terminal
   --static-dir <dir>   Built web app to serve (default: bundled build)
   --import-heap-mb <n> Memory for each import's worker, in MB (default 2048; $OA_IMPORT_HEAP_MB)
+  $OA_MAX_REIMPORTS    Re-import reviews kept open at once, each in memory (default 4; 2-1000)
+  $OA_MAX_QUEUED_IMPORTS
+                       Imports that may wait for the one running (default 4; 1-1000)`;
 
-Options for import:
+const IMPORT_OPTIONS = `Options for import:
   --name <tree>        Tree name (default: the file name)
   --media <dir>        Folder holding the media files a .ged file refers to
   --library <dir>      Folder holding your trees (default $OA_LIBRARY or ~/OpenAncestry)
+  --shared-library     Open trees even if other accounts can write to the library folder
+                       (also OA_SHARED_LIBRARY=1); they could swap a tree while it is open
 
 Import size limits (serve and import):
   --max-gedcom-mb <n>  Largest GEDCOM text, also inside a GEDZIP (default 64; $OA_MAX_GEDCOM_MB)
   --max-archive-mb <n> Largest GEDZIP with its photos (default 1024; $OA_MAX_ARCHIVE_MB)`;
 
+const USAGE = `Usage: open-ancestry <command> [options]
+
+Commands:
+  serve                Start the app on http://127.0.0.1:${DEFAULT_PORT} and open it in your browser
+  import <file>        Import a GEDCOM (.ged) or GEDZIP (.zip, .gdz) file into a new tree
+  help                 Show this message (also -h, --help; "<command> --help" for one command)
+
+${SERVE_OPTIONS}
+
+${IMPORT_OPTIONS}
+
+${LIMIT_OPTIONS} (serve and import)`;
+
+const COMMAND_USAGE = {
+  serve: `Usage: open-ancestry serve [options]
+
+Starts the app on http://127.0.0.1:${DEFAULT_PORT} and opens it in your browser.
+
+${SERVE_OPTIONS}
+
+${LIMIT_OPTIONS}`,
+  import: `Usage: open-ancestry import <file> [options]
+
+Imports a GEDCOM (.ged) or GEDZIP (.zip, .gdz) file into a new tree.
+
+${IMPORT_OPTIONS}
+
+${LIMIT_OPTIONS}`,
+} as const;
+
+type Topic = keyof typeof COMMAND_USAGE;
+
+/** The usage text for the CLI, or for one command. */
+export function usage(topic?: Topic): string {
+  return topic ? COMMAND_USAGE[topic] : USAGE;
+}
+
+/** A command line the CLI does not understand: exit 2, with the usage. */
+export class UsageError extends Error {
+  readonly topic: Topic | undefined;
+
+  constructor(message: string, topic?: Topic) {
+    super(message);
+    this.name = 'UsageError';
+    this.topic = topic;
+  }
+}
+
 export type CliCommand =
-  | { command: 'help' }
+  | { command: 'help'; topic?: Topic }
   | {
       command: 'serve';
       host: string;
@@ -62,6 +115,11 @@ export type CliCommand =
       importLimits: Partial<ImportLimits>;
       /** Heap for each import worker, in MB (default IMPORT_RESOURCE_LIMITS). */
       importHeapMb: number | undefined;
+      /** Re-import reviews held at once (default 4; OA_MAX_REIMPORTS). */
+      maxReimports: number | undefined;
+      /** Imports that may wait behind the running one (default 4; OA_MAX_QUEUED_IMPORTS). */
+      maxQueuedImports: number | undefined;
+      sharedLibrary: boolean;
     }
   | {
       command: 'import';
@@ -70,6 +128,7 @@ export type CliCommand =
       media: string | undefined;
       library: string;
       importLimits: Partial<ImportLimits>;
+      sharedLibrary: boolean;
     };
 
 const MiB = 1024 * 1024;
@@ -103,27 +162,52 @@ function importLimits(
   };
 }
 
-export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliCommand {
-  const { positionals, values } = parseArgs({
-    args: argv,
-    allowPositionals: true,
-    options: {
-      port: { type: 'string' },
-      host: { type: 'string' },
-      library: { type: 'string' },
-      open: { type: 'boolean' },
-      'static-dir': { type: 'string' },
-      name: { type: 'string' },
-      media: { type: 'string' },
-      'max-gedcom-mb': { type: 'string' },
-      'max-archive-mb': { type: 'string' },
-      'import-heap-mb': { type: 'string' },
-    },
-  });
-  if (positionals[0] === 'import') {
-    const file = positionals[1];
-    if (!file)
-      throw new Error('Usage: open-ancestry import <file> [--media <dir>] [--name <tree>]');
+export function parseCliArgs(
+  argv: string[],
+  env: NodeJS.ProcessEnv = process.env,
+  { tty = Boolean(process.stdout.isTTY) }: { tty?: boolean } = {},
+): CliCommand {
+  const isTopic = (word: string | undefined): word is Topic =>
+    word === 'serve' || word === 'import';
+  let parsed;
+  try {
+    parsed = parseArgs({
+      args: argv,
+      allowPositionals: true,
+      allowNegative: true,
+      options: {
+        help: { type: 'boolean', short: 'h' },
+        port: { type: 'string' },
+        host: { type: 'string' },
+        library: { type: 'string' },
+        open: { type: 'boolean' },
+        'static-dir': { type: 'string' },
+        name: { type: 'string' },
+        media: { type: 'string' },
+        'max-gedcom-mb': { type: 'string' },
+        'max-archive-mb': { type: 'string' },
+        'import-heap-mb': { type: 'string' },
+        'shared-library': { type: 'boolean' },
+      },
+    });
+  } catch (error) {
+    // Node's message suggests "--" for positionals; name the option plainly instead.
+    const option = /'(-[^']*)'/.exec((error as Error).message)?.[1];
+    const topic = argv.find(isTopic);
+    throw new UsageError(option ? `Unknown option: ${option}` : (error as Error).message, topic);
+  }
+  const { positionals, values } = parsed;
+  // Opting in to a library folder other accounts can write to (issue #211).
+  const sharedLibrary = values['shared-library'] ?? env.OA_SHARED_LIBRARY === '1';
+  const [command, second] = positionals;
+  if (command === undefined) return { command: 'help' };
+  if (command === 'help')
+    return isTopic(second) ? { command: 'help', topic: second } : { command: 'help' };
+  if (!isTopic(command)) throw new UsageError(`Unknown command: ${command}`);
+  if (values.help) return { command: 'help', topic: command };
+  if (command === 'import') {
+    const file = second;
+    if (!file) throw new UsageError('Missing the file to import', 'import');
     return {
       command: 'import',
       file,
@@ -131,9 +215,9 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
       media: values.media,
       library: values.library ?? defaultLibraryRoot(env),
       importLimits: importLimits(values, env),
+      sharedLibrary,
     };
   }
-  if (positionals[0] !== 'serve') return { command: 'help' };
 
   const port = values.port === undefined ? DEFAULT_PORT : Number(values.port);
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
@@ -144,11 +228,34 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     host: values.host ?? DEFAULT_HOST,
     port,
     library: values.library ?? defaultLibraryRoot(env),
-    open: values.open ?? false,
+    // On a terminal, open the app (spec F6); piped output (CI, e2e) gets no browser.
+    open: values.open ?? tty,
     staticDir: values['static-dir'],
     importLimits: importLimits(values, env),
+    sharedLibrary,
     importHeapMb: megabytes('import-heap-mb', values['import-heap-mb'], env, 'OA_IMPORT_HEAP_MB'),
+    // At least two, so a finishing comparison can't push out the review being applied.
+    maxReimports: count(env, 'OA_MAX_REIMPORTS', { min: 2, max: 1000 }),
+    maxQueuedImports: count(env, 'OA_MAX_QUEUED_IMPORTS', { min: 1, max: 1000 }),
   };
+}
+
+/**
+ * A whole number from an environment variable, if set, within `min` to `max`:
+ * the cap keeps a typo from sizing something in memory a hundred times over.
+ */
+function count(
+  env: NodeJS.ProcessEnv,
+  variable: string,
+  { min, max }: { min: number; max: number },
+): number | undefined {
+  const raw = env[variable] || undefined;
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < min || n > max) {
+    throw new Error(`Invalid ${variable}: ${raw} (a whole number, ${min} to ${max})`);
+  }
+  return n;
 }
 
 /**
@@ -249,6 +356,16 @@ export function stopOnSignals(
 
 const row = (label: string, value: string | number) => `${label.padEnd(15)}${value}`;
 const MAX_LISTED = 50;
+/** Longest unmapped example shown; real exports have lines of 500+ characters. */
+const MAX_EXAMPLE = 80;
+
+/** Pads a column, always leaving at least one space before the next. */
+const column = (text: string, width: number) =>
+  text.length < width ? text.padEnd(width) : `${text} `;
+const shorten = (text: string, max: number) =>
+  text.length > max ? `${text.slice(0, max - 1)}…` : text;
+/** Import time for the report: tenths of a second, or "under 0.1s". */
+export const seconds = (ms: number) => (ms < 100 ? 'under 0.1s' : `${(ms / 1000).toFixed(1)}s`);
 
 /**
  * The import report as plain text for the terminal. Every value from the file
@@ -262,7 +379,7 @@ export function formatReport(
   const rows = report.rows as Record<string, number | undefined>;
   const source = report.source;
   const lines = [
-    `Imported ${e(report.file.name ?? 'file')} into "${e(tree.name)}" (${e(tree.dir)}) in ${(report.timings.total / 1000).toFixed(1)}s`,
+    `Imported ${e(report.file.name ?? 'file')} into "${e(tree.name)}" (${e(tree.dir)}) in ${seconds(report.timings.total)}`,
     '',
     row(
       'Source',
@@ -288,7 +405,7 @@ export function formatReport(
     row('Warnings', report.warningCount || 'none'),
   ];
   for (const w of report.warnings.slice(0, MAX_LISTED)) {
-    lines.push(`  ${`line ${w.line}`.padEnd(11)}${e(w.code).padEnd(22)}${e(w.message)}`);
+    lines.push(`  ${column(`line ${w.line}`, 11)}${column(e(w.code), 22)}${e(w.message)}`);
   }
   if (report.warningCount > MAX_LISTED) {
     lines.push(`  ... and ${report.warningCount - MAX_LISTED} more`);
@@ -296,7 +413,7 @@ export function formatReport(
   lines.push(row('Unmapped tags', report.unmapped.length ? report.unmapped.length : 'none'));
   for (const u of report.unmapped.slice(0, MAX_LISTED)) {
     lines.push(
-      `  ${e(u.path).padEnd(28)}${String(u.count).padEnd(7)}line ${u.example.line}: ${e(u.example.text)}`,
+      `  ${column(e(u.path), 28)}${column(String(u.count), 7)}line ${u.example.line}: ${shorten(e(u.example.text), MAX_EXAMPLE)}`,
     );
   }
   if (report.unmapped.length > MAX_LISTED) {
@@ -352,8 +469,8 @@ async function importCommand(
   const name = cli.name ?? basename(cli.file, extname(cli.file)).trim();
   const problem = treeNameProblem(name);
   if (problem) throw new Error(`${problem}: "${name}". Choose another with --name.`);
-  mkdirSync(cli.library, { recursive: true });
-  const library = new Library(cli.library);
+  const library = new Library(cli.library, { shared: cli.sharedLibrary });
+  library.ensureRoot();
   const dir = library.dirOf(name);
   if (existsSync(dir)) {
     throw new Error(
@@ -398,6 +515,10 @@ export async function main(
     await run(argv, deps);
     return 0;
   } catch (failure) {
+    if (failure instanceof UsageError) {
+      error(`${escapeControls(failure.message)}\n\n${usage(failure.topic)}`);
+      return 2;
+    }
     error(escapeControls(failure instanceof Error ? failure.message : String(failure)));
     return 1;
   }
@@ -416,7 +537,7 @@ export async function run(
 ): Promise<RunningServer | undefined> {
   const cli = parseCliArgs(argv);
   if (cli.command === 'help') {
-    log(USAGE);
+    log(usage(cli.topic));
     return undefined;
   }
   if (cli.command === 'import') {
@@ -428,6 +549,9 @@ export async function run(
     host: cli.host,
     port: cli.port,
     library: cli.library,
+    sharedLibrary: cli.sharedLibrary,
+    maxReimports: cli.maxReimports,
+    maxQueuedImports: cli.maxQueuedImports,
     staticDir: cli.staticDir ?? bundledStaticDir(),
     importer: serverImporter(cli.importLimits, cli.importHeapMb),
     importLimits: cli.importLimits,

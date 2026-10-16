@@ -25,6 +25,7 @@ const base: ApiPersonSummary = {
   privacy: 'public',
   primaryMediaId: null,
   primaryPhotoLocal: false,
+  primaryPhotoVersion: null,
   given: null,
   surname: null,
   surnamePrefix: null,

@@ -1,5 +1,5 @@
 import { toNFC, type TreeStore } from '@open-ancestry/db';
-import { ownerKey, type TreeData } from './load';
+import { TreeData, ownerKey } from './load';
 
 /** Columns no GEDCOM line is written from; changing only these leaves a record verbatim. */
 const IGNORED_COLUMNS = new Set(['updated_at', 'created_at', 'living', 'surname_key']);
@@ -176,4 +176,13 @@ export function nameTextStates(store: TreeStore): Map<string, NameTextState> {
     }
   }
   return states;
+}
+
+/**
+ * Records (`person|<id>`, ...) changed or deleted since import: their imported
+ * text may still hold what was edited away (a JSON export without history
+ * leaves it out, #220).
+ */
+export function changedSinceImport(store: TreeStore): Set<string> {
+  return dirtyRecords(store, new TreeData(store));
 }

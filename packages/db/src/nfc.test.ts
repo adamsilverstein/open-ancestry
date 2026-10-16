@@ -1,7 +1,5 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   BulkWriter,
   LATEST_SCHEMA_VERSION,
@@ -22,6 +20,7 @@ import {
   UndoConflictError,
   type TreeStore,
 } from './index';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 const NFD = (s: string) => s.normalize('NFD');
 const NFC = (s: string) => s.normalize('NFC');
@@ -101,14 +100,13 @@ describe('Tx writes', () => {
 
 describe('schema v3: NFC normalization of existing trees', () => {
   let dir: string;
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
   /** A v1-era tree whose text was stored NFD (bulk import bypasses Tx normalization). */
   function legacyTree(more?: (store: TreeStore, ids: Record<string, string>) => void): {
     path: string;
     ids: Record<string, string>;
   } {
-    dir = mkdtempSync(join(tmpdir(), 'oa-nfc-'));
+    dir = makeTempDir('oa-nfc-');
     const path = join(dir, 'legacy.oatree');
     const store = createTree(path);
     const w = new BulkWriter(store);
@@ -185,6 +183,8 @@ describe('schema v3: NFC normalization of existing trees', () => {
     ).batchId;
     more?.(store, ids);
     // Pretend this tree and its history were written by version 2.
+    // Tables later versions add go too, so reopening runs their migrations again.
+    store.db.exec('DROP TABLE person_alias; DROP TABLE person_sort');
     store.db.prepare("UPDATE meta SET value = '2' WHERE key = 'schema_version'").run();
     store.db.prepare('UPDATE change_log SET schema_version = 2').run();
     store.close();
@@ -330,7 +330,7 @@ describe('schema v3: NFC normalization of existing trees', () => {
   });
 
   it('normalizes and merges an older JSON backup on import, without a change batch', () => {
-    dir = mkdtempSync(join(tmpdir(), 'oa-nfc-'));
+    dir = makeTempDir('oa-nfc-');
     const source = openMemoryTree();
     const w = new BulkWriter(source);
     w.insert('person', { id: 'P1' } as never);

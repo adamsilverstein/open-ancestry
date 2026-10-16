@@ -15,8 +15,7 @@ import {
 } from '@open-ancestry/db';
 import { GedcomSerializeError, parseGedcom } from '@open-ancestry/gedcom';
 import { importGedcom } from '@open-ancestry/import';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildGedcomExport, exportGedcom } from './index';
@@ -33,6 +32,7 @@ import {
   rows,
   value,
 } from './test-helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 const sample = () => importInto(readFileSync(join(FIXTURES, 'ancestry-sample.ged')));
 const quirks = () => importInto(readFileSync(join(FIXTURES, 'gedcom/ancestry-quirks.ged')));
@@ -243,7 +243,7 @@ describe('edited records', () => {
 
   it('upgrading a tree with NFD text keeps the export byte-identical and History empty', async () => {
     const nfd = (t: string) => t.normalize('NFD');
-    const dir = join(mkdtempSync(join(tmpdir(), 'oa-nfc-export-')), 'nfd.oatree');
+    const dir = join(makeTempDir('oa-nfc-export-'), 'nfd.oatree');
     try {
       await importGedcom(
         {
@@ -275,6 +275,8 @@ describe('edited records', () => {
           store.db.prepare(`UPDATE ${table} SET ${column} = ? WHERE id = ?`).run(nfd(r.v), r.id);
         }
       }
+      // Tables later versions add go too, so reopening runs their migrations again.
+      store.db.exec('DROP TABLE person_alias; DROP TABLE person_sort');
       store.db.prepare("UPDATE meta SET value = '2' WHERE key = 'schema_version'").run();
       const before = exportGedcom(store, { version: '5.5.1', now: TODAY });
       store.close();

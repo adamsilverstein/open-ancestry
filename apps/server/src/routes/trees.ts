@@ -9,7 +9,13 @@ import {
   undoLatest,
   type TreeStore,
 } from '@open-ancestry/db';
-import { buildGedcomExport, buildGedzipExport } from '@open-ancestry/export';
+import {
+  GedzipTooLargeError,
+  buildGedcomExport,
+  changedSinceImport,
+  planGedzipExport,
+  streamGedzip,
+} from '@open-ancestry/export';
 import type { Api, Deps } from '../context';
 import { edit } from '../edits';
 import {
@@ -17,11 +23,12 @@ import {
   GedzipQuery,
   HistoryQuery,
   HomeBody,
+  JsonExportQuery,
   TreeBody,
   TreeParams,
   UndoQuery,
 } from '../schemas';
-import { notNewest } from '../errors';
+import { conflict, notNewest } from '../errors';
 
 function treeDetail(deps: Deps, id: string) {
   const store = deps.library.open(id);
@@ -83,7 +90,10 @@ function hasBatch(store: TreeStore, state: 'applied' | 'undone'): boolean {
 
 /** Trees, home person, tags, history and export. */
 export function treeRoutes(app: Api, deps: Deps): void {
-  const { library } = deps;
+  const { library, thumbnails } = deps;
+  /** An undo or redo that swapped media files back (a re-import's replaced file) redraws their thumbnails. */
+  const swappedFiles = (tree: string, store: TreeStore, batchId: string) =>
+    thumbnails.refreshBatch(store, library.dirOf(tree), batchId);
 
   app.get('/api/trees', async () => ({ trees: library.list() }));
 
@@ -91,6 +101,14 @@ export function treeRoutes(app: Api, deps: Deps): void {
     library.create(request.body.name);
     return reply.code(201).send({ tree: treeDetail(deps, request.body.name) });
   });
+
+  /** A re-import review holds files in the tree's folder and applies to it by name. */
+  const assertNoReview = (tree: string) => {
+    // This server's reviews, or any live server's working folders in the tree (#246 review).
+    if (deps.reimports.hasTree(tree) || deps.reimportFolders.inUse(library.dirOf(tree))) {
+      throw conflict(`Tree "${tree}" has a re-import review open; apply or discard it first`);
+    }
+  };
 
   app.get('/api/trees/:tree', { schema: { params: TreeParams } }, async (request) => ({
     tree: treeDetail(deps, request.params.tree),
@@ -100,12 +118,14 @@ export function treeRoutes(app: Api, deps: Deps): void {
     '/api/trees/:tree',
     { schema: { params: TreeParams, body: TreeBody } },
     async (request) => {
+      assertNoReview(request.params.tree);
       library.rename(request.params.tree, request.body.name);
       return { tree: treeDetail(deps, request.body.name) };
     },
   );
 
   app.delete('/api/trees/:tree', { schema: { params: TreeParams } }, async (request, reply) => {
+    assertNoReview(request.params.tree);
     library.delete(request.params.tree);
     return reply.code(204).send();
   });
@@ -159,7 +179,9 @@ export function treeRoutes(app: Api, deps: Deps): void {
       const { expect } = request.query;
       if (expect === undefined) {
         // `skipped`: newer batches stepped over because the NFC upgrade made them un-undoable.
-        return undoLatest(store);
+        const result = undoLatest(store);
+        if (result.batch) await swappedFiles(request.params.tree, store, result.batch.id);
+        return result;
       }
       // A toast's Undo names its own batch: undo exactly that one, and only while nothing
       // newer exists, so it never undoes a later change in its place.
@@ -169,23 +191,35 @@ export function treeRoutes(app: Api, deps: Deps): void {
       if (newest?.id !== expect) {
         throw notNewest('Newer changes were made since; undo them from History first');
       }
-      return { batch: undo(store, expect), skipped: [] };
+      const batch = undo(store, expect);
+      await swappedFiles(request.params.tree, store, batch.id);
+      return { batch, skipped: [] };
     },
   );
 
   app.post('/api/trees/:tree/redo', { schema: { params: TreeParams } }, async (request) => {
     const store = library.open(request.params.tree);
-    return { batch: redoLast(store), skipped: [] };
+    const batch = redoLast(store);
+    if (batch) await swappedFiles(request.params.tree, store, batch.id);
+    return { batch, skipped: [] };
   });
 
   app.get(
     '/api/trees/:tree/export.json',
-    { schema: { params: TreeParams } },
+    { schema: { params: TreeParams, querystring: JsonExportQuery } },
     async (request, reply) => {
       const { tree } = request.params;
       // Mid-import the tree is not the user's yet: export it once the import ends (#186).
       library.assertIdle(tree);
-      const json = exportJsonString(library.open(tree));
+      // A full backup keeps the edit history (undo, and the text of deleted rows) unless asked not to.
+      const { history } = request.query;
+      const store = library.open(tree);
+      const keep = history !== '0' && history !== 'false';
+      // Without the history, deleted and edited-away text must not survive elsewhere either.
+      const json = exportJsonString(store, {
+        history: keep,
+        ...(!keep && { omitImportedText: changedSinceImport(store) }),
+      });
       return reply
         .type('application/json; charset=utf-8')
         .header('content-disposition', attachment(tree, 'json'))
@@ -222,9 +256,19 @@ export function treeRoutes(app: Api, deps: Deps): void {
       const { tree } = request.params;
       // Mid-import the tree is not the user's yet: export it once the import ends (#186).
       library.assertIdle(tree);
-      const { bytes, warnings } = buildGedzipExport(library.open(tree), {
-        privatizeLiving: request.query.privatize ?? false,
-      });
+      // The GEDCOM text and media list are taken now, in one snapshot; the
+      // media bytes are streamed one file at a time, so memory stays bounded
+      // and other requests keep being served (#198).
+      let plan;
+      try {
+        plan = planGedzipExport(library.open(tree), {
+          privatizeLiving: request.query.privatize ?? false,
+        });
+      } catch (error) {
+        if (error instanceof GedzipTooLargeError) throw conflict(error.message);
+        throw error;
+      }
+      const { warnings } = plan;
       return reply
         .type('application/vnd.familysearch.gedcom+zip')
         .header(
@@ -232,7 +276,7 @@ export function treeRoutes(app: Api, deps: Deps): void {
           attachment(downloadName(tree, request.query.privatize), 'gdz'),
         )
         .headers(warningHeaders(warnings))
-        .send(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+        .send(streamGedzip(plan));
     },
   );
 }

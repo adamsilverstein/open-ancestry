@@ -3,11 +3,19 @@
 Exports a tree as GEDCOM 5.5.1 (what Ancestry reads), GEDCOM 7, or GEDZIP (GEDCOM 7 plus media files). The JSON backup lives in `@open-ancestry/db` (`exportJson`).
 
 ```ts
-import { exportGedcom, exportGedzip, buildGedcomExport } from '@open-ancestry/export';
+import {
+  buildGedcomExport,
+  exportGedcom,
+  exportGedzip,
+  planGedzipExport,
+  streamGedzip,
+} from '@open-ancestry/export';
 
 const ged = exportGedcom(store); // GEDCOM 5.5.1, Ancestry-compatible (CHAR UTF-8)
 const ged7 = exportGedcom(store, { version: '7', privatizeLiving: true });
 const zip = exportGedzip(store); // Uint8Array: gedcom.ged + media/
+// Large trees: plan (one snapshot), then stream one file at a time.
+streamGedzip(planGedzipExport(store)).pipe(response);
 const { text, xrefs, stats } = buildGedcomExport(store, { version: '7' });
 ```
 
@@ -67,11 +75,14 @@ Tests (`src/roundtrip.test.ts`) run every fixture through:
 
 Privatize is an allowlist, not a filter. Every record is generated (never copied, since raw text can mention anyone) and gets a fresh xref (`@I1@`, `@F1@`, ...), because imported ids can spell names (`@ZELDAQUIXBY@`). Then:
 
-- **Withheld people:** anyone who may be living (`isLiving()`: living, inferred living or unknown), and anyone marked `private` or `confidential` (GEDCOM `RESN privacy` / `confidential`). They are written as `NAME Private`, `SEX`, `FAMC` and `FAMS`, with nothing under them. `RESN locked` means "do not change this record", not private, so locked records are exported as usual.
+- **Withheld people:** anyone who may be living (`isLiving()`: living, inferred living or unknown), and anyone marked `private` or `confidential` (GEDCOM `RESN privacy` / `confidential`). They are written as `NAME Private`, `SEX`, `FAMC` and `FAMS`, with nothing under them. `RESN locked` means "do not change this record", not private, so locked records are exported as usual. RESN fails closed: any RESN word other than `locked` or `public` (`privacy.`, `restricted`, a continuation line) counts as private, and a RESN the importer did not map (under a name, citation or media link, or on a source, note or media record) withholds what it sits on.
 - **Withheld families:** a family with a withheld partner, or marked private or confidential, keeps only `HUSB`, `WIFE` and `CHIL`.
 - **Withheld events:** an event marked private or confidential is left out, even under someone who is otherwise exported.
 - **Notes and media:** anything attached to a withheld person, family or event (directly, or through their names, child links or citations) is left out of the whole export, even where someone else shares it. A media file shared with a withheld item is withheld too; the importer stores identical files once, and the name is often the person's.
-- **Imported lines:** no unmapped or extension line is merged into a withheld record. A line elsewhere that points at a withheld record (an `ASSO` and its `RELA`) is dropped, and warnings name only the record and the tag path, never the text.
+- **Imported lines:** no unmapped or extension line is merged into a withheld record. A line elsewhere that points at a withheld record (an `ASSO` and its `RELA`) is dropped, and warnings name only the record and the tag path, never the text. Imported custom (`_`) lines are left out of every record, since nobody vetted what they say; each record's warning says how many.
+- **Names in other records' text (best effort):** names of withheld people are replaced with `Private` in the text of every record that is written: notes, event values and `TYPE`, titles, source text, custom values, media file names (and GEDZIP entry names), links and e-mail addresses, and imported record ids in text. A name is recognized as any word of three or more letters from any name the person goes by (given names, surnames, nicknames, the name as written); a given name and surname together when either is shorter (`Li Wu`, either order); inside longer text for scripts written without spaces (`李明` in `李明的照片`); regardless of accents and case (`Zoe Muller` for Zoë Müller); in words glued to digits or run together (`zedekiah2015`, `ZedekiahLivingson`); and, in file names and links (including links and e-mail addresses written inside a note), inside longer words after percent-decoding (`facebook.com/zedekiahlivingson`, `zedlivingson@gmail.com`), replacing only the name's own characters so the rest of an encoded link is unchanged. Matching errs towards removing too much: a deceased relative's notes lose a shared surname, and a common word that is also a name goes too; their own `NAME` keeps it. Places (`PLAC`) are kept as written, so a place named after a living person (`Livingson Farm`) stays. Free text can still identify someone in other words (a nickname nobody recorded, "my grandson the doctor"), which the export dialog says: read notes before sharing.
+  - **Also recognized:** names behind invisible characters (soft hyphen, zero-width space or joiner) or HTML character references (`Zo&euml;`, `&#90;`), names in fullwidth or ligature forms, up to four layers of percent-encoding, and bare domains in prose (`zedekiahlivingson.com`).
+  - **Known limits (accepted):** five or more layers of percent-encoding; look-alike letters from other scripts (Cyrillic `а` for Latin `a`); JavaScript-style `\u` escapes; punycode domains (`xn--`); and a name hyphenated across a line break (`Zede-` / `kiah`). Each needs a writer going out of their way, and catching them would redact far more ordinary text.
 - **Shared records:** sources, repositories and tags are written only if something still written points at them, or nothing in the tree uses them at all.
 - **Header:** the submitter (usually the user) is replaced by a generic one. `HEAD` has no tree name (often a surname) and no `_HOME` pointing at a withheld home person. The server names a privatized download `private-tree.ged` / `.gdz`.
 

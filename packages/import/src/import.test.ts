@@ -4,26 +4,21 @@ import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { importFile, importGedcom } from './import';
 import { FIXTURES, TODAY, ged, importInto, row, rows, value } from './test-helpers';
 import { ImportError } from './types';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 let tmp: string;
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'oa-import-'));
-});
-afterEach(() => {
-  rmSync(tmp, { recursive: true, force: true });
+  tmp = makeTempDir('oa-import-');
 });
 
 const sample = () => readFileSync(join(FIXTURES, 'ancestry-sample.ged'));
@@ -272,6 +267,9 @@ describe('media', () => {
       expect(readFileSync(join(dir, 'media', 'photos', 'portrait.JPG'), 'utf8')).toBe('jpeg-bytes');
       expect(readFileSync(join(dir, 'media', 'scans', 'letter.pdf'), 'utf8')).toBe('pdf-bytes');
       expect(value(store, 'SELECT count(*) FROM media_link')).toBe(6);
+      expect(
+        rows<{ line: string }>(store, "SELECT line FROM unmapped_line WHERE path = 'OBJE.FILE'"),
+      ).toEqual([{ line: '1 FILE ../../etc/passwd' }, { line: '1 FILE photos/missing.jpg' }]);
     } finally {
       store.close();
     }
@@ -282,8 +280,10 @@ describe('media', () => {
       rejected: 1,
     });
     expect(report.warnings.map((w) => w.code)).toEqual(['media-unsafe-path', 'media-missing']);
-    // The unsafe path and the missing file stay unmapped; neither gets a local_path.
-    expect(report.unmapped).toEqual([expect.objectContaining({ path: 'OBJE.FILE', count: 2 })]);
+    // The unsafe path and the missing file are reported under media only (issue #121), not
+    // as unmapped tags; their FILE lines are still kept (unmapped_line) for export.
+    expect(report.unmapped).toEqual([]);
+    expect(report.lines.mapped + report.lines.preserved).toBe(report.lines.total);
   });
 
   it('links media from a GEDZIP archive', async () => {

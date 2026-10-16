@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { APIRequestContext, Page } from '@playwright/test';
 import { openMemoryTree } from '../packages/db/src/index';
@@ -74,7 +73,7 @@ const sameFileName = (actual: string, expected: string) =>
   actual.replace(/_/g, ' ') === expected.replace(/_/g, ' ');
 
 const treeName = (title: string, project: string) =>
-  `export ${project} ${title.replace(/[^\w ]/g, '')} ${Date.now()}`.slice(0, 100);
+  `export ${project} ${title.replace(/[^\w ]/g, '')} ${Date.now()}`.slice(0, 100).trimEnd();
 
 test('exports GEDCOM 7 that re-imports with everyone in it', async ({
   page,
@@ -116,9 +115,18 @@ test('JSON export is a full backup, so privatize is not offered', async ({ page 
   await page.getByRole('button', { name: 'File' }).click();
   await page.getByRole('menuitem', { name: /Export/ }).click();
   const dialog = page.getByRole('dialog', { name: 'Export tree' });
+  // GEDCOM: privatizing says what it covers and what it cannot (#195).
+  await expect(dialog).toContainText(
+    'Names of theirs that the export recognizes are also replaced',
+  );
+  await expect(dialog).toContainText('This is best effort');
   await dialog.getByRole('combobox', { name: 'Format' }).click();
   await page.getByRole('option', { name: 'JSON (full backup)' }).click();
   await expect(dialog.getByRole('checkbox', { name: /^Privatize/ })).toBeDisabled();
+  // The edit history keeps deleted text, so it is left out unless asked for (#197).
+  const history = dialog.getByRole('checkbox', { name: /^Include edit history/ });
+  await expect(history).not.toBeChecked();
+  await expect(dialog).toContainText('including anything you have deleted');
   await dialog.getByRole('button', { name: 'Cancel' }).click();
   await expect(dialog).toBeHidden();
   await expect(page.getByRole('button', { name: 'File' })).toBeFocused();
@@ -128,7 +136,7 @@ test('shows what an export could not carry over', async ({ page }, info) => {
   // An imported tree (written straight into the e2e library) whose person points at a
   // family that is not in the file: a GEDCOM 7 export cannot keep that line.
   const tree = treeName(info.title, info.project.name);
-  const library = join(tmpdir(), `oa-e2e-library-${process.env.E2E_PORT}`);
+  const library = process.env.OA_E2E_LIBRARY!;
   await importGedcom(
     {
       bytes: [

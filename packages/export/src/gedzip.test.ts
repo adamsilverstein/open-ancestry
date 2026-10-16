@@ -2,11 +2,10 @@ import { openMemoryTree, openTree, treePaths } from '@open-ancestry/db';
 import { readGedzip, safeEntryPath } from '@open-ancestry/gedcom';
 import { importGedcom } from '@open-ancestry/import';
 import { unzipSync, zipSync } from 'fflate';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { linkSync, mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildGedzipExport, exportGedzip } from './index';
+import { buildGedzipExport, exportGedzip, planGedzipExport } from './index';
 import {
   TODAY,
   domainSnapshot,
@@ -15,13 +14,14 @@ import {
   importedSnapshot,
   rows,
 } from './test-helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 const dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 const tempDir = () => {
-  const d = mkdtempSync(join(tmpdir(), 'oa-export-'));
+  const d = makeTempDir('oa-export-');
   dirs.push(d);
   return d;
 };
@@ -105,6 +105,34 @@ describe('GEDZIP export', () => {
     const files = unzipSync(result.bytes);
     expect(Object.keys(files)).not.toContain('scans/letter.jpg');
     expect(result.warnings).toEqual([expect.stringContaining('scans/letter.jpg')]);
+    store.close();
+  });
+
+  it('leaves out a media file hard-linked to a file outside the media folder', async () => {
+    const { store, dir } = await treeWithMedia();
+    const outside = join(tempDir(), 'secret.txt');
+    writeFileSync(outside, 'not for export');
+    const letter = join(treePaths(dir).media, 'scans', 'letter.jpg');
+    rmSync(letter);
+    linkSync(outside, letter);
+    const result = buildGedzipExport(store, { now: TODAY });
+    expect(Object.keys(unzipSync(result.bytes))).not.toContain('scans/letter.jpg');
+    expect(result.warnings).toEqual([expect.stringContaining('scans/letter.jpg')]);
+    expect(planGedzipExport(store, { now: TODAY }).files.map((f) => f.entry)).toEqual([
+      'photos/odile portrait.png',
+    ]);
+    store.close();
+  });
+
+  it('exports no media from a media folder that is a symlink', async () => {
+    const { store, dir } = await treeWithMedia();
+    const media = treePaths(dir).media;
+    const elsewhere = join(tempDir(), 'media');
+    renameSync(media, elsewhere);
+    symlinkSync(elsewhere, media);
+    const result = buildGedzipExport(store, { now: TODAY });
+    expect(Object.keys(unzipSync(result.bytes))).toEqual(['gedcom.ged']);
+    expect(result.warnings).toHaveLength(2);
     store.close();
   });
 

@@ -82,6 +82,55 @@
   list-style: none;
 }
 
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-3);
+}
+
+.groupTitle {
+  display: flex;
+  align-items: center;
+  gap: var(--oa-space-2);
+  margin: var(--oa-space-2) 0 0;
+  font: var(--oa-text-lg);
+  font-weight: var(--oa-weight-semibold);
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oa-space-1);
+}
+
+/* As the gallery's media-type filter. */
+.filter[aria-pressed='true'] {
+  border-color: var(--oa-accent);
+  background: var(--oa-surface-selected);
+  color: var(--oa-text);
+}
+
+/* Marked by an icon and a word, not only colour. */
+.flag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oa-space-1);
+  margin-right: var(--oa-space-2);
+  font: var(--oa-text-xs);
+  font-weight: var(--oa-weight-semibold);
+}
+
+/* The warning colour is too light for small text: only the icon carries it. */
+.flag svg,
+.groupTitle svg {
+  color: var(--oa-warning);
+}
+
+.conflict {
+  padding-left: var(--oa-space-2);
+  border-left: 3px solid var(--oa-warning);
+}
+
 .info {
   color: var(--oa-text-muted);
   font: var(--oa-text-sm);
@@ -96,4 +145,18 @@
   padding: var(--oa-space-3) 0;
   border-top: 1px solid var(--oa-border);
   background: var(--oa-bg);
+}
+
+.summaryList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oa-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.skipped summary {
+  cursor: pointer;
+  font-weight: var(--oa-weight-semibold);
 }

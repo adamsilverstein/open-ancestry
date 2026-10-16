@@ -25,6 +25,8 @@ import { readSeed, type PerfTree } from './tree-view-fixtures';
  *   median frame at 58fps or better and under 5% of frames over 33ms. Long
  *   tasks and the longest frame are reported, not asserted: on a loaded machine
  *   OS scheduling alone produces them.
+ * - One family with 2,000 children (#209): first paint < 1s, and re-focus
+ *   between the father and a child, median of 10 < 50ms.
  * - Memory: after the first round of re-focuses and pans, each further round
  *   grows the JS heap by under 2MB (no growth per interaction).
  *
@@ -477,3 +479,52 @@ for (const tree of trees) {
     });
   });
 }
+
+test.describe('one family with 2,000 children', { tag: '@perf' }, () => {
+  const big = seed.bigFamily;
+  test.skip(!big, 'Seeded with OA_PERF=1');
+
+  test('opens and re-focuses within the budgets', async ({ page }) => {
+    const { tree, fatherId } = big!;
+    const url = (id: string) => `/tree/${id}?tree=${encodeURIComponent(tree)}`;
+    await page.goto(url(fatherId));
+    await ready(page);
+    const firstPaint = await page.evaluate(
+      () => performance.getEntriesByName('oa-tree-first-paint', 'mark')[0]?.startTime ?? 0,
+    );
+    expect(firstPaint).toBeGreaterThan(0);
+    const { laidOut } = await stats(page);
+    expect(laidOut).toBeGreaterThanOrEqual(2_000);
+
+    // Down to a child and back: every layout labels 2,000 siblings.
+    await canvas(page).locator(`[data-key="${fatherId}"]`).focus();
+    const refocus = async (key: string) => {
+      await page.keyboard.press(key);
+      const before = await refocusCount(page);
+      await page.keyboard.press('Enter');
+      await expect.poll(() => refocusCount(page)).toBeGreaterThan(before);
+      await ready(page);
+      await settled(page);
+      return lastRefocus(page);
+    };
+    const uncached = [await refocus('ArrowDown'), await refocus('ArrowUp')];
+    const durations: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      durations.push(await refocus('ArrowDown'));
+      durations.push(await refocus('ArrowUp'));
+    }
+    const median = percentile(durations, 0.5);
+    const paintBudget = 1000 * factor;
+    const budget = 50 * factor;
+    const tree2k = { ...seed.perf, people: big!.people };
+    report(
+      tree2k,
+      `One family with 2,000 children: first paint, then re-focus parent and child (${laidOut} laid out), median of 10`,
+      `${firstPaint.toFixed(0)}ms; ${median.toFixed(1)}ms (uncached ${uncached.map((d) => d.toFixed(0)).join(' and ')}ms)`,
+      `< ${paintBudget}ms; median < ${budget}ms`,
+      firstPaint < paintBudget && median < budget,
+    );
+    expect(firstPaint).toBeLessThan(paintBudget);
+    expect(median).toBeLessThan(budget);
+  });
+});

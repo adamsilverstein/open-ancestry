@@ -8,6 +8,7 @@ import { pipeline } from 'node:stream/promises';
 import { prepareReimport } from '@open-ancestry/import';
 import type { FastifyRequest } from 'fastify';
 import type { Api, Deps } from '../context';
+import { formatBytes } from '../bytes';
 import { ApiError, badRequest, conflict, notFound } from '../errors';
 import { TooManyJobsError, type JobEvent } from '../jobs';
 import { JobParams, TreeParams } from '../schemas';
@@ -35,7 +36,16 @@ export async function sweepStaleUploads(now = Date.now(), dir = tmpdir()): Promi
 
 /** Import uploads (multipart, streamed to a temp file) and job status over JSON and SSE. */
 export function importRoutes(app: Api, deps: Deps): void {
-  const { library, jobs, importer, uploadLimit, archiveUploadLimit, thumbnails, reimports } = deps;
+  const {
+    library,
+    jobs,
+    importer,
+    uploadLimit,
+    archiveUploadLimit,
+    thumbnails,
+    reimports,
+    reimportFolders,
+  } = deps;
 
   /** Streams the one uploaded file to a private temp folder. */
   async function receive(request: FastifyRequest) {
@@ -67,11 +77,12 @@ export function importRoutes(app: Api, deps: Deps): void {
     // A GEDZIP carries its photos, so it may be larger; the importer caps the
     // GEDCOM inside it like a plain file.
     const limit = ARCHIVE_EXTENSIONS.has(extension) ? archiveUploadLimit : uploadLimit;
+    const kind = ARCHIVE_EXTENSIONS.has(extension) ? 'GEDZIP' : 'GEDCOM';
     const tooLarge = () =>
       new ApiError(
         413,
         'payload_too_large',
-        `Uploads of ${extension} files are limited to ${limit} bytes`,
+        `${kind} uploads are limited to ${formatBytes(limit)}`,
       );
     // Past the limit, stop writing but keep reading (up to the larger cap,
     // where the parser stops), so the request ends cleanly with a 413.
@@ -131,6 +142,12 @@ export function importRoutes(app: Api, deps: Deps): void {
     }
   }
 
+  // The upload caps, so the app can refuse an oversized file before sending it.
+  app.get('/api/limits', async () => ({
+    importUpload: { gedcomBytes: uploadLimit, archiveBytes: archiveUploadLimit },
+    mediaUploadBytes: deps.mediaUploadLimit,
+  }));
+
   // Import into a new tree named after the file. The server owns the tree's
   // lifecycle: the client never deletes anything when an import fails.
   app.post('/api/import', async (request, reply) => {
@@ -182,13 +199,27 @@ export function importRoutes(app: Api, deps: Deps): void {
         const job = jobs.enqueue(
           { tree, fileName: upload.fileName, kind: 'reimport' },
           async (signal, onProgress) => {
-            const session = await prepareReimport(
-              library.open(tree),
-              { path: upload.path },
-              { signal, onProgress: (phase, done, total) => onProgress({ phase, done, total }) },
-            );
-            const stored = reimports.add(tree, upload.fileName, session);
-            return { reimportId: stored.id, counts: session.diff.counts };
+            const store = library.open(tree);
+            let spilled: string | undefined;
+            try {
+              const session = await prepareReimport(
+                store,
+                { path: upload.path },
+                {
+                  signal,
+                  onProgress: (phase, done, total) => onProgress({ phase, done, total }),
+                  // Owned by this server, so another server's sweep leaves it alone.
+                  ...(store.dir && {
+                    spillDir: () => (spilled = reimportFolders.create(store.dir!, 'media')),
+                  }),
+                },
+              );
+              const stored = reimports.add(tree, upload.fileName, session);
+              return { reimportId: stored.id, counts: session.diff.counts };
+            } catch (error) {
+              reimportFolders.release(spilled);
+              throw error;
+            }
           },
           async () => {
             await upload.cleanup();

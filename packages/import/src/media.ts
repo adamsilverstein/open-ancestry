@@ -107,9 +107,14 @@ export class MediaSource {
   private readonly byLowerPath = new Map<string, SourceFile>();
   private readonly byName = new Map<string, SourceFile[]>();
   readonly available: boolean;
+  /** Whether the files' bytes are held in memory (a GEDZIP's entries). */
+  readonly inMemory: boolean;
+  private readonly files: SourceFile[];
 
-  private constructor(files: SourceFile[], available: boolean) {
+  private constructor(files: SourceFile[], available: boolean, inMemory = false) {
     this.available = available;
+    this.inMemory = inMemory;
+    this.files = files;
     for (const file of files) {
       const path = toNFC(file.path);
       this.byPath.set(path, file);
@@ -129,7 +134,27 @@ export class MediaSource {
     return new MediaSource(
       [...entries].map(([path, bytes]) => ({ path, size: bytes.length, read: () => bytes })),
       true,
+      true,
     );
+  }
+
+  /**
+   * Writes in-memory files to `dir` and returns a source that reads them from
+   * there, so a long-lived holder (a re-import review) keeps no bytes in
+   * memory. Paths that aren't safe relative paths are dropped.
+   */
+  spill(dir: string): MediaSource {
+    const files: SourceFile[] = [];
+    for (const file of this.files) {
+      const rel = safeEntryPath(file.path);
+      if (!rel) continue;
+      const full = join(dir, ...rel.split('/'));
+      mkdirSync(dirname(full), { recursive: true });
+      writeFileSync(full, file.read());
+      const size = file.size;
+      files.push({ path: file.path, size, read: () => readFileSync(full) });
+    }
+    return new MediaSource(files, this.available);
   }
 
   static fromDir(root: string): MediaSource {
@@ -242,7 +267,8 @@ export function storeMediaFile(
       throw new Error(`media folder for ${relPath} leads outside the tree`);
     }
     // `wx` fails rather than replace a file that appeared since the check.
-    writeFileSync(target, bytes, { flag: 'wx' });
+    // 0600: private to the owner whatever the process umask.
+    writeFileSync(target, bytes, { flag: 'wx', mode: 0o600 });
     return { path: candidate, written: true, folder };
   }
   throw new Error(`no free name for ${relPath}`);

@@ -773,10 +773,9 @@ describe('review findings (#72)', () => {
     store.transact('Rename', (tx) => tx.update('person_name', name, { given: 'LocalName' }));
     const s2 = await prepareReimport(store, { bytes: renumber(SAMPLE) }, { today: TODAY });
     try {
-      const mercy = s2.diff.people.find((p) => p.existingId === pid(store, '@I2@'))!;
-      expect(mercy.changes).toEqual([
-        expect.objectContaining({ kind: 'name.add', conflict: 'local-edit', defaultAccept: false }),
-      ]);
+      // The export still has the name the user changed: nothing to bring back (#185).
+      const mercy = s2.diff.people.find((p) => p.existingId === pid(store, '@I2@'));
+      expect(mercy?.changes ?? []).toEqual([]);
     } finally {
       closeReimport(s2);
     }
@@ -850,10 +849,14 @@ describe('review findings (#72)', () => {
 });
 
 describe('re-review (#72): what the user deleted stays deleted', () => {
-  /** Re-imports the unchanged sample (renumbered) and returns one person's changes. */
-  async function changesFor(xref: string) {
+  /**
+   * Re-imports the sample (renumbered; unchanged unless `text` says otherwise)
+   * and returns one person's changes. Since #185 an export that still has what
+   * the user deleted offers nothing: only a changed one asks.
+   */
+  async function changesFor(xref: string, text = SAMPLE) {
     const id = pid(store, xref);
-    const s2 = await prepareReimport(store, { bytes: renumber(SAMPLE) }, { today: TODAY });
+    const s2 = await prepareReimport(store, { bytes: renumber(text) }, { today: TODAY });
     try {
       return s2.diff.people
         .filter((p) => p.existingId === id)
@@ -894,7 +897,11 @@ describe('re-review (#72): what the user deleted stays deleted', () => {
         tx.delete('event_role', r.id);
       tx.delete('event', birth);
     });
-    expect(await changesFor('@I1@')).toEqual([deleted('fact.add', 'BIRT')]);
+    expect(await changesFor('@I1@')).toEqual([]);
+    // Ancestry changed the birth the user deleted: that is a conflict to decide.
+    expect(
+      await changesFor('@I1@', SAMPLE.replace('2 DATE Abt. 1842', '2 DATE 12 MAR 1842')),
+    ).toEqual([deleted('fact.add', 'BIRT')]);
   });
 
   it('a deleted name', async () => {
@@ -909,7 +916,7 @@ describe('re-review (#72): what the user deleted stays deleted', () => {
         is_primary: 1,
       } as never);
     });
-    expect(await changesFor('@I2@')).toEqual([deleted('name.add')]);
+    expect(await changesFor('@I2@')).toEqual([]);
   });
 
   it('a deleted citation', async () => {
@@ -920,7 +927,7 @@ describe('re-review (#72): what the user deleted stays deleted', () => {
       death,
     );
     store.transact('Remove source', (tx) => tx.delete('citation_link', link));
-    expect(await changesFor('@I1@')).toEqual([deleted('citation.add')]);
+    expect(await changesFor('@I1@')).toEqual([]);
   });
 
   it('a deleted media link', async () => {
@@ -934,14 +941,14 @@ describe('re-review (#72): what the user deleted stays deleted', () => {
       ))
         tx.delete('media_link', l.id);
     });
-    expect(await changesFor('@I1@')).toEqual([deleted('media.add')]);
+    expect(await changesFor('@I1@')).toEqual([]);
   });
 
   it('a deleted parent link', async () => {
     const josiah = pid(store, '@I3@');
     const link = value<string>(store, 'SELECT id FROM family_child WHERE child_id = ?', josiah);
     store.transact('Unlink parents', (tx) => tx.delete('family_child', link));
-    expect(await changesFor('@I3@')).toEqual([deleted('child.add')]);
+    expect(await changesFor('@I3@')).toEqual([]);
   });
 
   it('a deleted partnership', async () => {
@@ -969,11 +976,9 @@ describe('re-review (#72): what the user deleted stays deleted', () => {
         tx.delete('family_child', c.id);
       tx.delete('family', family);
     });
-    const changes = await changesFor('@I1@');
-    expect(changes).toContainEqual(deleted('family.add'));
-    expect(changes.every((c) => !c.defaultAccept)).toBe(true);
+    expect(await changesFor('@I1@')).toEqual([]);
     // The children's links to that family were deleted with it.
-    expect(await changesFor('@I3@')).toEqual([deleted('child.add')]);
+    expect(await changesFor('@I3@')).toEqual([]);
   });
 
   it('only offers a deleted person back as "deleted here" when the birth year agrees too', async () => {
@@ -1262,42 +1267,6 @@ describe('UX QA (#72): new people who look like someone in the tree', () => {
   });
 });
 
-describe('comparing again (#163)', () => {
-  it('re-diffs against the tree as it is now, with stable change keys', async () => {
-    const s2 = await prepareReimport(store, { bytes: updatedSample() }, { today: TODAY });
-    try {
-      const keys = (s: ReimportSession) =>
-        new Map(s.diff.people.flatMap((p) => p.changes.map((c) => [c.key, c])));
-      const before = keys(s2);
-      expect(new Set([...before.keys()]).size).toBe(before.size);
-      expect(isReimportStale(store, s2)).toBe(false);
-      const josiah = pid(store, '@I3@');
-      const death = value<string>(
-        store,
-        "SELECT e.id FROM event e JOIN event_role r ON r.event_id = e.id WHERE r.person_id = ? AND e.type = 'DEAT'",
-        josiah,
-      );
-      store.transact('Edit', (tx) => tx.update('event', death, { date_text: '3 MAY 1939' }));
-      expect(isReimportStale(store, s2)).toBe(true);
-      refreshReimport(store, s2);
-      expect(isReimportStale(store, s2)).toBe(false);
-      const after = keys(s2);
-      // Every change not about the edited death keeps its key.
-      for (const [key, c] of before) {
-        if (c.kind === 'fact.change' && c.existingEventId === death) continue;
-        expect(after.has(key)).toBe(true);
-      }
-      const edited = [...after.values()].find(
-        (c) => c.kind === 'fact.change' && c.existingEventId === death,
-      );
-      expect(edited).toMatchObject({ conflict: 'local-edit', defaultAccept: false });
-      applyReimport(store, s2, new Set(), 'Re-import');
-    } finally {
-      closeReimport(s2);
-    }
-  });
-});
-
 describe('trustworthy confidence and reasons (#159)', () => {
   it('is below 100% when a fact differs, and 100% when nothing does', async () => {
     const s2 = await prepareReimport(store, { bytes: renumber(updatedSample()) }, { today: TODAY });
@@ -1399,10 +1368,768 @@ describe('trustworthy confidence and reasons (#159)', () => {
       expect(mary.reasons.some((r) => /^closest: Mary Brown, \d+%$/.test(r))).toBe(true);
       const quill = fresh.find((p) => p.name === 'Quill Vexbury')!;
       expect(quill.changes.map((c) => [c.kind, c.defaultAccept])).toEqual([['person.new', true]]);
-      expect(quill.reasons).toEqual(['no one with a similar name in your tree']);
+      expect(quill.reasons).toEqual(['no close match in your tree']);
     } finally {
       closeReimport(s2);
       tree.close();
     }
+  });
+});
+
+describe('apply reports where new people went (#158)', () => {
+  it('maps each added person to their id in the tree', async () => {
+    const s2 = await prepareReimport(store, { bytes: updatedSample() }, { today: TODAY });
+    try {
+      const noah = s2.diff.people.find((p) => p.name === 'Noah Ashgrove')!;
+      const result = applyReimport(store, s2, defaults(s2), 'Re-import');
+      const id = result.newPeople[noah.incomingId!];
+      expect(id).toBeTruthy();
+      expect(value(store, 'SELECT given FROM person_name WHERE person_id = ?', id)).toBe('Noah');
+    } finally {
+      closeReimport(s2);
+    }
+  });
+});
+
+describe('three-way re-import (#185)', () => {
+  const josiahDeath = () =>
+    value<string>(
+      store,
+      "SELECT e.date_text FROM event e JOIN event_role r ON r.event_id = e.id WHERE r.person_id = ? AND e.type = 'DEAT'",
+      pid(store, '@I3@'),
+    );
+  const josiahChanges = (s: ReimportSession) =>
+    s.diff.people
+      .filter((p) => p.existingId === pid(store, '@I3@'))
+      .flatMap((p) => p.changes)
+      .filter((c) => c.kind === 'fact.change');
+
+  it('follows a later export for a value an earlier re-import set', async () => {
+    // First re-import: Josiah's death 1939 -> 1940, accepted.
+    const first = await prepareReimport(
+      store,
+      { bytes: renumber(updatedSample()) },
+      { today: TODAY },
+    );
+    applyReimport(store, first, defaults(first), 'Re-import 1');
+    closeReimport(first);
+    expect(josiahDeath()).toBe('1940');
+    // Second re-import: Ancestry now says 1941. Nobody edited it here.
+    // updatedSample() is already renumbered: Josiah is @I103@ there.
+    const updated = updatedSample();
+    const later = renumber(
+      replaceRecord(
+        updated,
+        '@I103@',
+        recordOf(updated, '@I103@').map((l) => (l === '2 DATE 1940' ? '2 DATE 1941' : l)),
+      ),
+      300,
+    );
+    const second = await prepareReimport(store, { bytes: later }, { today: TODAY });
+    try {
+      const [change, ...rest] = josiahChanges(second);
+      expect(rest).toEqual([]);
+      expect(change).toMatchObject({ defaultAccept: true });
+      expect(change!.conflict).toBeUndefined();
+      applyReimport(store, second, defaults(second), 'Re-import 2');
+    } finally {
+      closeReimport(second);
+    }
+    expect(josiahDeath()).toBe('1941');
+  });
+
+  it('offers nothing for a local edit when the export did not change that value', async () => {
+    const death = value<string>(
+      store,
+      "SELECT e.id FROM event e JOIN event_role r ON r.event_id = e.id WHERE r.person_id = ? AND e.type = 'DEAT'",
+      pid(store, '@I3@'),
+    );
+    store.transact('Edit', (tx) => tx.update('event', death, { date_text: '3 MAY 1939' }));
+    const s2 = await prepareReimport(store, { bytes: renumber(SAMPLE) }, { today: TODAY });
+    try {
+      expect(josiahChanges(s2)).toEqual([]);
+    } finally {
+      closeReimport(s2);
+    }
+    // When Ancestry changes it too, both differ: a conflict, unticked.
+    const s3 = await prepareReimport(store, { bytes: renumber(updatedSample()) }, { today: TODAY });
+    try {
+      expect(josiahChanges(s3)).toEqual([
+        expect.objectContaining({ conflict: 'local-edit', defaultAccept: false }),
+      ]);
+    } finally {
+      closeReimport(s3);
+    }
+  });
+
+  it('does not count its own applied changes, or an added alternate name, as local edits', async () => {
+    const first = await prepareReimport(
+      store,
+      { bytes: renumber(updatedSample()) },
+      { today: TODAY },
+    );
+    applyReimport(store, first, defaults(first), 'Re-import 1');
+    closeReimport(first);
+    const mercy = pid(store, '@I2@');
+    store.transact('Add aka', (tx) =>
+      tx.insert('person_name', {
+        person_id: mercy,
+        given: 'Mercie',
+        surname: 'Bellweather',
+        type: 'aka',
+        is_primary: 0,
+      } as never),
+    );
+    const history = localHistory(store);
+    expect(history.edited.size).toBe(1);
+    expect(history.renamed.has(mercy)).toBe(false);
+  });
+});
+
+describe('three-way re-import, review findings (#224)', () => {
+  const pidOf = (xref: string) => pid(store, xref);
+  const eventIdOf = (xref: string, type: string) =>
+    value<string>(
+      store,
+      'SELECT e.id FROM event e JOIN event_role r ON r.event_id = e.id WHERE r.person_id = ? AND e.type = ?',
+      pidOf(xref),
+      type,
+    );
+  const changesOf = (s: ReimportSession, xref: string) =>
+    s.diff.people.filter((p) => p.existingId === pidOf(xref)).flatMap((p) => p.changes);
+  /** The sample with one person's record lines rewritten, renumbered. */
+  const edited = (xref: string, map: (line: string) => string[] | string, offset = 100) =>
+    renumber(
+      replaceRecord(
+        SAMPLE,
+        xref,
+        recordOf(SAMPLE, xref).flatMap((l) => map(l)),
+      ),
+      offset,
+    );
+  const josiah1940 = (offset = 100) =>
+    edited('@I3@', (l) => (l === '2 DATE 1939' ? '2 DATE 1940' : l), offset);
+
+  it('does not offer a declined change again for the same export (P6)', async () => {
+    const death = eventIdOf('@I3@', 'DEAT');
+    store.transact('Edit', (tx) => tx.update('event', death, { date_text: '3 MAY 1939' }));
+    const first = await prepareReimport(store, { bytes: josiah1940() }, { today: TODAY });
+    expect(changesOf(first, '@I3@')).toEqual([
+      expect.objectContaining({ kind: 'fact.change', conflict: 'local-edit' }),
+    ]);
+    applyReimport(store, first, new Set(), 'Re-import, declined');
+    closeReimport(first);
+    const again = await prepareReimport(store, { bytes: josiah1940(200) }, { today: TODAY });
+    try {
+      expect(changesOf(again, '@I3@')).toEqual([]);
+    } finally {
+      closeReimport(again);
+    }
+    // When Ancestry changes it again, both sides differ: a conflict once more.
+    const later = edited('@I3@', (l) => (l === '2 DATE 1939' ? '2 DATE 1941' : l), 300);
+    const third = await prepareReimport(store, { bytes: later }, { today: TODAY });
+    try {
+      expect(changesOf(third, '@I3@')).toEqual([
+        expect.objectContaining({ kind: 'fact.change', conflict: 'local-edit' }),
+      ]);
+    } finally {
+      closeReimport(third);
+    }
+  });
+
+  it('is no conflict when the user edited a value back by hand (P8)', async () => {
+    const death = eventIdOf('@I3@', 'DEAT');
+    store.transact('Edit', (tx) => tx.update('event', death, { date_text: '3 MAY 1939' }));
+    store.transact('Edit back', (tx) => tx.update('event', death, { date_text: '1939' }));
+    const s2 = await prepareReimport(store, { bytes: josiah1940() }, { today: TODAY });
+    try {
+      const [change] = changesOf(s2, '@I3@');
+      expect(change).toMatchObject({ kind: 'fact.change', defaultAccept: true });
+      expect(change!.conflict).toBeUndefined();
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  it('is no conflict when the user changed another column of the row (P7)', async () => {
+    store.transact('Privacy', (tx) => tx.update('person', pidOf('@I3@'), { privacy: 'private' }));
+    const s2 = await prepareReimport(
+      store,
+      { bytes: edited('@I3@', (l) => (l === '1 SEX M' ? '1 SEX F' : l)) },
+      { today: TODAY },
+    );
+    try {
+      const [change] = changesOf(s2, '@I3@').filter((c) => c.kind === 'sex');
+      // A different sex lowers the match's confidence, but the change is no local-edit conflict.
+      expect(change).toMatchObject({ kind: 'sex', after: 'F' });
+      expect(change!.conflict).toBeUndefined();
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  it('brings back a deleted multi-valued fact Ancestry changed as an unticked conflict (P4)', async () => {
+    const resi = eventIdOf('@I3@', 'RESI');
+    store.transact('Delete residence', (tx) => {
+      for (const r of rows<{ id: string }>(
+        store,
+        'SELECT id FROM event_role WHERE event_id = ?',
+        resi,
+      ))
+        tx.delete('event_role', r.id);
+      tx.delete('event', resi);
+    });
+    let inResi = false;
+    const s2 = await prepareReimport(
+      store,
+      {
+        bytes: edited('@I3@', (l) => {
+          if (l.startsWith('1 ')) inResi = l === '1 RESI';
+          return inResi && l === '2 DATE 1900' ? '2 DATE 1901' : l;
+        }),
+      },
+      { today: TODAY },
+    );
+    try {
+      const resiAdds = changesOf(s2, '@I3@').filter(
+        (c) => c.kind === 'fact.add' && c.fact.type === 'RESI',
+      );
+      expect(resiAdds).toEqual([
+        expect.objectContaining({ conflict: 'local-delete', defaultAccept: false }),
+      ]);
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  /** Renames the place of Josiah's death, residence and marriage, as the user. */
+  const renameElderford = () => {
+    const place = value<string>(
+      store,
+      'SELECT place_id FROM event WHERE id = ?',
+      eventIdOf('@I3@', 'DEAT'),
+    );
+    store.transact('Rename place', (tx) =>
+      tx.update('place', place, { full_name: 'Elderford, Ohio' } as never),
+    );
+  };
+
+  it('offers nothing for facts whose place the user renamed, if the export kept it', async () => {
+    renameElderford();
+    const s2 = await prepareReimport(store, { bytes: renumber(SAMPLE) }, { today: TODAY });
+    try {
+      expect(changesOf(s2, '@I3@').filter((c) => c.kind === 'fact.change')).toEqual([]);
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  it("offers Ancestry's other change to a fact at a renamed place, keeping the place", async () => {
+    renameElderford();
+    const death = eventIdOf('@I3@', 'DEAT');
+    const place = value<string>(store, 'SELECT place_id FROM event WHERE id = ?', death);
+    const s2 = await prepareReimport(store, { bytes: josiah1940() }, { today: TODAY });
+    try {
+      const changes = changesOf(s2, '@I3@').filter((c) => c.kind === 'fact.change');
+      expect(changes).toEqual([
+        expect.objectContaining({
+          after: expect.objectContaining({ type: 'DEAT', date: '1940' }),
+          keepPlace: true,
+          defaultAccept: true,
+        }),
+      ]);
+      expect(changes[0]!.conflict).toBeUndefined();
+      applyReimport(store, s2, defaults(s2), 'Re-import');
+    } finally {
+      closeReimport(s2);
+    }
+    // The date is Ancestry's; the place is still the user's renamed one, not a re-created copy.
+    expect(row(store, 'SELECT date_text, place_id FROM event WHERE id = ?', death)).toEqual({
+      date_text: '1940',
+      place_id: place,
+    });
+    expect(value(store, "SELECT count(*) FROM place WHERE full_name LIKE 'Elderford, Cask%'")).toBe(
+      0,
+    );
+  });
+
+  it('is a renamed-place conflict when Ancestry moves a fact at a renamed place elsewhere', async () => {
+    renameElderford();
+    let inDeath = false;
+    const moved = edited('@I3@', (l) => {
+      if (l.startsWith('1 ')) inDeath = l === '1 DEAT';
+      return inDeath && l.startsWith('2 PLAC ')
+        ? '2 PLAC Millbrook, Harlow County, Vermont, USA'
+        : l;
+    });
+    const s2 = await prepareReimport(store, { bytes: moved }, { today: TODAY });
+    try {
+      const changes = changesOf(s2, '@I3@').filter((c) => c.kind === 'fact.change');
+      expect(changes).toEqual([
+        expect.objectContaining({
+          after: expect.objectContaining({
+            type: 'DEAT',
+            place: 'Millbrook, Harlow County, Vermont, USA',
+          }),
+          conflict: 'renamed-place',
+          defaultAccept: false,
+        }),
+      ]);
+      expect(changes[0]).not.toHaveProperty('keepPlace');
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  it('adds a name Ancestry added after a rename plainly, if it still has the old name (P5c)', async () => {
+    const mercy = pidOf('@I2@');
+    const name = value<string>(store, 'SELECT id FROM person_name WHERE person_id = ?', mercy);
+    store.transact('Rename', (tx) => tx.update('person_name', name, { given: 'Marcy' }));
+    const s2 = await prepareReimport(
+      store,
+      {
+        bytes: edited('@I2@', (l) =>
+          l === '2 SURN Bellweather' ? [l, '1 NAME Mercy /Ashgrove/', '2 TYPE married'] : l,
+        ),
+      },
+      { today: TODAY },
+    );
+    try {
+      const [change, ...rest] = changesOf(s2, '@I2@');
+      expect(rest).toEqual([]);
+      expect(change).toMatchObject({
+        kind: 'name.add',
+        name: 'Mercy Ashgrove',
+        defaultAccept: true,
+      });
+      expect(change!.conflict).toBeUndefined();
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  it('brings back a deleted residence whose date and place both changed as a plain addition', async () => {
+    // A heuristic: with no shared date, place or value, nothing ties it to the deleted one.
+    const resi = eventIdOf('@I3@', 'RESI');
+    store.transact('Delete residence', (tx) => {
+      for (const r of rows<{ id: string }>(
+        store,
+        'SELECT id FROM event_role WHERE event_id = ?',
+        resi,
+      ))
+        tx.delete('event_role', r.id);
+      tx.delete('event', resi);
+    });
+    let inResi = false;
+    const s2 = await prepareReimport(
+      store,
+      {
+        bytes: edited('@I3@', (l) => {
+          if (l.startsWith('1 ')) inResi = l === '1 RESI';
+          if (!inResi) return l;
+          if (l === '2 DATE 1900') return '2 DATE 1910';
+          if (l.startsWith('2 PLAC ')) return '2 PLAC Millbrook, Harlow County, Vermont, USA';
+          return l;
+        }),
+      },
+      { today: TODAY },
+    );
+    try {
+      const [add, ...rest] = changesOf(s2, '@I3@').filter(
+        (c) => c.kind === 'fact.add' && c.fact.type === 'RESI',
+      );
+      expect(rest).toEqual([]);
+      expect(add).toMatchObject({ defaultAccept: true });
+      expect(add!.conflict).toBeUndefined();
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  const baseImages = () =>
+    rows<{ key: string; value: string }>(
+      store,
+      "SELECT key, value FROM meta WHERE key LIKE 'reimport.base:%'",
+    ).map((r) => Object.keys(JSON.parse(r.value) as object).sort());
+
+  it('records no base for changes it applied: the written row is the base', async () => {
+    const s2 = await prepareReimport(store, { bytes: josiah1940() }, { today: TODAY });
+    expect(changesOf(s2, '@I3@')).toEqual([expect.objectContaining({ kind: 'fact.change' })]);
+    applyReimport(store, s2, defaults(s2), 'Re-import');
+    closeReimport(s2);
+    expect(baseImages()).toEqual([]);
+    // The next re-import still follows Ancestry from the applied value.
+    const later = edited('@I3@', (l) => (l === '2 DATE 1939' ? '2 DATE 1941' : l), 200);
+    const s3 = await prepareReimport(store, { bytes: later }, { today: TODAY });
+    try {
+      const [change] = changesOf(s3, '@I3@');
+      expect(change).toMatchObject({ kind: 'fact.change', defaultAccept: true });
+      expect(change!.conflict).toBeUndefined();
+    } finally {
+      closeReimport(s3);
+    }
+  });
+
+  it('compares a base with its place as it was, after the user renamed the place (P4)', async () => {
+    const first = await prepareReimport(store, { bytes: josiah1940() }, { today: TODAY });
+    applyReimport(store, first, defaults(first), 'Re-import');
+    closeReimport(first);
+    const death = eventIdOf('@I3@', 'DEAT');
+    const place = value<string>(store, 'SELECT place_id FROM event WHERE id = ?', death);
+    store.transact('Rename place', (tx) =>
+      tx.update('place', place, { full_name: 'Elderford, Ohio' } as never),
+    );
+    store.transact('Edit', (tx) => tx.update('event', death, { date_text: '2 MAY 1940' }));
+    const again = await prepareReimport(store, { bytes: josiah1940(200) }, { today: TODAY });
+    try {
+      // The export still says what it said: the user's date and place name stand.
+      const deaths = changesOf(again, '@I3@').filter(
+        (c) => c.kind === 'fact.change' && c.after.type === 'DEAT',
+      );
+      expect(deaths).toEqual([]);
+    } finally {
+      closeReimport(again);
+    }
+  });
+
+  it('records the base only for the changes it declined', async () => {
+    const death = eventIdOf('@I3@', 'DEAT');
+    const s2 = await prepareReimport(
+      store,
+      {
+        bytes: edited('@I3@', (l) =>
+          l === '2 DATE 1939' ? '2 DATE 1940' : l === '2 DATE 12 JUN 1868' ? '2 DATE 1868' : l,
+        ),
+      },
+      { today: TODAY },
+    );
+    const birth = changesOf(s2, '@I3@').find(
+      (c) => c.kind === 'fact.change' && c.after.type === 'BIRT',
+    )!;
+    applyReimport(store, s2, new Set([birth.id]), 'Re-import, death declined');
+    closeReimport(s2);
+    expect(baseImages()).toEqual([[`event|${death}`]]);
+  });
+});
+
+describe('name conflict wording (#160)', () => {
+  it('gives a name type only when the export states one', async () => {
+    const typed = renumber(
+      SAMPLE.replace(
+        '2 GIVN Mercy\n2 SURN Bellweather\n',
+        '2 GIVN Mercy\n2 SURN Bellweather\n1 NAME Mercy /Ashgrove/\n2 TYPE married\n1 NAME Merry /Bellweather/\n',
+      ),
+    );
+    const s2 = await prepareReimport(store, { bytes: typed }, { today: TODAY });
+    try {
+      const mercy = s2.diff.people.find((p) => p.existingId === pid(store, '@I2@'))!;
+      const names = mercy.changes.flatMap((c) =>
+        c.kind === 'name.add' ? [[c.name, c.nameType]] : [],
+      );
+      expect(names).toEqual([
+        ['Mercy Ashgrove', 'married'],
+        ['Merry Bellweather', null],
+      ]);
+      // Compare again (#163) keeps them too.
+      refreshReimport(store, s2);
+      const again = s2.diff.people
+        .find((p) => p.existingId === pid(store, '@I2@'))!
+        .changes.flatMap((c) => (c.kind === 'name.add' ? [[c.name, c.nameType]] : []));
+      expect(again).toEqual(names);
+    } finally {
+      closeReimport(s2);
+    }
+  });
+});
+
+describe('rename wording only for renames (#201)', () => {
+  const mercyChanges = (s: ReimportSession) =>
+    s.diff.people
+      .filter((p) => p.existingId === pid(store, '@I2@'))
+      .flatMap((p) => p.changes)
+      .filter((c) => c.kind === 'name.add');
+  const withNames = (...lines: string[]) =>
+    renumber(
+      SAMPLE.replace(
+        '2 GIVN Mercy\n2 SURN Bellweather\n',
+        ['2 GIVN Mercy', '2 SURN Bellweather', ...lines, ''].join('\n'),
+      ),
+    );
+
+  it('a name the export adds is a plain addition when the user only added an alternate', async () => {
+    const mercy = pid(store, '@I2@');
+    store.transact('Add aka', (tx) =>
+      tx.insert('person_name', {
+        person_id: mercy,
+        given: 'Mercie',
+        surname: 'Bellweather',
+        type: 'aka',
+        is_primary: 0,
+      } as never),
+    );
+    const s2 = await prepareReimport(
+      store,
+      { bytes: withNames('1 NAME Mercy /Ashgrove/', '2 TYPE married') },
+      { today: TODAY },
+    );
+    try {
+      expect(mercyChanges(s2)).toEqual([
+        expect.objectContaining({
+          name: 'Mercy Ashgrove',
+          nameType: 'married',
+          defaultAccept: true,
+        }),
+      ]);
+      expect(mercyChanges(s2)[0]!.conflict).toBeUndefined();
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  it('an alternate name the user edited, still in the export, offers nothing', async () => {
+    const mercy = pid(store, '@I2@');
+    const s1 = await prepareReimport(
+      store,
+      { bytes: withNames('1 NAME Mercie /Bellweather/') },
+      { today: TODAY },
+    );
+    applyReimport(store, s1, defaults(s1), 'Re-import 1');
+    closeReimport(s1);
+    const alt = value<string>(
+      store,
+      "SELECT id FROM person_name WHERE person_id = ? AND given = 'Mercie'",
+      mercy,
+    );
+    store.transact('Edit alt', (tx) => tx.update('person_name', alt, { given: 'Mercia' }));
+    const s2 = await prepareReimport(
+      store,
+      { bytes: renumber(withNames('1 NAME Mercie /Bellweather/'), 400) },
+      { today: TODAY },
+    );
+    try {
+      expect(mercyChanges(s2)).toEqual([]);
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  it('a primary name both sides changed is a conflict that says what it was', async () => {
+    const mercy = pid(store, '@I2@');
+    const name = value<string>(store, 'SELECT id FROM person_name WHERE person_id = ?', mercy);
+    store.transact('Rename', (tx) => tx.update('person_name', name, { given: 'Marcy' }));
+    const changed = renumber(
+      SAMPLE.replace(
+        '1 NAME Mercy /Bellweather/\n2 GIVN Mercy\n',
+        '1 NAME Mercey /Bellweather/\n2 GIVN Mercey\n',
+      ),
+    );
+    const s2 = await prepareReimport(store, { bytes: changed }, { today: TODAY });
+    try {
+      expect(mercyChanges(s2)).toEqual([
+        expect.objectContaining({
+          name: 'Mercey Bellweather',
+          was: 'Mercy Bellweather',
+          conflict: 'local-edit',
+          defaultAccept: false,
+        }),
+      ]);
+      // Ticked, it is kept as an alternate with no invented type.
+      applyReimport(store, s2, new Set(mercyChanges(s2).map((c) => c.id)), 'Re-import');
+    } finally {
+      closeReimport(s2);
+    }
+    expect(
+      rows(
+        store,
+        'SELECT given, type, is_primary FROM person_name WHERE person_id = ? ORDER BY sort_order',
+        mercy,
+      ),
+    ).toEqual([
+      { given: 'Marcy', type: 'birth', is_primary: 1 },
+      { given: 'Mercey', type: 'aka', is_primary: 0 },
+    ]);
+  });
+});
+
+describe('dates compared by meaning (#194)', () => {
+  it('offers no change when a date is only written differently', async () => {
+    const text = renumber(
+      SAMPLE.replace('2 DATE 3 Mar 1846', '2 DATE 03 MAR 1846').replace(
+        '2 DATE 12 JUN 1868',
+        '2 DATE 12 June 1868',
+      ),
+    );
+    const s2 = await prepareReimport(store, { bytes: text }, { today: TODAY });
+    try {
+      expect(s2.diff.people.flatMap((p) => p.changes)).toEqual([]);
+    } finally {
+      closeReimport(s2);
+    }
+  });
+});
+
+describe('three-way with dates by meaning (#224 on #194)', () => {
+  it('does not re-offer a value the export only wrote differently', async () => {
+    const person = (date: string) =>
+      ged('0 @I1@ INDI', '1 NAME Ada /Vale/', '1 SEX F', '1 DEAT', `2 DATE ${date}`);
+    const tree = openMemoryTree();
+    await importGedcom({ bytes: person('1 JAN 1900') }, tree, { today: TODAY });
+    const death = value<string>(tree, "SELECT id FROM event WHERE type = 'DEAT'");
+    tree.transact('Edit', (tx) => tx.update('event', death, { date_text: '2 JAN 1900' }));
+    const s2 = await prepareReimport(tree, { bytes: person('01 JAN 1900') }, { today: TODAY });
+    try {
+      // The base said 1 Jan 1900; the export still does, so the user's 2 Jan stands.
+      expect(s2.diff.people.flatMap((p) => p.changes)).toEqual([]);
+    } finally {
+      closeReimport(s2);
+      tree.close();
+    }
+  });
+});
+
+describe('comparing again (#163)', () => {
+  it('re-diffs against the tree as it is now, with stable change keys', async () => {
+    const s2 = await prepareReimport(store, { bytes: updatedSample() }, { today: TODAY });
+    try {
+      const keys = (s: ReimportSession) =>
+        new Map(s.diff.people.flatMap((p) => p.changes.map((c) => [c.key, c])));
+      const before = keys(s2);
+      expect(new Set([...before.keys()]).size).toBe(before.size);
+      expect(isReimportStale(store, s2)).toBe(false);
+      const josiah = pid(store, '@I3@');
+      const death = value<string>(
+        store,
+        "SELECT e.id FROM event e JOIN event_role r ON r.event_id = e.id WHERE r.person_id = ? AND e.type = 'DEAT'",
+        josiah,
+      );
+      store.transact('Edit', (tx) => tx.update('event', death, { date_text: '3 MAY 1939' }));
+      expect(isReimportStale(store, s2)).toBe(true);
+      refreshReimport(store, s2);
+      expect(isReimportStale(store, s2)).toBe(false);
+      const after = keys(s2);
+      // Every change not about the edited death keeps its key.
+      for (const [key, c] of before) {
+        if (c.kind === 'fact.change' && c.existingEventId === death) continue;
+        expect(after.has(key)).toBe(true);
+      }
+      const edited = [...after.values()].find(
+        (c) => c.kind === 'fact.change' && c.existingEventId === death,
+      );
+      expect(edited).toMatchObject({ conflict: 'local-edit', defaultAccept: false });
+      applyReimport(store, s2, new Set(), 'Re-import');
+    } finally {
+      closeReimport(s2);
+    }
+  });
+});
+
+describe('review of #221: media whose files were missing at import', () => {
+  const TWO_MISSING = ged(
+    '0 @I1@ INDI',
+    '1 NAME Ivo /Canary/',
+    '1 OBJE',
+    '2 FILE photos/untitled-a.jpg',
+    '1 OBJE',
+    '2 FILE photos/untitled-b.jpg',
+  );
+  const files = (tree: TreeStore) =>
+    rows<{ line: string }>(
+      tree,
+      `SELECT u.line FROM unmapped_line u JOIN media m ON m.id = u.owner_id
+        WHERE u.owner_type = 'media' ORDER BY u.line`,
+    ).map((r) => r.line);
+
+  it('keeps two untitled missing photos apart, each with its own path', async () => {
+    const tree = openMemoryTree();
+    await importGedcom({ bytes: TWO_MISSING }, tree, { today: TODAY });
+    expect(files(tree)).toEqual(['2 FILE photos/untitled-a.jpg', '2 FILE photos/untitled-b.jpg']);
+
+    const again = await prepareReimport(tree, { bytes: renumber(TWO_MISSING) }, { today: TODAY });
+    try {
+      expect(again.diff.counts).toMatchObject({ newPeople: 0, changes: 0 });
+      applyReimport(tree, again, defaults(again), 'Re-import');
+    } finally {
+      closeReimport(again);
+    }
+    expect(value(tree, 'SELECT count(*) FROM media')).toBe(2);
+    expect(files(tree)).toEqual(['2 FILE photos/untitled-a.jpg', '2 FILE photos/untitled-b.jpg']);
+    tree.close();
+  });
+
+  it('never merges two incoming media into one existing row', async () => {
+    const tree = openMemoryTree();
+    // An older tree: one untitled missing photo, keyed by title only.
+    await importGedcom(
+      {
+        bytes: ged('0 @I1@ INDI', '1 NAME Ivo /Canary/', '1 OBJE', '2 FILE photos/untitled-a.jpg'),
+      },
+      tree,
+      { today: TODAY },
+    );
+    tree.db.prepare("DELETE FROM unmapped_line WHERE owner_type = 'media'").run();
+    const again = await prepareReimport(tree, { bytes: renumber(TWO_MISSING) }, { today: TODAY });
+    try {
+      applyReimport(tree, again, defaults(again), 'Re-import');
+    } finally {
+      closeReimport(again);
+    }
+    const lines = rows<{ n: number }>(
+      tree,
+      `SELECT count(*) AS n FROM unmapped_line WHERE owner_type = 'media' GROUP BY owner_id`,
+    );
+    expect(lines.every((l) => l.n <= 1)).toBe(true);
+    tree.close();
+  });
+});
+
+describe('dates compared by meaning (#194)', () => {
+  it('offers no change when a date is only written differently', async () => {
+    const text = renumber(
+      SAMPLE.replace('2 DATE 3 Mar 1846', '2 DATE 03 MAR 1846').replace(
+        '2 DATE 12 JUN 1868',
+        '2 DATE 12 June 1868',
+      ),
+    );
+    const s2 = await prepareReimport(store, { bytes: text }, { today: TODAY });
+    try {
+      expect(s2.diff.people.flatMap((p) => p.changes)).toEqual([]);
+    } finally {
+      closeReimport(s2);
+    }
+  });
+});
+
+describe('why a new person is new, truthfully (#192 review)', () => {
+  const reasonsOf = async (tree: TreeStore, text: string, name: string) => {
+    const s2 = await prepareReimport(tree, { bytes: text }, { today: TODAY });
+    try {
+      return s2.diff.people.find((p) => p.status === 'new' && p.name === name)!.reasons;
+    } finally {
+      closeReimport(s2);
+    }
+  };
+
+  it('finds a tree person by an alternate given name', async () => {
+    const joseph = [
+      '0 @I1@ INDI',
+      '1 NAME Joseph /Ashgrove/',
+      '1 NAME Joe /Ashgrove/',
+      '2 TYPE aka',
+      '1 BIRT',
+      '2 DATE 1900',
+    ];
+    const tree = openMemoryTree();
+    await importGedcom({ bytes: ged(...joseph) }, tree, { today: TODAY });
+    const later = ged(...joseph, '0 @I2@ INDI', '1 NAME Joe /Ashgrove/', '1 BIRT', '2 DATE 1990');
+    const reasons = await reasonsOf(tree, later, 'Joe Ashgrove');
+    expect(reasons[0]).toMatch(/^closest: Joseph Ashgrove, \d+%$/);
+    tree.close();
+  });
+
+  it('does not claim nobody has a similar name when people share the surname', async () => {
+    const text = renumber(
+      SAMPLE.replace('0 TRLR', '0 @I90@ INDI\n1 NAME John /Ashgrove/\n1 BIRT\n2 DATE 2001\n0 TRLR'),
+    );
+    expect(await reasonsOf(store, text, 'John Ashgrove')).toEqual(['no close match in your tree']);
   });
 });

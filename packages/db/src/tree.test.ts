@@ -1,15 +1,184 @@
-import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import {
+  chmodSync,
+  existsSync,
+  linkSync,
+  mkdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTree, meta, openMemoryTree, openTree, persons, treePaths } from './index';
+import { beforeEach, describe, expect, it } from 'vitest';
+import {
+  assertOwnTree,
+  createTree,
+  ensurePrivateDir,
+  meta,
+  openMemoryTree,
+  openTree,
+  persons,
+  restrictMode,
+  treePaths,
+} from './index';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 let root: string;
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'oa-db-'));
+  root = makeTempDir('oa-db-');
 });
-afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+
+const mode = (path: string) => statSync(path).mode & 0o777;
+
+describe.skipIf(process.platform === 'win32')('tree permissions', () => {
+  it('creates the tree private to its owner: folders 0700, database files 0600', () => {
+    const dir = join(root, 'Private.oatree');
+    const store = createTree(dir);
+    store.db.prepare("INSERT INTO meta (key, value) VALUES ('probe', 'x')").run();
+    const paths = treePaths(dir);
+    for (const folder of [dir, paths.media, paths.thumbs]) expect(mode(folder), folder).toBe(0o700);
+    for (const file of [paths.database, `${paths.database}-wal`, `${paths.database}-shm`]) {
+      expect(existsSync(file), file).toBe(true);
+      expect(mode(file), file).toBe(0o600);
+    }
+    store.close();
+  });
+
+  it('tightens an existing tree when it opens', () => {
+    const dir = join(root, 'Old.oatree');
+    createTree(dir).close();
+    const paths = treePaths(dir);
+    for (const folder of [dir, paths.media, paths.thumbs]) chmodSync(folder, 0o755);
+    chmodSync(paths.database, 0o644);
+    const store = openTree(dir);
+    for (const folder of [dir, paths.media, paths.thumbs]) expect(mode(folder), folder).toBe(0o700);
+    expect(mode(paths.database)).toBe(0o600);
+    store.close();
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('opening refuses linked tree files', () => {
+  it('refuses a tree folder that is a symlink', () => {
+    const real = join(root, 'Real.oatree');
+    createTree(real).close();
+    const link = join(root, 'Link.oatree');
+    symlinkSync(real, link);
+    expect(() => openTree(link)).toThrow(/symbolic link/);
+  });
+
+  it('refuses a tree.sqlite that is a symlink', () => {
+    const dir = join(root, 'Db.oatree');
+    createTree(dir).close();
+    const other = join(root, 'Other.oatree');
+    createTree(other).close();
+    const { database } = treePaths(dir);
+    rmSync(database);
+    symlinkSync(treePaths(other).database, database);
+    expect(() => openTree(dir)).toThrow(/symbolic link/);
+  });
+
+  it('refuses a tree.sqlite or -wal with another hard link', () => {
+    const dir = join(root, 'Hard.oatree');
+    createTree(dir).close();
+    const { database } = treePaths(dir);
+    // In a shared folder, someone could link any file of yours in as the tree.
+    linkSync(database, join(root, 'elsewhere.sqlite'));
+    expect(() => openTree(dir)).toThrow(/hard link/);
+  });
+
+  it('refuses a media or thumbs folder that is a symlink', () => {
+    for (const which of ['media', 'thumbs'] as const) {
+      const dir = join(root, `Linked ${which}.oatree`);
+      createTree(dir).close();
+      const outside = join(root, `outside-${which}`);
+      mkdirSync(outside);
+      rmSync(treePaths(dir)[which], { recursive: true });
+      symlinkSync(outside, treePaths(dir)[which]);
+      expect(() => openTree(dir), which).toThrow(/symbolic link/);
+    }
+  });
+
+  it('never hangs on a FIFO planted in the tree', () => {
+    const dir = join(root, 'Fifo.oatree');
+    createTree(dir).close();
+    const { thumbs } = treePaths(dir);
+    rmSync(thumbs, { recursive: true });
+    execFileSync('mkfifo', [thumbs]);
+    // Opening a FIFO for reading blocks until a writer comes: refuse, not hang.
+    expect(() => openTree(dir)).toThrow(/not a folder/);
+    expect(() => restrictMode(thumbs, 0o700)).not.toThrow();
+  });
+
+  it('opens an ordinary tree', () => {
+    const dir = join(root, 'Plain.oatree');
+    createTree(dir).close();
+    expect(() => openTree(dir).close()).not.toThrow();
+  });
+});
+
+describe('on Windows (issue #211)', () => {
+  // A platform shim: the uid check is skipped there, the link refusals are not.
+  const windows = { platform: 'win32' as const, uid: undefined };
+
+  it.skipIf(process.platform === 'win32')('still refuses symlinks and hard links', () => {
+    const dir = join(root, 'Win.oatree');
+    createTree(dir).close();
+    const { database } = treePaths(dir);
+    linkSync(database, join(root, 'elsewhere.sqlite'));
+    expect(() => assertOwnTree(treePaths(dir), windows)).toThrow(/hard link/);
+    const link = join(root, 'WinLink.oatree');
+    symlinkSync(dir, link);
+    expect(() => assertOwnTree(treePaths(link), windows)).toThrow(/symbolic link/);
+  });
+
+  it('skips only the owner check', () => {
+    const dir = join(root, 'Owner.oatree');
+    createTree(dir).close();
+    // Elsewhere another uid is refused; on Windows ownership is not compared.
+    expect(() => assertOwnTree(treePaths(dir), { platform: 'linux', uid: -1 })).toThrow(
+      /another account/,
+    );
+    expect(() => assertOwnTree(treePaths(dir), windows)).not.toThrow();
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('tightening never follows links or widens', () => {
+  it('leaves the target of a symlinked folder alone', () => {
+    const dir = join(root, 'Linked.oatree');
+    createTree(dir).close();
+    const outside = join(root, 'elsewhere');
+    mkdirSync(outside, { mode: 0o755 });
+    chmodSync(outside, 0o755);
+    const paths = treePaths(dir);
+    rmSync(paths.thumbs, { recursive: true });
+    symlinkSync(outside, paths.thumbs);
+    expect(() => openTree(dir)).toThrow(/symbolic link/);
+    restrictMode(paths.thumbs, 0o700);
+    expect(mode(outside)).toBe(0o755);
+  });
+
+  it('only removes access, never adds it', () => {
+    const dir = join(root, 'ReadOnly.oatree');
+    createTree(dir).close();
+    const paths = treePaths(dir);
+    chmodSync(paths.thumbs, 0o500);
+    openTree(dir).close();
+    expect(mode(paths.thumbs)).toBe(0o500);
+    chmodSync(paths.thumbs, 0o700);
+  });
+
+  it('ensurePrivateDir tightens an existing folder without widening it', () => {
+    const open = join(root, 'open');
+    mkdirSync(open);
+    chmodSync(open, 0o755);
+    ensurePrivateDir(open);
+    expect(mode(open)).toBe(0o700);
+    chmodSync(open, 0o500);
+    ensurePrivateDir(open);
+    expect(mode(open)).toBe(0o500);
+    chmodSync(open, 0o700);
+  });
 });
 
 describe('tree storage layout', () => {

@@ -1,12 +1,17 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useQueryClient, useSuspenseQuery } from '@tanstack/react-query';
 import { getRouteApi, useRouter } from '@tanstack/react-router';
 import { isNotFound } from '../../api/client';
+import { takeUnsaved } from '../../api/edits';
+import { deletedHere } from '../../api/history';
+import { useUrlTree } from '../../app/useUrlTree';
 import { personQuery } from '../../api/queries';
+import type { PersonDetail } from '../../api/types';
 import { useToast } from '../../components/Toast/Toast';
-import { fullName } from '../../lib/person';
+import { fullName, nearestRelative } from '../../lib/person';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/Tabs/Tabs';
 import { FactsTab } from './FactsTab';
+import { hasDirtyForms } from './edit/dirty';
 import { NotesTab } from './edit/NotesTab';
 import { GalleryTab, LifeStoryTab, SourcesTab } from './OtherTabs';
 import { PersonHeader } from './PersonHeader';
@@ -24,32 +29,54 @@ const TAB_LABELS: Record<PersonTab, string> = {
 };
 
 /**
- * Leaves the page when the person stops existing while it is open, e.g. after
- * undoing their creation: back where the user came from, else home.
+ * Leaves the page when the person stops existing while it is open (deleted in
+ * another window, or by undoing their creation): to the nearest relative, else
+ * the people list, with one message that also says when an edit was lost.
  */
-function useLeaveWhenGone(tree: string, personId: string, name: string, error: unknown) {
+function useLeaveWhenGone(tree: string, detail: PersonDetail, error: unknown) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const toast = useToast();
   const gone = isNotFound(error);
+  const ownDelete = useRef(false);
+  const personId = detail.person.id;
+  const name = fullName(detail.summary);
+  const nearby = nearestRelative(detail);
   useEffect(() => {
+    // A delete made here already navigated and said so; its page may still be
+    // mounted for a moment and see the 404 (#181's removeQueries).
     if (!gone) return;
-    toast({ title: `${name} is no longer in the tree` });
-    if (router.history.canGoBack()) router.history.back();
-    else void router.navigate({ to: '/' });
+    // deletedHere answers once, so remember it if this effect runs again.
+    if (ownDelete.current || deletedHere(personId)) {
+      ownDelete.current = true;
+      return;
+    }
+    const lost = takeUnsaved(tree)
+      ? "Your changes couldn't be saved."
+      : hasDirtyForms()
+        ? 'Your unsaved changes were discarded.'
+        : null;
+    toast({
+      title: `${name} was deleted (in another window or by undo)`,
+      ...(lost ? { description: lost } : {}),
+    });
+    void (nearby
+      ? router.navigate({ to: '/person/$personId', params: { personId: nearby } })
+      : router.navigate({ to: '/people' }));
     queryClient.removeQueries({ queryKey: personQuery(tree, personId).queryKey });
-  }, [gone, name, personId, queryClient, router, toast, tree]);
+  }, [gone, name, nearby, personId, queryClient, router, toast, tree]);
 }
 
 /** Ancestry-style person page: header band, then Facts, Gallery, Notes, LifeStory, Sources. */
 export function PersonPage() {
   const { personId } = route.useParams();
   const { tree } = route.useLoaderData();
-  const { tab = 'facts' } = route.useSearch();
+  const { tab = 'facts', tree: urlTree } = route.useSearch();
+  useUrlTree(urlTree);
   const navigate = route.useNavigate();
   // The loader already fetched it, so this never suspends on navigation.
   const { data: detail, error } = useSuspenseQuery(personQuery(tree, personId));
-  useLeaveWhenGone(tree, personId, fullName(detail.summary), error);
+  useLeaveWhenGone(tree, detail, error);
 
   return (
     // Keyed so per-person UI state (filters, collapsed groups) resets on navigation.
@@ -59,7 +86,12 @@ export function PersonPage() {
         value={tab}
         onValueChange={(value) =>
           void navigate({
-            search: value === 'facts' ? {} : { tab: value as Exclude<PersonTab, 'facts'> },
+            // Keep the rest of the search, `tree` above all: without it the
+            // page would be redirected against whichever tree is current.
+            search: (prev) => ({
+              ...prev,
+              tab: value === 'facts' ? undefined : (value as Exclude<PersonTab, 'facts'>),
+            }),
             replace: true,
           })
         }
@@ -84,7 +116,7 @@ export function PersonPage() {
             <NotesTab tree={tree} detail={detail} />
           </TabsContent>
           <TabsContent value="lifestory">
-            <LifeStoryTab detail={detail} />
+            <LifeStoryTab tree={tree} detail={detail} />
           </TabsContent>
           <TabsContent value="sources">
             <SourcesTab detail={detail} />

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { CircleHelp, TriangleAlert } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError } from '../../api/client';
 import { invalidateTree } from '../../api/edits';
+import { historyQuery } from '../../api/history';
 import { treeQuery } from '../../api/queries';
 import { Button } from '../../components/Button/Button';
 import buttonStyles from '../../components/Button/Button.module.css';
@@ -23,7 +25,9 @@ import {
   type ReimportReview,
   type ReviewChange,
 } from './api';
-import { describeChange } from './labels';
+import { groupReview, QUESTIONS, type GroupId } from './group';
+import { conflictText, describeChange } from './labels';
+import { summarizeApply, type ApplySummary, type SummaryPerson } from './summary';
 import styles from './Reimport.module.css';
 
 /** People shown per page of the review. */
@@ -76,14 +80,16 @@ function PersonCard({
   active: Set<string>;
   onToggle: (change: ReviewChange, on: boolean) => void;
 }) {
+  // An article per card: the four groups stay the only regions (landmarks).
   return (
-    <section aria-label={person.name} className={styles.card} data-status={person.status}>
+    // Named by the person alone (the heading also shows their lifespan).
+    <article aria-label={person.name} className={styles.card} data-status={person.status}>
       <header className={styles.cardHeader}>
         <div>
-          <h2 className={styles.name}>
+          <h3 className={styles.name}>
             {person.name}
             {person.lifespan && <span className={styles.lifespan}> {person.lifespan}</span>}
-          </h2>
+          </h3>
           <p className={styles.meta}>
             {STATUS[person.status]}
             {person.confidence !== null && ` · ${Math.round(person.confidence * 100)}% match`}
@@ -100,6 +106,11 @@ function PersonCard({
           if (!change.applicable) {
             return (
               <li key={change.id} className={styles.info}>
+                {QUESTIONS.has(change.kind) && (
+                  <span className={styles.flag}>
+                    <CircleHelp aria-hidden size={14} /> Check
+                  </span>
+                )}
                 {label}
                 {change.kind === 'person.missing' && '. Kept in your tree.'}
               </li>
@@ -107,19 +118,24 @@ function PersonCard({
           }
           const waiting = change.requires?.some((r) => !active.has(r)) ?? false;
           return (
-            <li key={change.id}>
+            <li key={change.id} className={change.conflict ? styles.conflict : undefined}>
               <Checkbox
                 label={label}
                 checked={active.has(change.id)}
                 disabled={waiting}
                 description={
-                  change.conflict === 'local-edit'
-                    ? 'Edited in this tree since the last import; your edit is kept unless you tick this.'
-                    : change.conflict === 'local-delete'
-                      ? 'You deleted this in this tree; it stays deleted unless you tick this.'
-                      : waiting
-                        ? 'Needs the new person above.'
-                        : undefined
+                  change.conflict ? (
+                    // The marker opens the description, so it is announced with the checkbox (#194),
+                    // followed by what ticking does (#201).
+                    <>
+                      <span className={styles.flag}>
+                        <TriangleAlert aria-hidden size={14} /> Conflict
+                      </span>
+                      {conflictText(change, person.name)}
+                    </>
+                  ) : waiting ? (
+                    'Needs the new person above.'
+                  ) : undefined
                 }
                 onChange={(event) => onToggle(change, event.target.checked)}
               />
@@ -127,7 +143,7 @@ function PersonCard({
           );
         })}
       </ul>
-    </section>
+    </article>
   );
 }
 
@@ -140,10 +156,24 @@ function Review({ review }: { review: ReimportReview }) {
     () => new Set(all.filter((c) => c.applicable && c.defaultAccept).map((c) => c.id)),
   );
   const [pending, setPending] = useState(false);
+  const [done, setDone] = useState<{
+    summary: ApplySummary;
+    homePersonId: string | null;
+    batchId: string;
+  } | null>(null);
   const [stale, setStale] = useState(review.stale);
   const [comparing, setComparing] = useState(false);
   // A large export can change thousands of people: render cards in pages.
   const [shown, setShown] = useState(PAGE);
+  const [filter, setFilter] = useState<GroupId | 'all'>('all');
+  const groups = useMemo(() => groupReview(review.diff.people), [review]);
+  const visible = groups.filter((g) => g.people.length && (filter === 'all' || g.id === filter));
+  const listed = visible.reduce((n, g) => n + g.people.length, 0);
+  // Matched people without a card: nothing in the export changed them.
+  const unchanged = Math.max(
+    0,
+    review.diff.counts.matched - review.diff.people.filter((p) => p.status === 'matched').length,
+  );
   const active = useMemo(() => effective(review, selected), [review, selected]);
   const { counts } = review.diff;
 
@@ -241,11 +271,20 @@ function Review({ review }: { review: ReimportReview }) {
       toast({
         title: `Applied ${result.applied} change${result.applied === 1 ? '' : 's'}`,
         description: 'Undo with Cmd/Ctrl-Z or from History.',
+        // Undoing the re-import closes this toast (#158).
+        tag: `batch:${result.batchId}`,
       });
+      const blocked = new Set(result.blocked);
       const tree = await queryClient.fetchQuery(treeQuery(review.tree));
-      await (tree.homePersonId
-        ? navigate({ to: '/tree/$personId', params: { personId: tree.homePersonId } })
-        : navigate({ to: '/' }));
+      setDone({
+        summary: summarizeApply(
+          review.diff.people,
+          new Set([...active].filter((id) => !blocked.has(id))),
+          result.newPeople,
+        ),
+        homePersonId: tree.homePersonId ?? null,
+        batchId: result.batchId,
+      });
     } catch (error) {
       setPending(false);
       // The tree moved since the comparison: offer to compare again instead.
@@ -266,6 +305,8 @@ function Review({ review }: { review: ReimportReview }) {
     await discardReimport(review.id).catch(() => {});
     await navigate({ to: '/' });
   }
+
+  if (done) return <Applied {...done} tree={review.tree} fileName={review.fileName} />;
 
   return (
     <div className={cx(importStyles.page, styles.page)}>
@@ -290,9 +331,8 @@ function Review({ review }: { review: ReimportReview }) {
       )}
       <section aria-label="Summary" className={styles.summary}>
         <span>
-          {counts.matched} matched ({counts.highConfidence} high confidence)
+          In the export: {counts.matched} matched ({unchanged} unchanged, not listed)
         </span>
-        <span>{counts.changedPeople} with changes</span>
         <span>{counts.newPeople} new</span>
         <span>{counts.missingPeople} missing</span>
       </section>
@@ -310,13 +350,62 @@ function Review({ review }: { review: ReimportReview }) {
         </p>
       ) : (
         <>
-          {review.diff.people.slice(0, shown).map((person) => (
-            <PersonCard key={person.key} person={person} active={active} onToggle={toggle} />
-          ))}
-          {review.diff.people.length > shown && (
+          <div role="group" aria-label="Filter the review" className={styles.filters}>
+            {[
+              { id: 'all' as const, title: 'All', count: review.diff.people.length },
+              ...groups
+                .filter((g) => g.people.length)
+                .map((g) => ({ id: g.id, title: g.title, count: g.people.length })),
+            ].map((f) => (
+              <Button
+                key={f.id}
+                size="sm"
+                variant="secondary"
+                className={styles.filter}
+                aria-pressed={filter === f.id}
+                onClick={() => {
+                  setFilter(f.id);
+                  setShown(PAGE);
+                }}
+              >
+                {f.title} {f.count}
+              </Button>
+            ))}
+          </div>
+          {(() => {
+            // Pages run through the groups in reading order.
+            let left = shown;
+            return visible.map((g) => {
+              const people = g.people.slice(0, Math.max(0, left));
+              left -= people.length;
+              if (!people.length) return null;
+              return (
+                <section
+                  key={g.id}
+                  aria-labelledby={`group-${g.id}`}
+                  data-group={g.id}
+                  className={styles.group}
+                >
+                  <h2 id={`group-${g.id}`} className={styles.groupTitle}>
+                    {g.id === 'decide' && <TriangleAlert aria-hidden size={18} />}
+                    {g.title} ({g.people.length})
+                  </h2>
+                  {people.map((person) => (
+                    <PersonCard
+                      key={person.key}
+                      person={person}
+                      active={active}
+                      onToggle={toggle}
+                    />
+                  ))}
+                </section>
+              );
+            });
+          })()}
+          {listed > shown && (
             <Button onClick={() => setShown((n) => n + PAGE)}>
-              Show {Math.min(PAGE, review.diff.people.length - shown)} more (
-              {review.diff.people.length - shown} not shown; bulk choices include them)
+              Show {Math.min(PAGE, listed - shown)} more ({listed - shown} not shown; bulk choices
+              include them)
             </Button>
           )}
         </>
@@ -334,6 +423,99 @@ function Review({ review }: { review: ReimportReview }) {
         </Button>
       </div>
     </div>
+  );
+}
+
+/** `undone`: the re-import was undone, so the people it added are gone and lose their links. */
+function SummaryList({ people, undone = false }: { people: SummaryPerson[]; undone?: boolean }) {
+  return (
+    <ul className={styles.summaryList}>
+      {people.map((p) => (
+        <li key={`${p.personId ?? ''}|${p.name}`}>
+          {p.personId && !(undone && p.created) ? (
+            <Link to="/person/$personId" params={{ personId: p.personId }} className={styles.name}>
+              {p.name}
+            </Link>
+          ) : (
+            <span className={styles.name}>{p.name}</span>
+          )}
+          <ul className={styles.changes}>
+            {p.changes.map((c, i) => (
+              <li key={i} className={styles.info}>
+                {c}
+              </li>
+            ))}
+          </ul>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** After Apply: what was applied, to whom (with links), and what was left out (#158). */
+function Applied({
+  summary,
+  homePersonId,
+  fileName,
+  tree,
+  batchId,
+}: {
+  summary: ApplySummary;
+  homePersonId: string | null;
+  fileName: string;
+  tree: string;
+  batchId: string;
+}) {
+  const plural = (n: number) => `${n} change${n === 1 ? '' : 's'}`;
+  // Undo and redo refetch the history (in this tab or another), so the page
+  // follows the batch's state rather than claiming changes that were undone.
+  const { data: history } = useQuery(historyQuery(tree));
+  const undone = history?.items.find((b) => b.id === batchId)?.state === 'undone';
+  return (
+    <section aria-labelledby="reimport-applied" className={cx(importStyles.page, styles.page)}>
+      <header className={importStyles.header}>
+        <div>
+          <h1 id="reimport-applied" className={importStyles.title}>
+            {undone ? 'Re-import undone' : 'Re-import applied'}
+          </h1>
+          {undone ? (
+            <p className={importStyles.subtitle}>
+              This re-import was undone, so none of these {plural(summary.appliedCount)} from{' '}
+              {fileName} are in the tree, and the people it added are gone (shown without links).
+              Redo it with Shift-Cmd/Ctrl-Z or from History.
+            </p>
+          ) : (
+            <p className={importStyles.subtitle}>
+              Applied {plural(summary.appliedCount)} from {fileName} to {summary.applied.length}{' '}
+              {summary.applied.length === 1 ? 'person' : 'people'}. Undo all of it with Cmd/Ctrl-Z
+              or from History.
+            </p>
+          )}
+        </div>
+      </header>
+      <SummaryList people={summary.applied} undone={undone} />
+      {summary.skippedCount > 0 && (
+        <details className={styles.skipped}>
+          <summary>Skipped {plural(summary.skippedCount)}</summary>
+          <SummaryList people={summary.skipped} />
+        </details>
+      )}
+      <div className={styles.footer}>
+        {homePersonId ? (
+          <Link
+            to="/tree/$personId"
+            params={{ personId: homePersonId }}
+            className={cx(buttonStyles.button, buttonStyles.primary, buttonStyles.md)}
+          >
+            Go to the tree
+          </Link>
+        ) : (
+          <Link to="/" className={cx(buttonStyles.button, buttonStyles.primary, buttonStyles.md)}>
+            Go to the tree
+          </Link>
+        )}
+      </div>
+    </section>
   );
 }
 

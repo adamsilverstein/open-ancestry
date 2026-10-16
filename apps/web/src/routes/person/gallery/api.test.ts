@@ -1,6 +1,15 @@
 import type { MediaRow } from '@open-ancestry/db';
 import { describe, expect, it } from 'vitest';
-import { ancestryLink, hasThumbnail, mediaGroup, thumbUrl, learnedSize, tileImage } from './api';
+import {
+  ancestryLink,
+  hasThumbnail,
+  learnedSize,
+  mediaGroup,
+  mediaVersion,
+  originalUrl,
+  thumbUrl,
+  tileImage,
+} from './api';
 
 const media = (fields: Partial<MediaRow>) =>
   ({ kind: 'photo', local_path: null, ...fields }) as MediaRow;
@@ -20,6 +29,9 @@ describe('gallery helpers', () => {
     expect(hasThumbnail(media({ remote_url: 'https://x' }))).toBe(false);
     expect(hasThumbnail(media({ local_path: 'a.pdf', kind: 'document' }))).toBe(false);
     expect(thumbUrl('My tree', 'M1', 'sm')).toBe('/api/trees/My%20tree/media/M1/thumb/sm');
+    expect(originalUrl('My tree', 'M1', 'ff00')).toBe('/api/trees/My%20tree/media/M1?v=ff00');
+    expect(mediaVersion(media({ sha256: 'a'.repeat(64) }))).toBe('a'.repeat(16));
+    expect(mediaVersion(media({ sha256: null }))).toBeNull();
   });
 });
 
@@ -69,6 +81,10 @@ describe('tileImage', () => {
   });
 
   it('assumes full-size thumbnails when the size is unknown', () => {
+    expect(tileImage('t', 'M', null, 'v1')).toMatchObject({
+      src: '/api/trees/t/media/M/thumb/sm?v=v1',
+      srcSet: expect.stringContaining('/thumb/md?v=v1 '),
+    });
     expect(tileImage('t', 'M', null)).toMatchObject({
       srcSet: '/api/trees/t/media/M/thumb/sm 160w, /api/trees/t/media/M/thumb/md 480w',
       sizes: '190px',

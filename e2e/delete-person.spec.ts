@@ -16,6 +16,8 @@ test.beforeEach(async ({ request, baseURL }, testInfo) => {
 });
 
 const h1 = (page: Page) => page.getByRole('heading', { level: 1 });
+const toasts = (page: Page) =>
+  page.getByRole('region', { name: /Notifications/ }).getByRole('listitem');
 const deletedToast = (page: Page, name: string) =>
   page
     .getByRole('region', { name: /Notifications/ })
@@ -35,12 +37,16 @@ async function deletePerson(page: Page, name: string) {
 test('lands on a parent, and Cmd/Ctrl-Z returns to the restored person', async ({ page }) => {
   await openSeeded(page, seeded);
   await deletePerson(page, 'Rowan Ashdown');
-  await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}$`));
+  await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}(\\?tree=[^&]*)?$`));
   await expect(h1(page)).toHaveText('Edmund Ashdown');
   await expect(deletedToast(page, 'Rowan Ashdown')).toBeVisible();
+  // A delete made here is not also announced as one made elsewhere (#189).
+  await page.waitForTimeout(500);
+  await expect(toasts(page)).toHaveCount(1);
+  await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}(\\?tree=[^&]*)?$`));
 
   await page.keyboard.press(`${mod}+z`);
-  await expect(page).toHaveURL(new RegExp(`/person/${seeded.rowan}$`));
+  await expect(page).toHaveURL(new RegExp(`/person/${seeded.rowan}(\\?tree=[^&]*)?$`));
   await expect(h1(page)).toHaveText('Rowan Ashdown');
 });
 
@@ -48,9 +54,9 @@ test('the toast Undo button restores the person and opens them', async ({ page }
   await openSeeded(page, seeded, seeded.iris);
   await deletePerson(page, 'Iris Vale');
   // No parents: her partner is the nearest relative.
-  await expect(page).toHaveURL(new RegExp(`/person/${seeded.rowan}$`));
+  await expect(page).toHaveURL(new RegExp(`/person/${seeded.rowan}(\\?tree=[^&]*)?$`));
   await deletedToast(page, 'Iris Vale').getByRole('button', { name: 'Undo' }).click();
-  await expect(page).toHaveURL(new RegExp(`/person/${seeded.iris}$`));
+  await expect(page).toHaveURL(new RegExp(`/person/${seeded.iris}(\\?tree=[^&]*)?$`));
   await expect(h1(page)).toHaveText('Iris Vale');
 });
 
@@ -61,18 +67,18 @@ test('someone with no relatives leaves for the people list', async ({ page }) =>
   await expect(page.getByTestId('people-count')).toHaveText('4 people');
 
   await page.keyboard.press(`${mod}+z`);
-  await expect(page).toHaveURL(new RegExp(`/person/${seeded.wendell}$`));
+  await expect(page).toHaveURL(new RegExp(`/person/${seeded.wendell}(\\?tree=[^&]*)?$`));
   await expect(h1(page)).toHaveText('Wendell Quarrier');
 });
 
 test('undo from the History panel also returns to the restored person', async ({ page }) => {
   await openSeeded(page, seeded);
   await deletePerson(page, 'Rowan Ashdown');
-  await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}$`));
+  await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}(\\?tree=[^&]*)?$`));
   await page.getByRole('banner').getByRole('button', { name: 'History', exact: true }).click();
   const history = page.getByRole('dialog', { name: 'History' });
   await history.getByRole('button', { name: 'Undo' }).click();
-  await expect(page).toHaveURL(new RegExp(`/person/${seeded.rowan}$`));
+  await expect(page).toHaveURL(new RegExp(`/person/${seeded.rowan}(\\?tree=[^&]*)?$`));
 });
 
 test('the toast Undo refuses once a newer change was made, instead of undoing that', async ({
@@ -94,7 +100,7 @@ test('the toast Undo refuses once a newer change was made, instead of undoing th
   ).toBeVisible();
   // Neither the rename nor the delete was undone.
   await expect(h1(page)).toHaveText('Edwin Ashdown');
-  await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}$`));
+  await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}(\\?tree=[^&]*)?$`));
   const rowan = await page.request.get(
     `/api/trees/${encodeURIComponent(seeded.tree)}/people/${seeded.rowan}`,
   );

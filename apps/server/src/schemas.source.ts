@@ -41,7 +41,8 @@ export const ReimportStatusQuery = Type.Object(
 );
 
 export const TreeBody = Type.Object(
-  { name: Type.String({ minLength: 1, maxLength: 100 }) },
+  // No minLength: a blank name gets treeNameProblem's plain message, not a schema error.
+  { name: Type.String({ maxLength: 100 }) },
   strict,
 );
 
@@ -67,6 +68,12 @@ export const ExportQuery = Type.Object(
     version: Type.Optional(Type.Enum(['5.5.1', '7'])),
     privatize: Type.Optional(Type.Boolean()),
   },
+  strict,
+);
+
+/** `history=0` (or `false`) leaves the edit history, and the deleted text it keeps, out. */
+export const JsonExportQuery = Type.Object(
+  { history: Type.Optional(Type.Enum(['0', '1', 'false', 'true'])) },
   strict,
 );
 
@@ -241,16 +248,31 @@ export const MediaThumbParams = Type.Object({
 
 // ---------------------------------------------------------------- batch
 
+/**
+ * Columns of the row as the client last saw them, e.g. `{ given: 'Ada', surname: 'Vale' }`
+ * or `{ updated_at }` where the table has one. A row that no longer matches is refused
+ * (409 `stale`), so an edit made from old data cannot mix old and new values.
+ */
+const Seen = Type.Optional(
+  Type.Record(
+    Type.String({ pattern: '^[a-z0-9_]{1,40}$' }),
+    // Untyped: coerceTypes would turn a seen 1 into '1' (or '' into null), so
+    // operations.ts checks that each value is a string, number or null.
+    Type.Unknown(),
+    { maxProperties: 30 },
+  ),
+);
+
 const op = <K extends string, P extends TProperties>(name: K, props: P) =>
   Type.Object({ op: Type.Literal(name), ...props }, strict);
 
 /** Edits that can be grouped into one change batch (one undo step). */
 export const BatchOperation = Type.Union([
-  op('person.update', { id: Id, patch: PersonPatch }),
+  op('person.update', { id: Id, patch: PersonPatch, expect: Seen }),
   op('name.add', { personId: Id, name: NameBody }),
-  op('name.update', { id: Id, name: NameBody }),
-  op('name.delete', { id: Id }),
-  op('familyChild.update', { id: Id, patch: FamilyChildPatch }),
+  op('name.update', { id: Id, name: NameBody, expect: Seen }),
+  op('name.delete', { id: Id, expect: Seen }),
+  op('familyChild.update', { id: Id, patch: FamilyChildPatch, expect: Seen }),
   op('tag.create', { tag: TagBody, attachTo: Type.Optional(Id) }),
   op('person.tag', { personId: Id, tagId: Id }),
   op('person.untag', { personId: Id, tagId: Id }),

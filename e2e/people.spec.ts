@@ -28,6 +28,18 @@ test('lists everyone with a count, rendering only the visible rows', async ({ pa
   expect(await bodyRows(page).count()).toBeLessThan(80);
 });
 
+test('a hand-edited URL with bad values shows the default list (#146)', async ({ page }) => {
+  await open(page, SEARCH_TREE, '/people?sort=evil&limit=-5&dir=sideways&sex=Q');
+  await expect(page.getByText('Could not load')).toHaveCount(0);
+  await expect(
+    page.getByText(`${SEARCH_TREE_PEOPLE.toLocaleString('en-US')} people`),
+  ).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: /Surname/ })).toHaveAttribute(
+    'aria-sort',
+    'ascending',
+  );
+});
+
 test('sorts by each column from the headers', async ({ page }) => {
   await open(page, SEARCH_TREE);
   const surname = page.getByRole('columnheader', { name: /Surname/ });
@@ -108,7 +120,7 @@ test('opens a person from the list', async ({ page }) => {
   const link = bodyRows(page).first().getByRole('link');
   await expect(link).toHaveAccessibleName(/Ashgrove/);
   await link.click();
-  await expect(page).toHaveURL(/\/person\/[0-9A-Z]{26}$/);
+  await expect(page).toHaveURL(/\/person\/[0-9A-Z]{26}(\?tree=[^&]*)?$/);
 });
 
 test('stays virtualized and scrolls to the end of a 100k tree', async ({ page }) => {

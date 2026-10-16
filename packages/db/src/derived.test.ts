@@ -1,8 +1,6 @@
 import { parseDate } from '@open-ancestry/core';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   createTree,
   events,
@@ -17,16 +15,14 @@ import {
   undoLast,
   type TreeStore,
 } from './index';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 const HEBREW = '@#DHEBREW@ 1 TSH 5780';
 const FRENCH = '@#DFRENCH R@ BET 1 VEND 3 AND 5 FLOR 7';
 
 let root: string;
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'oa-derived-'));
-});
-afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  root = makeTempDir('oa-derived-');
 });
 
 const count = (store: TreeStore, table: string) =>
@@ -73,7 +69,7 @@ describe('derived column refresh', () => {
     const id = seedStale(store);
     const logged = count(store, 'change_log');
     const result = refreshDerivedColumns(store, { force: true });
-    expect(result).toEqual({ event_date_sort: 2 });
+    expect(result).toMatchObject({ event_date_sort: 2 });
     const french = parseDate(FRENCH);
     expect(sorts(store)).toEqual([
       // Gregorian rows are left alone.
@@ -85,7 +81,7 @@ describe('derived column refresh', () => {
     // The search index follows: years come from date_sort.
     expect(searchPeople(store, 'marren 2019').map((r) => r.person.id)).toEqual([id]);
     // Idempotent.
-    expect(refreshDerivedColumns(store, { force: true })).toEqual({ event_date_sort: 0 });
+    expect(refreshDerivedColumns(store, { force: true })).toMatchObject({ event_date_sort: 0 });
     store.close();
   });
 

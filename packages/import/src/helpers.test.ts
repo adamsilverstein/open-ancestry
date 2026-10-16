@@ -1,16 +1,15 @@
 import { createTree } from '@open-ancestry/db';
 import {
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { importGedcom } from './import';
 import {
   classifyFile,
@@ -24,6 +23,7 @@ import { coordinate, placeParts, Places } from './places';
 import { childRelationship, morePrivate, nameType, privacy, relationshipStatus } from './tags';
 import { dateColumns, surnameKey } from './index';
 import { ged } from './test-helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 describe('tags', () => {
   it('maps child relationships case-insensitively', () => {
@@ -183,10 +183,7 @@ describe('media helpers', () => {
 describe('media folder edge cases', () => {
   let tmp: string;
   beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), 'oa-media-'));
-  });
-  afterEach(() => {
-    rmSync(tmp, { recursive: true, force: true });
+    tmp = makeTempDir('oa-media-');
   });
 
   it('skips file names that cannot be stored and reports copy failures as warnings', async () => {
@@ -218,7 +215,8 @@ describe('media folder edge cases', () => {
       'media-missing',
     ]);
     expect(report.media.linked).toBe(0);
-    expect(report.unmapped.map((u) => u.path)).toEqual(['OBJE.FILE']);
+    // Reported under media and warnings, not again as unmapped tags (issue #121).
+    expect(report.unmapped.map((u) => u.path)).toEqual([]);
     expect(report.media.missing.map((m) => m.path)).toEqual([
       'odd/name.jpg',
       'D:\\nowhere\\gone.jpg',
@@ -257,10 +255,14 @@ describe('storing media in a tree', () => {
   let root: string;
   const hash = (b: Uint8Array) => Buffer.from(b).toString('hex');
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'oa-store-'));
+    root = makeTempDir('oa-store-');
   });
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
+
+  it.skipIf(process.platform === 'win32')('writes media private to the owner (0600)', () => {
+    const enc = new TextEncoder().encode('bytes');
+    const stored = storeMediaFile(root, 'p/private.jpg', enc, hash);
+    expect(statSync(join(root, 'p', 'private.jpg')).mode & 0o777).toBe(0o600);
+    expect(stored.written).toBe(true);
   });
 
   it('never overwrites: same bytes are reused, different bytes get a suffix', () => {
@@ -285,7 +287,7 @@ describe('storing media in a tree', () => {
   });
 
   it('never writes through or reuses a symlink inside the media folder', () => {
-    const outside = mkdtempSync(join(tmpdir(), 'oa-outside-'));
+    const outside = makeTempDir('oa-outside-');
     try {
       symlinkSync(outside, join(root, 'linked'));
       const enc = (t: string) => new TextEncoder().encode(t);

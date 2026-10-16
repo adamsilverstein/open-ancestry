@@ -4,6 +4,8 @@ interface ChunkBoundaryProps {
   /** Rendered instead of the children once they fail (a chunk that will not load). */
   fallback: ReactNode;
   children: ReactNode;
+  /** Called once when the children fail, e.g. to undo state that waits for them. */
+  onError?: () => void;
 }
 
 /**
@@ -15,6 +17,10 @@ export class ChunkBoundary extends Component<ChunkBoundaryProps, { failed: boole
 
   static getDerivedStateFromError() {
     return { failed: true };
+  }
+
+  override componentDidCatch() {
+    this.props.onError?.();
   }
 
   override render() {

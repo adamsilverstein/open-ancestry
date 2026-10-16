@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { changeText, describeChange, factText } from './labels';
+import { changeText, conflictText, describeChange, factText } from './labels';
 import type { ReviewChange } from './api';
 
 const fact = (date: string | null, place: string | null = 'Elderford') => ({
@@ -13,8 +13,14 @@ const base = { id: 'c1', key: 'k1', defaultAccept: true, applicable: true };
 
 describe('re-import labels', () => {
   it('names only what changed', () => {
+    // Dates read the way the rest of the app shows them, not as raw GEDCOM.
     expect(changeText(fact('Abt. 1842'), fact('12 MAR 1842'))).toBe(
-      'Birth: Abt. 1842 → 12 MAR 1842',
+      'Birth: abt. 1842 → 12 Mar 1842',
+    );
+    expect(factText(fact('03/15/1828', null))).toBe('Birth, 15 Mar 1828');
+    // Different texts for the same date: show them as written rather than "x → x".
+    expect(changeText(fact('BET 1850 AND 1860'), fact('1850-1860'))).toBe(
+      'Birth: BET 1850 AND 1860 → 1850-1860',
     );
     expect(changeText(fact('1842', 'A'), fact('1843', 'B'))).toBe('Birth: 1842, A → 1843, B');
     expect(changeText(fact('1842', null), fact('1842', 'B'))).toBe('Birth: (none) → B');
@@ -49,6 +55,8 @@ describe('re-import labels', () => {
       ],
       [{ ...base, kind: 'tag.add', tag: 'Research: Done' }, 'Add tag: Research: Done'],
       [{ ...base, kind: 'media.add', title: null }, 'Add media: untitled'],
+      [{ ...base, kind: 'media.file', title: 'Portrait' }, 'Add the file for Portrait'],
+      [{ ...base, kind: 'media.replace', title: 'Letter' }, "Use the new export's file for Letter"],
       [
         { ...base, kind: 'family.add', partnerNames: ['Noah Ashgrove', 'Ivy Fen'] },
         'Partner: Ivy Fen',
@@ -102,5 +110,88 @@ describe('re-import labels', () => {
       ],
     ];
     for (const [change, text] of cases) expect(describeChange(change, 'Noah Ashgrove')).toBe(text);
+  });
+
+  it("leaves a kept place out of a change's label", () => {
+    const change: ReviewChange = {
+      ...base,
+      kind: 'fact.change',
+      before: fact('1939', 'Elderford, Ohio'),
+      after: fact('1940', 'Elderford, Cask County, Ohio, USA'),
+      keepPlace: true,
+    };
+    expect(describeChange(change, 'Josiah Ashgrove')).toBe('Birth: 1939 → 1940');
+  });
+
+  it('says why a move away from a renamed place is a conflict', () => {
+    const moved = {
+      ...base,
+      kind: 'fact.change',
+      before: fact('1939', 'Elderford, Ohio'),
+      after: fact('1939', 'Millbrook'),
+      conflict: 'renamed-place',
+      defaultAccept: false,
+    } as ReviewChange;
+    expect(conflictText(moved, 'Josiah Ashgrove')).toBe(
+      'You renamed this place in this tree, and the export moves this fact to another place. It stays at your place unless you tick this.',
+    );
+  });
+});
+
+describe('conflict wording (#160)', () => {
+  const name = (conflict: 'local-edit' | 'local-delete', nameType: string | null = null) =>
+    ({
+      ...base,
+      kind: 'name.add',
+      name: 'Walter Ashgrove',
+      nameType,
+      conflict,
+      defaultAccept: false,
+    }) as ReviewChange;
+
+  it("says that ticking a name keeps the user's name as the primary", () => {
+    const renamed = {
+      ...name('local-edit'),
+      was: 'Walter Ashgrove',
+      name: 'Walther Ashgrove',
+    } as ReviewChange;
+    expect(describeChange(renamed, 'Walt Ashgrove')).toBe(
+      'Also keep Walther Ashgrove as an alternate name',
+    );
+    expect(conflictText(renamed, 'Walt Ashgrove')).toBe(
+      'The export now calls this person Walther Ashgrove (it was Walter Ashgrove); you renamed them Walt Ashgrove here. Tick to also keep Walther Ashgrove as an alternate name; Walt Ashgrove stays the primary name.',
+    );
+    // A stated type stays in the label where the user decides.
+    expect(
+      describeChange({ ...renamed, nameType: 'married' } as ReviewChange, 'Walt Ashgrove'),
+    ).toBe('Also keep Walther Ashgrove (married name) as an alternate name');
+  });
+
+  it('shows a name type only when the export gives one', () => {
+    expect(
+      describeChange(
+        { ...base, kind: 'name.add', name: 'Ann Fen', nameType: null } as ReviewChange,
+        'Ann Fen',
+      ),
+    ).toBe('Add name: Ann Fen');
+    expect(
+      describeChange(
+        { ...base, kind: 'name.add', name: 'Ann Fen', nameType: 'married' } as ReviewChange,
+        'Ann Fen',
+      ),
+    ).toBe('Add name: Ann Fen (married name)');
+  });
+
+  it('keeps the general wording for other conflicts', () => {
+    const fact = { ...base, kind: 'fact.change', conflict: 'local-edit' } as ReviewChange;
+    expect(conflictText(fact, 'X')).toBe(
+      'Edited in this tree since the last import; your edit is kept unless you tick this.',
+    );
+    expect(conflictText({ ...fact, conflict: 'local-delete' } as ReviewChange, 'X')).toBe(
+      'You deleted this in this tree; it stays deleted unless you tick this.',
+    );
+    expect(
+      conflictText({ ...base, kind: 'tag.add', tag: 't' } as ReviewChange, 'X'),
+    ).toBeUndefined();
   });
 });

@@ -399,7 +399,10 @@ export function localHistory(store: TreeStore): LocalHistory {
   // Facts are compared by place name, as the export names them: the place as it
   // was too, if the user renamed it since.
   for (const [key, row] of base) {
-    if (key.startsWith('place|')) renamedPlaces.set(key.slice(6), row.full_name as string);
+    // A place whose name changed: new coordinates or a type alone aren't a rename.
+    if (key.startsWith('place|') && rowOf('place', key.slice(6))?.full_name !== row.full_name) {
+      renamedPlaces.set(key.slice(6), row.full_name as string);
+    }
     if (key.startsWith('event|') && row.place_id) {
       const place = base.get(`place|${row.place_id as string}`) ?? rowOf('place', row.place_id);
       base.set(key, { ...row, place_name: place?.full_name ?? null });

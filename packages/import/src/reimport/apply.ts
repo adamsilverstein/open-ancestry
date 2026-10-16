@@ -459,31 +459,7 @@ export function applyReimport(
         const placeId = tx.store.getRow('event', c.existingEventId)?.place_id;
         if (placeId) olds.add(placeId);
       }
-      let target = (
-        tx.store
-          .stmt('SELECT id FROM place WHERE full_name = ? ORDER BY id LIMIT 1')
-          .get(rename.to) as { id: string } | undefined
-      )?.id;
-      for (const old of olds) {
-        if (!target) {
-          tx.update('place', old, {
-            full_name: rename.to,
-            name: rename.to.split(',')[0]!.trim() || rename.to,
-          });
-          target = old;
-          continue;
-        }
-        if (old === target) continue;
-        // The tree already has the new name: its facts and child places move there.
-        const ids = (table: 'event' | 'place', column: string) =>
-          tx.store
-            .stmt(`SELECT id FROM ${table} WHERE ${column} = ? ORDER BY id`)
-            .pluck()
-            .all(old) as string[];
-        for (const id of ids('event', 'place_id')) tx.update('event', id, { place_id: target });
-        for (const id of ids('place', 'parent_id')) tx.update('place', id, { parent_id: target });
-        places.delete(tx, old);
-      }
+      renamePlaces(tx, olds, rename.from, rename.to);
     }
     let applied = 0;
     /** Changes whose rows this batch wrote: those rows are the next comparison's base. */
@@ -868,5 +844,73 @@ function recordStale(tx: Tx, importBatchId: string, stale: Set<string>) {
       key: staleKey(importBatchId),
       value: JSON.stringify([...stale].sort()),
     } as never);
+  }
+}
+
+/** Owner links a place can have, moved with it when it merges into another. */
+const PLACE_OWNED = [
+  'citation_link',
+  'media_link',
+  'note_link',
+  'tag_link',
+  'raw_record',
+  'unmapped_line',
+] as const;
+
+/**
+ * Applies a place the export renamed (#307 review) to the place rows `olds`:
+ * each is renamed to `to`, or merged into a row already of that name (its
+ * facts, child places, notes, media and sources move there, and coordinates
+ * the target lacks are kept). Child places' full names follow. Only a change
+ * to the place's own name is applied this way: when a county or anything
+ * above changed, the place would sit under the old parents, so its facts
+ * are moved one by one instead (by their fact changes, onto the export's
+ * place chain).
+ */
+function renamePlaces(tx: Tx, olds: Set<string>, from: string, to: string) {
+  const above = (name: string) =>
+    name
+      .split(',')
+      .slice(1)
+      .map((part) => norm(part))
+      .join(',');
+  if (above(from) !== above(to)) return;
+  const ids = (table: string, column: string, value: string, extra = '') =>
+    tx.store
+      .stmt(`SELECT id FROM ${table} WHERE ${column} = ?${extra} ORDER BY id`)
+      .pluck()
+      .all(value) as string[];
+  let target = ids('place', 'full_name', to)[0];
+  for (const old of olds) {
+    const row = tx.store.getRow('place', old) as PlaceRow | undefined;
+    if (!row || old === target) continue;
+    if (!target) {
+      tx.update('place', old, { full_name: to, name: to.split(',')[0]!.trim() || to });
+      target = old;
+    } else {
+      const kept = tx.store.getRow('place', target) as PlaceRow;
+      if (kept.latitude == null && kept.longitude == null && row.latitude != null) {
+        tx.update('place', target, { latitude: row.latitude, longitude: row.longitude });
+      }
+      for (const table of PLACE_OWNED) {
+        for (const id of ids(table, 'owner_id', old, " AND owner_type = 'place'")) {
+          tx.update(table, id, { owner_id: target });
+        }
+      }
+      for (const id of ids('event', 'place_id', old)) tx.update('event', id, { place_id: target });
+      for (const id of ids('place', 'parent_id', old))
+        tx.update('place', id, { parent_id: target });
+      places.delete(tx, old);
+    }
+    // Places under it carry its name in theirs ("Old Cemetery, Millbrook, ...").
+    const suffix = `, ${row.full_name}`;
+    for (const child of tx.store
+      .stmt('SELECT id, full_name FROM place WHERE full_name LIKE ? ORDER BY id')
+      .all(`%${suffix}`) as { id: string; full_name: string }[]) {
+      if (!child.full_name.endsWith(suffix)) continue;
+      tx.update('place', child.id, {
+        full_name: `${child.full_name.slice(0, -suffix.length)}, ${to}`,
+      });
+    }
   }
 }

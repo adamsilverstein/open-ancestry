@@ -1587,6 +1587,44 @@ describe('three-way re-import, review findings (#224)', () => {
     }
   });
 
+  /** Renames the place of Josiah's death, residence and marriage, as the user. */
+  const renameElderford = () => {
+    const place = value<string>(
+      store,
+      'SELECT place_id FROM event WHERE id = ?',
+      eventIdOf('@I3@', 'DEAT'),
+    );
+    store.transact('Rename place', (tx) =>
+      tx.update('place', place, { full_name: 'Elderford, Ohio' } as never),
+    );
+  };
+
+  it('offers nothing for facts whose place the user renamed, if the export kept it', async () => {
+    renameElderford();
+    const s2 = await prepareReimport(store, { bytes: renumber(SAMPLE) }, { today: TODAY });
+    try {
+      expect(changesOf(s2, '@I3@').filter((c) => c.kind === 'fact.change')).toEqual([]);
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  it('is a conflict when Ancestry changes a fact whose place the user renamed', async () => {
+    renameElderford();
+    const s2 = await prepareReimport(store, { bytes: josiah1940() }, { today: TODAY });
+    try {
+      expect(changesOf(s2, '@I3@').filter((c) => c.kind === 'fact.change')).toEqual([
+        expect.objectContaining({
+          after: expect.objectContaining({ type: 'DEAT', date: '1940' }),
+          conflict: 'local-edit',
+          defaultAccept: false,
+        }),
+      ]);
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
   it('adds a name Ancestry added after a rename plainly, if it still has the old name (P5c)', async () => {
     const mercy = pidOf('@I2@');
     const name = value<string>(store, 'SELECT id FROM person_name WHERE person_id = ?', mercy);

@@ -155,6 +155,33 @@ describe('derived column refresh', () => {
     store.close();
   });
 
+  it('finds people by their old spelling while a deferred rebuild is pending', () => {
+    const dir = join(root, 'pending.oatree');
+    let store = createTree(dir);
+    const id = store.transact('add', (tx) =>
+      persons.create(tx, { names: [{ given: 'Emre', surname: 'Yılmaz' }] }),
+    ).result.id;
+    // An index written before the fold: the name as typed, and no fingerprint.
+    store.db
+      .prepare(
+        "UPDATE person_search SET names = 'Emre Yılmaz' WHERE rowid = (SELECT doc_id FROM search_doc WHERE person_id = ?)",
+      )
+      .run(id);
+    store.db.prepare("DELETE FROM derived_state WHERE name = 'search_index'").run();
+    store.close();
+
+    store = openTree(dir, { deferSearch: true, log: () => {} });
+    expect(store.searchRebuildPending).toBe(true);
+    // The query is folded to "yilmaz", which the old document lacks; the spelling
+    // as typed still finds it, as it did before the upgrade.
+    expect(searchPeople(store, 'Yılmaz').map((r) => r.person.id)).toEqual([id]);
+    for (const done of rebuildSearchIndexInChunks(store)) void done;
+    expect(store.searchRebuildPending).toBe(false);
+    expect(searchPeople(store, 'Yılmaz').map((r) => r.person.id)).toEqual([id]);
+    expect(searchPeople(store, 'Yilmaz').map((r) => r.person.id)).toEqual([id]);
+    store.close();
+  });
+
   it('keeps an edit made between rebuild chunks', () => {
     const dir = join(root, 'edit-between.oatree');
     let store = createTree(dir);

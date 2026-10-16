@@ -259,6 +259,41 @@ test.describe('events', () => {
     await expect(row).toContainText('Wexmoor, Westmere');
   });
 
+  test('asks for an event type instead of saving a Birth by default (#280)', async ({ page }) => {
+    await openSeeded(page, seeded);
+    const births = timeline(page)
+      .getByRole('listitem')
+      .filter({ has: page.locator('[data-title]', { hasText: /^Birth$/ }) });
+    const before = await births.count();
+    await timeline(page).getByRole('button', { name: 'Add event' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Add event' });
+    await expect(dialog.getByRole('combobox', { name: 'Event type' })).toContainText(
+      'Choose a type',
+    );
+    await dialog.getByRole('textbox', { name: 'Date' }).fill('1905');
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText('Choose an event type')).toBeVisible();
+    await expect(births).toHaveCount(before);
+  });
+
+  test('suggests places already in the tree (#280)', async ({ page }) => {
+    await openSeeded(page, seeded);
+    await timeline(page).getByRole('button', { name: 'Add event' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Add event' });
+    await dialog.getByRole('combobox', { name: 'Event type' }).click();
+    await page.getByRole('option', { name: 'Residence' }).click();
+    const place = dialog.getByRole('combobox', { name: 'Place' });
+    await place.fill('Bracken');
+    const suggestion = dialog.locator('datalist option[value="Brackenford, Westmere"]');
+    await expect(suggestion).toHaveCount(1);
+    await place.fill('Brackenford, Westmere');
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect(dialog).toBeHidden();
+    const row = timeline(page).getByRole('listitem').filter({ hasText: 'Residence' });
+    await expect(row).toContainText('Brackenford, Westmere');
+  });
+
   test('edits and deletes an event', async ({ page }) => {
     await openSeeded(page, seeded);
     await timeline(page).getByRole('button', { name: 'Edit Death' }).click();

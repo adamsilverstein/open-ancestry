@@ -284,3 +284,18 @@ describe('caching and compression', () => {
     expect(small.headers['content-encoding']).toBeUndefined();
   });
 });
+
+describe('GET places (#280)', () => {
+  it('suggests places by any part of their name, starts first', async () => {
+    const res = await api.get(`${s.base}/places?q=harl`);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items.map((p: { full_name: string }) => p.full_name)).toEqual([
+      'Harlow, Essex, England',
+    ]);
+    expect((await api.get(`${s.base}/places?q=essex`)).json().items).toHaveLength(1);
+    expect((await api.get(`${s.base}/places?q=nowhere`)).json().items).toEqual([]);
+    // LIKE wildcards in the query are literal.
+    expect((await api.get(`${s.base}/places?q=%25`)).json().items).toEqual([]);
+    expect((await api.get(`${s.base}/places?q=${'x'.repeat(300)}`)).statusCode).toBe(400);
+  });
+});

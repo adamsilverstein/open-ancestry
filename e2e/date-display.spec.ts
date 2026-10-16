@@ -39,7 +39,8 @@ test('tree cards keep date qualifiers in lifespans', async ({ page }) => {
   for (const [name, lifespan] of [
     ['Thaddeus Ashgrove', 'abt. 1842–1911'],
     ['Mercy Bellweather', '1846–bef. 1920'],
-    ['Clementine Ashgrove', '1870–aft. 1950'],
+    // Born "BET 1870 AND 1872": a range reads as about its middle year.
+    ['Clementine Ashgrove', 'abt. 1871–aft. 1950'],
   ]) {
     await expect(card(name!)).toContainText(lifespan!);
   }

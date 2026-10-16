@@ -68,7 +68,7 @@ test.describe('timeline', () => {
   }) => {
     await open(page, 'Thaddeus Ashgrove');
     const titles = await timeline(page).locator('[data-title]').allTextContents();
-    const wife = titles.indexOf('Death of wife Mercy Bellweather');
+    const wife = titles.indexOf('Death of wife Mercy Bellweather (may be after his death)');
     // "bef. 1920" sorts after his 1911 death (#278), but gets no age.
     expect(titles.indexOf('Death')).toBeGreaterThan(-1);
     expect(wife).toBeGreaterThan(titles.indexOf('Death'));

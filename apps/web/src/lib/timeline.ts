@@ -142,6 +142,7 @@ export function buildTimeline(
   // dates never drop an event that might fall inside it.
   const lifeStart = dateRange(birthText)?.[0] ?? -Infinity;
   const lifeEnd = dateRange(detail.summary.death?.dateText)?.[1] ?? Infinity;
+  const possessive = bySex(detail.summary.sex, 'his', 'her', 'their');
   // `25`, or `about 31` when either date is imprecise. No age at zero (a
   // same-year sibling would read "about 0") or after the death.
   const ageFor = (text: string | null | undefined) => {
@@ -222,7 +223,8 @@ export function buildTimeline(
       id,
       kind: 'family',
       category: 'family',
-      title: `${what} of ${relation} ${fullName(relative)}`,
+      // Said outright, since its place in the list can't show it.
+      title: `${what} of ${relation} ${fullName(relative)}${mayFollowDeath ? ` (may be after ${possessive} death)` : ''}`,
       date: display(event.dateText),
       year: yearOf(event.dateText),
       age: mayFollowDeath ? undefined : ageFor(event.dateText),

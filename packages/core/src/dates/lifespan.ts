@@ -4,6 +4,7 @@
  * Tree cards, the person page, lists and the palette all use these, so an
  * uncertain date never reads as a fact in one place and not in another.
  */
+import { parseDate } from './parse';
 import type { DateQualifier } from './types';
 
 /** The qualifiers a lifespan keeps, abbreviated. */
@@ -29,17 +30,34 @@ const ABBREVIATION: Partial<Record<DateQualifier, LifeQualifier>> = {
   calculated: 'cal',
 };
 
+const yearOfKey = (key: number) => Math.floor(key / 10000);
+
 /**
- * The year-level date of a stored event (`date_sort` and `date_qualifier`,
- * as the database and API keep them), or undefined without a sortable date.
- * Ranges show their first year.
+ * The year-level date of a stored event (`dateSort`, `dateQualifier` and
+ * `dateText`, as the database and API keep them), or undefined without a
+ * sortable date. A range has no single year, so it reads as about its middle
+ * year (`BET 1870 AND 1872` is `abt. 1871`); an open period reads as before
+ * or after its bound (`FROM 1890` is `aft. 1890`).
  */
 export function lifeDate(
-  event: { dateSort?: number | null; dateQualifier?: string | null } | null | undefined,
+  event:
+    | { dateSort?: number | null; dateQualifier?: string | null; dateText?: string | null }
+    | null
+    | undefined,
 ): LifeDate | undefined {
   if (!event?.dateSort) return undefined;
-  const year = Math.floor(event.dateSort / 10000);
-  const qualifier = ABBREVIATION[event.dateQualifier as DateQualifier];
+  const year = yearOfKey(event.dateSort);
+  const kind = event.dateQualifier as DateQualifier;
+  if (kind === 'between' || kind === 'from_to') {
+    const end = event.dateText ? parseDate(event.dateText).sortKeyEnd : undefined;
+    return {
+      year: end === undefined ? year : Math.floor((year + yearOfKey(end)) / 2),
+      qualifier: 'abt',
+    };
+  }
+  if (kind === 'from') return { year, qualifier: 'aft' };
+  if (kind === 'to') return { year, qualifier: 'bef' };
+  const qualifier = ABBREVIATION[kind];
   return qualifier ? { year, qualifier } : { year };
 }
 

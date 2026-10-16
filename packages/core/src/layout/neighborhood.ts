@@ -23,8 +23,16 @@ export interface NeighborhoodPerson {
   prefix?: string | null;
   suffix?: string | null;
   surnamePrefix?: string | null;
-  birth: { dateSort: number | null; dateQualifier?: string | null } | null;
-  death: { dateSort: number | null; dateQualifier?: string | null } | null;
+  birth: {
+    dateSort: number | null;
+    dateQualifier?: string | null;
+    dateText?: string | null;
+  } | null;
+  death: {
+    dateSort: number | null;
+    dateQualifier?: string | null;
+    dateText?: string | null;
+  } | null;
 }
 
 export interface NeighborhoodInput {

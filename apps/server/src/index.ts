@@ -91,6 +91,8 @@ export interface ServerOptions {
   archiveUploadLimit?: number;
   /** Largest media upload in bytes (default 1 GiB). */
   mediaUploadLimit?: number;
+  /** Photo attaches streaming at once (default 3); more get 429. */
+  maxConcurrentAttaches?: number;
   /** Concurrent imports (default 1) and how many may wait (default 4). */
   importConcurrency?: number;
   maxQueuedImports?: number | undefined;
@@ -219,6 +221,7 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
     uploadLimit: options.uploadLimit ?? importLimits.maxBytes,
     archiveUploadLimit: options.archiveUploadLimit ?? importLimits.maxArchiveBytes,
     mediaUploadLimit: options.mediaUploadLimit ?? DEFAULT_MEDIA_UPLOAD_LIMIT,
+    maxConcurrentAttaches: options.maxConcurrentAttaches ?? 3,
     thumbnails: new ThumbnailQueue(),
     reimports: new ReimportSessions({
       maxSessions: options.maxReimports,

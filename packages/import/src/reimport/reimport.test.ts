@@ -1480,6 +1480,8 @@ describe('dates compared by meaning (#194)', () => {
     } finally {
       closeReimport(s2);
     }
+  });
+});
 
 describe('why a new person is new, truthfully (#192 review)', () => {
   const reasonsOf = async (tree: TreeStore, text: string, name: string) => {

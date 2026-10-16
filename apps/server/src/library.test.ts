@@ -242,6 +242,14 @@ describe('treeNameProblem', () => {
     expect(newTreeNameProblem(name)).not.toBeNull();
   });
 
+  it.each(['\u200b', '\u200c', '\u200d', '\u2060', '\ufeff', '\u200e', '\u200f', '\u061c'])(
+    'refuses the invisible %j in a new tree name, so two names cannot look the same (#264)',
+    (char) => {
+      expect(newTreeNameProblem(`Smi${char}th`)).toMatch(/invisible/);
+      expect(treeNameFromFile(`Smi${char}th.ged`)).toBe('Smith');
+    },
+  );
+
   it('keeps a long uploaded file name with an isolate acceptable after shortening (#215)', () => {
     // Wherever the cut falls, inside the isolate or not, the name the server picks must pass.
     for (let before = 0; before <= 120; before += 7) {
@@ -303,6 +311,18 @@ describe('Library', () => {
     library.closeAll();
     cpSync(join(root, 'Backup.oatree'), join(root, 'Evil\u202Eypoc.oatree'), { recursive: true });
     expect(library.list().map((t) => t.label)).toContain('Smith (Evilypoc)');
+    // A name stored before the check is shown cleaned, and counts as the same
+    // name as one that only differs by invisible characters (#264).
+    library.closeAll();
+    library
+      .open('Backup')
+      .db.prepare("UPDATE meta SET value = ? WHERE key = 'tree_name'")
+      .run('Smi\u200bth\u202e');
+    expect(library.list().map(({ id, label }) => ({ id, label }))).toContainEqual({
+      id: 'Backup',
+      label: 'Smith (Backup)',
+    });
+    expect(library.info('Backup').label).toBe('Smith');
     library.closeAll();
     rmSync(root, { recursive: true, force: true });
   });

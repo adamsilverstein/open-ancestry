@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeForSearch } from '../names/phonetic';
-import { displayText, unsafeTextReason } from './safety';
+import { displayText, isolate, unsafeTextReason } from './safety';
 
 /* Names, places and dates: no control characters or bidi overrides (#190). */
 
@@ -52,6 +52,15 @@ describe('displayText', () => {
 
   it('leaves ordinary text alone', () => {
     expect(displayText('Zoë Ashdown')).toBe('Zoë Ashdown');
+  });
+});
+
+describe('isolate (#264)', () => {
+  it('wraps cleaned text in a first-strong isolate, so it cannot reorder what follows', () => {
+    expect(isolate('Rowan Ashdown')).toBe('\u2068Rowan Ashdown\u2069');
+    expect(isolate('Evil\u202e')).toBe('\u2068Evil\u2069');
+    expect(isolate('Cohen\u2069')).toBe('\u2068Cohen\u2069');
+    expect(isolate('')).toBe('');
   });
 });
 

@@ -353,7 +353,11 @@ export function DesignPage() {
         >
           <div className={styles.stack}>
             <Input label="Given names" defaultValue="Eleanor" />
-            <Input label="Surname" defaultValue="Whitcombe" />
+            <Input
+              label="Surname"
+              defaultValue="Whitcombe"
+              suggestions={['Whitcombe', 'Whitfield', 'Whitlock']}
+            />
           </div>
         </Dialog>
       </Section>

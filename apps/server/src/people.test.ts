@@ -1,3 +1,5 @@
+import { join } from 'node:path';
+import { openTree } from '@open-ancestry/db';
 import { fromNeighborhood, layoutFamily } from '@open-ancestry/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seed, testApi, type Seeded, type TestApi } from './test/helpers';
@@ -282,5 +284,38 @@ describe('caching and compression', () => {
     expect(gzip.headers['content-encoding']).toBe('gzip');
     const small = await api.get('/api/health', { 'accept-encoding': 'br, gzip' });
     expect(small.headers['content-encoding']).toBeUndefined();
+  });
+});
+
+describe('GET places (#280)', () => {
+  it('suggests places by any part of their name, starts first', async () => {
+    const res = await api.get(`${s.base}/places?q=harl`);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items.map((p: { full_name: string }) => p.full_name)).toEqual([
+      'Harlow, Essex, England',
+    ]);
+    expect((await api.get(`${s.base}/places?q=essex`)).json().items).toHaveLength(1);
+    expect((await api.get(`${s.base}/places?q=nowhere`)).json().items).toEqual([]);
+    // LIKE wildcards in the query are literal.
+    expect((await api.get(`${s.base}/places?q=%25`)).json().items).toEqual([]);
+    expect((await api.get(`${s.base}/places?q=${'x'.repeat(300)}`)).statusCode).toBe(400);
+  });
+
+  it('lists each place name once, prefix matches before the rest', async () => {
+    const store = openTree(join(api.root, 'Test.oatree'));
+    try {
+      store.transact('places', (tx) => {
+        // Two rows with one name (imports can do that), and names containing the text.
+        tx.insert('place', { name: 'Essex', full_name: 'Essex, England' });
+        tx.insert('place', { name: 'Essex', full_name: 'Essex, England' });
+        tx.insert('place', { name: 'Little Essex', full_name: 'Little Essex, Vermont' });
+      });
+    } finally {
+      store.close();
+    }
+    const names = (await api.get(`${s.base}/places?q=essex`))
+      .json()
+      .items.map((p: { full_name: string }) => p.full_name);
+    expect(names).toEqual(['Essex, England', 'Harlow, Essex, England', 'Little Essex, Vermont']);
   });
 });

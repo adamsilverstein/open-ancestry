@@ -417,13 +417,15 @@ for (const tree of trees) {
       const slack = early * 1.5 + 2 * factor;
       report(
         tree,
-        'Worker layout time while browsing 50 people, median of visits 1-10 vs 41-50',
+        `Worker layout time while browsing 50 people (${seen.size} visited, ending at ${current}), median of visits 1-10 vs 41-50`,
         `${early.toFixed(1)}ms vs ${late.toFixed(1)}ms`,
         `late < ${slack.toFixed(0)}ms`,
         late < slack,
       );
       expect(end.median).toBeLessThan(allowed);
       expect(end.p95).toBeLessThan(budget);
+      // The whole walk, to reproduce a run.
+      console.log(`[${people}] visited: ${[...seen].join(' ')}`);
       expect(late).toBeLessThan(slack);
     });
 

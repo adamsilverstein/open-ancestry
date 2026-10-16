@@ -235,7 +235,7 @@ describe('GraphCache.index', () => {
         cache.merge(slice);
         const index = cache.index();
         const graph = cache.graph();
-        for (const f of graph.families) expect(index.family(f.id)?.id).toBe(f.id);
+        for (const f of graph.families) expect(index.family(f.id)).toEqual(f);
         expect(index.family('nope')).toBeUndefined();
         for (let i = 0; i < 40; i += 3) {
           for (const layout of [

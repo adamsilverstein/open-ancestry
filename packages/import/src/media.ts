@@ -10,7 +10,7 @@ import {
   writeFileSync,
   type Stats,
 } from 'node:fs';
-import { dirname, join, resolve, sep } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 
 /** What a GEDCOM `FILE` value points at. */
 export type FileRef =
@@ -235,6 +235,28 @@ export interface StoredMedia {
 }
 
 /**
+ * Creates the folders from `root` down to `dir` one level at a time, refusing
+ * any that already exists as a symlink or not as a folder, so nothing is
+ * created through a link before the containment check (mkdir -p would).
+ * Returns the first folder created, for cleanup, or undefined.
+ */
+function makeFoldersInside(root: string, dir: string, relPath: string): string | undefined {
+  let first: string | undefined;
+  let current = root;
+  for (const part of relative(root, dir).split(sep).filter(Boolean)) {
+    current = join(current, part);
+    const stat = lstatOrNull(current);
+    if (!stat) {
+      mkdirSync(current, { mode: 0o700 });
+      first ??= current;
+    } else if (!stat.isDirectory()) {
+      throw new Error(`media folder for ${relPath} leads outside the tree`);
+    }
+  }
+  return first;
+}
+
+/**
  * Stores a media file under the tree's media folder without ever overwriting
  * one: identical bytes already at the path are reused, different bytes get a
  * `-2`, `-3`, ... suffix. Refuses anything that would land outside the folder.
@@ -259,7 +281,7 @@ export function storeMediaFile(
       }
       continue;
     }
-    const folder = mkdirSync(dirname(target), { recursive: true });
+    const folder = makeFoldersInside(root, dirname(target), relPath);
     // A symlinked folder inside media/ must not carry the write elsewhere.
     const realRoot = realpathSync(root);
     const realDir = realpathSync(dirname(target));

@@ -1,8 +1,10 @@
 import { useState } from 'react';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Trash2 } from 'lucide-react';
 import { seg } from '../../../api/client';
 import { useEdit } from '../../../api/edits';
 import { apiSend } from '../../../api/client';
+import { placesQuery } from '../../../api/queries';
 import type { EventDetail } from '../../../api/types';
 import { Button } from '../../../components/Button/Button';
 import { ConfirmDialog } from '../../../components/ConfirmDialog/ConfirmDialog';
@@ -78,10 +80,21 @@ export function EventDialog({
   // Stays open until the save succeeds, so a failure keeps the fields.
   const saveState = useSaveState(() => onOpenChange(false));
   const event = item?.event;
-  const [type, setType] = useState(event?.type ?? 'BIRT');
+  // No default type when adding: a silent Birth made second births by accident (#280).
+  const [type, setType] = useState(event?.type ?? '');
+  const [typeError, setTypeError] = useState<string | undefined>();
   const [customType, setCustomType] = useState(event?.custom_type ?? '');
   const [date, setDate] = useState(event?.date_text ?? '');
   const [place, setPlace] = useState(item?.place?.full_name ?? '');
+  // Existing places matching what is typed, so the event reuses one instead of adding a near twin.
+  const typedPlace = place.trim();
+  const places = useQuery({
+    ...placesQuery(tree, typedPlace),
+    enabled: open && typedPlace.length >= 2,
+    placeholderData: keepPreviousData,
+  });
+  const placeSuggestions =
+    typedPlace.length >= 2 ? (places.data ?? []).map((p) => p.full_name) : [];
   const [detail, setDetail] = useState(
     (event && (VALUE_LABELS[event.type] ? event.value : event.description)) ?? '',
   );
@@ -93,6 +106,10 @@ export function EventDialog({
 
   function save() {
     if (edit.isPending) return;
+    if (!type) {
+      setTypeError('Choose an event type');
+      return;
+    }
     const valueField = VALUE_LABELS[type] ? 'value' : 'description';
     const body = {
       type,
@@ -164,8 +181,13 @@ export function EventDialog({
           <div className={styles.grid}>
             <Select
               label="Event type"
-              value={type}
-              onValueChange={setType}
+              value={type || undefined}
+              onValueChange={(value) => {
+                setType(value);
+                setTypeError(undefined);
+              }}
+              placeholder="Choose a type"
+              error={typeError}
               options={types.map((t) => ({
                 value: t,
                 label: t === 'EVEN' ? 'Custom event' : eventLabel(t),
@@ -184,6 +206,7 @@ export function EventDialog({
             label="Place"
             value={place}
             onChange={(e) => setPlace(e.currentTarget.value)}
+            suggestions={placeSuggestions}
             hint="Smallest to largest, e.g. Wexmoor, Westmere, England"
           />
           <Input

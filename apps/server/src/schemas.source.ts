@@ -99,6 +99,12 @@ export const SearchQuery = Type.Object({
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
 });
 
+/** Place suggestions while typing (#280). */
+export const PlacesQuery = Type.Object({
+  q: Type.String({ maxLength: 200 }),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
+});
+
 export const HistoryQuery = Type.Object({
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })),
 });

@@ -251,7 +251,7 @@ test.describe('events', () => {
     await date.fill('bet 1900 and 1905');
     await expect(dialog.getByTestId('date-preview')).toHaveText('bet. 1900 and 1905 · between');
 
-    await dialog.getByRole('textbox', { name: 'Place' }).fill('Wexmoor, Westmere');
+    await dialog.getByRole('combobox', { name: 'Place' }).fill('Wexmoor, Westmere');
     await dialog.getByRole('button', { name: 'Save' }).click();
     await expect(dialog).toBeHidden();
     const row = timeline(page).getByRole('listitem').filter({ hasText: 'Residence' });
@@ -261,8 +261,10 @@ test.describe('events', () => {
 
   test('asks for an event type instead of saving a Birth by default (#280)', async ({ page }) => {
     await openSeeded(page, seeded);
-    const births = timeline(page)
-      .getByRole('listitem')
+    // Counted with hidden items too: the open dialog hides the page behind it.
+    const births = page
+      .getByRole('region', { name: 'Timeline', exact: true, includeHidden: true })
+      .getByRole('listitem', { includeHidden: true })
       .filter({ has: page.locator('[data-title]', { hasText: /^Birth$/ }) });
     const before = await births.count();
     await timeline(page).getByRole('button', { name: 'Add event' }).click();

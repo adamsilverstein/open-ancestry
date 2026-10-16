@@ -79,11 +79,13 @@ test('Add event and Edit event keep their fields and retry', async ({ page }) =>
   let restore = await failWrites(page, /\/people\/[^/]+\/events$/, 'POST');
   await timeline(page).getByRole('button', { name: 'Add event' }).click();
   const add = page.getByRole('dialog', { name: 'Add event' });
+  await add.getByRole('combobox', { name: 'Event type' }).click();
+  await page.getByRole('option', { name: 'Residence' }).click();
   await add.getByRole('textbox', { name: 'Date' }).fill('1905');
-  await add.getByRole('textbox', { name: 'Place' }).fill('Wexmoor, Westmere');
+  await add.getByRole('combobox', { name: 'Place' }).fill('Wexmoor, Westmere');
   await add.getByRole('button', { name: 'Save' }).click();
   await expect(add.getByRole('alert')).toContainText('Simulated failure');
-  await expect(add.getByRole('textbox', { name: 'Place' })).toHaveValue('Wexmoor, Westmere');
+  await expect(add.getByRole('combobox', { name: 'Place' })).toHaveValue('Wexmoor, Westmere');
   await restore();
   await add.getByRole('button', { name: 'Try again' }).click();
   await expect(add).toBeHidden();
@@ -92,10 +94,10 @@ test('Add event and Edit event keep their fields and retry', async ({ page }) =>
   restore = await failWrites(page, /\/events\/[^/]+$/, 'PATCH');
   await timeline(page).getByRole('button', { name: 'Edit Death' }).click();
   const edit = page.getByRole('dialog', { name: 'Edit event' });
-  await edit.getByRole('textbox', { name: 'Place' }).fill('Ravensholt, Northvale');
+  await edit.getByRole('combobox', { name: 'Place' }).fill('Ravensholt, Northvale');
   await edit.getByRole('button', { name: 'Save' }).click();
   await expect(edit.getByRole('alert')).toContainText('Simulated failure');
-  await expect(edit.getByRole('textbox', { name: 'Place' })).toHaveValue('Ravensholt, Northvale');
+  await expect(edit.getByRole('combobox', { name: 'Place' })).toHaveValue('Ravensholt, Northvale');
   await restore();
   await edit.getByRole('button', { name: 'Try again' }).click();
   await expect(edit).toBeHidden();
@@ -220,6 +222,8 @@ test('a save that finishes after Cancel does not close the next dialog', async (
   });
   await timeline(page).getByRole('button', { name: 'Add event' }).click();
   const first = page.getByRole('dialog', { name: 'Add event' });
+  await first.getByRole('combobox', { name: 'Event type' }).click();
+  await page.getByRole('option', { name: 'Residence' }).click();
   await first.getByRole('textbox', { name: 'Date' }).fill('1905');
   await first.getByRole('button', { name: 'Save' }).click();
   await first.getByRole('button', { name: 'Cancel' }).click();

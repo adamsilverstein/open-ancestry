@@ -81,6 +81,68 @@ function handZip(entries: { name: string; data: Uint8Array; size: number }[]): U
   return out;
 }
 
+/**
+ * A hand-built zip whose central directory lists `names` more than once over
+ * the same local records: `aliases` maps an extra central name to the local
+ * record (by name) it points at.
+ */
+function sharedZip(
+  entries: { name: string; data: Uint8Array; size: number }[],
+  aliases: Record<string, string>,
+  { localNames = {} as Record<string, string>, shift = {} as Record<string, number> } = {},
+): Uint8Array {
+  const honest = handZip(entries);
+  const view = new DataView(honest.buffer);
+  const eocd = honest.length - 22;
+  const cdStart = view.getUint32(eocd + 16, true);
+  // Each local record's offset, by name.
+  const offsets = new Map<string, number>();
+  for (let p = 0; p < cdStart;) {
+    const n = view.getUint16(p + 26, true);
+    const name = new TextDecoder().decode(honest.subarray(p + 30, p + 30 + n));
+    offsets.set(name, p);
+    p += 30 + n + view.getUint32(p + 18, true);
+  }
+  const records = honest.slice(0, cdStart);
+  // A different local name for an entry, same length (the central name stays).
+  for (const [from, to] of Object.entries(localNames)) {
+    records.set(strToU8(to), offsets.get(from)! + 30);
+  }
+  const central: Uint8Array[] = [];
+  const add = (name: string, target: string) => {
+    // The record it points at: the target's, or one nested in its data.
+    const local = offsets.get(target)! + (shift[name] ?? 0);
+    const n = strToU8(name);
+    const cd = new Uint8Array(46 + n.length);
+    const cv = new DataView(cd.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(10, 8, true);
+    cv.setUint32(20, view.getUint32(local + 18, true), true);
+    cv.setUint32(24, view.getUint32(local + 22, true), true);
+    cv.setUint16(28, n.length, true);
+    cv.setUint32(42, local, true);
+    cd.set(n, 46);
+    central.push(cd);
+  };
+  for (const { name } of entries) add(name, name);
+  for (const [name, target] of Object.entries(aliases)) add(name, target);
+  const cdSize = central.reduce((sum, c) => sum + c.length, 0);
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, central.length, true);
+  ev.setUint16(10, central.length, true);
+  ev.setUint32(12, cdSize, true);
+  ev.setUint32(16, records.length, true);
+  const out = new Uint8Array(records.length + cdSize + 22);
+  let p = 0;
+  for (const part of [records, ...central, end]) {
+    out.set(part, p);
+    p += part.length;
+  }
+  return out;
+}
+
 function expectError(fn: () => unknown, code: GedzipError['code']) {
   try {
     fn();
@@ -167,6 +229,53 @@ describe('readGedzip', () => {
   it('reads a hand-built archive', () => {
     const archive = handZip([{ name: 'gedcom.ged', data: deflateSync(GED), size: GED.length }]);
     expect(readGedzip(archive).gedcom).toEqual(GED);
+  });
+
+  describe('entries sharing local records (#265)', () => {
+    // 2 MiB that deflates about 170:1: under the ratio cap on its own.
+    const sparse = new Uint8Array(2 * 1024 * 1024);
+    for (let i = 0; i < sparse.length; i += 800) sparse[i] = (i * 2654435761) >>> 24;
+    const deflated = deflateSync(sparse);
+    const ged = { name: 'gedcom.ged', data: deflateSync(GED), size: GED.length };
+    const photo = { name: 'a.bin', data: deflated, size: sparse.length };
+
+    it('refuses central entries that point at one local record', () => {
+      // Five names over one stream: each looks 170:1, and their summed sizes do too.
+      const archive = sharedZip([ged, photo], {
+        'b.bin': 'a.bin',
+        'c.bin': 'a.bin',
+        'd.bin': 'a.bin',
+        'e.bin': 'a.bin',
+      });
+      expect(() => readGedzip(archive)).toThrow(/b\.bin shares its data with a\.bin/);
+      expectError(() => readGedzip(archive), 'invalid');
+    });
+
+    it("refuses an entry whose record sits inside another entry's data", () => {
+      // a.bin is stored, and its bytes are a whole local record for b.bin.
+      const inner = handZip([{ name: 'b.bin', data: deflateSync(GED), size: GED.length }]);
+      const record = inner.subarray(
+        0,
+        new DataView(inner.buffer).getUint32(inner.length - 6, true),
+      );
+      const archive = sharedZip(
+        [ged, { name: 'a.bin', data: record, size: record.length }],
+        { 'b.bin': 'a.bin' },
+        { shift: { 'b.bin': 30 + 'a.bin'.length } },
+      );
+      patchCentral(archive, 'a.bin', 10, 0, 2);
+      expect(() => readGedzip(archive)).toThrow(/b\.bin overlaps a\.bin/);
+    });
+
+    it("refuses an entry whose local name isn't its central name", () => {
+      const archive = sharedZip([ged, photo], {}, { localNames: { 'a.bin': 'x.bin' } });
+      expect(() => readGedzip(archive)).toThrow(/a\.bin is named x\.bin in its local header/);
+    });
+
+    it('still reads an honest archive of distinct records', () => {
+      const archive = handZip([ged, photo]);
+      expect(readGedzip(archive).media.get('a.bin')).toEqual(sparse);
+    });
   });
 
   it('rejects many small high-ratio entries by the aggregate ratio', () => {

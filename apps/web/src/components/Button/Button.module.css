@@ -7,6 +7,8 @@
   border-radius: var(--oa-radius-md);
   font-weight: var(--oa-weight-medium);
   white-space: nowrap;
+  /* A link styled as a button (Open tree) reads as a button, without an underline. */
+  text-decoration: none;
   cursor: pointer;
   transition:
     background-color var(--oa-duration-fast) var(--oa-ease),

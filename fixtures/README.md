@@ -8,6 +8,7 @@ Synthetic GEDCOM files for tests and benchmarks. **Every person, place and id he
 | `generate.ts`                   | Deterministic generator: `generateGedcom({ people, seed })`. Same seed, same bytes.                  |
 | `generated/synthetic-1000.ged`  | Committed output of `npm run fixtures` for 1,000 people (seed 1).                                    |
 | `generated/synthetic-10000.ged` | Generated on demand by `npm run fixtures`; not committed.                                            |
+| `gedzip/*-utf8-names.zip`      | A GEDZIP with `photos/Müller.jpg`, zipped by Info-ZIP `zip -X -r` and macOS `ditto -c -k`: both store UTF-8 names without bit 11 (#287). |
 
 ```sh
 npm run fixtures                                   # 1k and 10k into fixtures/generated/

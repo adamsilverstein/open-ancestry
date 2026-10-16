@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, rmdirSync, statSync } from 'node:fs';
 import { basename, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { getPersonSummary, openTree } from '@open-ancestry/db';
+import { ensurePrivateDir, getPersonSummary, openTree } from '@open-ancestry/db';
 import {
   importGedcom,
   type ImportLimits,
@@ -14,10 +14,12 @@ import {
   DEFAULT_HOST,
   Library,
   defaultLibraryRoot,
+  devWorkerComparer,
   devWorkerImporter,
   isLoopbackHost,
   startServer,
   newTreeNameProblem,
+  workerComparer,
   workerImporter,
   type RunningServer,
   type WorkerImporterOptions,
@@ -39,7 +41,10 @@ const SERVE_OPTIONS = `Options for serve:
   --no-open            Do not open the app in your browser (opened by default on a terminal)
   --open               Open it even when output is not a terminal
   --static-dir <dir>   Built web app to serve (default: bundled build)
-  --import-heap-mb <n> Memory for each import's worker, in MB (default 2048; $OA_IMPORT_HEAP_MB)`;
+  --import-heap-mb <n> Memory for each import's worker, in MB (default 2048; $OA_IMPORT_HEAP_MB)
+  $OA_MAX_REIMPORTS    Re-import reviews kept open at once, each in memory (default 4; 2-1000)
+  $OA_MAX_QUEUED_IMPORTS
+                       Imports that may wait for the one running (default 4; 1-1000)`;
 
 const IMPORT_OPTIONS = `Options for import:
   --name <tree>        Tree name (default: the file name)
@@ -112,6 +117,10 @@ export type CliCommand =
       importLimits: Partial<ImportLimits>;
       /** Heap for each import worker, in MB (default IMPORT_RESOURCE_LIMITS). */
       importHeapMb: number | undefined;
+      /** Re-import reviews held at once (default 4; OA_MAX_REIMPORTS). */
+      maxReimports: number | undefined;
+      /** Imports that may wait behind the running one (default 4; OA_MAX_QUEUED_IMPORTS). */
+      maxQueuedImports: number | undefined;
       sharedLibrary: boolean;
     }
   | {
@@ -227,7 +236,28 @@ export function parseCliArgs(
     importLimits: importLimits(values, env),
     sharedLibrary,
     importHeapMb: megabytes('import-heap-mb', values['import-heap-mb'], env, 'OA_IMPORT_HEAP_MB'),
+    // At least two, so a finishing comparison can't push out the review being applied.
+    maxReimports: count(env, 'OA_MAX_REIMPORTS', { min: 2, max: 1000 }),
+    maxQueuedImports: count(env, 'OA_MAX_QUEUED_IMPORTS', { min: 1, max: 1000 }),
   };
+}
+
+/**
+ * A whole number from an environment variable, if set, within `min` to `max`:
+ * the cap keeps a typo from sizing something in memory a hundred times over.
+ */
+function count(
+  env: NodeJS.ProcessEnv,
+  variable: string,
+  { min, max }: { min: number; max: number },
+): number | undefined {
+  const raw = env[variable] || undefined;
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < min || n > max) {
+    throw new Error(`Invalid ${variable}: ${raw} (a whole number, ${min} to ${max})`);
+  }
+  return n;
 }
 
 /**
@@ -243,6 +273,18 @@ function serverImporter(limits: Partial<ImportLimits>, heapMb: number | undefine
   return existsSync(fileURLToPath(bundled))
     ? workerImporter(bundled, options)
     : devWorkerImporter(options);
+}
+
+/** Re-import compares run in the same worker script (#161), so they never block the server. */
+function serverComparer(limits: Partial<ImportLimits>, heapMb: number | undefined) {
+  const options: WorkerImporterOptions = {
+    limits,
+    ...(heapMb !== undefined && { resourceLimits: { maxOldGenerationSizeMb: heapMb } }),
+  };
+  const bundled = new URL('./import-worker.js', import.meta.url);
+  return existsSync(fileURLToPath(bundled))
+    ? workerComparer(bundled, options)
+    : devWorkerComparer(options);
 }
 
 /** The web build copied next to the bundled CLI (dist/public). */
@@ -423,6 +465,15 @@ const stderrProgress = process.stderr.isTTY
   ? (text: string) => void process.stderr.write(text)
   : undefined;
 
+/** Removes `dir` if it is empty (a folder made for an import that failed). */
+function rmEmptyDir(dir: string): void {
+  try {
+    rmdirSync(dir);
+  } catch {
+    // Not empty, or gone already.
+  }
+}
+
 async function importCommand(
   cli: Extract<CliCommand, { command: 'import' }>,
   log: (line: string) => void,
@@ -450,15 +501,36 @@ async function importCommand(
     );
   }
   log(`Importing ${escapeControls(cli.file)} ...`);
-  const report = await importGedcom(
-    { path: cli.file },
-    { dir, name },
-    {
-      limits: cli.importLimits,
-      ...(cli.media && { mediaDir: cli.media }),
-      ...(progress && { onProgress: progressReporter(progress) }),
-    },
-  );
+  // The folder first, so the import holds the same busy lock a server's does:
+  // no server on this library renames, deletes or sweeps it meanwhile (#289).
+  ensurePrivateDir(dir);
+  let release: () => void;
+  try {
+    release = library.markBusy(name);
+  } catch (error) {
+    rmEmptyDir(dir);
+    throw error;
+  }
+  let report: ImportReport;
+  try {
+    report = await importGedcom(
+      { path: cli.file },
+      { dir, name },
+      {
+        limits: cli.importLimits,
+        ...(cli.media && { mediaDir: cli.media }),
+        ...(progress && { onProgress: progressReporter(progress) }),
+      },
+    );
+  } catch (error) {
+    release();
+    // The importer removed what it wrote; the folder made here goes too.
+    rmEmptyDir(dir);
+    throw error;
+  } finally {
+    library.closeAll();
+  }
+  release();
   const store = openTree(dir);
   let homePerson: string | null = null;
   try {
@@ -522,8 +594,11 @@ export async function run(
     port: cli.port,
     library: cli.library,
     sharedLibrary: cli.sharedLibrary,
+    maxReimports: cli.maxReimports,
+    maxQueuedImports: cli.maxQueuedImports,
     staticDir: cli.staticDir ?? bundledStaticDir(),
     importer: serverImporter(cli.importLimits, cli.importHeapMb),
+    comparer: serverComparer(cli.importLimits, cli.importHeapMb),
     importLimits: cli.importLimits,
   });
   log(`open-ancestry running at ${escapeControls(server.url)}`);

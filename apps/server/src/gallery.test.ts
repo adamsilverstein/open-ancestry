@@ -1,13 +1,14 @@
 import { existsSync, statSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
 import sharp from 'sharp';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TreeStore } from '@open-ancestry/db';
 import { Library } from './library';
 import { THUMB_SIZES, ThumbnailQueue } from './thumbnails';
 import { MUTATION_HEADERS, seed, testApi, type Seeded, type TestApi } from './test/helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 let api: TestApi;
 let library: Library;
@@ -75,7 +76,7 @@ function attach(
 }
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'oa-gallery-'));
+  root = makeTempDir('oa-gallery-');
   library = new Library(root);
   api = await testApi({ library });
   s = await seed(api);
@@ -152,7 +153,7 @@ describe('thumbnails', () => {
   });
 
   it('runs after an import job completes', async () => {
-    const lib = new Library(await mkdtemp(join(tmpdir(), 'oa-gallery-import-')));
+    const lib = new Library(makeTempDir('oa-gallery-import-'));
     const imported = await testApi({
       library: lib,
       importer: async (_path, store) => {
@@ -284,6 +285,68 @@ describe('attaching media', () => {
     await small.app.close();
   });
 
+  it('refuses a photo attach past the concurrent limit, before reading it (L5, #267)', async () => {
+    const capped = await testApi({ library, maxConcurrentAttaches: 1 });
+    try {
+      // The first upload sends its fields and part of the file, then waits.
+      const body = multipart(
+        { owner_type: 'person', owner_id: s.ada },
+        { name: 'a.png', bytes: png },
+      );
+      const stream = new PassThrough();
+      stream.write(body.payload.subarray(0, body.payload.length - 200));
+      const slow = capped.inject({
+        method: 'POST',
+        url: `${s.base}/media`,
+        payload: stream,
+        headers: body.headers,
+      });
+      await new Promise((r) => setTimeout(r, 100));
+      const second = multipart(
+        { owner_type: 'person', owner_id: s.ada },
+        { name: 'b.png', bytes: png },
+      );
+      const refused = await capped.inject({ method: 'POST', url: `${s.base}/media`, ...second });
+      expect(refused.statusCode, refused.body).toBe(429);
+      stream.end(body.payload.subarray(body.payload.length - 200));
+      expect((await slow).statusCode).toBe(201);
+      // With the first done, there is room again.
+      const after = await capped.inject({ method: 'POST', url: `${s.base}/media`, ...second });
+      expect(after.statusCode).toBe(201);
+    } finally {
+      await capped.app.close();
+    }
+  });
+
+  it('holds the tree busy while it writes the attached file (#289)', async () => {
+    // A delete in the gap before the copy would leave media/attached in a
+    // database-less folder under the tree's name: it must be refused instead.
+    const exists = library.exists.bind(library);
+    let refused: unknown;
+    const spy = vi.spyOn(library, 'exists').mockImplementation((id: string) => {
+      if (id === 'Test' && refused === undefined) {
+        try {
+          library.delete('Test');
+          refused = null;
+        } catch (error) {
+          refused = error;
+        }
+      }
+      return exists(id);
+    });
+    try {
+      const res = await attach(
+        { owner_type: 'person', owner_id: s.ada },
+        { name: 'a.png', bytes: png },
+      );
+      expect(res.statusCode).toBe(201);
+      expect(refused).toMatchObject({ statusCode: 409 });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(library.list().map((t) => t.id)).toContain('Test');
+  });
+
   it('deduplicates by sha256 and can attach to an event', async () => {
     const first = (
       await attach({ owner_type: 'person', owner_id: s.ada }, { name: 'a.png', bytes: png })
@@ -375,7 +438,7 @@ describe('attaching media', () => {
 
 describe('containment', () => {
   it('never writes thumbnails or attachments through a symlinked folder', async () => {
-    const outside = await mkdtemp(join(tmpdir(), 'oa-outside-'));
+    const outside = makeTempDir('oa-outside-');
     await rm(join(treeDir(), 'thumbs'), { recursive: true, force: true });
     await symlink(outside, join(treeDir(), 'thumbs'));
     const id = addMedia({ local_path: 'photos/big.png' });
@@ -390,8 +453,22 @@ describe('containment', () => {
     expect(await readdir(outside)).toEqual([]);
   });
 
+  it('creates no folder through a symlinked media folder when attaching (#314)', async () => {
+    // Before, mkdir -p made attached/ wherever media/ pointed, then refused the copy.
+    const outside = makeTempDir('oa-outside-');
+    await rm(join(treeDir(), 'media'), { recursive: true, force: true });
+    await symlink(outside, join(treeDir(), 'media'));
+    const res = await attach(
+      { owner_type: 'person', owner_id: s.ada },
+      { name: 'a.png', bytes: png },
+    );
+    expect(res.statusCode, res.body).toBe(409);
+    expect(res.json().error.message).toMatch(/outside the tree/);
+    expect(await readdir(outside)).toEqual([]);
+  });
+
   it('does not serve a thumbnail that is a symlink out of the tree', async () => {
-    const outside = await mkdtemp(join(tmpdir(), 'oa-outside-'));
+    const outside = makeTempDir('oa-outside-');
     await writeFile(join(outside, 'secret.webp'), 'secret');
     const id = addMedia({ local_path: 'photos/letter.pdf', kind: 'document' });
     await mkdir(join(treeDir(), 'thumbs'), { recursive: true });

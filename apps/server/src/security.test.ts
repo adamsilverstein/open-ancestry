@@ -1,5 +1,4 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createServer } from './index';
@@ -20,6 +19,7 @@ import {
   testApi,
   type TestApi,
 } from './test/helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 let api: TestApi;
 // One server for the file: these tests only read, or create uniquely named trees.
@@ -51,7 +51,7 @@ describe('security headers', () => {
   });
 
   it('are sent on the SPA shell', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'oa-static-'));
+    const dir = makeTempDir('oa-static-');
     await writeFile(join(dir, 'index.html'), '<!doctype html><title>spa</title>');
     const app = createServer({ staticDir: dir, library: api.root });
     const res = await app.inject({ method: 'GET', url: '/tree/x', headers: { host: HOST } });
@@ -91,7 +91,7 @@ describe('Host allowlist (DNS rebinding)', () => {
   });
 
   it('applies to the SPA too', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'oa-static-'));
+    const dir = makeTempDir('oa-static-');
     await writeFile(join(dir, 'index.html'), '<!doctype html><title>spa</title>');
     const app = createServer({ staticDir: dir, library: api.root });
     const res = await app.inject({ method: 'GET', url: '/', headers: { host: 'evil.example' } });

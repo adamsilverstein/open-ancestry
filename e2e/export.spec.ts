@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { APIRequestContext, Page } from '@playwright/test';
 import { openMemoryTree } from '../packages/db/src/index';
@@ -116,6 +115,13 @@ test('JSON export is a full backup, so privatize is not offered', async ({ page 
   await page.getByRole('button', { name: 'File' }).click();
   await page.getByRole('menuitem', { name: /Export/ }).click();
   const dialog = page.getByRole('dialog', { name: 'Export tree' });
+  // GEDCOM: privatizing says what it covers and what it cannot (#195).
+  await expect(dialog).toContainText(
+    'Names of theirs that the export recognizes are also replaced',
+  );
+  await expect(dialog).toContainText('This is best effort');
+  // GEDZIP media: embedded photo details are removed, other files left out (#263).
+  await expect(dialog).toContainText('In a GEDZIP, photos lose their embedded details');
   await dialog.getByRole('combobox', { name: 'Format' }).click();
   await page.getByRole('option', { name: 'JSON (full backup)' }).click();
   await expect(dialog.getByRole('checkbox', { name: /^Privatize/ })).toBeDisabled();
@@ -132,7 +138,7 @@ test('shows what an export could not carry over', async ({ page }, info) => {
   // An imported tree (written straight into the e2e library) whose person points at a
   // family that is not in the file: a GEDCOM 7 export cannot keep that line.
   const tree = treeName(info.title, info.project.name);
-  const library = join(tmpdir(), `oa-e2e-library-${process.env.E2E_PORT}`);
+  const library = process.env.OA_E2E_LIBRARY!;
   await importGedcom(
     {
       bytes: [
@@ -196,6 +202,95 @@ test('privatize starts on for a tree with living people and warns when turned of
   await expect(dialog.getByRole('status')).toHaveText(
     'JSON is a full backup: it includes everything about 1 person who may be living.',
   );
+});
+
+test('privatize turns back on for each new export and each format (#277)', async ({
+  page,
+  request,
+  baseURL,
+}, info) => {
+  const tree = treeName(info.title, info.project.name);
+  await seedTree(request, baseURL!, tree);
+  // One export with privatize turned off...
+  await exportFrom(page, tree, 'GEDCOM 7', false);
+  // ...and the next time the dialog opens, it is on again.
+  await page.getByRole('button', { name: 'File' }).click();
+  await page.getByRole('menuitem', { name: /Export/ }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export tree' });
+  await dialog.getByRole('combobox', { name: 'Tree' }).click();
+  await page.getByRole('option', { name: tree, exact: true }).click();
+  const privatize = dialog.getByRole('checkbox', { name: /^Privatize/ });
+  await expect(privatize).toBeChecked();
+  // Turning it off for one format does not carry over to another.
+  await privatize.uncheck();
+  await dialog.getByRole('combobox', { name: 'Format' }).click();
+  await page.getByRole('option', { name: 'GEDZIP (GEDCOM 7 with media)', exact: true }).click();
+  await expect(privatize).toBeChecked();
+});
+
+test('reopening rechecks the tree, so someone living added elsewhere turns privatize on (#283)', async ({
+  page,
+  request,
+  baseURL,
+}, info) => {
+  const tree = treeName(info.title, info.project.name);
+  const { token } = (await (await request.get('/api/session')).json()) as { token: string };
+  const headers = { origin: baseURL!, 'x-oa-token': token };
+  expect((await request.post('/api/trees', { headers, data: { name: tree } })).status()).toBe(201);
+  const base = `/api/trees/${encodeURIComponent(tree)}`;
+  const add = (living: string, given: string) =>
+    request.post(`${base}/people`, {
+      headers,
+      data: {
+        living,
+        names: [{ given, surname: 'Quarry' }],
+        events: [{ type: 'DEAT', date_text: living === 'dead' ? '1900' : null }],
+      },
+    });
+  expect((await add('dead', 'Bramwell')).status()).toBe(201);
+
+  await page.goto('/');
+  const open = async () => {
+    await page.getByRole('button', { name: 'File' }).click();
+    await page.getByRole('menuitem', { name: /Export/ }).click();
+    const dialog = page.getByRole('dialog', { name: 'Export tree' });
+    await dialog.getByRole('combobox', { name: 'Tree' }).click();
+    await page.getByRole('option', { name: tree, exact: true }).click();
+    return dialog;
+  };
+  let dialog = await open();
+  // Nobody living yet: privatize starts off.
+  await expect(dialog.getByRole('checkbox', { name: /^Privatize/ })).not.toBeChecked();
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toBeHidden();
+
+  // Someone living arrives outside this page (another tab, the CLI).
+  expect((await add('living', 'Adelind')).status()).toBe(201);
+  dialog = await open();
+  await expect(dialog.getByRole('checkbox', { name: /^Privatize/ })).toBeChecked();
+});
+
+test('says when a format change turns privatize back on (#283)', async ({
+  page,
+  request,
+  baseURL,
+}, info) => {
+  const tree = treeName(info.title, info.project.name);
+  await seedTree(request, baseURL!, tree);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'File' }).click();
+  await page.getByRole('menuitem', { name: /Export/ }).click();
+  const dialog = page.getByRole('dialog', { name: 'Export tree' });
+  await dialog.getByRole('combobox', { name: 'Tree' }).click();
+  await page.getByRole('option', { name: tree, exact: true }).click();
+  const privatize = dialog.getByRole('checkbox', { name: /^Privatize/ });
+  await privatize.uncheck();
+  await dialog.getByRole('combobox', { name: 'Format' }).click();
+  await page.getByRole('option', { name: 'GEDCOM 7', exact: true }).click();
+  await expect(privatize).toBeChecked();
+  await expect(
+    dialog.getByRole('status').filter({ hasText: 'Privatize turned back on' }),
+  ).toHaveCount(1);
 });
 
 test('a privatized export hides a deceased person marked confidential', async ({

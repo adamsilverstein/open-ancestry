@@ -24,6 +24,10 @@ const VERBATIM_TABLES = new Set([
 /** Columns that name things outside the database (files, URLs) or are machine values. */
 const VERBATIM_COLUMNS: Record<string, ReadonlySet<string>> = {
   media: new Set(['local_path', 'remote_url', 'sha256', 'mime']),
+  // Links point at files or pages whose bytes matter (a macOS server may serve
+  // a decomposed path), so they are kept exactly as given, like remote_url.
+  citation: new Set(['url']),
+  repository: new Set(['url']),
 };
 
 /**

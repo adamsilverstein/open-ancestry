@@ -1,23 +1,25 @@
 import { createTree } from '@open-ancestry/db';
 import {
+  appendFileSync,
   mkdirSync,
-  mkdtempSync,
   readdirSync,
+  renameSync,
   readFileSync,
   rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { basename, dirname, join } from 'node:path';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { importGedcom } from './import';
 import {
   classifyFile,
   kindFromType,
   mediaType,
   MediaSource,
+  MediaFolderOutsideError,
+  makeFoldersInside,
   storeMediaFile,
   suffixedPath,
 } from './media';
@@ -25,6 +27,7 @@ import { coordinate, placeParts, Places } from './places';
 import { childRelationship, morePrivate, nameType, privacy, relationshipStatus } from './tags';
 import { dateColumns, surnameKey } from './index';
 import { ged } from './test-helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 describe('tags', () => {
   it('maps child relationships case-insensitively', () => {
@@ -184,10 +187,7 @@ describe('media helpers', () => {
 describe('media folder edge cases', () => {
   let tmp: string;
   beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), 'oa-media-'));
-  });
-  afterEach(() => {
-    rmSync(tmp, { recursive: true, force: true });
+    tmp = makeTempDir('oa-media-');
   });
 
   it('skips file names that cannot be stored and reports copy failures as warnings', async () => {
@@ -228,6 +228,36 @@ describe('media folder edge cases', () => {
     store.close();
   });
 
+  it('refuses to read a file swapped for another, or for a link, after the folder was read (#266)', () => {
+    const source = join(tmp, 'src');
+    mkdirSync(source);
+    writeFileSync(join(source, 'a.jpg'), 'a');
+    writeFileSync(join(source, 'b.jpg'), 'b');
+    const media = MediaSource.fromDir(source);
+    // Swapped after the walk: another file now has the name.
+    writeFileSync(join(tmp, 'other.jpg'), 'other');
+    renameSync(join(tmp, 'other.jpg'), join(source, 'a.jpg'));
+    expect(() => media.find({ type: 'local', path: 'a.jpg' })!.read()).toThrow(
+      /a\.jpg changed after the media folder was read/,
+    );
+    // Replaced by a symlink: never followed.
+    rmSync(join(source, 'b.jpg'));
+    symlinkSync(join(tmp, 'other.jpg'), join(source, 'b.jpg'));
+    expect(() => media.find({ type: 'local', path: 'b.jpg' })!.read()).toThrow();
+  });
+
+  it('refuses a file that grew after the folder was read, without reading it all (#266)', () => {
+    const source = join(tmp, 'src');
+    mkdirSync(source);
+    writeFileSync(join(source, 'a.jpg'), 'small');
+    const media = MediaSource.fromDir(source);
+    const file = media.find({ type: 'local', path: 'a.jpg' })!;
+    expect(file.size).toBe(5);
+    // Same file, same single link: only its size changed, past what was checked.
+    appendFileSync(join(source, 'a.jpg'), 'x'.repeat(1024 * 1024));
+    expect(() => file.read()).toThrow(/a\.jpg changed after the media folder was read/);
+  });
+
   it('ignores an unreadable media folder', () => {
     expect(
       MediaSource.fromDir(join(tmp, 'missing')).find({ type: 'absolute', name: 'a.jpg' }),
@@ -255,14 +285,27 @@ describe('shared derived columns', () => {
   });
 });
 
+describe('spilling media to disk', () => {
+  it.skipIf(process.platform === 'win32')(
+    'writes spilled files private to the owner (#267)',
+    () => {
+      const dir = makeTempDir('oa-spill-');
+      const source = MediaSource.fromEntries(
+        new Map([['photos/a.jpg', new TextEncoder().encode('bytes')]]),
+      );
+      const spilled = source.spill(dir);
+      expect(statSync(join(dir, 'photos', 'a.jpg')).mode & 0o777).toBe(0o600);
+      expect(statSync(join(dir, 'photos')).mode & 0o777).toBe(0o700);
+      expect(spilled.find({ type: 'local', path: 'photos/a.jpg' } as never)).toBeTruthy();
+    },
+  );
+});
+
 describe('storing media in a tree', () => {
   let root: string;
   const hash = (b: Uint8Array) => Buffer.from(b).toString('hex');
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'oa-store-'));
-  });
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
+    root = makeTempDir('oa-store-');
   });
 
   it.skipIf(process.platform === 'win32')('writes media private to the owner (0600)', () => {
@@ -294,7 +337,7 @@ describe('storing media in a tree', () => {
   });
 
   it('never writes through or reuses a symlink inside the media folder', () => {
-    const outside = mkdtempSync(join(tmpdir(), 'oa-outside-'));
+    const outside = makeTempDir('oa-outside-');
     try {
       symlinkSync(outside, join(root, 'linked'));
       const enc = (t: string) => new TextEncoder().encode(t);
@@ -308,6 +351,33 @@ describe('storing media in a tree', () => {
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
+  });
+
+  it('refuses a folder that is not under its root (#315)', () => {
+    const outside = makeTempDir('oa-outside-');
+    for (const dir of [
+      join(outside, 'x'),
+      join(root, '..', basename(outside), 'y'),
+      dirname(root),
+    ]) {
+      expect(() => makeFoldersInside(root, dir, 'x')).toThrow(MediaFolderOutsideError);
+    }
+    expect(readdirSync(outside)).toEqual([]);
+    // Inside the root is fine, and the root itself needs nothing made.
+    expect(makeFoldersInside(root, join(root, 'a', 'b'), 'a/b')).toBe(join(root, 'a'));
+    expect(makeFoldersInside(root, root, '.')).toBeUndefined();
+  });
+
+  it('never creates folders outside the tree through a symlinked folder (L3, #267)', () => {
+    // Before, mkdir -p ran first and made deep/er inside the link's target,
+    // then the containment check threw.
+    const outside = makeTempDir('oa-outside-');
+    symlinkSync(outside, join(root, 'linked'));
+    const enc = new TextEncoder().encode('x');
+    expect(() => storeMediaFile(root, 'linked/deep/er/a.jpg', enc, hash)).toThrow(
+      /outside the tree/,
+    );
+    expect(readdirSync(outside)).toEqual([]);
   });
 
   it('keeps files already in a tree folder and stores identical content once', async () => {

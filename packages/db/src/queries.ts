@@ -49,6 +49,8 @@ export interface PersonSummary {
    * file missing at import), so clients can request its thumbnail.
    */
   primaryPhotoLocal: boolean;
+  /** The primary photo's bytes, shortened (sha256 prefix), so its URLs change with its file. */
+  primaryPhotoVersion: string | null;
   given: string | null;
   surname: string | null;
   surnamePrefix: string | null;
@@ -66,6 +68,7 @@ interface SummaryRow {
   privacy: Privacy;
   primary_media_id: string | null;
   primary_local: number;
+  primary_version: string | null;
   given: string | null;
   surname: string | null;
   surname_prefix: string | null;
@@ -100,6 +103,7 @@ export function getPersonSummaries(store: TreeStore, ids: readonly string[]): Pe
     .stmt(
       `SELECT p.id, p.sex, p.living, p.privacy, p.primary_media_id,
               m.local_path IS NOT NULL AS primary_local,
+              substr(m.sha256, 1, 16) AS primary_version,
               n.given, n.surname, n.surname_prefix, n.prefix, n.suffix, n.nickname
        FROM person p LEFT JOIN person_name n ON n.person_id = p.id AND n.is_primary = 1
        LEFT JOIN media m ON m.id = p.primary_media_id
@@ -133,6 +137,7 @@ export function getPersonSummaries(store: TreeStore, ids: readonly string[]): Pe
       privacy: r.privacy,
       primaryMediaId: r.primary_media_id,
       primaryPhotoLocal: r.primary_local === 1,
+      primaryPhotoVersion: r.primary_version,
       given: r.given,
       surname: r.surname,
       surnamePrefix: r.surname_prefix,
@@ -474,6 +479,20 @@ export interface Neighborhood {
   moreUp: string[];
   /** People at the bottom edge who have children not included. */
   moreDown: string[];
+  /**
+   * People whose children (in every partner family) are all included: the
+   * focus and descendants above the bottom edge, and ancestors whose
+   * siblings were fetched. A person missing here may have more children
+   * than the slice shows, even if some are in it.
+   */
+  childrenLoaded: string[];
+  /**
+   * Line ancestors past `siblingsDepth` who have siblings (or half siblings)
+   * the slice left out: the tree offers to show them.
+   */
+  moreSiblings: string[];
+  /** People whose siblings, half siblings included, are all in the slice. */
+  siblingsLoaded: string[];
   /** True when the slice hit `maxPeople` and stopped early. */
   truncated: boolean;
 }
@@ -592,6 +611,11 @@ export function getNeighborhood(
       JSON.stringify(familyIds),
     );
 
+  const childrenLoaded = new Set<string>();
+  const siblingsLoaded = new Set<string>();
+  /** Line ancestors past siblingsDepth, to their siblings in the database. */
+  const siblingsOf = new Map<string, string[]>();
+
   // Ancestors.
   let frontier = [focusId];
   const seenUp = new Set(frontier);
@@ -625,6 +649,26 @@ export function getNeighborhood(
       for (const c of childrenOf([...foundIds, ...others.map((f) => f.id)])) {
         addChild(c);
         if (!line.has(c.child_id)) siblingIds.add(c.child_id);
+      }
+      // Every partner family of these parents came with all its children.
+      for (const id of parentIds) childrenLoaded.add(id);
+      for (const id of frontier) siblingsLoaded.add(id);
+    } else if (found.length > 0) {
+      // Past siblingsDepth: say who has siblings (through either parent) left out.
+      for (const { id, sib } of rows<{ id: string; sib: string }>(
+        store,
+        `SELECT DISTINCT me.child_id AS id, sib.child_id AS sib FROM family_child me
+         JOIN family pf ON pf.id = me.family_id
+         JOIN family f ON f.id = pf.id
+           OR f.partner1_id IN (pf.partner1_id, pf.partner2_id)
+           OR f.partner2_id IN (pf.partner1_id, pf.partner2_id)
+         JOIN family_child sib ON sib.family_id = f.id AND sib.child_id <> me.child_id
+         WHERE me.child_id IN (${IDS})`,
+        JSON.stringify(frontier),
+      )) {
+        const list = siblingsOf.get(id);
+        if (list) list.push(sib);
+        else siblingsOf.set(id, [sib]);
       }
     }
     frontier = next;
@@ -663,6 +707,8 @@ export function getNeighborhood(
       ].sort();
       break;
     }
+    // All the partner families of this generation, with all their children.
+    for (const id of frontier) childrenLoaded.add(id);
     const next: string[] = [];
     for (const k of kids) {
       addChild(k);
@@ -713,7 +759,14 @@ export function getNeighborhood(
     moreUp = moreUp.filter((id) => keep.has(id));
     moreDown = moreDown.filter((id) => keep.has(id));
   }
+  // Cut short (even exactly at the cap), the slice may have dropped anyone's
+  // children: claim nothing.
+  if (truncated) {
+    childrenLoaded.clear();
+    siblingsLoaded.clear();
+  }
 
+  const keptSet = new Set(kept);
   return {
     focusId,
     people: getPersonSummaries(store, kept),
@@ -721,6 +774,13 @@ export function getNeighborhood(
     children: childEdges,
     moreUp,
     moreDown,
+    childrenLoaded: [...childrenLoaded].filter((id) => people.has(id)).sort(),
+    // Only siblings the slice does not already hold (with a partner, say).
+    moreSiblings: [...siblingsOf]
+      .filter(([id, sibs]) => keptSet.has(id) && sibs.some((sib) => !keptSet.has(sib)))
+      .map(([id]) => id)
+      .sort(),
+    siblingsLoaded: [...siblingsLoaded].filter((id) => keptSet.has(id)).sort(),
     truncated,
   };
 }
@@ -848,7 +908,7 @@ function sortedPeople(
     birth: ['birth_key', null],
     death: ['death_key', null],
   };
-  const name = (sort && sort in orders ? sort : 'surname') as PeopleSort;
+  const name = (sort && Object.hasOwn(orders, sort) ? sort : 'surname') as PeopleSort;
   const [key, second] = orders[name];
   const text = second !== null;
   const index = `person_sort_${name}${desc ? '_desc' : ''}_idx`;
@@ -877,4 +937,38 @@ function sortedPeople(
   for (const old of [...cache.keys()].slice(0, Math.max(0, cache.size - ORDER_CACHE_SIZE)))
     cache.delete(old);
   return ids;
+}
+
+export interface PlaceSuggestion {
+  id: string;
+  full_name: string;
+}
+
+/**
+ * Places for suggestions while typing (#280): each full name once, those
+ * starting with `query` first (a range on the NOCASE index, so no scan),
+ * then names containing it to fill `limit`. LIKE wildcards in the text are
+ * literal.
+ */
+export function suggestPlaces(store: TreeStore, query: string, limit = 10): PlaceSuggestion[] {
+  const text = query.trim();
+  if (!text || limit < 1) return [];
+  const prefix = store
+    .stmt(
+      `SELECT min(id) AS id, full_name FROM place
+       WHERE full_name >= @text COLLATE NOCASE AND full_name < @text || char(1114111) COLLATE NOCASE
+       GROUP BY full_name COLLATE NOCASE ORDER BY full_name COLLATE NOCASE LIMIT @limit`,
+    )
+    .all({ text, limit }) as PlaceSuggestion[];
+  if (prefix.length >= limit) return prefix;
+  const like = text.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const contains = store
+    .stmt(
+      `SELECT min(id) AS id, full_name FROM place
+       WHERE full_name LIKE '%' || @like || '%' ESCAPE '\\'
+         AND NOT (full_name >= @text COLLATE NOCASE AND full_name < @text || char(1114111) COLLATE NOCASE)
+       GROUP BY full_name COLLATE NOCASE ORDER BY full_name COLLATE NOCASE LIMIT @rest`,
+    )
+    .all({ like, text, rest: limit - prefix.length }) as PlaceSuggestion[];
+  return [...prefix, ...contains];
 }

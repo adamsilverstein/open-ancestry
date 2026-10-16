@@ -392,7 +392,7 @@ test('quick view popover shows details and actions', async ({ page }) => {
     .getByRole('dialog', { name: 'Eleanor Whitcombe' })
     .getByRole('link', { name: 'Profile' })
     .click();
-  await expect(page).toHaveURL(/\/person\/I1$/);
+  await expect(page).toHaveURL(/\/person\/I1(\?tree=[^&]*)?$/);
 });
 
 test('timeline, relationships and sources render their variants', async ({ page }) => {
@@ -405,7 +405,7 @@ test('timeline, relationships and sources render their variants', async ({ page 
   await rel.getByRole('button', { name: 'Add parent' }).click();
   await expect(rel.getByRole('status')).toHaveText('Add parent');
   await rel.getByRole('link', { name: /Wilhelmina Ostrander/ }).click();
-  await expect(page).toHaveURL(/\/person\/I3$/);
+  await expect(page).toHaveURL(/\/person\/I3(\?tree=[^&]*)?$/);
 });
 
 test('source item links to the external record', async ({ page }) => {

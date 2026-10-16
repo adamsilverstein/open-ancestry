@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { importFile } from '@open-ancestry/import';
+import { importFile, prepareReimport } from '@open-ancestry/import';
+import { zipSync } from 'fflate';
+import sharp from 'sharp';
+import { devWorkerComparer } from './import-runner';
 import { MUTATION_HEADERS, testApi, type TestApi } from './test/helpers';
 
 const SAMPLE = readFileSync(
@@ -27,7 +30,7 @@ function laterSample() {
     .replace(/@([A-Z]+)(\d+)@/g, (_, p: string, n: string) => `@${p}${Number(n) + 100}@`);
 }
 
-function multipart(fileName: string, content: string) {
+function multipart(fileName: string, content: string | Uint8Array) {
   const boundary = '----oa-reimport';
   return {
     payload: Buffer.concat([
@@ -116,6 +119,115 @@ describe('re-import', () => {
     const undo = await api.post(`${base}/undo`);
     expect(undo.json().batch.label).toBe('Re-import Family 2026.ged');
     expect((await api.get(base)).json().tree.peopleCount).toBe(26);
+  });
+
+  it("copies a GEDZIP export's new photo into the tree when applied (#75)", async () => {
+    const base = await importedTree();
+    const ged = laterSample().replace(
+      '0 @I127@ INDI\n1 NAME Noah /Ashgrove/',
+      '0 @I127@ INDI\n1 NAME Noah /Ashgrove/\n1 OBJE\n2 FILE photos/noah.jpg\n3 TITL Noah',
+    );
+    expect(ged).toContain('photos/noah.jpg');
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+    const zip = zipSync({ 'tree.ged': new TextEncoder().encode(ged), 'photos/noah.jpg': jpeg });
+    const res = await api.inject({
+      method: 'POST',
+      url: `${base}/reimport`,
+      ...multipart('Family 2026.zip', zip),
+    });
+    const job = await waitForJob(res.json().jobId);
+    const { reimportId } = job.result as { reimportId: string };
+    const review = (await api.get(`/api/reimports/${reimportId}`)).json();
+    expect(review.media).toMatchObject({ linked: 1, rejected: 0 });
+    const accept = review.diff.people.flatMap(
+      (p: { changes: { id: string; defaultAccept: boolean }[] }) =>
+        p.changes.filter((c) => c.defaultAccept).map((c) => c.id),
+    );
+    const applied = (
+      await api.post(`/api/reimports/${reimportId}/apply`, {
+        accept,
+        comparison: review.comparison,
+      })
+    ).json();
+    expect(applied.media).toMatchObject({ refused: [] });
+    expect(applied.media.copied).toHaveLength(1);
+    const photo = await api.get(`${base}/media/${applied.media.copied[0]}`);
+    expect(photo.statusCode).toBe(200);
+    expect(photo.rawPayload).toEqual(jpeg);
+  });
+
+  it("redraws a replaced photo's thumbnail, and again after undo and redo (#75)", async () => {
+    const solid = (background: string) =>
+      sharp({ create: { width: 64, height: 64, channels: 3, background } })
+        .png()
+        .toBuffer();
+    const ged = [
+      '0 HEAD',
+      '1 GEDC',
+      '2 VERS 5.5.1',
+      '1 CHAR UTF-8',
+      '0 @I1@ INDI',
+      '1 NAME Ada /Vale/',
+      '1 SEX F',
+      '1 BIRT',
+      '2 DATE 3 MAR 1851',
+      '1 OBJE @O1@',
+      '0 @O1@ OBJE',
+      '1 FILE photos/face.png',
+      '2 TITL Face',
+      // An Ancestry id: media without one are known by their bytes, so new bytes are new media.
+      '1 _OID 222',
+      '0 TRLR',
+      '',
+    ].join('\n');
+    const zip = async (background: string) =>
+      zipSync({
+        'tree.ged': new TextEncoder().encode(ged),
+        'photos/face.png': await solid(background),
+      });
+    const imported = await api.inject({
+      method: 'POST',
+      url: '/api/import',
+      ...multipart('Vale.zip', await zip('#d02020')),
+    });
+    const job = await waitForJob(imported.json().jobId);
+    const base = `/api/trees/${encodeURIComponent(job.tree)}`;
+    const person = (await api.get(`${base}/people?limit=1`)).json().items[0].id;
+    const items = (await api.get(`${base}/people/${person}/media`)).json().items;
+    const id: string = items[0].media?.id ?? items[0].id;
+    /** Red or blue, from the thumbnail's first pixel. */
+    const thumbColor = async () => {
+      const res = await api.get(`${base}/media/${id}/thumb/sm`);
+      expect(res.statusCode).toBe(200);
+      const { data } = await sharp(res.rawPayload).raw().toBuffer({ resolveWithObject: true });
+      return data[0]! > data[2]! ? 'red' : 'blue';
+    };
+    expect(await thumbColor()).toBe('red');
+
+    const res = await api.inject({
+      method: 'POST',
+      url: `${base}/reimport`,
+      ...multipart('Vale 2026.zip', await zip('#2020d0')),
+    });
+    const { reimportId } = (await waitForJob(res.json().jobId)).result as { reimportId: string };
+    const review = (await api.get(`/api/reimports/${reimportId}`)).json();
+    const replace = review.diff.people
+      .flatMap((p: { changes: { id: string; kind: string }[] }) => p.changes)
+      .filter((c: { kind: string }) => c.kind === 'media.replace')
+      .map((c: { id: string }) => c.id);
+    expect(replace).toHaveLength(1);
+    const applied = (
+      await api.post(`/api/reimports/${reimportId}/apply`, {
+        accept: replace,
+        comparison: review.comparison,
+      })
+    ).json();
+    expect(applied.media.copied).toEqual([id]);
+    expect(await thumbColor()).toBe('blue');
+    expect((await api.post(`${base}/undo`)).statusCode).toBe(200);
+    expect(await thumbColor()).toBe('red');
+    expect((await api.post(`${base}/redo`)).statusCode).toBe(200);
+    expect(await thumbColor()).toBe('blue');
   });
 
   it('refuses a stale review and validates the request', async () => {
@@ -221,5 +333,64 @@ describe('re-import', () => {
     expect(job.state).toBe('failed');
     expect(job.error).toMatch(/does not look like GEDCOM/);
     expect((await api.get(base)).json().tree.peopleCount).toBe(26);
+  });
+});
+
+describe('re-import compare in a worker (#161)', () => {
+  it('compares through the worker comparer and applies the review', async () => {
+    await api.close();
+    api = await testApi({ importer: importFile, comparer: devWorkerComparer() });
+    const base = await importedTree();
+    const { reimportId, counts } = await startReimport(base);
+    expect(counts).toMatchObject({ matched: 26, newPeople: 1 });
+    const review = (await api.get(`/api/reimports/${reimportId}`)).json();
+    const accept = review.diff.people.flatMap(
+      (p: { changes: { id: string; defaultAccept: boolean }[] }) =>
+        p.changes.filter((c) => c.defaultAccept).map((c) => c.id),
+    );
+    const applied = await api.post(`/api/reimports/${reimportId}/apply`, {
+      accept,
+      comparison: review.comparison,
+    });
+    expect(applied.statusCode).toBe(200);
+    expect((await api.get(base)).json().tree.peopleCount).toBe(27);
+  }, 60_000);
+});
+
+describe('cancelling a re-import compare (#161)', () => {
+  it('keeps no review when the compare finishes after a cancel was accepted', async () => {
+    await api.close();
+    let compared!: () => void;
+    const finishedCompare = new Promise<void>((resolve) => (compared = resolve));
+    api = await testApi({
+      importer: importFile,
+      // Like the worker: the compare runs to the end and ignores the abort.
+      comparer: async (path, store, { signal }) => {
+        const session = await prepareReimport(store, { path });
+        await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+        compared();
+        return session;
+      },
+    });
+    const base = await importedTree();
+    const res = await api.inject({
+      method: 'POST',
+      url: `${base}/reimport`,
+      ...multipart('Family 2026.ged', laterSample()),
+    });
+    const jobId = res.json().jobId as string;
+    await vi.waitFor(async () => {
+      expect((await api.get(`/api/jobs/${jobId}`)).json().state).toBe('running');
+    });
+    const cancel = await api.inject({
+      method: 'DELETE',
+      url: `/api/jobs/${jobId}`,
+      headers: MUTATION_HEADERS,
+    });
+    expect(cancel.statusCode).toBeLessThan(300);
+    await finishedCompare;
+    const job = await waitForJob(jobId);
+    // The cancel was accepted, so it wins: no review is left for anyone to apply.
+    expect(job).toMatchObject({ state: 'failed', cancelled: true, result: null });
   });
 });

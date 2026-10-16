@@ -1,10 +1,10 @@
 import { closeSync, fstatSync } from 'node:fs';
-import { link, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { link, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openMediaFileSync } from '@open-ancestry/db';
 import { openMediaFile, resolveMediaPath, resolveMediaPathSync } from './routes/media';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 /*
  * Both media resolvers must agree on every case (#207): the async one serves
@@ -18,7 +18,7 @@ let tree: string;
 let outside: string;
 
 beforeEach(async () => {
-  base = await realpath(await mkdtemp(join(tmpdir(), 'oa-media-resolve-')));
+  base = await realpath(makeTempDir('oa-media-resolve-'));
   tree = join(base, 'Tree.oatree');
   outside = join(base, 'outside');
   await mkdir(join(tree, 'thumbs'), { recursive: true });

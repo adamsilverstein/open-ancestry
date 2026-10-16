@@ -1,3 +1,4 @@
+import { lifeDate as coreLifeDate } from '@open-ancestry/core';
 import type { LivingStatus } from '@open-ancestry/db';
 import type { ApiPersonSummary, EventBrief, PersonDetail } from '../api/types';
 import type { LifeDate } from './lifespan';
@@ -39,14 +40,6 @@ export function initials(name: string): string {
 
 // ------------------------------------------------------------ API adapters
 
-const QUALIFIER: Partial<Record<string, LifeDate['qualifier']>> = {
-  about: 'abt',
-  before: 'bef',
-  after: 'aft',
-  estimated: 'est',
-  calculated: 'cal',
-};
-
 /** Mirrors packages/db `isLiving`: unknown counts as living for privacy. */
 export function isLivingStatus(status: LivingStatus): boolean {
   return status !== 'dead' && status !== 'inferred_dead';
@@ -61,13 +54,9 @@ export function fullName(person: ApiPersonSummary): string {
   return name || 'Unknown name';
 }
 
-/** Year-level date for LifespanText from an API event brief. */
+/** Year-level date for LifespanText from an API event brief (core's shared rule). */
 export function lifeDate(event: EventBrief | null): LifeDate | undefined {
-  if (!event?.dateSort) return undefined;
-  return {
-    year: Math.trunc(event.dateSort / 10000),
-    qualifier: QUALIFIER[event.dateQualifier ?? ''],
-  };
+  return coreLifeDate(event);
 }
 
 /** API summary to the shape PersonCard, Avatar and RelationshipList take. */

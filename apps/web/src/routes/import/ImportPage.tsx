@@ -17,6 +17,7 @@ const PHASES: Record<ImportProgress['phase'], string> = {
   finalize: 'Linking families and checking the tree',
   commit: 'Saving and building the search index',
   done: 'Finishing',
+  compare: 'Comparing',
 };
 
 /** Moves focus to an element when it appears (the Cancel button it replaced is gone). */

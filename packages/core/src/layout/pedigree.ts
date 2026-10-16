@@ -6,7 +6,7 @@
  */
 import { Builder, settingsFrom } from './build';
 import type { Role } from './build';
-import { indexGraph } from './graph';
+import { asIndex, type GraphSource } from './graph';
 import {
   boundsOf,
   DEFAULT_CARD,
@@ -17,7 +17,7 @@ import {
   z,
 } from './output';
 import { tidyLayout } from './tidy';
-import type { LayoutEdge, LayoutOptions, TreeGraph, TreeLayout } from './types';
+import type { LayoutEdge, LayoutOptions, TreeLayout } from './types';
 
 const CHEVRONS = {
   up: new Set<Role>(['focus', 'ancestor']),
@@ -26,11 +26,11 @@ const CHEVRONS = {
 };
 
 export function layoutPedigree(
-  graph: TreeGraph,
+  graph: GraphSource,
   focusId: string,
   options: LayoutOptions = {},
 ): TreeLayout {
-  const index = indexGraph(graph);
+  const index = asIndex(graph);
   if (!index.person(focusId)) return emptyLayout();
   const size = { ...DEFAULT_CARD, ...options.cardSize };
   const gaps = { ...DEFAULT_GAPS, ...options.gaps };

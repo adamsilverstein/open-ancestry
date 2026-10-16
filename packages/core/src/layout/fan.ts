@@ -5,12 +5,23 @@
  * father on the start (left) side. Missing ancestors leave empty slots.
  */
 import { Builder, settingsFrom } from './build';
-import { chooseParentFamily, coupleOrder, indexGraph } from './graph';
+import {
+  asIndex,
+  chooseParentFamily,
+  coupleOrder,
+  partneredParentFamilies,
+  type GraphSource,
+} from './graph';
 import { boundsOf } from './output';
-import type { Bounds, FanLayout, FanOptions, FanSegment, FanSlot, TreeGraph } from './types';
+import type { Bounds, FanLayout, FanOptions, FanSegment, FanSlot } from './types';
+import { maxOf, minOf } from './arrays';
 
-export function layoutFan(graph: TreeGraph, focusId: string, options: FanOptions = {}): FanLayout {
-  const index = indexGraph(graph);
+export function layoutFan(
+  graph: GraphSource,
+  focusId: string,
+  options: FanOptions = {},
+): FanLayout {
+  const index = asIndex(graph);
   const generations = Math.max(1, Math.floor(options.generations ?? 6));
   const inner = options.innerRadius ?? 60;
   const ring = options.ringWidth ?? 70;
@@ -62,7 +73,7 @@ export function layoutFan(graph: TreeGraph, focusId: string, options: FanOptions
       continue;
     }
     segments.push(segment);
-    const families = index.parentFamilies(personId);
+    const families = partneredParentFamilies(index, personId);
     const family = chooseParentFamily(index, personId, b.s.selected);
     if (family && families.length > 1) {
       b.alternates[personId] = { selected: family.id, families: families.map((f) => f.id) };
@@ -109,9 +120,9 @@ function sectorBounds(start: number, sweep: number, radius: number): Bounds {
     add(k * (Math.PI / 2));
   }
   const clean = (n: number) => Math.round(n * 1e6) / 1e6 + 0;
-  const minX = clean(Math.min(...xs));
-  const maxX = clean(Math.max(...xs));
-  const minY = clean(Math.min(...ys));
-  const maxY = clean(Math.max(...ys));
+  const minX = clean(minOf(xs));
+  const maxX = clean(maxOf(xs));
+  const minY = clean(minOf(ys));
+  const maxY = clean(maxOf(ys));
   return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
 }

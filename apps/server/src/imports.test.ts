@@ -1,6 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, rm, utimes } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, readdir, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { startServer } from './index';
@@ -15,6 +14,7 @@ import {
   testApi,
   type TestApi,
 } from './test/helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 /** A multipart/form-data body with one file field. */
 function multipart(fileName: string, content: string | Buffer, field = 'file') {
@@ -56,8 +56,11 @@ function sse(body: string): [string, unknown][] {
 /** A fake importer that records its arguments and finishes when released. */
 function controllableImporter() {
   const calls: { path: string; content: string; options: ImporterOptions }[] = [];
-  let release: (value?: unknown) => void = () => {};
-  let fail: (error: Error) => void = () => {};
+  let release: ((value?: unknown) => void) | undefined;
+  let fail: ((error: Error) => void) | undefined;
+  // A release or failure asked for before an importer is waiting (a job is
+  // "running" before its importer has read the upload): kept for the next one.
+  let early: { ok: true; value: unknown } | { ok: false; error: Error } | undefined;
   const importer: Importer = async (path, _store, options) => {
     // Like the real importers, honor an abort that came before the work
     // started listening (a cancel during the read below), or the job never
@@ -74,12 +77,26 @@ function controllableImporter() {
     return Promise.race([
       aborted,
       new Promise((resolve, reject) => {
-        release = resolve;
-        fail = reject;
+        const settle = early;
+        early = undefined;
+        if (settle) return settle.ok ? resolve(settle.value) : reject(settle.error);
+        release = (value) => {
+          release = fail = undefined;
+          resolve(value);
+        };
+        fail = (error) => {
+          release = fail = undefined;
+          reject(error);
+        };
       }),
     ]);
   };
-  return { importer, calls, release: (v?: unknown) => release(v), fail: (e: Error) => fail(e) };
+  return {
+    importer,
+    calls,
+    release: (value?: unknown) => (release ? release(value) : (early = { ok: true, value })),
+    fail: (error: Error) => (fail ? fail(error) : (early = { ok: false, error })),
+  };
 }
 
 async function waitForJob(api: TestApi, id: string, state: string) {
@@ -191,6 +208,26 @@ describe('POST import', () => {
     await jobs.close();
     expect(fake.calls[0]!.options.signal.aborted).toBe(true);
     expect(jobId).toBeTruthy();
+  });
+
+  it('the fake importer keeps a release that comes before it is waiting', async () => {
+    // "bounds concurrency" flaked on CI: a job is "running" before its importer
+    // has read the upload, so a release() in that window was lost and the next
+    // job stayed queued. The fake must remember it.
+    const fake = controllableImporter();
+    const upload = join(makeTempDir('oa-fake-'), 'u.ged');
+    await writeFile(upload, '0 HEAD\n0 TRLR\n');
+    const controller = new AbortController();
+    const running = fake.importer(upload, {} as never, {
+      onProgress: () => {},
+      signal: controller.signal,
+    });
+    fake.release({ done: true });
+    const settled = await Promise.race([
+      running,
+      new Promise((r) => setTimeout(() => r('hung'), 2000)),
+    ]);
+    expect(settled).toEqual({ done: true });
   });
 
   it('bounds concurrency and the queue', async () => {
@@ -479,7 +516,7 @@ describe('POST /api/import (new tree owned by the server)', () => {
   it('aborts imports and cleans up on shutdown, even with an event stream open', async () => {
     const fake = controllableImporter();
     api = await testApi(); // keeps afterEach's close happy; this test runs its own server
-    const root = await mkdtemp(join(tmpdir(), 'oa-lib-'));
+    const root = makeTempDir('oa-lib-');
     const server = await startServer({ library: root, importer: fake.importer, token: TOKEN });
     const origin = server.url;
     const form = new FormData();
@@ -567,7 +604,7 @@ describe('startup sweeps', () => {
 
   it('removes stale upload folders only', async () => {
     api = await testApi();
-    const dir = await mkdtemp(join(tmpdir(), 'oa-sweep-'));
+    const dir = makeTempDir('oa-sweep-');
     await mkdir(join(dir, `${UPLOAD_PREFIX}old`));
     await mkdir(join(dir, `${UPLOAD_PREFIX}fresh`));
     await mkdir(join(dir, 'unrelated-old'));
@@ -576,5 +613,21 @@ describe('startup sweeps', () => {
     await utimes(join(dir, 'unrelated-old'), past, past);
     expect(await sweepStaleUploads(Date.now(), dir)).toBe(1);
     expect((await readdir(dir)).sort()).toEqual([`${UPLOAD_PREFIX}fresh`, 'unrelated-old']);
+  });
+
+  it('also sweeps stale photo-attach folders, and never follows a link (L5, #267)', async () => {
+    api = await testApi();
+    const dir = makeTempDir('oa-sweep-');
+    const past = new Date(Date.now() - STALE_UPLOAD_MS - 60_000);
+    await mkdir(join(dir, 'oa-attach-old'));
+    await utimes(join(dir, 'oa-attach-old'), past, past);
+    // A link named like an upload folder is not a folder of ours: left alone.
+    const target = makeTempDir('oa-sweep-target-');
+    await writeFile(join(target, 'keep.txt'), 'keep');
+    await utimes(target, past, past);
+    await symlink(target, join(dir, `${UPLOAD_PREFIX}link`));
+    expect(await sweepStaleUploads(Date.now(), dir)).toBe(1);
+    expect((await readdir(dir)).sort()).toEqual([`${UPLOAD_PREFIX}link`]);
+    expect(await readdir(target)).toEqual(['keep.txt']);
   });
 });

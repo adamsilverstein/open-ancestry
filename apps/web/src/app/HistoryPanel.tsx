@@ -6,7 +6,7 @@ import { currentTreeQuery } from '../api/queries';
 import { useOpenRestored } from '../lib/useOpenRestored';
 import { Button } from '../components/Button/Button';
 import { Dialog } from '../components/Dialog/Dialog';
-import { useToast } from '../components/Toast/Toast';
+import { useDismissToasts, useToast } from '../components/Toast/Toast';
 import styles from './HistoryPanel.module.css';
 
 const relative = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
@@ -34,8 +34,9 @@ interface HistoryPanelProps {
 export default function HistoryPanel({ open, onOpenChange }: HistoryPanelProps) {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const dismiss = useDismissToasts();
   const onRestored = useOpenRestored();
-  const { data: tree } = useQuery(currentTreeQuery);
+  const { data: tree, isError: noTreeList } = useQuery(currentTreeQuery);
   const { data: history } = useQuery({ ...historyQuery(tree ?? ''), enabled: !!tree });
   // While an edit is on its way the list is about to change; undo waits for it anyway.
   const saving = useIsMutating({ mutationKey: editKey(tree ?? '') }) > 0;
@@ -43,6 +44,7 @@ export default function HistoryPanel({ open, onOpenChange }: HistoryPanelProps) 
   const run = async (direction: 'undo' | 'redo') => {
     try {
       const result = await undoRedo(queryClient, direction, { onRestored });
+      if (direction === 'undo' && result.batch) dismiss(`batch:${result.batch.id}`);
       // The panel shows what changed; only a step-over needs saying.
       if (result.skipped.length) toast({ ...undoRedoMessage(direction, result), duration: 6000 });
     } catch (error) {
@@ -59,7 +61,11 @@ export default function HistoryPanel({ open, onOpenChange }: HistoryPanelProps) 
       open={open}
       onOpenChange={onOpenChange}
       title="History"
-      description="Every change to this tree. Undo and redo also work with Ctrl+Z and Shift+Ctrl+Z (⌘ on a Mac)."
+      description={
+        tree === null
+          ? 'No tree is open, so there is nothing to undo.'
+          : 'Every change to this tree. Undo and redo also work with Ctrl+Z and Shift+Ctrl+Z (⌘ on a Mac).'
+      }
       footer={
         <>
           <Button
@@ -81,7 +87,13 @@ export default function HistoryPanel({ open, onOpenChange }: HistoryPanelProps) 
         </>
       }
     >
-      {!history ? (
+      {noTreeList ? (
+        <p className={styles.muted}>
+          Could not load the tree list, so there is no history to show.
+        </p>
+      ) : tree === null ? (
+        <p className={styles.muted}>Import a GEDCOM or create a tree, and its changes show here.</p>
+      ) : !history ? (
         <p className={styles.muted}>Loading…</p>
       ) : history.items.length === 0 ? (
         <p className={styles.muted}>No changes yet.</p>

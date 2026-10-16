@@ -1,6 +1,17 @@
 import { displayText, unsafeTextReason } from '@open-ancestry/core';
-import { existsSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { randomUUID } from 'node:crypto';
+import {
+  existsSync,
+  linkSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
+import { homedir, hostname } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
   TREE_EXTENSION,
@@ -9,10 +20,12 @@ import {
   ensurePrivateDir,
   meta,
   openTree,
+  readTreeName,
   treePaths,
   type TreeStore,
 } from '@open-ancestry/db';
-import { ApiError, conflict, notFound } from './errors';
+import { ApiError, busy, conflict, notFound } from './errors';
+import type { ReimportFolders } from './reimport-folders';
 
 /*
  * The library is a folder of trees: `<root>/<name>.oatree/`. A tree's API id
@@ -30,11 +43,18 @@ export const TRASH_DIR = '.trash';
 export const IMPORT_PENDING_KEY = 'import_pending';
 export const MAX_TREE_NAME_LENGTH = 100;
 /**
+ * The same cap in UTF-8 bytes. Most Linux file systems allow 255 bytes per
+ * name; the folder adds ".oatree", and the trash a timestamp (#275 P1).
+ */
+export const MAX_TREE_NAME_BYTES = 200;
+/**
  * How long a server connection waits for another connection's write lock (an
  * import worker's) before SQLITE_BUSY, which the API answers with 409. Short,
  * since the wait blocks the event loop.
  */
 export const LIBRARY_BUSY_TIMEOUT_MS = 50;
+/** How long the list shows a locked tree by folder name before trying it again. */
+const LOCKED_LIST_MS = 2000;
 
 /** `~/OpenAncestry`, or OA_LIBRARY when set. */
 export function defaultLibraryRoot(env: NodeJS.ProcessEnv = process.env): string {
@@ -53,6 +73,8 @@ export function treeNameProblem(name: string): string | null {
   if (name.trim().length === 0) return 'Enter a tree name';
   if (name.length > MAX_TREE_NAME_LENGTH)
     return `Tree name is longer than ${MAX_TREE_NAME_LENGTH} characters`;
+  if (Buffer.byteLength(name) > MAX_TREE_NAME_BYTES)
+    return 'Tree name is too long for a folder name';
   if (name !== name.trim()) return 'Tree name has leading or trailing spaces';
   if (name.startsWith('.')) return 'Tree name cannot start with a dot';
   if (name.endsWith('.')) return 'Tree name cannot end with a dot';
@@ -88,9 +110,22 @@ export function treeNameFromFile(fileName: string): string {
     .replace(/[/\\:*?"<>|%\u0000-\u001f\u007f]+/g, ' ')
     .replace(/\s+/g, ' ')
     .replace(/^[\s.]+|[\s.]+$/g, '')
-    .slice(0, MAX_TREE_NAME_LENGTH - 10)
     .trim();
-  return !name || WINDOWS_DEVICE.test(name) ? `Imported ${name}`.trim() : name;
+  const short = truncate(name, MAX_TREE_NAME_LENGTH - 10, MAX_TREE_NAME_BYTES - 10).trim();
+  return !short || WINDOWS_DEVICE.test(short) ? `Imported ${short}`.trim() : short;
+}
+
+/** `text` cut to whole characters (code points) within both a character and a UTF-8 byte budget. */
+function truncate(text: string, maxLength: number, maxBytes: number): string {
+  let out = '';
+  let bytes = 0;
+  for (const char of text) {
+    const size = Buffer.byteLength(char);
+    if (out.length + char.length > maxLength || bytes + size > maxBytes) break;
+    out += char;
+    bytes += size;
+  }
+  return out;
 }
 
 function assertTreeName(name: string): void {
@@ -101,6 +136,59 @@ function assertTreeName(name: string): void {
 function assertNewTreeName(name: string): void {
   const problem = newTreeNameProblem(name);
   if (problem) throw new ApiError(400, 'bad_request', problem);
+}
+
+/** A tree folder mid-rename (see Library.rename), and the note of where it was going. */
+const RENAMING =
+  /^\.renaming-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.oatree$/;
+const RENAME_MARKER = '.rename-to';
+
+/** A tree's lock file while an import or compare runs in some server (#275 P3). */
+const BUSY_LOCK = 'busy.lock';
+/**
+ * Liveness, as for re-import folders (#243): the holder re-touches its lock
+ * every LOCK_HEARTBEAT_MS, and a lock silent for LOCK_SILENT_MS is stale on any
+ * host. A pid is only a fast "definitely gone" check on the machine that wrote
+ * it, so a reused pid (pid 1 in every container) can delay, never extend, it.
+ */
+const LOCK_HEARTBEAT_MS = 30_000;
+const LOCK_SILENT_MS = 5 * 60_000;
+
+interface BusyLock {
+  pid: number;
+  host: string;
+  owner: string;
+  at: string;
+}
+
+/** Whether a process on this machine is still running. */
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM: it runs, as another user.
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/** A lock file's inode and content, or undefined when it is gone. */
+function fingerprint(path: string): string | undefined {
+  try {
+    return `${statSync(path).ino}:${readFileSync(path, 'utf8')}`;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether two paths name the same folder (one may be another spelling of the other). */
+function sameFolder(a: string, b: string): boolean {
+  try {
+    const [x, y] = [statSync(a), statSync(b)];
+    return x.dev === y.dev && x.ino === y.ino;
+  } catch {
+    return false;
+  }
 }
 
 export interface TreeInfo {
@@ -138,6 +226,14 @@ export class Library {
   /** Trees that must not be renamed or deleted right now (e.g. importing). */
   /** Trees with an import queued or running, and how many. */
   private readonly busy = new Map<string, number>();
+  /** Trees another process had locked when last listed, until when to skip them. */
+  private readonly lockedUntil = new Map<string, number>();
+
+  /**
+   * The re-import folders of the server using this library: opening a tree
+   * sweeps the leftovers whose owner is gone (see reimport-folders.ts).
+   */
+  reimportFolders: ReimportFolders | undefined;
 
   /** Trees may be opened from a folder other accounts can write to (--shared-library). */
   readonly shared: boolean;
@@ -278,6 +374,9 @@ export class Library {
 
   list(): TreeInfo[] {
     this.ensureRoot();
+    const now = Date.now();
+    // Forget trees that were locked a while ago, including deleted or renamed ones.
+    for (const [id, until] of this.lockedUntil) if (until <= now) this.lockedUntil.delete(id);
     const trees = readdirSync(this.root, { withFileTypes: true })
       .filter((d) => d.isDirectory() && d.name.endsWith(TREE_EXTENSION) && !d.name.startsWith('.'))
       .map((d) => d.name.slice(0, -TREE_EXTENSION.length))
@@ -286,8 +385,40 @@ export class Library {
           treeNameProblem(id) === null &&
           existsSync(treePaths(join(this.root, `${id}${TREE_EXTENSION}`)).database),
       )
-      .map((id) => this.info(id));
+      .map((id) => this.listedInfo(id, now));
     return withLabels(trees).sort((a, b) => a.label.localeCompare(b.label));
+  }
+
+  /**
+   * What the list shows for a tree. A tree not open yet is read through a
+   * short-lived read-only connection rather than opened: opening runs any
+   * pending upgrade, and waiting on another process's upgrade (up to 30 s)
+   * would freeze every page. A tree that can't be read right now (another
+   * process holds its lock, a crashed writer left it needing recovery, its file
+   * is damaged) is listed under its folder name, so one tree never fails the
+   * whole list; opening it reports the problem. A locked tree is skipped
+   * briefly so each list does not wait on it again.
+   */
+  private listedInfo(id: string, now: number): TreeInfo {
+    if (this.stores.has(id)) return this.info(id);
+    const dir = this.dirOf(id);
+    const modifiedAt = statSync(treePaths(dir).database).mtime.toISOString();
+    const byFolder = { id, name: id, label: id, modifiedAt };
+    if ((this.lockedUntil.get(id) ?? 0) > now) return byFolder;
+    this.lockedUntil.delete(id);
+    let name: string | undefined;
+    try {
+      name = readTreeName(dir, { busyTimeoutMs: LIBRARY_BUSY_TIMEOUT_MS });
+    } catch (error) {
+      // A planted link or another account's file is refused, as when opening.
+      if (error instanceof TreeAccessError) throw new ApiError(403, 'forbidden', error.message);
+      if ((error as { code?: string }).code?.startsWith('SQLITE_BUSY')) {
+        this.lockedUntil.set(id, now + LOCKED_LIST_MS);
+      }
+      return byFolder;
+    }
+    const stored = name || id;
+    return { id, name: stored, label: stored, modifiedAt };
   }
 
   info(id: string): TreeInfo {
@@ -350,6 +481,62 @@ export class Library {
   }
 
   /**
+   * Startup: finishes renames a crash interrupted between their two steps
+   * (see rename), which left a tree under a hidden `.renaming-*` name. It
+   * takes the new name if free, else the old one, else the name stored in
+   * the tree. Returns the ids the trees got back.
+   */
+  recoverRenames(): string[] {
+    const recovered: string[] = [];
+    let names: string[];
+    try {
+      names = readdirSync(this.root);
+    } catch {
+      return recovered;
+    }
+    for (const name of names) {
+      if (!RENAMING.test(name)) continue;
+      const temp = join(this.root, name);
+      let wanted: string[] = [];
+      try {
+        const marker = JSON.parse(readFileSync(join(temp, RENAME_MARKER), 'utf8')) as {
+          from?: unknown;
+          to?: unknown;
+        };
+        wanted = [marker.to, marker.from].filter((n): n is string => typeof n === 'string');
+      } catch {
+        try {
+          const store = openTree(temp);
+          wanted = [meta.get(store, 'tree_name')].filter((n): n is string => !!n);
+          store.close();
+        } catch {
+          // Not a readable tree: left for the user.
+        }
+      }
+      const id = wanted
+        .map((n) => n.normalize('NFC'))
+        .find(
+          (n) =>
+            treeNameProblem(n) === null && !existsSync(join(this.root, `${n}${TREE_EXTENSION}`)),
+        );
+      if (!id) continue;
+      this.testHooks.beforeRecoverRename?.();
+      try {
+        renameSync(temp, join(this.root, `${id}${TREE_EXTENSION}`));
+      } catch (error) {
+        // Another server starting at the same moment moved it first (ENOENT),
+        // or took the name (EEXIST, ENOTEMPTY): startup goes on either way.
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT' || code === 'EEXIST' || code === 'ENOTEMPTY') continue;
+        throw error;
+      }
+      rmSync(join(this.root, `${id}${TREE_EXTENSION}`, RENAME_MARKER), { force: true });
+      recovered.push(id);
+    }
+    return recovered;
+  }
+
+  /**
    * Startup: removes empty trees left by imports a crash or restart
    * interrupted. Only trees created over `minAgeMs` ago are touched, so an
    * import another server process is running on the same library is safe.
@@ -360,10 +547,23 @@ export class Library {
     for (const { id } of this.list()) {
       const marker = meta.get(this.open(id), IMPORT_PENDING_KEY);
       const created = statSync(this.dirOf(id)).birthtimeMs || statSync(this.dirOf(id)).mtimeMs;
-      if (!marker || this.busy.has(id) || now - created < minAgeMs) continue;
+      if (!marker || this.busy.has(id) || this.busyElsewhere(id) || now - created < minAgeMs)
+        continue;
       if (this.discardFailedImport(id, marker)) removed.push(id);
     }
     return removed;
+  }
+
+  /**
+   * At startup: removes the trees' re-import folders whose owner is gone,
+   * by the same ownership rule as the sweep when a tree opens (see
+   * reimport-folders.ts), so another live server's reviews are kept.
+   */
+  sweepReimportLeftovers(): string[] {
+    if (!existsSync(this.root)) return [];
+    const folders = this.reimportFolders;
+    if (!folders) return [];
+    return this.list().flatMap(({ id }) => folders.sweep(this.dirOf(id)));
   }
 
   private isPendingImport(id: string, marker: string): boolean {
@@ -392,6 +592,9 @@ export class Library {
       if (error instanceof TreeAccessError) throw new ApiError(403, 'forbidden', error.message);
       throw error;
     }
+    // A crash can leave a re-import's working folders (up to 256 MiB of media)
+    // behind. Swept once the tree folder has passed openTree's access checks.
+    this.reimportFolders?.sweep(this.dirOf(canonical));
     this.stores.set(canonical, store);
     return store;
   }
@@ -401,10 +604,30 @@ export class Library {
     assertNewTreeName(name);
     if (!this.exists(id)) throw notFound(`Tree "${id}" not found`);
     if (name === id) return;
-    if (existsSync(this.dirOf(name))) throw conflict(`A tree named "${name}" already exists`);
+    const from = this.dirOf(id);
+    const to = this.dirOf(name);
+    // On a case-insensitive or normalizing file system (macOS, Windows), the
+    // folder found for `name` can be this tree's own: a rename that changes
+    // only case or Unicode form is not a conflict with itself (#275 M8).
+    const own = existsSync(to) && sameFolder(from, to);
+    if (existsSync(to) && !own) throw conflict(`A tree named "${name}" already exists`);
+    if (own && name.normalize('NFC') === this.canonical(id).normalize('NFC')) return;
     this.assertIdle(id);
     this.close(id);
-    renameSync(this.dirOf(id), this.dirOf(name));
+    if (own) {
+      // Through a temporary name, so the file system records the new spelling.
+      // The marker lets recoverRenames finish the job after a crash in between.
+      const temp = join(this.root, `.renaming-${randomUUID()}${TREE_EXTENSION}`);
+      const target = join(this.root, `${name.normalize('NFC')}${TREE_EXTENSION}`);
+      writeFileSync(join(from, RENAME_MARKER), JSON.stringify({ from: id, to: name }), {
+        mode: 0o600,
+      });
+      renameSync(from, temp);
+      renameSync(temp, target);
+      rmSync(join(target, RENAME_MARKER), { force: true });
+    } else {
+      renameSync(from, to);
+    }
     // Not an undoable edit: the folder rename is not in the change log either.
     this.open(name).db.prepare("UPDATE meta SET value = ? WHERE key = 'tree_name'").run(name);
   }
@@ -427,15 +650,152 @@ export class Library {
    */
   markBusy(tree: string): () => void {
     const id = this.canonical(tree);
-    this.busy.set(id, (this.busy.get(id) ?? 0) + 1);
+    const count = this.busy.get(id) ?? 0;
+    // Other servers on this library see the busy state through a lock file,
+    // created exclusively: of two servers marking the tree, one wins, the
+    // other gets 409 before counting anything busy (#289).
+    if (count === 0) this.takeLock(id);
+    this.busy.set(id, count + 1);
     let released = false;
     return () => {
       if (released) return;
       released = true;
       const left = (this.busy.get(id) ?? 1) - 1;
       if (left > 0) this.busy.set(id, left);
-      else this.busy.delete(id);
+      else {
+        this.busy.delete(id);
+        this.dropLock(id);
+      }
     };
+  }
+
+  /** Seams for tests that need another server's step at an exact moment. */
+  readonly testHooks: { beforeLockTakeover?: () => void; beforeRecoverRename?: () => void } = {};
+
+  /** This Library's mark in lock files, so it never mistakes its own lock for another server's. */
+  private readonly owner = randomUUID();
+  /** Trees whose lock file this Library holds, re-touched by the heartbeat. */
+  private readonly locks = new Set<string>();
+  private heartbeat: ReturnType<typeof setInterval> | undefined;
+
+  private lockPath(id: string): string {
+    return join(this.root, `${id}${TREE_EXTENSION}`, BUSY_LOCK);
+  }
+
+  private takeLock(id: string): void {
+    const path = this.lockPath(id);
+    const lock: BusyLock = {
+      pid: process.pid,
+      host: hostname(),
+      owner: this.owner,
+      at: new Date().toISOString(),
+    };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        writeFileSync(path, JSON.stringify(lock), { mode: 0o600, flag: 'wx' });
+        this.locks.add(id);
+        this.startHeartbeat();
+        return;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        // No tree folder (yet): nothing for another server to find either.
+        if (code === 'ENOENT') return;
+        if (code !== 'EEXIST') throw error;
+      }
+      const held = this.readLock(id);
+      if (held?.owner === this.owner) return;
+      if (attempt === 0 && (!held || this.lockStale(id, held))) {
+        // Take over a stale lock: move it aside, then retry the create. Another
+        // server may have taken it over in between, so check that the file moved
+        // is the one judged stale; if not, put it back and refuse. The inode
+        // alone is not enough: Linux reuses a freed inode for the next file at
+        // once, so the other server's fresh lock can have the old one's number.
+        // Its content (owner id and time) always differs.
+        const judged = fingerprint(path);
+        this.testHooks.beforeLockTakeover?.();
+        this.testHooks.beforeLockTakeover = undefined;
+        const aside = `${path}.stale-${randomUUID()}`;
+        try {
+          renameSync(path, aside);
+        } catch {
+          continue; // Another server moved it first; the retry decides.
+        }
+        if (judged === undefined || fingerprint(aside) !== judged) {
+          try {
+            linkSync(aside, path);
+          } catch {
+            // A third server's lock is there now; it holds the tree.
+          }
+          rmSync(aside, { force: true });
+          break;
+        }
+        rmSync(aside, { force: true });
+        continue;
+      }
+      break;
+    }
+    throw this.busyElsewhereError(id);
+  }
+
+  private dropLock(id: string): void {
+    if (!this.locks.delete(id)) return;
+    if (this.readLock(id)?.owner === this.owner) rmSync(this.lockPath(id), { force: true });
+    if (this.locks.size === 0) this.stopHeartbeat();
+  }
+
+  private startHeartbeat(): void {
+    if (this.heartbeat) return;
+    this.heartbeat = setInterval(() => {
+      const now = new Date();
+      for (const id of this.locks) {
+        try {
+          utimesSync(this.lockPath(id), now, now);
+        } catch {
+          // Renamed or deleted with the tree: the next release forgets it.
+        }
+      }
+    }, LOCK_HEARTBEAT_MS);
+    this.heartbeat.unref();
+  }
+
+  private stopHeartbeat(): void {
+    clearInterval(this.heartbeat);
+    this.heartbeat = undefined;
+  }
+
+  private readLock(id: string): BusyLock | null {
+    try {
+      return JSON.parse(readFileSync(this.lockPath(id), 'utf8')) as BusyLock;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Whether another holder's lock has stopped: its process here is gone, or it went silent. */
+  private lockStale(id: string, lock: BusyLock): boolean {
+    if (lock.host === hostname() && !processAlive(lock.pid)) return true;
+    try {
+      return Date.now() - statSync(this.lockPath(id)).mtimeMs >= LOCK_SILENT_MS;
+    } catch {
+      return true;
+    }
+  }
+
+  /** Whether another live server holds the tree's lock file; a stale one is removed. */
+  private busyElsewhere(tree: string): boolean {
+    const id = this.canonical(tree);
+    if (!existsSync(this.lockPath(id))) return false;
+    const lock = this.readLock(id);
+    if (!lock || lock.owner === this.owner) return false;
+    if (!this.lockStale(id, lock)) return true;
+    rmSync(this.lockPath(id), { force: true });
+    return false;
+  }
+
+  private busyElsewhereError(id: string): ApiError {
+    return busy(
+      `Tree "${id}" is busy in another Open Ancestry server using this library; try again in a moment`,
+    );
   }
 
   /** Marks a tree busy for the duration of `fn`. */
@@ -454,7 +814,9 @@ export class Library {
 
   /** Throws 409 while the tree is importing. */
   assertIdle(id: string): void {
-    if (this.isBusy(id)) throw conflict(`Tree "${id}" is busy (an import is running)`);
+    // Busy with an import, a re-import compare or an attach: say so generically.
+    if (this.isBusy(id)) throw busy(`Tree "${id}" is busy; try again in a moment`);
+    if (this.busyElsewhere(id)) throw this.busyElsewhereError(id);
   }
 
   private close(tree: string): void {
@@ -464,6 +826,7 @@ export class Library {
   }
 
   closeAll(): void {
+    this.stopHeartbeat();
     for (const id of [...this.stores.keys()]) this.close(id);
   }
 }

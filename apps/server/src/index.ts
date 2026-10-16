@@ -9,16 +9,22 @@ import fastifyEtag from '@fastify/etag';
 import fastifyMultipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
-import { IMPORT_LIMITS, resolveImportLimits, type ImportLimits } from '@open-ancestry/import';
+import {
+  IMPORT_LIMITS,
+  prepareReimport,
+  resolveImportLimits,
+  type ImportLimits,
+} from '@open-ancestry/import';
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import type { Deps } from './context';
 import { errorBody, registerErrorHandling, toApiError } from './errors';
-import { JobManager, type Importer } from './jobs';
+import { JobManager, type Comparer, type Importer } from './jobs';
 import { Library, defaultLibraryRoot } from './library';
 import { checkRoutes } from './routes/checks';
 import { editRoutes } from './routes/edit';
 import { importRoutes, sweepStaleUploads } from './routes/imports';
 import { reimportRoutes } from './routes/reimports';
+import { ReimportFolders } from './reimport-folders';
 import { ReimportSessions } from './reimports';
 import { mediaRoutes } from './routes/media';
 import { peopleRoutes } from './routes/people';
@@ -41,7 +47,9 @@ export {
 export { SECURITY_HEADERS, TOKEN_HEADER, isLoopbackHost } from './security';
 export {
   IMPORT_RESOURCE_LIMITS,
+  devWorkerComparer,
   devWorkerImporter,
+  workerComparer,
   workerImporter,
   type WorkerImporterOptions,
 } from './import-runner';
@@ -63,6 +71,11 @@ export interface ServerOptions {
   library?: string | Library;
   /** GEDCOM importer; without one the import endpoint answers 501. */
   importer?: Importer;
+  /**
+   * Re-import compare; default runs on the server's thread (fine for tests).
+   * The CLI and dev server pass `workerComparer` so it never blocks (#161).
+   */
+  comparer?: Comparer;
   /** Mutation token; random per process by default. */
   token?: string;
   /** Hostnames accepted in the Host header besides loopback. */
@@ -78,9 +91,13 @@ export interface ServerOptions {
   archiveUploadLimit?: number;
   /** Largest media upload in bytes (default 1 GiB). */
   mediaUploadLimit?: number;
+  /** Photo attaches streaming at once (default 3); more get 429. */
+  maxConcurrentAttaches?: number;
   /** Concurrent imports (default 1) and how many may wait (default 4). */
   importConcurrency?: number;
-  maxQueuedImports?: number;
+  maxQueuedImports?: number | undefined;
+  /** Re-import reviews held in memory at once, each with its parsed export (default 4). */
+  maxReimports?: number | undefined;
 }
 
 export interface StartOptions extends ServerOptions {
@@ -167,18 +184,51 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   // Once, at startup: warn if others can see an existing library folder
   // (a missing one is created, private, on first use).
   if (existsSync(library.root)) library.ensureRoot();
+  library.recoverRenames();
   library.sweepInterruptedImports();
   void sweepStaleUploads();
   const importLimits = resolveImportLimits(options.importLimits);
+  // This server's re-import working folders; opening a tree sweeps others' leftovers.
+  const reimportFolders = new ReimportFolders();
+  library.reimportFolders = reimportFolders;
+  // Leftovers whose owner is gone: a crash, or a server that has stopped.
+  library.sweepReimportLeftovers();
   const deps: Deps = {
     library,
     jobs,
     importer: options.importer,
+    comparer:
+      options.comparer ??
+      (async (path, store, { onProgress, signal, folders }) => {
+        let spilled: string | undefined;
+        try {
+          return await prepareReimport(
+            store,
+            { path },
+            {
+              signal,
+              onProgress: (phase, done, total) => onProgress({ phase, done, total }),
+              // Owned by this server, so another server's sweep leaves it alone.
+              ...(store.dir && {
+                spillDir: () => (spilled = folders.create(store.dir!, 'media')),
+              }),
+            },
+          );
+        } catch (error) {
+          folders.release(spilled);
+          throw error;
+        }
+      }),
     uploadLimit: options.uploadLimit ?? importLimits.maxBytes,
     archiveUploadLimit: options.archiveUploadLimit ?? importLimits.maxArchiveBytes,
     mediaUploadLimit: options.mediaUploadLimit ?? DEFAULT_MEDIA_UPLOAD_LIMIT,
+    maxConcurrentAttaches: options.maxConcurrentAttaches ?? 3,
     thumbnails: new ThumbnailQueue(),
-    reimports: new ReimportSessions(),
+    reimports: new ReimportSessions({
+      maxSessions: options.maxReimports,
+      folders: reimportFolders,
+    }),
+    reimportFolders,
   };
 
   registerErrorHandling(app);
@@ -275,6 +325,7 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   app.addHook('preClose', drain);
   app.addHook('onClose', async () => {
     deps.reimports.closeAll();
+    reimportFolders.close();
     library.closeAll();
   });
 

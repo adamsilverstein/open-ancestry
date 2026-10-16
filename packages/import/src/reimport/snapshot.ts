@@ -61,7 +61,8 @@ export interface Snapshot {
   families: Map<string, FamilyRow>;
   familyChildren: FamilyChildRow[];
   /** Family events (marriage, divorce, ...) by family id. */
-  familyEvents: Map<string, EventRow[]>;
+  /** Family facts (marriage, divorce) by family, paired like person facts (#268). */
+  familyEvents: Map<string, SnapEvent[]>;
   /**
    * The latest import's person records by xref, mapped to the person they
    * belong to now. A merge (#70) points several xrefs at one person.
@@ -273,15 +274,24 @@ export function snapshot(store: TreeStore): Snapshot {
     people.get(owner_id)?.media.push({ row: row as MediaRow, key: keyOf(row as MediaRow) });
   }
 
-  const familyEvents = new Map<string, EventRow[]>();
-  for (const e of all<EventRow & { family_id: string }>(
+  const familyEvents = new Map<string, SnapEvent[]>();
+  for (const e of all<
+    EventRow & { family_id: string; is_preferred: number; place_name: string | null }
+  >(
     store,
-    `SELECT e.*, r.family_id FROM event_role r JOIN event e ON e.id = r.event_id
+    `SELECT e.*, r.family_id, r.is_preferred, p.full_name AS place_name
+     FROM event_role r JOIN event e ON e.id = r.event_id LEFT JOIN place p ON p.id = e.place_id
      WHERE r.family_id IS NOT NULL ORDER BY r.sort_order, e.id`,
   )) {
-    const { family_id, ...row } = e;
+    const { family_id, is_preferred, place_name, ...row } = e;
     const list = familyEvents.get(family_id) ?? [];
-    list.push(row as EventRow);
+    // Family facts' sources are not compared (as before #268): only the facts are.
+    list.push({
+      row: row as EventRow,
+      place: place_name,
+      isPreferred: is_preferred === 1,
+      citations: [],
+    });
     familyEvents.set(family_id, list);
   }
 

@@ -6,7 +6,7 @@ import { importGedcom } from '../import';
 import { FIXTURES, TODAY, fid, value } from '../test-helpers';
 import { applyReimport, closeReimport, prepareReimport, type ReimportSession } from './index';
 
-const SAMPLE = readFileSync(join(FIXTURES, 'ancestry-sample.ged'), 'utf8').replace(/^﻿/, '');
+const SAMPLE = readFileSync(join(FIXTURES, 'ancestry-sample.ged'), 'utf8').replace(/^\uFEFF/, '');
 const renumber = (text: string, offset = 100) =>
   text.replace(/@([A-Z]+)(\d+)@/g, (_, p: string, n: string) => `@${p}${Number(n) + offset}@`);
 
@@ -16,7 +16,12 @@ beforeEach(async () => {
   await importGedcom({ bytes: SAMPLE }, store, { today: TODAY });
 });
 const defaults = (s: ReimportSession) =>
-  new Set(s.diff.people.flatMap((p) => p.changes).filter((c) => c.defaultAccept).map((c) => c.id));
+  new Set(
+    s.diff.people
+      .flatMap((p) => p.changes)
+      .filter((c) => c.defaultAccept)
+      .map((c) => c.id),
+  );
 const marriages = (family: string) =>
   value<number>(
     store,
@@ -60,5 +65,23 @@ describe('family facts on re-import (#268)', () => {
       closeReimport(s);
     }
     expect(marriages(f4)).toBe(1);
+  });
+
+  it("offers a marriage's corrected date as a change that names the place", async () => {
+    const updated = renumber(SAMPLE.replace('2 DATE 14 OCT 1895', '2 DATE 15 OCT 1895'));
+    const s = await prepareReimport(store, { bytes: updated }, { today: TODAY });
+    try {
+      const changes = s.diff.people.flatMap((p) => p.changes);
+      expect(changes.filter((c) => c.kind === 'fact.add')).toEqual([]);
+      expect(changes.filter((c) => c.kind === 'fact.change')).toMatchObject([
+        {
+          before: { type: 'MARR', date: '14 OCT 1895', place: 'Elderford, Cask County, Ohio, USA' },
+          after: { type: 'MARR', date: '15 OCT 1895', place: 'Elderford, Cask County, Ohio, USA' },
+          defaultAccept: true,
+        },
+      ]);
+    } finally {
+      closeReimport(s);
+    }
   });
 });

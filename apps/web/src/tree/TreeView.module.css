@@ -124,17 +124,21 @@
 
 /*
  * Touch: a larger invisible target around the small chevrons and switcher,
- * 48px on screen at any zoom, so 44px with room for rounding (--oa-tree-scale
- * is set on touch screens). It grows away from the card, never more than 8px
- * on screen into it, so a tap on a zoomed-out card opens the card rather than
- * its chevron.
+ * 48px wide on screen at any zoom (44px with room for rounding;
+ * --oa-tree-scale is set on touch screens). Zoomed out, the rows come close:
+ * a target reaches at most 46px of tree out from its chevron, short of the
+ * next row's card (a 64px gap), so it is wider than it is tall there. Into
+ * its own card it reaches 8px on screen up to 100% zoom (8px of tree beyond),
+ * and never more than 14px of tree, so a tap on a zoomed-out card's top
+ * quarter opens the card. At the lowest zoom a side reaches about 2px on
+ * screen into a spouse card, only in that top band.
  */
 @media (pointer: coarse) {
   .chevron,
   .switcher {
-    --out: max(18px, 48px / var(--oa-tree-scale, 1) - 32px);
+    --out: max(18px, min(48px / var(--oa-tree-scale, 1) - 32px, 46px));
     --side: max(18px, 24px / var(--oa-tree-scale, 1) - 12px);
-    --in: calc(-8px / min(1, var(--oa-tree-scale, 1)));
+    --in: calc(-1 * min(14px, 8px / min(1, var(--oa-tree-scale, 1))));
   }
 
   .chevron::before,
@@ -154,12 +158,19 @@
   }
 
   /*
-   * Off the card's corner, so its target does not overlap the up chevron's.
-   * Both targets grow as the view zooms out, so the offset grows with them:
-   * the switcher's target starts where the chevron's 44px reach ends.
+   * The pill stays on the card's corner. Its target grows with the zoom like
+   * the up chevron's, so it moves right by as much as they would overlap: it
+   * starts where the chevron's 48px ends.
    */
   .switcher {
-    translate: max(22px, 48px / var(--oa-tree-scale, 1) - 40px) 0;
+    --shift: max(0px, 48px / var(--oa-tree-scale, 1) - 62px);
+
+    translate: 22px 0;
+  }
+
+  .switcher::before {
+    inset: calc(-1 * var(--out)) calc(-1 * var(--side) - var(--shift)) var(--in)
+      calc(var(--shift) - var(--side));
   }
 }
 

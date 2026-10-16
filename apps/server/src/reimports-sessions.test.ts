@@ -14,6 +14,7 @@ describe('ReimportSessions', () => {
     sessions.add('Tree', 'c.ged', session());
     expect(sessions.get(first.id)).toBeDefined();
     expect(sessions.get(second.id)).toBeUndefined();
+    sessions.closeAll();
   });
 
   describe('expiry without further calls (L4, #267)', () => {

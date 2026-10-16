@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
+import type { ChildRelation } from '@open-ancestry/core';
 import { formatLifespan } from '../../lib/lifespan';
 import type { PersonSummary } from '../../lib/person';
 import { LifespanText } from '../LifespanText/LifespanText';
@@ -18,6 +19,8 @@ export interface RelationshipChartCell {
   role: RelationshipChartRole;
   /** How this person relates to the previous one: their parent, child or spouse. */
   step?: 'parent' | 'child' | 'spouse';
+  /** For parent and child steps, the child's relation to the parent (step, adopted...). */
+  rel?: ChildRelation;
 }
 
 export interface RelationshipChartPath {
@@ -30,6 +33,8 @@ export interface RelationshipChartPath {
 export interface RelationshipChartProps {
   /** Several with pedigree collapse; a picker switches between them. Never empty. */
   paths: RelationshipChartPath[];
+  /** Caption of the last card (role `home`); null shows its lifespan like other cards. */
+  endCaption?: string | null;
 }
 
 const W = 148;
@@ -51,22 +56,35 @@ const STEP_WORDS = {
   spouse: ['husband', 'wife', 'spouse'],
 } as const;
 
+/** A parent or child link that is not by birth: drawn dashed and named ("stepfather"). */
+const marked = (rel: ChildRelation | undefined) =>
+  rel === 'step' || rel === 'adopted' || rel === 'foster';
+
+/** "stepfather", "adopted son", "foster daughter" for a non-birth link. */
+function kinWord(word: string, step: 'parent' | 'child', rel: ChildRelation | undefined): string {
+  if (rel === 'step') return `step${word}`;
+  if (rel === 'adopted') return `${step === 'parent' ? 'adoptive' : 'adopted'} ${word}`;
+  if (rel === 'foster') return `foster ${word}`;
+  return word;
+}
+
 /** "father of Felix Ashdown": what a card is to the card before it, for screen readers. */
-function stepText(
+export function stepText(
   cell: RelationshipChartCell,
   previous: RelationshipChartCell | undefined,
 ): string {
   if (!cell.step || !previous) return 'This person';
   const [male, female, other] = STEP_WORDS[cell.step];
   const sex = cell.person?.sex;
-  const word = sex === 'M' ? male : sex === 'F' ? female : other;
+  let word: string = sex === 'M' ? male : sex === 'F' ? female : other;
+  if (cell.step !== 'spouse') word = kinWord(word, cell.step, cell.rel);
   return `${word} of ${previous.person?.name ?? 'unknown parents'}`;
 }
 
 /** Name, then lifespan or role, as one spoken phrase: "Horace Ashdown, 1848 to 1910". */
-function linkLabel(cell: RelationshipChartCell): string {
+function linkLabel(cell: RelationshipChartCell, roleCaption: string | undefined): string {
   const person = cell.person!;
-  const detail = caption[cell.role] ?? formatLifespan(person).replace('–', ' to ');
+  const detail = roleCaption ?? formatLifespan(person).replace('–', ' to ');
   return detail ? `${person.name}, ${detail}` : person.name;
 }
 
@@ -93,7 +111,7 @@ function connector(a: RelationshipChartCell, b: RelationshipChartCell): string {
  * the list in path order, each card's name and lifespan, and what each person
  * is to the one before ("father of Felix Ashdown").
  */
-export function RelationshipChart({ paths }: RelationshipChartProps) {
+export function RelationshipChart({ paths, endCaption = 'Home person' }: RelationshipChartProps) {
   const [index, setIndex] = useState(0);
   const path = paths[Math.min(index, paths.length - 1)]!;
   return (
@@ -106,19 +124,29 @@ export function RelationshipChart({ paths }: RelationshipChartProps) {
           options={paths.map((p, i) => ({ value: String(i), label: p.label }))}
         />
       )}
-      <Chart cells={path.cells} label={path.label} />
+      <Chart cells={path.cells} label={path.label} endCaption={endCaption} />
     </div>
   );
 }
 
-function Chart({ cells, label }: RelationshipChartPath) {
+function Chart({
+  cells,
+  label,
+  endCaption,
+}: RelationshipChartPath & { endCaption: string | null }) {
+  const captionOf = (role: RelationshipChartRole) =>
+    role === 'home' ? (endCaption ?? undefined) : caption[role];
   const width = Math.max(...cells.map((c) => left(c) + W));
   const height = Math.max(...cells.map((c) => top(c) + H));
   return (
     <div className={styles.chart} style={{ width, height }}>
       <svg className={styles.lines} width={width} height={height} aria-hidden>
         {cells.slice(1).map((cell, i) => (
-          <polyline key={i} points={connector(cells[i]!, cell)} />
+          <polyline
+            key={i}
+            points={connector(cells[i]!, cell)}
+            data-marked={marked(cell.rel) || undefined}
+          />
         ))}
       </svg>
       <ol className={styles.list} aria-label={`Relationship path: ${label}`}>
@@ -134,17 +162,17 @@ function Chart({ cells, label }: RelationshipChartPath) {
                 to="/person/$personId"
                 params={{ personId: cell.person.id }}
                 className={styles.card}
-                aria-label={linkLabel(cell)}
+                aria-label={linkLabel(cell, captionOf(cell.role))}
               >
                 <PersonName className={styles.name} name={cell.person.name} />
                 <span className={styles.meta}>
-                  {caption[cell.role] ?? <LifespanText {...cell.person} />}
+                  {captionOf(cell.role) ?? <LifespanText {...cell.person} />}
                 </span>
               </Link>
             ) : (
               <span className={styles.card}>
                 <span className={styles.name}>Unknown parents</span>
-                <span className={styles.meta}>{caption[cell.role]}</span>
+                <span className={styles.meta}>{captionOf(cell.role)}</span>
               </span>
             )}
             <span className="oa-visually-hidden">{`, ${stepText(cell, cells[i - 1])}`}</span>

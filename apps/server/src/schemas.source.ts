@@ -27,12 +27,22 @@ export const TreeIdParams = Type.Object({ tree: TreeParams.properties.tree, id: 
 export const JobParams = Type.Object({ id: Type.String({ format: 'uuid' }) });
 /** The change ids from a re-import review the user accepted. */
 export const ReimportApplyBody = Type.Object(
-  { accept: Type.Array(Type.String({ maxLength: 32 }), { maxItems: 1_000_000 }) },
+  {
+    accept: Type.Array(Type.String({ maxLength: 32 }), { maxItems: 1_000_000 }),
+    /** The comparison the ids come from (see the review's `comparison`). */
+    comparison: Type.Integer({ minimum: 1 }),
+  },
+  strict,
+);
+/** The comparison the client holds; status reports stale when it isn't the latest. */
+export const ReimportStatusQuery = Type.Object(
+  { comparison: Type.Optional(Type.Integer({ minimum: 1 })) },
   strict,
 );
 
 export const TreeBody = Type.Object(
-  { name: Type.String({ minLength: 1, maxLength: 100 }) },
+  // No minLength: a blank name gets treeNameProblem's plain message, not a schema error.
+  { name: Type.String({ maxLength: 100 }) },
   strict,
 );
 
@@ -61,6 +71,12 @@ export const ExportQuery = Type.Object(
   strict,
 );
 
+/** `history=0` (or `false`) leaves the edit history, and the deleted text it keeps, out. */
+export const JsonExportQuery = Type.Object(
+  { history: Type.Optional(Type.Enum(['0', '1', 'false', 'true'])) },
+  strict,
+);
+
 export const GedzipQuery = Type.Object({ privatize: Type.Optional(Type.Boolean()) }, strict);
 
 export const NeighborhoodQuery = Type.Object({
@@ -72,6 +88,12 @@ export const NeighborhoodQuery = Type.Object({
   siblingsDepth: Type.Optional(Type.Integer({ minimum: 0, maximum: 10 })),
 });
 
+/** What `from` is to `to`; `to` defaults to the home person. */
+export const RelationshipQuery = Type.Object({
+  from: Id,
+  to: Type.Optional(Id),
+});
+
 export const SearchQuery = Type.Object({
   q: Type.String({ maxLength: 200 }),
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
@@ -80,6 +102,9 @@ export const SearchQuery = Type.Object({
 export const HistoryQuery = Type.Object({
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })),
 });
+
+/** `expect`: undo only if this batch is still the newest applied one (a toast's Undo). */
+export const UndoQuery = Type.Object({ expect: Type.Optional(Id) });
 
 export const HomeBody = Type.Object({ personId: Type.Union([Id, Type.Null()]) }, strict);
 
@@ -223,16 +248,31 @@ export const MediaThumbParams = Type.Object({
 
 // ---------------------------------------------------------------- batch
 
+/**
+ * Columns of the row as the client last saw them, e.g. `{ given: 'Ada', surname: 'Vale' }`
+ * or `{ updated_at }` where the table has one. A row that no longer matches is refused
+ * (409 `stale`), so an edit made from old data cannot mix old and new values.
+ */
+const Seen = Type.Optional(
+  Type.Record(
+    Type.String({ pattern: '^[a-z0-9_]{1,40}$' }),
+    // Untyped: coerceTypes would turn a seen 1 into '1' (or '' into null), so
+    // operations.ts checks that each value is a string, number or null.
+    Type.Unknown(),
+    { maxProperties: 30 },
+  ),
+);
+
 const op = <K extends string, P extends TProperties>(name: K, props: P) =>
   Type.Object({ op: Type.Literal(name), ...props }, strict);
 
 /** Edits that can be grouped into one change batch (one undo step). */
 export const BatchOperation = Type.Union([
-  op('person.update', { id: Id, patch: PersonPatch }),
+  op('person.update', { id: Id, patch: PersonPatch, expect: Seen }),
   op('name.add', { personId: Id, name: NameBody }),
-  op('name.update', { id: Id, name: NameBody }),
-  op('name.delete', { id: Id }),
-  op('familyChild.update', { id: Id, patch: FamilyChildPatch }),
+  op('name.update', { id: Id, name: NameBody, expect: Seen }),
+  op('name.delete', { id: Id, expect: Seen }),
+  op('familyChild.update', { id: Id, patch: FamilyChildPatch, expect: Seen }),
   op('tag.create', { tag: TagBody, attachTo: Type.Optional(Id) }),
   op('person.tag', { personId: Id, tagId: Id }),
   op('person.untag', { personId: Id, tagId: Id }),

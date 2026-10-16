@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
 import { ChevronDown, Plus } from 'lucide-react';
 import { cx } from '../../lib/cx';
@@ -18,6 +18,10 @@ export interface RelationshipGroup {
   /** Renders the title as a disclosure button that hides the rows. */
   collapsible?: boolean;
   defaultCollapsed?: boolean;
+  /** Short qualifier under the title, e.g. the relationship type. */
+  subtitle?: string | undefined;
+  /** Controls at the end of the header, e.g. a menu of edits for the group. */
+  actions?: ReactNode;
   /** Shows an add button labelled `addLabel`. */
   onAdd?: () => void;
   addLabel?: string;
@@ -77,6 +81,7 @@ function Group({ group, headingLevel }: { group: RelationshipGroup; headingLevel
             group.title
           )}
         </Heading>
+        {group.actions}
         {group.onAdd && (
           <Button
             size="sm"
@@ -88,6 +93,7 @@ function Group({ group, headingLevel }: { group: RelationshipGroup; headingLevel
           </Button>
         )}
       </div>
+      {group.subtitle && <p className={styles.subtitle}>{group.subtitle}</p>}
       <div id={`${id}-list`} hidden={!open}>
         <ul className={styles.list}>
           {group.people.map((person) => (

@@ -27,6 +27,8 @@ export function toPersonSummary(p: ApiPersonSummary, tree: string): PersonSummar
   return {
     id: p.id,
     name: displayName(p),
+    given: p.given ?? undefined,
+    surname: [p.surnamePrefix, p.surname].filter(Boolean).join(' ') || undefined,
     sex: p.sex === 'M' || p.sex === 'F' ? p.sex : 'U',
     birth: lifeDate(p.birth),
     death: lifeDate(p.death),

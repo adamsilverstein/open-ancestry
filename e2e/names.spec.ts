@@ -120,11 +120,10 @@ test('saving a name with a text-direction override is refused', async ({
   const dialog = page.getByRole('dialog', { name: 'Edit person' });
   await dialog.getByRole('textbox', { name: 'Given names' }).first().fill('Evil‮');
   await dialog.getByRole('button', { name: 'Save' }).click();
-  await expect(
-    page
-      .getByRole('region', { name: /Notifications/ })
-      .getByRole('listitem')
-      .filter({ hasText: 'text direction' }),
-  ).toBeVisible();
-  await expect(h1(page)).toHaveText('Rowan Ashdown');
+  // The dialog stays open with the server's reason, and nothing is saved.
+  await expect(dialog.getByRole('alert')).toContainText('text direction');
+  // Behind the open dialog the page is hidden from the accessibility tree.
+  await expect(page.getByRole('heading', { level: 1, includeHidden: true })).toHaveText(
+    'Rowan Ashdown',
+  );
 });

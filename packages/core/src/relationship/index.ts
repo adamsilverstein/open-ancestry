@@ -1,5 +1,7 @@
 export { relationship, relationshipCalculator } from './calculate';
 export type { CalculatorOptions } from './calculate';
+export { cardTerm } from './card';
+export type { CardStep } from './card';
 export { chartPath } from './chart';
 export type { ChartCell } from './chart';
 export { isVirtualParent, kinshipGraph, VIRTUAL_PARENT } from './graph';

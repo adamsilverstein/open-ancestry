@@ -1,10 +1,12 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import buttonStyles from '../../components/Button/Button.module.css';
 import { cx } from '../../lib/cx';
 import { setCurrentTree, treesQuery, type ImportProgress } from '../../library/api';
 import { finished, useImportJob } from '../../library/useImportJob';
+import { useToast } from '../../components/Toast/Toast';
+import { CancelImportButton } from './CancelImportButton';
 import { ImportReport } from './ImportReport';
 import styles from './Import.module.css';
 
@@ -17,19 +19,32 @@ const PHASES: Record<ImportProgress['phase'], string> = {
   done: 'Finishing',
 };
 
+/** Moves focus to an element when it appears (the Cancel button it replaced is gone). */
+const focusOnMount = (element: HTMLElement | null) => element?.focus();
+
 export function ImportPage() {
   const { jobId } = useParams({ from: '/import/$jobId' });
   const { job, missing } = useImportJob(jobId);
   const queryClient = useQueryClient();
+  const toast = useToast();
   const settled = useRef(false);
+  const [cancelAccepted, setCancelAccepted] = useState(false);
 
   useEffect(() => {
     if (!job || !finished(job) || settled.current) return;
     settled.current = true;
+    if (job.cancelled) {
+      toast({
+        title: 'Import cancelled',
+        description: job.createdTree
+          ? `The partial tree for ${job.fileName} was removed.`
+          : `Nothing was imported from ${job.fileName}.`,
+      });
+    }
     // Display only: a failed import's tree is the server's to clean up.
     if (job.state === 'completed') void setCurrentTree(queryClient, job.tree);
     else void queryClient.invalidateQueries({ queryKey: treesQuery.queryKey });
-  }, [job, queryClient]);
+  }, [job, queryClient, toast]);
 
   if (missing) {
     return (
@@ -47,13 +62,39 @@ export function ImportPage() {
   }
 
   if (job?.state === 'completed' && job.result) {
-    return <ImportReport job={job} report={job.result} />;
+    // A cancel the server took as the import reached saving: it finished anyway.
+    return (
+      <ImportReport
+        job={job}
+        report={job.result}
+        note={cancelAccepted ? 'Too late to cancel; the import finished.' : undefined}
+      />
+    );
+  }
+
+  if (job?.state === 'failed' && job.cancelled) {
+    return (
+      <div className={styles.page}>
+        <h1 className={styles.title} ref={focusOnMount} tabIndex={-1}>
+          Import cancelled
+        </h1>
+        <p className={styles.note}>
+          Nothing was imported from {job.fileName}.
+          {job.createdTree && ' The tree made for it was removed, and the uploaded file deleted.'}
+        </p>
+        <Link to="/" className={cx(buttonStyles.button, buttonStyles.secondary, buttonStyles.md)}>
+          Import a file
+        </Link>
+      </div>
+    );
   }
 
   if (job?.state === 'failed') {
     return (
       <div className={styles.page}>
-        <h1 className={styles.title}>Import failed</h1>
+        <h1 className={styles.title} ref={focusOnMount} tabIndex={-1}>
+          Import failed
+        </h1>
         <p role="alert" className={styles.error}>
           {job.error ?? 'The import stopped with an unknown error.'}
         </p>
@@ -86,6 +127,11 @@ export function ImportPage() {
             ? `${PHASES[progress.phase]}${progress.phase === 'map' ? ` (${progress.done.toLocaleString()} of ${progress.total.toLocaleString()} records)` : ''}`
             : 'Uploading'}
       </p>
+      {job && !finished(job) && (
+        <div className={styles.actions}>
+          <CancelImportButton job={job} onCancelAccepted={() => setCancelAccepted(true)} />
+        </div>
+      )}
     </div>
   );
 }

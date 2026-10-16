@@ -28,9 +28,9 @@ PR numbers point to the change on GitHub.
 - **Expand and collapse** ancestors, descendants and siblings card by card. Half siblings hang from their shared parent, and cousins keep their parents together. (#31, #53, #73)
 - **Pan, zoom, minimap and keyboard navigation**: arrow keys move between related cards. The URL names the focus person, so any view can be bookmarked, and a hand-edited URL falls back to the default view instead of breaking it. (#39, #77, #214)
 - **Pedigree collapse** (the same person reached twice) is drawn as a linked duplicate card. (#39)
-- **Quick view polish**: Edit opens the editor directly, a living person shows "Living" once, and people without a photo get a silhouette tinted by sex. (#178)
+- **Quick view polish**: Edit opens the editor directly, a living person shows "Living" once, and people without a photo get a silhouette tinted by sex. At phone width it opens above or below the card and stays on screen, with larger touch targets. (#155, #178)
 - **Copied trees are told apart**: a tree folder copied by hand shows its folder name next to the tree name in the switcher, start page and export dialog. (#235)
-- **Kinship labels** on tree cards name step, adoptive and foster links, not just birth relationships. (#157)
+- **Kinship labels** on tree cards name step, adoptive and foster links, not just birth relationships, and use the same words as the relationship calculator ("sister-in-law", "stepmother", "wife of uncle"). (#157, #238)
 
 ### Person page
 
@@ -54,6 +54,7 @@ PR numbers point to the change on GitHub.
 
 ### Editing
 
+- **Add a person without a relative**, including the first person in a new tree, who becomes its home person. Add person is on the people list, the empty-tree page and the command palette. (#153)
 - **Add, edit and delete** people, names, events (with a live preview of how the date is read), notes, tags and relationships. (#48)
 - **Relationship fixes**: set or change a partnership's type, and remove a wrong parent, partner or child link. People are never deleted by these. (#165)
 - **Merge duplicate people** in one step. Each merge is recorded, so a later re-import still recognizes the person who was merged away. (#70, #219)
@@ -69,7 +70,7 @@ PR numbers point to the change on GitHub.
 
 - **Your data stays on your computer.** Each tree is a folder (a SQLite database plus media) in your library. The app makes no third-party network requests. (#23, #29)
 - **Export GEDCOM 5.5.1** (Ancestry compatible, keeping Ancestry's custom tags), **GEDCOM 7**, **GEDZIP** with media, and **JSON** for backup and tools. Original records are re-read by their own GEDCOM version, so nothing is lost when a GEDCOM 7 import is exported as 5.5.1, and a line that should point at a record but holds text is reported, not silently dropped. GEDCOM 7 exports give each media file's format as a MIME type. (#23, #46, #221, #223)
-- **GEDZIP exports stream** one media file at a time, so a large media library exports without loading it all, and an archive too big for the ZIP format is refused before anything is sent. (#227)
+- **GEDZIP exports stream** one media file at a time, so a large media library exports without loading it all, and an archive too big for the ZIP format is refused before anything is sent. The export applies the same media checks as the app, so a file from outside the tree can't end up in the archive. (#227, #248)
 - **JSON exports can leave out edit history**, and do by default from the export dialog, since that history holds anything you deleted. (#220)
 - **Privatize living people**, on by default when exporting. Private and confidential records are hidden, and record ids are renumbered so nothing about a hidden person leaks. (#46, #104)
 - **Living status** is worked out from dates and can be set by hand. (#21, #48)

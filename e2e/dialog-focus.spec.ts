@@ -117,6 +117,26 @@ test.describe('focus returns to the opener', () => {
       .toBe(true);
   });
 
+  test('the palette opened over the Delete person confirm gives focus back to the confirm', async ({
+    page,
+  }) => {
+    await openSeeded(page, seeded);
+    await openWithKeyboard(page.getByRole('button', { name: 'Edit person', exact: true }));
+    const edit = page.getByRole('dialog', { name: 'Edit person' });
+    await edit.getByRole('button', { name: 'Delete person' }).click();
+    const confirm = page.getByRole('alertdialog', { name: /Delete Rowan Ashdown/ });
+    await expect(confirm).toBeVisible();
+    const focused = () =>
+      page.evaluate(() => document.activeElement?.closest('[role="alertdialog"]') !== null);
+    await expect.poll(focused).toBe(true);
+    await page.keyboard.press(`${process.platform === 'darwin' ? 'Meta' : 'Control'}+k`);
+    const palette = page.getByRole('dialog', { name: 'Command palette' });
+    await expect(palette).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(palette).toBeHidden();
+    await expect.poll(focused).toBe(true);
+  });
+
   test('Edit person opened with a mouse click returns focus to it', async ({ page }) => {
     // WebKit does not focus a clicked button and focuses the <main> landmark
     // (tabindex=-1) instead; that must not become the place focus returns to.

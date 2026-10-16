@@ -46,6 +46,7 @@ export function TreePage() {
     previousCurrent.current = current.data;
     if (!search.tree || before !== search.tree) return;
     if (!current.data || current.data === search.tree) return;
+    // A fresh search on purpose, `tag` included: tag ids belong to one tree, so a highlight cannot follow.
     void navigate({ to: '/tree/$personId', params: { personId: 'home' }, search: {} });
   }, [current.data, search.tree, navigate]);
 

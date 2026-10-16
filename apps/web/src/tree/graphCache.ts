@@ -144,7 +144,14 @@ export class GraphCache {
 
   /** The database has siblings for this person that no slice has loaded yet. */
   needsSiblings(id: string): boolean {
-    return this.moreSiblings.has(id) && !this.siblingsLoaded.has(id);
+    if (!this.moreSiblings.has(id) || this.siblingsLoaded.has(id)) return false;
+    // A slice that held every child of every parent of theirs held them too.
+    const parents = (this.parentFamilies.get(id) ?? []).flatMap((link) => {
+      const family = this.families.get(link.familyId);
+      return family ? [family.partner1Id, family.partner2Id] : [];
+    });
+    const known = parents.filter((p): p is string => p !== null);
+    return known.length === 0 || !known.every((p) => this.childrenLoaded.has(p));
   }
 
   /** Partners of the person's preferred (else first) parent family. */

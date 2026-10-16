@@ -11,24 +11,25 @@ let bytes = new Uint8Array();
  */
 let ansi = new Uint8Array();
 
+function setupAnsi() {
+  const text = generateGedcom({ people: 4600, seed: 1 });
+  const ascii = text.replace(/^1 CHAR .*$/m, '1 CHAR ANSI').replace(/[\u0080-\u{10ffff}]/gu, '?');
+  const middle = ascii.indexOf('\n0 @', ascii.length >> 1) + 1;
+  ansi = new TextEncoder().encode(
+    `${ascii.slice(0, middle)}0 @X1@ INDI\n1 NAME José /Müller/\n${ascii.slice(middle)}`,
+  );
+  const first = ansi.findIndex((b) => b >= 0x80);
+  if (first < 65536) throw new Error(`first non-ASCII byte at ${first}, not past 64 KiB`);
+  const { encoding } = parseGedcom(ansi);
+  if (encoding.encoding !== 'utf-8') throw new Error(`ANSI case decoded as ${encoding.encoding}`);
+}
+
 export default [
   {
     name: 'gedcom: decode + tokenize + parse 100k lines',
     setup: () => {
       const text = generateGedcom({ people: 4600, seed: 1 });
       bytes = new TextEncoder().encode(text);
-      const ascii = text
-        .replace(/^1 CHAR .*$/m, '1 CHAR ANSI')
-        .replace(/[\u0080-\u{10ffff}]/gu, '?');
-      const middle = ascii.indexOf('\n0 @', ascii.length >> 1) + 1;
-      ansi = new TextEncoder().encode(
-        `${ascii.slice(0, middle)}0 @X1@ INDI\n1 NAME José /Müller/\n${ascii.slice(middle)}`,
-      );
-      const first = ansi.findIndex((b) => b >= 0x80);
-      if (first < 65536) throw new Error(`first non-ASCII byte at ${first}, not past 64 KiB`);
-      const { encoding } = parseGedcom(ansi);
-      if (encoding.encoding !== 'utf-8')
-        throw new Error(`ANSI case decoded as ${encoding.encoding}`);
       const { lineCount } = parseGedcom(bytes);
       if (lineCount < 100_000) throw new Error(`bench input has only ${lineCount} lines`);
     },
@@ -48,6 +49,7 @@ export default [
   },
   {
     name: 'gedcom: stream-parse 100k lines labelled ANSI, choosing at the first non-ASCII byte',
+    setup: setupAnsi,
     fn: () =>
       parseGedcomStream(
         (async function* () {

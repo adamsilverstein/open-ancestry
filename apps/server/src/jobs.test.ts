@@ -151,4 +151,37 @@ describe('JobManager', () => {
     release();
     await vi.waitFor(() => expect(jobs.get(job.id)?.state).toBe('completed'));
   });
+
+  it("lets a re-import's compare be cancelled in any phase: it never writes the tree", async () => {
+    const jobs = new JobManager();
+    const job = jobs.enqueue({ ...meta, kind: 'reimport' }, (signal, progress) => {
+      // Reading the export into its scratch copy reports the importer's phases.
+      progress({ phase: 'commit', done: 0, total: 1 });
+      return new Promise((_, reject) =>
+        signal.addEventListener('abort', () => reject(new Error('stop'))),
+      );
+    });
+    await vi.waitFor(() => expect(jobs.get(job.id)?.progress).toMatchObject({ phase: 'commit' }));
+    expect(jobs.cancel(job.id)).toBe(true);
+    await vi.waitFor(() =>
+      expect(jobs.get(job.id)).toMatchObject({ state: 'failed', cancelled: true }),
+    );
+  });
+
+  it('refuses a cancel once the work has finished, while it cleans up, and shows the result', async () => {
+    const jobs = new JobManager();
+    let cleaned!: () => void;
+    const job = jobs.enqueue(
+      { ...meta, kind: 'reimport' },
+      async () => ({ reimportId: 'r1' }),
+      () => new Promise<void>((r) => (cleaned = r)),
+    );
+    // The work returned; the job is still running while its upload is removed.
+    await vi.waitFor(() => expect(cleaned).toBeTypeOf('function'));
+    expect(jobs.get(job.id)).toMatchObject({ state: 'running', result: { reimportId: 'r1' } });
+    // A cancel now could not stop anything, so it's refused: the caller discards the result.
+    expect(jobs.cancel(job.id)).toBe(false);
+    cleaned();
+    await vi.waitFor(() => expect(jobs.get(job.id)?.state).toBe('completed'));
+  });
 });

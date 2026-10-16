@@ -36,4 +36,14 @@ export default [
     fn: () => suggestPlaces(store!, 'harlow county'),
     budgetMs: 50,
   },
+  {
+    // Worst case: nothing matches, so the contains pass reads every place (about
+    // 30 ms). The form waits 150 ms after the last key before asking, so this runs
+    // once per pause in typing, not once per key.
+    name: 'db: place suggestions, no match (100k places)',
+    setup: loaded,
+    fn: () => suggestPlaces(store!, 'quarrytown'),
+    budgetMs: 50,
+    metric: 'mean',
+  },
 ] satisfies BenchCase[];

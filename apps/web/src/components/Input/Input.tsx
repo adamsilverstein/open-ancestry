@@ -9,7 +9,7 @@ export interface InputProps extends Omit<ComponentProps<'input'>, 'id'> {
   error?: string | undefined;
   /**
    * Values to suggest while typing (a native datalist, so any text is still
-   * allowed); the field is announced as a combobox when given.
+   * allowed); the field reads as a combobox only while there are some.
    */
   suggestions?: readonly string[] | undefined;
 }
@@ -23,10 +23,10 @@ export function Input({ label, hint, error, className, suggestions, ...rest }: I
           <input
             className={cx(fieldStyles.control, className)}
             {...control}
-            {...(suggestions ? { list: listId } : {})}
+            {...(suggestions?.length ? { list: listId } : {})}
             {...rest}
           />
-          {suggestions && (
+          {suggestions && suggestions.length > 0 && (
             <datalist id={listId}>
               {suggestions.map((value) => (
                 <option key={value} value={value} />

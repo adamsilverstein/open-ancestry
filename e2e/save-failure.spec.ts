@@ -82,10 +82,10 @@ test('Add event and Edit event keep their fields and retry', async ({ page }) =>
   await add.getByRole('combobox', { name: 'Event type' }).click();
   await page.getByRole('option', { name: 'Residence' }).click();
   await add.getByRole('textbox', { name: 'Date' }).fill('1905');
-  await add.getByRole('combobox', { name: 'Place' }).fill('Wexmoor, Westmere');
+  await add.getByLabel('Place', { exact: true }).fill('Wexmoor, Westmere');
   await add.getByRole('button', { name: 'Save' }).click();
   await expect(add.getByRole('alert')).toContainText('Simulated failure');
-  await expect(add.getByRole('combobox', { name: 'Place' })).toHaveValue('Wexmoor, Westmere');
+  await expect(add.getByLabel('Place', { exact: true })).toHaveValue('Wexmoor, Westmere');
   await restore();
   await add.getByRole('button', { name: 'Try again' }).click();
   await expect(add).toBeHidden();
@@ -94,10 +94,10 @@ test('Add event and Edit event keep their fields and retry', async ({ page }) =>
   restore = await failWrites(page, /\/events\/[^/]+$/, 'PATCH');
   await timeline(page).getByRole('button', { name: 'Edit Death' }).click();
   const edit = page.getByRole('dialog', { name: 'Edit event' });
-  await edit.getByRole('combobox', { name: 'Place' }).fill('Ravensholt, Northvale');
+  await edit.getByLabel('Place', { exact: true }).fill('Ravensholt, Northvale');
   await edit.getByRole('button', { name: 'Save' }).click();
   await expect(edit.getByRole('alert')).toContainText('Simulated failure');
-  await expect(edit.getByRole('combobox', { name: 'Place' })).toHaveValue('Ravensholt, Northvale');
+  await expect(edit.getByLabel('Place', { exact: true })).toHaveValue('Ravensholt, Northvale');
   await restore();
   await edit.getByRole('button', { name: 'Try again' }).click();
   await expect(edit).toBeHidden();

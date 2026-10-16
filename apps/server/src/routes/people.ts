@@ -10,6 +10,7 @@ import {
   listPeople,
   meta,
   searchPeople,
+  suggestPlaces,
   type LivingStatus,
 } from '@open-ancestry/db';
 import type { Api, Deps } from '../context';
@@ -142,19 +143,7 @@ export function peopleRoutes(app: Api, { library }: Deps): void {
     { schema: { params: TreeParams, querystring: PlacesQuery } },
     async (request) => {
       const { q, limit = 10 } = request.query;
-      const text = q.trim();
-      if (!text) return { items: [] };
-      const like = text.replace(/[\\%_]/g, (c) => `\\${c}`);
-      const items = library
-        .open(request.params.tree)
-        .stmt(
-          `SELECT id, full_name FROM place
-           WHERE full_name LIKE '%' || @like || '%' ESCAPE '\\'
-           ORDER BY full_name LIKE @like || '%' ESCAPE '\\' DESC, length(full_name), full_name
-           LIMIT @limit`,
-        )
-        .all({ like, limit });
-      return { items };
+      return { items: suggestPlaces(library.open(request.params.tree), q, limit) };
     },
   );
 }

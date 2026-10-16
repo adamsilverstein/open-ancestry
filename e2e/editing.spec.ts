@@ -251,7 +251,7 @@ test.describe('events', () => {
     await date.fill('bet 1900 and 1905');
     await expect(dialog.getByTestId('date-preview')).toHaveText('bet. 1900 and 1905 · between');
 
-    await dialog.getByRole('combobox', { name: 'Place' }).fill('Wexmoor, Westmere');
+    await dialog.getByLabel('Place', { exact: true }).fill('Wexmoor, Westmere');
     await dialog.getByRole('button', { name: 'Save' }).click();
     await expect(dialog).toBeHidden();
     const row = timeline(page).getByRole('listitem').filter({ hasText: 'Residence' });
@@ -285,7 +285,7 @@ test.describe('events', () => {
     const dialog = page.getByRole('dialog', { name: 'Add event' });
     await dialog.getByRole('combobox', { name: 'Event type' }).click();
     await page.getByRole('option', { name: 'Residence' }).click();
-    const place = dialog.getByRole('combobox', { name: 'Place' });
+    const place = dialog.getByLabel('Place', { exact: true });
     await place.fill('Bracken');
     const suggestion = dialog.locator('datalist option[value="Brackenford, Westmere"]');
     await expect(suggestion).toHaveCount(1);

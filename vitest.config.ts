@@ -4,7 +4,7 @@ import { defineConfig } from 'vitest/config';
 // own; add a vitest.config.ts inside a workspace only when it needs one (web).
 export default defineConfig({
   test: {
-    projects: ['packages/*', 'apps/*', 'fixtures'],
+    projects: ['packages/*', 'apps/*', 'fixtures', 'scripts'],
     coverage: {
       provider: 'istanbul',
       reportsDirectory: 'coverage/unit',

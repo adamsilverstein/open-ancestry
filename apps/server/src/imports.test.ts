@@ -56,8 +56,11 @@ function sse(body: string): [string, unknown][] {
 /** A fake importer that records its arguments and finishes when released. */
 function controllableImporter() {
   const calls: { path: string; content: string; options: ImporterOptions }[] = [];
-  let release: (value?: unknown) => void = () => {};
-  let fail: (error: Error) => void = () => {};
+  let release: ((value?: unknown) => void) | undefined;
+  let fail: ((error: Error) => void) | undefined;
+  // A release or failure asked for before an importer is waiting (a job is
+  // "running" before its importer has read the upload): kept for the next one.
+  let early: { ok: true; value: unknown } | { ok: false; error: Error } | undefined;
   const importer: Importer = async (path, _store, options) => {
     // Like the real importers, honor an abort that came before the work
     // started listening (a cancel during the read below), or the job never
@@ -74,12 +77,26 @@ function controllableImporter() {
     return Promise.race([
       aborted,
       new Promise((resolve, reject) => {
-        release = resolve;
-        fail = reject;
+        const settle = early;
+        early = undefined;
+        if (settle) return settle.ok ? resolve(settle.value) : reject(settle.error);
+        release = (value) => {
+          release = fail = undefined;
+          resolve(value);
+        };
+        fail = (error) => {
+          release = fail = undefined;
+          reject(error);
+        };
       }),
     ]);
   };
-  return { importer, calls, release: (v?: unknown) => release(v), fail: (e: Error) => fail(e) };
+  return {
+    importer,
+    calls,
+    release: (value?: unknown) => (release ? release(value) : (early = { ok: true, value })),
+    fail: (error: Error) => (fail ? fail(error) : (early = { ok: false, error })),
+  };
 }
 
 async function waitForJob(api: TestApi, id: string, state: string) {

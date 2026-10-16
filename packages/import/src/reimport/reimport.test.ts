@@ -2168,3 +2168,73 @@ describe('why a new person is new, truthfully (#192 review)', () => {
     expect(await reasonsOf(store, text, 'John Ashgrove')).toEqual(['no close match in your tree']);
   });
 });
+
+describe('a place the export renamed (#279)', () => {
+  const OLD = 'Millbrook, Harlow County, Vermont, USA';
+  const NEW = 'Millbrook Falls, Harlow County, Vermont, USA';
+  const renamed = () => renumber(SAMPLE.replaceAll(OLD, NEW));
+
+  it('is offered as one place rename covering every fact there', async () => {
+    const s2 = await prepareReimport(store, { bytes: renamed() }, { today: TODAY });
+    try {
+      const changes = s2.diff.people.flatMap((p) => p.changes);
+      const atPlace = changes.filter(
+        (c) => c.kind === 'fact.change' && c.before.place === OLD && c.after.place === NEW,
+      );
+      expect(atPlace.length).toBeGreaterThanOrEqual(2);
+      expect(s2.diff.placeRenames).toEqual([
+        { key: `${OLD}→${NEW}`, from: OLD, to: NEW, changeIds: atPlace.map((c) => c.id) },
+      ]);
+      // Each member names its rename, so the review can show them as one item.
+      for (const c of atPlace) expect(c).toMatchObject({ placeRename: `${OLD}→${NEW}` });
+      // Accepting them all moves every fact to the new name.
+      applyReimport(store, s2, new Set(atPlace.map((c) => c.id)), 'Re-import');
+    } finally {
+      closeReimport(s2);
+    }
+    expect(
+      value(
+        store,
+        `SELECT count(*) FROM event e JOIN place p ON p.id = e.place_id WHERE p.full_name = ?`,
+        OLD,
+      ),
+    ).toBe(0);
+  });
+
+  it("doesn't count the rename against a match", async () => {
+    const same = await prepareReimport(store, { bytes: renumber(SAMPLE) }, { today: TODAY });
+    const before = new Map(
+      same.diff.people.filter((p) => p.existingId).map((p) => [p.existingId, p.confidence]),
+    );
+    closeReimport(same);
+    const s2 = await prepareReimport(store, { bytes: renamed() }, { today: TODAY });
+    try {
+      for (const p of s2.diff.people.filter((x) => x.existingId)) {
+        expect(p.reasons).not.toContain('different birth place');
+        if (before.has(p.existingId)) expect(p.confidence).toBe(before.get(p.existingId));
+      }
+      // Someone born there is still matched as surely as with the old name.
+      const born = s2.diff.people.find((p) => p.existingId === pid(store, '@I3@'))!;
+      expect(born.reasons).toContain('same birth place');
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  it('leaves a one-off place change as an ordinary change', async () => {
+    let first = true;
+    const text = renumber(
+      SAMPLE.replaceAll(OLD, (m) => {
+        if (!first) return m;
+        first = false;
+        return NEW;
+      }),
+    );
+    const s2 = await prepareReimport(store, { bytes: text }, { today: TODAY });
+    try {
+      expect(s2.diff.placeRenames).toEqual([]);
+    } finally {
+      closeReimport(s2);
+    }
+  });
+});

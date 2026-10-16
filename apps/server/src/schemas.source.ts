@@ -71,7 +71,10 @@ export const ExportQuery = Type.Object(
   strict,
 );
 
-/** `history=0` (or `false`) leaves the edit history, and the deleted text it keeps, out. */
+/**
+ * `history=1` (or `true`) keeps the edit history, and the deleted text it keeps,
+ * making a full backup. Left out by default; `0` and `false` mean the default.
+ */
 export const JsonExportQuery = Type.Object(
   { history: Type.Optional(Type.Enum(['0', '1', 'false', 'true'])) },
   strict,

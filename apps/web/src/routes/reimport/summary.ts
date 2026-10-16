@@ -5,6 +5,8 @@ export interface SummaryPerson {
   name: string;
   /** The person in the tree, to link to; null if they aren't in it (a skipped new person). */
   personId: string | null;
+  /** Added by this re-import: undoing it removes them, so their link goes too. */
+  created: boolean;
   changes: string[];
 }
 
@@ -27,16 +29,18 @@ export function summarizeApply(
 ): ApplySummary {
   const summary: ApplySummary = { applied: [], skipped: [], appliedCount: 0, skippedCount: 0 };
   for (const person of people) {
-    const personId =
-      person.existingId ?? (person.incomingId ? (newPeople[person.incomingId] ?? null) : null);
+    const added =
+      !person.existingId && person.incomingId ? newPeople[person.incomingId] : undefined;
+    const personId = person.existingId ?? added ?? null;
+    const created = added !== undefined;
     const done: string[] = [];
     const left: string[] = [];
     for (const change of person.changes) {
       if (!change.applicable) continue;
       (applied.has(change.id) ? done : left).push(describeChange(change, person.name));
     }
-    if (done.length) summary.applied.push({ name: person.name, personId, changes: done });
-    if (left.length) summary.skipped.push({ name: person.name, personId, changes: left });
+    if (done.length) summary.applied.push({ name: person.name, personId, created, changes: done });
+    if (left.length) summary.skipped.push({ name: person.name, personId, created, changes: left });
     summary.appliedCount += done.length;
     summary.skippedCount += left.length;
   }

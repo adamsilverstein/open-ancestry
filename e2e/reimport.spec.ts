@@ -199,8 +199,13 @@ test('import, edit, re-import, review, apply, then undo', async ({
   // The result page says so too, and stops linking to people the undo removed.
   const undone = page.getByRole('region', { name: 'Re-import undone' });
   await expect(undone).toContainText('This re-import was undone');
+  // Noah was added by the re-import, so undo removed him and his link goes;
+  // Thaddeus was only updated, still exists, and keeps his link.
   await expect(undone.getByRole('link', { name: 'Noah Ashgrove' })).toHaveCount(0);
-  await expect(undone.getByRole('link', { name: 'Thaddeus Ashgrove' })).toHaveCount(0);
+  await expect(undone.getByRole('link', { name: 'Thaddeus Ashgrove' })).toHaveAttribute(
+    'href',
+    new RegExp(`/person/${thaddeus}$`),
+  );
   await expect(undone.getByText('Noah Ashgrove', { exact: true }).first()).toBeVisible();
   // Redo applies it again, and the page follows.
   await page.keyboard.press(`Shift+${mod}+z`);

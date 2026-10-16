@@ -427,13 +427,13 @@ function Review({ review }: { review: ReimportReview }) {
   );
 }
 
-/** `linked` is false once the changes were undone: people the re-import added are gone. */
-function SummaryList({ people, linked = true }: { people: SummaryPerson[]; linked?: boolean }) {
+/** `undone`: the re-import was undone, so the people it added are gone and lose their links. */
+function SummaryList({ people, undone = false }: { people: SummaryPerson[]; undone?: boolean }) {
   return (
     <ul className={styles.summaryList}>
       {people.map((p) => (
         <li key={`${p.personId ?? ''}|${p.name}`}>
-          {p.personId && linked ? (
+          {p.personId && !(undone && p.created) ? (
             <Link to="/person/$personId" params={{ personId: p.personId }} className={styles.name}>
               {p.name}
             </Link>
@@ -482,7 +482,8 @@ function Applied({
           {undone ? (
             <p className={importStyles.subtitle}>
               This re-import was undone, so none of these {plural(summary.appliedCount)} from{' '}
-              {fileName} are in the tree. Redo it with Shift-Cmd/Ctrl-Z or from History.
+              {fileName} are in the tree, and the people it added are gone (shown without links).
+              Redo it with Shift-Cmd/Ctrl-Z or from History.
             </p>
           ) : (
             <p className={importStyles.subtitle}>
@@ -493,7 +494,7 @@ function Applied({
           )}
         </div>
       </header>
-      <SummaryList people={summary.applied} linked={!undone} />
+      <SummaryList people={summary.applied} undone={undone} />
       {summary.skippedCount > 0 && (
         <details className={styles.skipped}>
           <summary>Skipped {plural(summary.skippedCount)}</summary>

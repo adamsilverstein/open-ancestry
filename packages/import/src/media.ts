@@ -295,7 +295,7 @@ export interface StoredMedia {
  * created through a link before the containment check (mkdir -p would).
  * Returns the first folder created, for cleanup, or undefined.
  */
-function makeFoldersInside(root: string, dir: string, relPath: string): string | undefined {
+export function makeFoldersInside(root: string, dir: string, relPath: string): string | undefined {
   let first: string | undefined;
   let current = root;
   for (const part of relative(root, dir).split(sep).filter(Boolean)) {

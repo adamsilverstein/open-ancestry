@@ -15,7 +15,7 @@ import {
   type BigIntStats,
   type Stats,
 } from 'node:fs';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 /** What a GEDCOM `FILE` value points at. */
 export type FileRef =
@@ -289,6 +289,14 @@ export interface StoredMedia {
   folder: string | undefined;
 }
 
+/** A media folder that would lead outside the tree: not under its root, a symlink, or not a folder. */
+export class MediaFolderOutsideError extends Error {
+  constructor(relPath: string) {
+    super(`media folder for ${relPath} leads outside the tree`);
+    this.name = 'MediaFolderOutsideError';
+  }
+}
+
 /**
  * Creates the folders from `root` down to `dir` one level at a time, refusing
  * any that already exists as a symlink or not as a folder, so nothing is
@@ -296,9 +304,14 @@ export interface StoredMedia {
  * Returns the first folder created, for cleanup, or undefined.
  */
 export function makeFoldersInside(root: string, dir: string, relPath: string): string | undefined {
+  const rel = relative(root, dir);
+  // Only folders under root: never climb out of it, whatever `dir` says.
+  if (isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) {
+    throw new MediaFolderOutsideError(relPath);
+  }
   let first: string | undefined;
   let current = root;
-  for (const part of relative(root, dir).split(sep).filter(Boolean)) {
+  for (const part of rel.split(sep).filter(Boolean)) {
     current = join(current, part);
     const stat = lstatOrNull(current);
     if (!stat) {
@@ -309,11 +322,11 @@ export function makeFoldersInside(root: string, dir: string, relPath: string): s
         // Another server made it meanwhile: fine if it is a real folder.
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
         if (!lstatOrNull(current)?.isDirectory()) {
-          throw new Error(`media folder for ${relPath} leads outside the tree`);
+          throw new MediaFolderOutsideError(relPath);
         }
       }
     } else if (!stat.isDirectory()) {
-      throw new Error(`media folder for ${relPath} leads outside the tree`);
+      throw new MediaFolderOutsideError(relPath);
     }
   }
   return first;

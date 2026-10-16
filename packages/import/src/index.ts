@@ -11,7 +11,7 @@ export {
   resolveImportLimits,
 } from './import';
 export { dateColumns, surnameKey } from './mapper';
-export { makeFoldersInside } from './media';
+export { MediaFolderOutsideError, makeFoldersInside } from './media';
 export { BIRTH_SUBSTITUTES, DEATH_EVENTS, OTHER_DEATH_FACTS, morePrivate } from './tags';
 export { ImportError } from './types';
 export type * from './types';

@@ -14,7 +14,7 @@ import {
   type MediaRow,
   type TreeStore,
 } from '@open-ancestry/db';
-import { makeFoldersInside } from '@open-ancestry/import';
+import { MediaFolderOutsideError, makeFoldersInside } from '@open-ancestry/import';
 import type { Api, Deps } from '../context';
 import { ATTACH_PREFIX } from './imports';
 import { edit, requireRow } from '../edits';
@@ -321,7 +321,7 @@ export function galleryRoutes(
             try {
               makeFoldersInside(library.dirOf(tree), join(mediaRoot, ATTACHED_DIR), ATTACHED_DIR);
             } catch (error) {
-              if (!/leads outside the tree/.test((error as Error).message)) throw error;
+              if (!(error instanceof MediaFolderOutsideError)) throw error;
               throw new ApiError(409, 'conflict', 'The media folder leads outside the tree');
             }
             // A symlinked attached/ (or media/) folder must not carry the copy out of the tree.

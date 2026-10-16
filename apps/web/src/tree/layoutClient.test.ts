@@ -106,4 +106,18 @@ describe('LayoutClient', () => {
       100,
     );
   });
+
+  it('still settles a layout when the browser cannot record its time', async () => {
+    const measure = vi.spyOn(performance, 'measure').mockImplementation(() => {
+      throw new TypeError('no timeline');
+    });
+    try {
+      const client = new LayoutClient(() => empty);
+      const done = client.layout(request('a'));
+      FakeWorker.last.answer(done.id);
+      await expect(done).resolves.toMatchObject({ id: done.id });
+    } finally {
+      measure.mockRestore();
+    }
+  });
 });

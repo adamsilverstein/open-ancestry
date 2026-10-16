@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -87,6 +88,16 @@ export function treeNameFromFile(fileName: string): string {
 function assertTreeName(name: string): void {
   const problem = treeNameProblem(name);
   if (problem) throw new ApiError(400, 'bad_request', problem);
+}
+
+/** Whether two paths name the same folder (one may be another spelling of the other). */
+function sameFolder(a: string, b: string): boolean {
+  try {
+    const [x, y] = [statSync(a), statSync(b)];
+    return x.dev === y.dev && x.ino === y.ino;
+  } catch {
+    return false;
+  }
 }
 
 export interface TreeInfo {
@@ -445,10 +456,24 @@ export class Library {
     assertTreeName(name);
     if (!this.exists(id)) throw notFound(`Tree "${id}" not found`);
     if (name === id) return;
-    if (existsSync(this.dirOf(name))) throw conflict(`A tree named "${name}" already exists`);
+    const from = this.dirOf(id);
+    const to = this.dirOf(name);
+    // On a case-insensitive or normalizing file system (macOS, Windows), the
+    // folder found for `name` can be this tree's own: a rename that changes
+    // only case or Unicode form is not a conflict with itself (#275 M8).
+    const own = existsSync(to) && sameFolder(from, to);
+    if (existsSync(to) && !own) throw conflict(`A tree named "${name}" already exists`);
+    if (own && name.normalize('NFC') === this.canonical(id).normalize('NFC')) return;
     this.assertIdle(id);
     this.close(id);
-    renameSync(this.dirOf(id), this.dirOf(name));
+    if (own) {
+      // Through a temporary name, so the file system records the new spelling.
+      const temp = join(this.root, `.renaming-${randomUUID()}${TREE_EXTENSION}`);
+      renameSync(from, temp);
+      renameSync(temp, join(this.root, `${name.normalize('NFC')}${TREE_EXTENSION}`));
+    } else {
+      renameSync(from, to);
+    }
     // Not an undoable edit: the folder rename is not in the change log either.
     this.open(name).db.prepare("UPDATE meta SET value = ? WHERE key = 'tree_name'").run(name);
   }

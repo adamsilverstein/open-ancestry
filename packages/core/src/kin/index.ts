@@ -60,14 +60,15 @@ export type SharedAdult = readonly [mine: ChildRelation, theirs: ChildRelation];
  *
  * - `full`: both are birth children of every shared adult, and `apart` is
  *   false.
- * - `half`: they share some birth parents but not all, or (with `apart`, for
- *   a parent's other partnership) exactly the one parent passed.
+ * - `half`: they share some birth parents but not all (a shared parent who is
+ *   birth parent of only one, or of neither, makes them half), or (with
+ *   `apart`, for a parent's other partnership) exactly the one parent passed.
  * - `adopted`: they share parents only through adoption (a birth child and
  *   an adopted child of one couple): "adopted brother", as the relationship
  *   calculator says too.
  * - `step`: they share no parent; a parent of one is the partner of a parent
- *   of the other (the stepfather's own son).
- * - `foster`: they share no parent and foster or guardian care joins them.
+ *   of the other (the stepfather's own son). A step link wins over care.
+ * - `foster`: they share no parent and only foster or guardian care joins them.
  *
  * For two children of one family pass every recorded partner of it (none:
  * full, as for a GEDCOM `FAM` with only children). For a
@@ -81,6 +82,12 @@ export function siblingKind(shared: readonly SharedAdult[], apart = false): Sibl
   const birth = shared.filter(([mine, theirs]) => isBirthParent(mine) && isBirthParent(theirs));
   if (birth.length > 0) return birth.length === shared.length && !apart ? 'full' : 'half';
   if (common > 0) return 'adopted';
+  // No shared parent: a step link makes them stepsiblings even where care
+  // (foster, guardian) joins them too, as the calculator's marriage path says.
+  const step = shared.some(
+    ([mine, theirs]) => parentLink(mine) === 'step' || parentLink(theirs) === 'step',
+  );
+  if (step) return 'step';
   return shared.some(([mine, theirs]) => isCare(mine) || isCare(theirs)) ? 'foster' : 'step';
 }
 

@@ -124,3 +124,19 @@ describe('spouse of a half-aunt', () => {
     expect(k.auh).not.toBe('half-uncle');
   });
 });
+
+describe('adoption on the focus side of an uncle (#296 review)', () => {
+  it('names the uncle an adoptive uncle when the focus person’s father was adopted', () => {
+    // p22 adopted p41 (his wife p40 is p41's birth mother); p37 is p22's birth
+    // son by another wife. p37 was never adopted: he is p76's adoptive uncle.
+    const g = mk({ p22: 'M', p40: 'F', p36: 'F', p41: 'M', p37: 'M', p76: 'M' }, [
+      ['f12', 'p22', 'p40', [['p41', 'adopted']]],
+      ['f11', 'p22', 'p36', ['p37']],
+      ['f20', 'p41', null, ['p76']],
+    ]);
+    // Only p41's link to p22 is an adoption.
+    (g.families[0]!.children[0] as { rel2?: ChildRelation }).rel2 = 'biological';
+    expect(calc(g, 'p37', 'p76')).toBe('adoptive uncle');
+    expect(labels(g, 'p76').p37).toBe('adoptive uncle');
+  });
+});

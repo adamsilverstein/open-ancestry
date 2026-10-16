@@ -28,7 +28,15 @@ export interface FactView {
 export type ReimportChange =
   | { kind: 'person.new'; incomingId: string }
   | { kind: 'sex'; before: string; after: string }
-  | { kind: 'name.add'; incomingNameId: string; name: string; nameType: string }
+  | {
+      kind: 'name.add';
+      incomingNameId: string;
+      name: string;
+      /** Only when the export states it; otherwise null (the importer's default is not news). */
+      nameType: string | null;
+      /** For a primary name both sides changed: the name it had before the user renamed them. */
+      was?: string;
+    }
   | {
       kind: 'fact.add';
       incomingEventId: string;
@@ -200,6 +208,8 @@ export interface LocalHistory {
   base: Map<string, Record<string, unknown>>;
   /** Names (normalized) a person had before the user changed or removed them. */
   formerNames: Map<string, Set<string>>;
+  /** People whose primary name the user changed or removed, with what it was (as written). */
+  renamedPrimary: Map<string, string>;
   /** Names (normalized) the last re-import's export gave each person it offered names for. */
   baseNames: Map<string, Set<string>>;
   /** People the user deleted: their names (normalized) and birth year. */
@@ -269,6 +279,7 @@ export function localHistory(store: TreeStore): LocalHistory {
   const renamed = new Set<string>();
   const base = new Map<string, Image>();
   const formerNames = new Map<string, Set<string>>();
+  const renamedPrimary = new Map<string, string>();
   const baseNames = new Map<string, Set<string>>();
   /** Deleted rows as they were, by `entity|id`. */
   const gone = new Map<string, Image>();
@@ -277,8 +288,10 @@ export function localHistory(store: TreeStore): LocalHistory {
     const person = row.person_id as string;
     renamed.add(person);
     const set = formerNames.get(person) ?? new Set<string>();
-    set.add(norm(fullName(row as { given: string | null; surname: string | null })));
+    const name = fullName(row as { given: string | null; surname: string | null });
+    set.add(norm(name));
     formerNames.set(person, set);
+    if (row.is_primary && !renamedPrimary.has(person)) renamedPrimary.set(person, name);
   };
   for (const r of rows) {
     const key = `${r.entity}|${r.entity_id}`;
@@ -417,6 +430,7 @@ export function localHistory(store: TreeStore): LocalHistory {
     renamed,
     base,
     formerNames,
+    renamedPrimary,
     baseNames,
     deletedPeople,
     removed: { facts, names, citations, media, families, childLinks },
@@ -438,6 +452,7 @@ function foldMerged(
     r: PersonReview,
     defaults: Partial<ReviewChange>,
   ) => (change: ReimportChange, extra?: Partial<ReviewChange>) => ReviewChange,
+  typedNames: Set<string>,
 ) {
   const confident = m.confidence >= HIGH_CONFIDENCE;
   const add = adder(r, confident ? {} : { defaultAccept: false });
@@ -462,7 +477,12 @@ function foldMerged(
     const key = `name|${norm(full)}`;
     if (names.has(key) || offered.has(key)) continue;
     offered.add(key);
-    add({ kind: 'name.add', incomingNameId: n.id, name: full, nameType: n.type });
+    add({
+      kind: 'name.add',
+      incomingNameId: n.id,
+      name: full,
+      nameType: typedNames.has(n.id) ? n.type : null,
+    });
   }
   for (const ie of i.events) {
     const same = e.events.find((ee) => sameFact(ee, ie));
@@ -692,6 +712,7 @@ export function diffTrees(
   matches: Map<string, PersonMatch>,
   local: LocalHistory,
   nearMisses: Map<string, NearMiss> = new Map(),
+  typedNames: Set<string> = new Set(),
 ): ReimportDiff {
   const { edited } = local;
   const gone = local.removed;
@@ -766,6 +787,7 @@ export function diffTrees(
         incoming.people.get(m.incomingId)!,
         m,
         adder,
+        typedNames,
       );
       if (folded.changes.length && !reviews.has(folded.key)) {
         reviews.set(folded.key, folded);
@@ -801,6 +823,8 @@ export function diffTrees(
       );
     }
     const names = new Set(e.names.map((n) => `${norm(n.given)}|${norm(n.surname)}`));
+    // The user renamed this person's primary name: what it was, for the wording.
+    const renamedFrom = local.renamedPrimary.get(e.row.id);
     const removedNames = gone.names.get(e.row.id);
     const formerNames = local.formerNames.get(e.row.id);
     const lastExport = local.baseNames.get(e.row.id);
@@ -818,14 +842,17 @@ export function diffTrees(
         held.add(`person|${e.row.id}`);
         continue;
       }
+      // Both sides renamed the person (#224): the export's new primary competes with theirs.
+      const bothRenamed = renamed && renamedFrom !== undefined && !!n.is_primary;
       add(
         {
           kind: 'name.add',
           incomingNameId: n.id,
           name: fullName(n),
-          nameType: n.type,
+          nameType: typedNames.has(n.id) ? n.type : null,
+          ...(bothRenamed ? { was: renamedFrom } : {}),
         },
-        renamed ? { conflict: 'local-edit', defaultAccept: false } : {},
+        bothRenamed ? { conflict: 'local-edit', defaultAccept: false } : {},
       );
     }
     diffFacts(e, i, edited, add, removed);

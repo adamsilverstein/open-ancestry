@@ -235,7 +235,12 @@ export class GraphCache {
       if (!value) {
         const summary = this.people.get(id);
         if (!summary) return undefined;
-        value = toTreePerson(summary, this.needsParents(id), this.needsChildren(id));
+        value = toTreePerson(
+          summary,
+          this.needsParents(id),
+          this.needsChildren(id),
+          this.needsSiblings(id),
+        );
         persons.set(id, value);
       }
       return value;

@@ -11,7 +11,7 @@ import {
   type Tx,
 } from '@open-ancestry/db';
 import { nameRow, refreshLiving, requireRow } from './edits';
-import { conflict, notFound } from './errors';
+import { badRequest, conflict, notFound, stale } from './errors';
 import { resolveMediaPathSync, sniffMediaType } from './routes/media';
 import type { BatchOperation, NameBody } from './schemas';
 import type { Static } from 'typebox';
@@ -50,6 +50,21 @@ function profilePhotoProblem(store: TreeStore, media: MediaRow): string | null {
     return 'This file is not a readable image, so it cannot be the profile photo';
   }
   return null;
+}
+
+type Seen = Record<string, unknown>;
+
+/** Refuses a write made from a copy of the row that no longer matches the stored one. */
+function requireSeen(row: object, seen: Seen | undefined, what: string): void {
+  for (const [column, value] of Object.entries(seen ?? {})) {
+    if (!Object.hasOwn(row, column)) throw badRequest(`Unknown column ${column} in expect`);
+    if (value !== null && typeof value !== 'string' && typeof value !== 'number') {
+      throw badRequest(`expect.${column} must be a string, number or null`);
+    }
+    if ((row as Record<string, unknown>)[column] !== value) {
+      throw stale(`The ${what} changed after it was loaded`);
+    }
+  }
 }
 
 /*
@@ -118,6 +133,32 @@ export function untagPerson(tx: Tx, personId: string, tagId: string) {
   requireRow(tx.store, 'person', personId);
   const link = tagLinks.listFor(tx.store, 'person', personId).find((l) => l.tag_id === tagId);
   if (link) tagLinks.delete(tx, link.id);
+}
+
+/**
+ * Checks every operation's `expect` against the rows as the batch found them,
+ * before any operation runs: an earlier one may change a later one's row on
+ * purpose (promoting a name demotes the old primary).
+ */
+export function checkSeen(store: TreeStore, operations: BatchOperation[]): void {
+  for (const operation of operations) {
+    switch (operation.op) {
+      case 'person.update':
+        requireSeen(requireRow(store, 'person', operation.id), operation.expect, 'person');
+        break;
+      case 'name.update':
+      case 'name.delete':
+        requireSeen(requireRow(store, 'person_name', operation.id), operation.expect, 'name');
+        break;
+      case 'familyChild.update':
+        requireSeen(
+          requireRow(store, 'family_child', operation.id),
+          operation.expect,
+          'relationship to a parent',
+        );
+        break;
+    }
+  }
 }
 
 /** Runs one batch operation; the result is what the single route would return. */

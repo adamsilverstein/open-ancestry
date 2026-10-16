@@ -106,7 +106,8 @@ describe('NameScrubber', () => {
     for (const note of notes) {
       const start = performance.now();
       text(note);
-      expect(performance.now() - start, note.slice(0, 8)).toBeLessThan(1000);
+      // Generous for loaded runners: the quadratic version took about a minute.
+      expect(performance.now() - start, note.slice(0, 8)).toBeLessThan(3000);
     }
   });
 

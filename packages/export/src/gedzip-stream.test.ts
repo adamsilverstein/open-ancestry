@@ -2,11 +2,14 @@ import { openTree, treePaths } from '@open-ancestry/db';
 import { importGedcom } from '@open-ancestry/import';
 import { unzipSync, zipSync } from 'fflate';
 import {
+  linkSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   renameSync,
   rmSync,
   statSync,
+  symlinkSync,
   truncateSync,
   utimesSync,
   writeFileSync,
@@ -136,6 +139,43 @@ describe('streamed GEDZIP export', () => {
     const files = unzipSync(await buffer(streamGedzip(plan)));
     expect(files['notes/letter.txt']).toBeUndefined();
     expect(new TextDecoder().decode(files['warnings.txt'])).toContain('notes/letter.txt');
+    store.close();
+  });
+
+  it('leaves out a file hard-linked from elsewhere after the snapshot', async () => {
+    const { store, dir } = await tree();
+    const plan = planGedzipExport(store, { now: TODAY });
+    // Same inode, size and time as planned; only the link count changed.
+    linkSync(join(treePaths(dir).media, 'notes', 'letter.txt'), join(dir, 'letter-link.txt'));
+    const files = unzipSync(await buffer(streamGedzip(plan)));
+    expect(files['notes/letter.txt']).toBeUndefined();
+    expect(new TextDecoder().decode(files['warnings.txt'])).toContain('notes/letter.txt');
+    store.close();
+  });
+
+  it('leaves out a file whose folder became a symlink out of the tree after the snapshot', async () => {
+    const { store, dir } = await tree();
+    const plan = planGedzipExport(store, { now: TODAY });
+    // The same file, moved out of the tree and reached through a symlinked folder.
+    const outside = mkdtempSync(join(root, 'outside-'));
+    renameSync(join(treePaths(dir).media, 'notes'), join(outside, 'notes'));
+    symlinkSync(join(outside, 'notes'), join(treePaths(dir).media, 'notes'));
+    const files = unzipSync(await buffer(streamGedzip(plan)));
+    expect(files['notes/letter.txt']).toBeUndefined();
+    expect(new TextDecoder().decode(files['warnings.txt'])).toContain('notes/letter.txt');
+    store.close();
+  });
+
+  it('leaves out every file once the media folder became a symlink after the snapshot', async () => {
+    const { store, dir } = await tree();
+    const plan = planGedzipExport(store, { now: TODAY });
+    const media = treePaths(dir).media;
+    const real = `${media}-real`;
+    mkdirSync(real);
+    renameSync(media, join(real, 'm'));
+    symlinkSync(join(real, 'm'), media);
+    const files = unzipSync(await buffer(streamGedzip(plan)));
+    expect(Object.keys(files).sort()).toEqual(['gedcom.ged', 'warnings.txt']);
     store.close();
   });
 

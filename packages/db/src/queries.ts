@@ -730,9 +730,10 @@ export function getNeighborhood(
     childEdges = childEdges.filter((c) => keep.has(c.childId) && keptFamilies.has(c.familyId));
     moreUp = moreUp.filter((id) => keep.has(id));
     moreDown = moreDown.filter((id) => keep.has(id));
-    // Cut short, the slice may have dropped anyone's children: claim nothing.
-    childrenLoaded.clear();
   }
+  // Cut short (even exactly at the cap), the slice may have dropped anyone's
+  // children: claim nothing.
+  if (truncated) childrenLoaded.clear();
 
   return {
     focusId,

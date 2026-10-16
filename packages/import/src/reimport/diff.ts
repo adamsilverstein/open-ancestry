@@ -320,10 +320,12 @@ export function localHistory(store: TreeStore): LocalHistory {
     typeof id === 'string'
       ? (gone.get(`${entity}|${id}`) ?? (store.getRow(entity, id) as Image | undefined))
       : undefined;
-  // Facts are compared by place name, as the export names them.
+  // Facts are compared by place name, as the export names them: the place as it
+  // was too, if the user renamed it since.
   for (const [key, row] of base) {
     if (key.startsWith('event|') && row.place_id) {
-      base.set(key, { ...row, place_name: rowOf('place', row.place_id)?.full_name ?? null });
+      const place = base.get(`place|${row.place_id as string}`) ?? rowOf('place', row.place_id);
+      base.set(key, { ...row, place_name: place?.full_name ?? null });
     }
   }
   const mediaKeyOf = mediaKeys(store);

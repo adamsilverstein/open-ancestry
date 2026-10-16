@@ -38,6 +38,7 @@ import { GridIndex } from './spatial';
 import {
   centerOn,
   fitBounds,
+  fitFan,
   interpolate,
   toScreen,
   visibleWorld,
@@ -74,7 +75,8 @@ export interface TreeCanvasHandle {
   centerOnPoint: (point: { x: number; y: number }) => void;
   /** Viewport-relative client rect of a card, for anchoring the quick view. */
   clientRect: (key: string) => DOMRect | null;
-  focusCard: (key: string) => void;
+  /** Moves keyboard focus to a card; `reveal: false` leaves the view where it is. */
+  focusCard: (key: string, options?: { reveal?: boolean }) => void;
 }
 
 export interface TreeCanvasProps {
@@ -663,7 +665,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       return centerOn(t, focus.x + focus.width / 2, focus.y + focus.height / 2, width, height);
     if (currentFan) {
       // The whole fan, as large as fits.
-      if (fitRows) return fitBounds(currentFan.bounds, width, height, FIT_PADDING);
+      if (fitRows) return fitFan(currentFan, width, height, FIT_PADDING);
       const b = currentFan.bounds;
       return centerOn(t, b.minX + b.width / 2, b.minY + b.height / 2, width, height);
     }
@@ -700,10 +702,10 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   );
 
   const focusCard = useCallback(
-    (key: string) => {
+    (key: string, { reveal = true }: { reveal?: boolean } = {}) => {
       setActiveKey(key);
       pendingFocus.current = key;
-      ensureOnScreen(key);
+      if (reveal) ensureOnScreen(key);
       // Enter would re-focus here next: get its layout ready.
       const node = nodeByKey(key);
       if (node && !node.isDuplicate && !node.isFocus) latest.current.onPrefetch(node.personId);
@@ -729,10 +731,14 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       },
       fit() {
         const { width, height } = measure();
-        const bounds = latest.current.layout?.bounds ?? latest.current.fan?.bounds;
-        if (!bounds) return;
+        const { layout: current, fan: currentFan } = latest.current;
+        if (!current && !currentFan) return;
         latest.current.onInteract();
-        animateTo(fitBounds(bounds, width, height, FIT_PADDING));
+        animateTo(
+          current
+            ? fitBounds(current.bounds, width, height, FIT_PADDING)
+            : fitFan(currentFan!, width, height, FIT_PADDING),
+        );
       },
       centerOnKey(key) {
         const node = nodeByKey(key);

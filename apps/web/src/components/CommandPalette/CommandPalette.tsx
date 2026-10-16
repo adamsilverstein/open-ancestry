@@ -178,6 +178,11 @@ export function CommandPalette({
             if (typed?.enter) queueEnter(typed.enter.alt, typed.text);
           }}
           onCloseAutoFocus={(event) => {
+            // An action that opened a dialog (such as Add person) keeps the focus it moved there.
+            if (document.querySelector('[role="dialog"][data-state="open"]')) {
+              event.preventDefault();
+              return;
+            }
             if (!returnFocus.current?.isConnected) return;
             event.preventDefault();
             returnFocus.current.focus();

@@ -9,12 +9,18 @@ const fact = (date: string | null, place: string | null = 'Elderford') => ({
   place,
   value: null,
 });
-const base = { id: 'c1', defaultAccept: true, applicable: true };
+const base = { id: 'c1', key: 'k1', defaultAccept: true, applicable: true };
 
 describe('re-import labels', () => {
   it('names only what changed', () => {
+    // Dates read the way the rest of the app shows them, not as raw GEDCOM.
     expect(changeText(fact('Abt. 1842'), fact('12 MAR 1842'))).toBe(
-      'Birth: Abt. 1842 → 12 MAR 1842',
+      'Birth: abt. 1842 → 12 Mar 1842',
+    );
+    expect(factText(fact('03/15/1828', null))).toBe('Birth, 15 Mar 1828');
+    // Different texts for the same date: show them as written rather than "x → x".
+    expect(changeText(fact('BET 1850 AND 1860'), fact('1850-1860'))).toBe(
+      'Birth: BET 1850 AND 1860 → 1850-1860',
     );
     expect(changeText(fact('1842', 'A'), fact('1843', 'B'))).toBe('Birth: 1842, A → 1843, B');
     expect(changeText(fact('1842', null), fact('1842', 'B'))).toBe('Birth: (none) → B');

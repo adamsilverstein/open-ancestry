@@ -10,6 +10,9 @@ import {
 import type ShellCommandPaletteType from './ShellCommandPalette';
 import type { TypeAhead } from '../components/CommandPalette/CommandPalette';
 import { Outlet } from '@tanstack/react-router';
+import { useQuery } from '@tanstack/react-query';
+import { currentTreeQuery } from '../api/queries';
+import { AddPersonContext } from './addPerson';
 import { ToastProvider } from '../components/Toast/Toast';
 import { ChunkBoundary } from '../lib/ChunkBoundary';
 import { trackFocus } from '../lib/returnFocus';
@@ -26,10 +29,18 @@ const loadPalette = () => import('./ShellCommandPalette');
  */
 const palettes: LazyExoticComponent<typeof ShellCommandPaletteType>[] = [];
 const paletteFor = (attempt: number) => (palettes[attempt] ??= lazy(loadPalette));
+const AddPersonDialog = lazy(() => import('./AddPersonDialog'));
 
 /** Cmd on macOS, Ctrl elsewhere; both work everywhere. */
 function isPaletteShortcut(event: KeyboardEvent) {
   return (event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k';
+}
+
+/** The focused control outside any dialog, or null. */
+function focusedOutsideDialogs(): HTMLElement | null {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement) || active === document.body) return null;
+  return active.closest('[role="dialog"], [role="alertdialog"]') ? null : active;
 }
 
 /**
@@ -62,6 +73,9 @@ const TYPE_AHEAD_LIMIT_MS = 3000;
 
 export function AppShell() {
   const [paletteOpen, setPaletteOpenState] = useState(false);
+  // What had focus before the palette opened: a dialog launched from the
+  // palette returns focus there, since the palette's input is gone by then.
+  const beforePalette = useRef<HTMLElement | null>(null);
   // The palette chunk loads on first use, then stays mounted so it opens instantly.
   const [paletteLoaded, setPaletteLoaded] = useState(false);
   // A new attempt (a fresh lazy component and boundary) after the chunk failed to load.
@@ -81,6 +95,7 @@ export function AppShell() {
     };
     const setOpen = (open: boolean) => {
       if (open && !openRef.current) {
+        beforePalette.current = focusedOutsideDialogs();
         if (failedRef.current) {
           failedRef.current = false;
           setAttempt((n) => n + 1);
@@ -118,6 +133,22 @@ export function AppShell() {
       },
     };
   }, []);
+
+  const { data: tree = null } = useQuery(currentTreeQuery);
+  // Bumped on every open so each Add person starts with an empty form.
+  const [addPersonKey, setAddPersonKey] = useState(0);
+  const [addPersonOpen, setAddPersonOpen] = useState(false);
+  const [addPersonOpener, setAddPersonOpener] = useState<HTMLElement | null>(null);
+  const addPerson = useMemo(
+    () => ({
+      open: () => {
+        setAddPersonOpener(focusedOutsideDialogs() ?? beforePalette.current);
+        setAddPersonKey((key) => key + 1);
+        setAddPersonOpen(true);
+      },
+    }),
+    [],
+  );
 
   // Fetch the palette chunk once the page is idle so Cmd-K never waits on the network.
   useEffect(() => {
@@ -174,29 +205,44 @@ export function AppShell() {
 
   return (
     <PaletteContext value={palette}>
-      <ToastProvider>
-        <UndoShortcuts />
-        <a className={styles.skipLink} href="#main">
-          Skip to content
-        </a>
-        <TopBar onFind={palette.open} />
-        <main id="main" className={styles.main} tabIndex={-1}>
-          <Outlet />
-        </main>
-        {paletteLoaded && (
-          <ChunkBoundary key={attempt} fallback={null} onError={palette.failed}>
-            <Suspense fallback={null}>
-              {/* A new component only per load attempt, remounting after a failed chunk. */}
-              {/* eslint-disable-next-line react-hooks/static-components */}
-              <ShellCommandPalette
-                open={paletteOpen}
-                onOpenChange={palette.setOpen}
-                takeTypeAhead={palette.takeTypeAhead}
-              />
-            </Suspense>
-          </ChunkBoundary>
-        )}
-      </ToastProvider>
+      <AddPersonContext value={addPerson}>
+        <ToastProvider>
+          <UndoShortcuts />
+          <a className={styles.skipLink} href="#main">
+            Skip to content
+          </a>
+          <TopBar onFind={palette.open} />
+          <main id="main" className={styles.main} tabIndex={-1}>
+            <Outlet />
+          </main>
+          {paletteLoaded && (
+            <ChunkBoundary key={attempt} fallback={null} onError={palette.failed}>
+              <Suspense fallback={null}>
+                {/* A new component only per load attempt, remounting after a failed chunk. */}
+                {/* eslint-disable-next-line react-hooks/static-components */}
+                <ShellCommandPalette
+                  open={paletteOpen}
+                  onOpenChange={palette.setOpen}
+                  takeTypeAhead={palette.takeTypeAhead}
+                />
+              </Suspense>
+            </ChunkBoundary>
+          )}
+          {tree && addPersonKey > 0 && (
+            <ChunkBoundary fallback={null}>
+              <Suspense fallback={null}>
+                <AddPersonDialog
+                  key={addPersonKey}
+                  opener={addPersonOpener}
+                  tree={tree}
+                  open={addPersonOpen}
+                  onOpenChange={setAddPersonOpen}
+                />
+              </Suspense>
+            </ChunkBoundary>
+          )}
+        </ToastProvider>
+      </AddPersonContext>
     </PaletteContext>
   );
 }

@@ -149,6 +149,43 @@ test.describe('family view', () => {
     await expect(page).toHaveURL(new RegExp(`/person/${ids.bram}$`));
   });
 
+  test('quick view Edit opens the editor, not just the profile (#134)', async ({ page }) => {
+    await open(page);
+    await card(page, 'Bram Vale').click();
+    await page
+      .getByRole('dialog', { name: 'Bram Vale' })
+      .getByRole('button', { name: 'Edit' })
+      .click();
+    await expect(page).toHaveURL(new RegExp(`/person/${ids.bram}\\?edit=true$`));
+    const editor = page.getByRole('dialog', { name: 'Edit person' });
+    await expect(editor).toBeVisible();
+    // Closing the editor leaves the plain profile URL, so reload does not reopen it.
+    await page.keyboard.press('Escape');
+    await expect(editor).toHaveCount(0);
+    await expect(page).toHaveURL(new RegExp(`/person/${ids.bram}$`));
+    // Focus lands on the header's Edit person button, not lost on the page.
+    await expect(page.getByRole('button', { name: 'Edit person' })).toBeFocused();
+  });
+
+  test('quick view says Living once (#134)', async ({ page }) => {
+    await open(page);
+    await card(page, 'Wren Ash').click();
+    const quick = page.getByRole('dialog', { name: 'Wren Ash' });
+    await expect(quick).toContainText('Living');
+    await expect(quick.getByText(/Living/)).toHaveCount(1);
+  });
+
+  test('cards without a photo show a silhouette tinted by sex, without a badge (#134)', async ({
+    page,
+  }) => {
+    await open(page);
+    for (const name of ['Bram Vale', 'Elsa Hale']) {
+      const c = card(page, name);
+      await expect(c.locator('[data-fallback="silhouette"] svg.lucide-user-round')).toHaveCount(1);
+      await expect(c.locator('svg.lucide-mars, svg.lucide-venus')).toHaveCount(0);
+    }
+  });
+
   test('Escape closes the quick view and returns focus to the card', async ({ page }) => {
     await open(page);
     await card(page, 'Elsa Hale').click();
@@ -491,6 +528,8 @@ test.describe('family view', () => {
 
     // Single-key shortcuts only act while focus is in the tree (WCAG 2.1.4).
     await expect(card(page, 'Ada Vale')).toHaveAccessibleName(/focus person/);
+    // Keyboard focus follows the re-focus to Ada; let it land before moving on.
+    await expect(card(page, 'Ada Vale')).toBeFocused();
     await card(page, 'Bram Vale').focus();
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
@@ -880,6 +919,20 @@ test.describe('pedigree, descendant and fan views', () => {
   });
 });
 
+test.describe('hand-edited layouts (#146)', () => {
+  for (const layout of ['bogus', 'descendant', 'toString', '__proto__']) {
+    test(`layout=${layout} opens the family view`, async ({ page }) => {
+      await open(page, 'ada', `&layout=${layout}`);
+      await expect(page.getByRole('heading', { name: 'Something went wrong' })).toHaveCount(0);
+      await expect(page.getByText('Could not load the tree')).toHaveCount(0);
+      await expect(card(page, 'Ada Vale')).toBeAttached();
+      await expect(
+        page.getByRole('toolbar', { name: 'Tree tools' }).getByRole('button', { name: /Layout/ }),
+      ).toHaveAccessibleName('Layout: Family view');
+    });
+  }
+});
+
 test.describe('generation depth in the URL', () => {
   /** The `up` and `down` of every neighborhood request the page makes. */
   function depths(page: Page) {
@@ -1010,6 +1063,155 @@ test.describe('fan chart keyboard', () => {
   });
 });
 
+for (const [width, height] of [
+  [320, 568],
+  [390, 844],
+  [568, 320],
+  [680, 900],
+  [844, 390],
+] as const) {
+  test.describe(`quick view at ${width}x${height}`, () => {
+    test.use({ viewport: { width, height }, hasTouch: true });
+
+    test('stays on screen, below the top bar, off its card, with reachable actions', async ({
+      page,
+    }) => {
+      // Four cards, each opened, measured and closed.
+      test.slow();
+      await open(page);
+      await settled(page);
+      // The minimap picks its corner after the view settles; measure after that,
+      // or a card clear of it now can be under it in the next fresh view.
+      await minimapRested(page);
+      const topBar = (await page.getByRole('banner').boundingBox())!;
+      const top = topBar.y + topBar.height;
+      const touchTargets = await page.evaluate(
+        () => window.matchMedia('(pointer: coarse), (max-width: 640px)').matches,
+      );
+      // The leftmost, rightmost, topmost and bottommost cards fully on screen and
+      // not under the toolbar or minimap.
+      const onScreen = await page.evaluate(
+        ({ top, width, height }) =>
+          [...document.querySelectorAll<HTMLElement>('[role="application"] [data-key]')]
+            .map((el) => ({ key: el.dataset.key!, b: el.getBoundingClientRect() }))
+            .filter(({ key, b }) => {
+              if (b.x < 0 || b.y < top || b.right > width || b.bottom > height) return false;
+              const hit = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+              return hit?.closest<HTMLElement>('[data-key]')?.dataset.key === key;
+            })
+            .map(({ key, b }) => ({ key, x: b.x, y: b.y })),
+        { top, width, height },
+      );
+      expect(onScreen.length).toBeGreaterThanOrEqual(1);
+      const by = (f: (o: (typeof onScreen)[number]) => number) =>
+        [...onScreen].sort((a, b) => f(a) - f(b))[0]!.key;
+      const picks = [
+        ...new Set([by((o) => o.x), by((o) => -o.x), by((o) => o.y), by((o) => -o.y)]),
+      ].map((key) => canvas(page).locator(`[data-key="${key}"]`));
+      for (const [i, target] of picks.entries()) {
+        // Each from a fresh view: closing with Escape returns keyboard focus to the
+        // card, which may scroll the view to show it.
+        if (i > 0) {
+          await open(page);
+          await settled(page);
+          await minimapRested(page);
+        }
+        const name = (await target.getAttribute('aria-label'))!.split(',')[0]!;
+        const cardBox = await box(target);
+        await target.tap();
+        const quick = page.getByRole('dialog', { name });
+        await expect(quick).toBeVisible();
+        // Let the positioning settle (it can take a frame or two after opening).
+        let b = await box(quick);
+        await expect
+          .poll(async () => {
+            const now = await box(quick);
+            const same = now.x === b.x && now.y === b.y && now.height === b.height;
+            b = now;
+            return same;
+          })
+          .toBe(true);
+        expect(b.x, name).toBeGreaterThanOrEqual(0);
+        expect(b.y, name).toBeGreaterThanOrEqual(top);
+        expect(b.x + b.width, name).toBeLessThanOrEqual(width);
+        expect(b.y + b.height, name).toBeLessThanOrEqual(height);
+        // It does not cover the card it describes.
+        const overlap =
+          b.x < cardBox.x + cardBox.width &&
+          cardBox.x < b.x + b.width &&
+          b.y < cardBox.y + cardBox.height &&
+          cardBox.y < b.y + b.height;
+        expect(
+          overlap,
+          `${name} covered by its quick view: ${JSON.stringify({ b, cardBox })}`,
+        ).toBe(false);
+        // The name stays in sight, not scrolled under the actions.
+        const title = quick.getByText(name, { exact: true });
+        const t = await box(title);
+        const shown = await page.evaluate(
+          ({ x, y }) => document.elementFromPoint(x, y)?.textContent ?? '',
+          { x: t.x + Math.min(t.width / 2, 20), y: t.y + t.height / 2 },
+        );
+        expect(shown, `${name} hidden in its quick view`).toBe(name);
+        const actions = [
+          quick.getByRole('link', { name: 'Profile' }),
+          quick.getByRole('button', { name: 'Make focus' }),
+          quick.getByRole('button', { name: 'Edit' }),
+        ];
+        // Initial focus is on the first action.
+        await expect(actions[0]!).toBeFocused();
+        for (const action of actions) {
+          const a = await box(action);
+          expect(a.x, name).toBeGreaterThanOrEqual(0);
+          expect(a.y, name).toBeGreaterThanOrEqual(top);
+          expect(a.x + a.width, name).toBeLessThanOrEqual(width);
+          expect(a.y + a.height, name).toBeLessThanOrEqual(height);
+          if (touchTargets) {
+            expect(a.height).toBeGreaterThanOrEqual(44);
+            expect(a.width).toBeGreaterThanOrEqual(44);
+          }
+        }
+        await page.keyboard.press('Escape');
+        await expect(quick).toHaveCount(0);
+      }
+    });
+  });
+}
+
+test.describe('quick view above a bottom toolbar', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+  test('keeps clear of the phone layout bottom bar', async ({ page }) => {
+    await open(page);
+    await settled(page);
+    // Stand in for the phone toolbar: the layout publishes its height on the tree region.
+    const bar = 120;
+    await page.evaluate((height) => {
+      document
+        .querySelector<HTMLElement>('[data-tree-region]')!
+        .style.setProperty('--oa-tree-bottom-bar', `${height}px`);
+    }, bar);
+    // Pan so Ada's card ends where the popover fits below it on the bare screen
+    // but not above the bar.
+    const ada = await box(card(page, 'Ada Vale'));
+    const dy = 500 - (ada.y + ada.height);
+    await page.mouse.move(200, 400);
+    await page.mouse.down();
+    await page.mouse.move(200, 400 + dy, { steps: 5 });
+    await page.mouse.up();
+    const lowest = ids.ada;
+    expect(lowest).toBeTruthy();
+    const target = canvas(page).locator(`[data-key="${lowest}"]`);
+    const name = (await target.getAttribute('aria-label'))!.split(',')[0]!;
+    await target.tap();
+    const quick = page.getByRole('dialog', { name });
+    await expect(quick).toBeVisible();
+    await expect
+      .poll(async () => (await box(quick)).y + (await box(quick)).height)
+      .toBeLessThanOrEqual(844 - bar);
+  });
+});
+
 test.describe('far zoom', () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
@@ -1035,6 +1237,44 @@ test.describe('far zoom', () => {
     await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
     await settled(page);
     expect(errors).toEqual([]);
+  });
+});
+
+test.describe('step and adoptive kinship (#138)', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+  const sample = seed.sample;
+  const openSample = async (page: Page, given: string) => {
+    await page.goto(`/tree/${sample.ids[given]}?tree=${encodeURIComponent(sample.tree)}`);
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+  };
+
+  test('a stepfather and half-sister keep their words in either parent set', async ({ page }) => {
+    await openSample(page, 'George');
+    await expect(card(page, 'Iris Hollowell')).toHaveAccessibleName(
+      /half-sister of George Eldermoor$/,
+    );
+    await canvas(page)
+      .getByRole('button', { name: /^Switch parents of George Eldermoor/ })
+      .click();
+    await expect(card(page, 'Leopold Hollowell')).toHaveAccessibleName(
+      /, stepfather of George Eldermoor$/,
+    );
+    await expect(card(page, 'Iris Hollowell')).toHaveAccessibleName(
+      /, half-sister of George Eldermoor$/,
+    );
+  });
+
+  test('adoptive parents are named as such', async ({ page }) => {
+    await openSample(page, 'Peter');
+    await expect(card(page, 'Harold Ashgrove')).toHaveAccessibleName(
+      /, adoptive father of Peter Ashgrove$/,
+    );
+    await expect(card(page, 'Dorothy Ingleby')).toHaveAccessibleName(
+      /, adoptive mother of Peter Ashgrove$/,
+    );
+    await expect(card(page, 'Thomas Ashgrove')).toHaveAccessibleName(
+      /, adopted brother of Peter Ashgrove$/,
+    );
   });
 });
 
@@ -1158,6 +1398,100 @@ test.describe('wide descendant charts (#74)', () => {
     await drag(page, 300, 0);
     // The minimap re-checks its corner 150ms after each pan settles.
     await expect(check).toPass({ timeout: 2000 });
+  });
+});
+
+test('the fan has no minimap, so its toolbar offers none (#134)', async ({ page }) => {
+  await open(page, 'ada', '&layout=fan');
+  const tools = page.getByRole('toolbar', { name: 'Tree tools' });
+  await expect(tools.getByRole('button', { name: 'Fit to screen' })).toBeVisible();
+  await expect(tools.getByRole('button', { name: 'Minimap' })).toHaveCount(0);
+  await page.keyboard.press('m');
+  await expect(page.getByTestId('tree-minimap')).toHaveCount(0);
+});
+
+test.describe('fan labels (#137)', () => {
+  const sample = seed.sample;
+  async function openFan(page: Page) {
+    await page.goto(`/tree/${sample.ids.Lily}?tree=${encodeURIComponent(sample.tree)}&layout=fan`);
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    await page.evaluate(() => document.fonts.ready);
+  }
+
+  /** Each segment's label: its text, and whether all four corners lie in the segment. */
+  function labels(page: Page) {
+    return page.getByTestId('tree-fan').evaluate((svg) =>
+      [...svg.querySelectorAll<SVGGElement>('g[role="button"]')].map((g) => {
+        const text = g.querySelector('text');
+        const path = g.querySelector('path')!;
+        if (!text) return { text: null, inside: true, fontSize: 0 };
+        const box = text.getBBox();
+        const matrix = text.transform.baseVal.consolidate()?.matrix ?? new DOMMatrix();
+        const corners = [
+          [box.x, box.y],
+          [box.x + box.width, box.y],
+          [box.x, box.y + box.height],
+          [box.x + box.width, box.y + box.height],
+        ];
+        return {
+          text: [...text.querySelectorAll('tspan')].map((t) => t.textContent).join(' | '),
+          inside: corners.every(([x, y]) =>
+            path.isPointInFill(new DOMPoint(x, y).matrixTransform(matrix)),
+          ),
+          fontSize: parseFloat(getComputedStyle(text).fontSize),
+        };
+      }),
+    );
+  }
+
+  test('names stay inside their segments, with years where they fit', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openFan(page);
+    const all = await labels(page);
+    expect(all.filter((l) => !l.inside).map((l) => l.text)).toEqual([]);
+    // Nearly every ancestor is named, and the inner rings with their years.
+    expect(all.filter((l) => l.text).length).toBeGreaterThanOrEqual(all.length - 2);
+    const withYears = all.filter((l) => l.text && /\d{4}/.test(l.text));
+    expect(withYears.length).toBeGreaterThanOrEqual(3);
+  });
+
+  for (const [width, height] of [
+    [1440, 900],
+    [390, 844],
+  ] as const) {
+    test(`hard names fit, whole, at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height });
+      const { tree, focusId } = seed.fanNames;
+      await page.goto(`/tree/${focusId}?tree=${encodeURIComponent(tree)}&layout=fan`);
+      await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+      await page.evaluate(() => document.fonts.ready);
+      await page.getByRole('button', { name: 'Fit to screen' }).click();
+      await settled(page);
+      const all = await labels(page);
+      expect(all.filter((l) => !l.inside).map((l) => l.text)).toEqual([]);
+      const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+      for (const l of all) expect(l.text ?? '').not.toMatch(lone);
+      // The father's long name, in the widest ring, keeps his first name
+      // (and at least the surname's initial), never initials alone.
+      const father = all[1]!.text ?? '';
+      expect(father).toMatch(/^Johann .*(v\.|von)/);
+      // The single-word name is shown, whole or shortened, in every ring.
+      expect(all.filter((l) => l.text?.startsWith('山田')).length).toBeGreaterThan(0);
+    });
+  }
+
+  test('Fit on a phone keeps names readable', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openFan(page);
+    await page.getByRole('button', { name: 'Fit to screen' }).click();
+    await settled(page);
+    const { scale } = await transform(page);
+    const all = await labels(page);
+    expect(all.filter((l) => !l.inside).map((l) => l.text)).toEqual([]);
+    for (const l of all.filter((l) => l.text))
+      expect(l.fontSize * scale).toBeGreaterThanOrEqual(10);
+    // The focus person stays on screen.
+    await expect(canvas(page).getByRole('button', { name: /^Lily Mosswood/ })).toBeInViewport();
   });
 });
 

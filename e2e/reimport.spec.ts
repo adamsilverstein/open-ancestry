@@ -627,6 +627,53 @@ test("a renamed person's export name is offered as an alternate, saying so", asy
   ).toBeVisible();
 });
 
+test('a place the export renamed is one item, and keeps matches sure (#279)', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const josiah = (await personByName(request, seeded.tree, 'Josiah'))!;
+  const OLD = 'Millbrook, Harlow County, Vermont, USA';
+  const NEW = 'Millbrook Falls, Harlow County, Vermont, USA';
+  await startReimport(page, seeded, laterExport().replaceAll(OLD, NEW));
+  const places = page.getByRole('region', { name: 'Places renamed' });
+  const rename = places.getByRole('checkbox', {
+    name: new RegExp(`^Place renamed: ${OLD} → ${NEW} \\(\\d+ facts\\)$`),
+  });
+  await expect(rename).toBeChecked();
+  // Not repeated fact by fact on the cards, and no doubt cast on who was born there.
+  await expect(page.getByRole('checkbox', { name: new RegExp(`${OLD}.*→.*${NEW}`) })).toHaveCount(
+    1,
+  );
+  await expect(card(page, 'Josiah Ashgrove').getByText(/different birth place/)).toHaveCount(0);
+  // The rename has a filter of its own and counts as one change, however many facts it covers.
+  await expect(
+    page
+      .getByRole('group', { name: 'Filter the review' })
+      .getByRole('button', { name: 'Places renamed 1' }),
+  ).toBeVisible();
+  const applyButton = page.getByRole('button', { name: /^Apply \d+ changes?$/ });
+  const count = async () => Number(/\d+/.exec((await applyButton.textContent()) ?? '')![0]);
+  const withRename = await count();
+  // Unticked, nothing moves; ticked again, every fact goes to the new name.
+  await rename.uncheck();
+  await expect(rename).not.toBeChecked();
+  expect(await count()).toBe(withRename - 1);
+  await rename.check();
+  await page.getByRole('button', { name: /^Apply \d+ changes?$/ }).click();
+  await expect(
+    page
+      .getByRole('region', { name: /Notifications/ })
+      .getByRole('listitem')
+      .filter({ hasText: /Applied \d+ change/ }),
+  ).toBeVisible({ timeout: 30_000 });
+  const detail = (await (
+    await request.get(`/api/trees/${encodeURIComponent(seeded.tree)}/people/${josiah}`)
+  ).json()) as { events: { event: { type: string }; place: { full_name: string } | null }[] };
+  expect(detail.events.find((e) => e.event.type === 'BIRT')!.place!.full_name).toBe(NEW);
+});
+
 test('discarding a review changes nothing', async ({ page, request, baseURL }, testInfo) => {
   const seeded = await seed(request, baseURL!, testInfo);
   await startReimport(page, seeded);

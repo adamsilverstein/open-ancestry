@@ -636,7 +636,7 @@ export function applyReimport(
       for (const u of lines) tx.insert('unmapped_line', { ...u, id: undefined } as never);
     }
     recordStale(tx, batch.id, stale);
-    recordBase(tx, batch.id, session, incAll);
+    recordBase(tx, batch.id, session, chosen, incAll);
     return applied;
   }) as { batchId: string; result: number };
 
@@ -664,20 +664,27 @@ const SAME_ANYWAY = new Set([
 ]);
 
 /**
- * What the export said for every row it offered a change to, applied or
- * declined: the base of the next re-import's three-way comparison (#224).
+ * What the export said for each row it offered a change to that was not
+ * applied: the base of the next re-import's three-way comparison (#224).
  * Without it a declined change would come back as a conflict every time.
+ * An applied change needs none, since the row this batch wrote is its base.
  * Written in the re-import's batch, so undo removes it.
+ *
+ * One meta row per re-import, never pruned: `localHistory` reads these from
+ * the change log, where later batches' images replace earlier ones row by row,
+ * and deleting an old meta row would only log a copy of it.
  */
 function recordBase(
   tx: Tx,
   importBatchId: string,
   session: ReimportSession,
+  applied: ReadonlySet<string>,
   incAll: <T>(sql: string, ...params: unknown[]) => T[],
 ) {
   const images: Record<string, unknown> = {};
   for (const person of session.diff.people) {
     for (const c of person.changes) {
+      if (applied.has(c.id)) continue;
       if (c.kind === 'fact.change') images[`event|${c.existingEventId}`] = imageOfView(c.after);
       else if (c.kind === 'fact.add' && c.deletedEventId) {
         images[`event|${c.deletedEventId}`] = imageOfView(c.fact);

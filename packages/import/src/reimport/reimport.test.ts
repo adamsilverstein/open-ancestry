@@ -1682,13 +1682,15 @@ describe('three-way re-import, review findings (#224)', () => {
       store,
       {
         bytes: edited('@I3@', (l) =>
-          l === '2 DATE 1939' ? '2 DATE 1940' : l === '1 SEX M' ? '1 SEX F' : l,
+          l === '2 DATE 1939' ? '2 DATE 1940' : l === '2 DATE 12 JUN 1868' ? '2 DATE 1868' : l,
         ),
       },
       { today: TODAY },
     );
-    const sex = changesOf(s2, '@I3@').find((c) => c.kind === 'sex')!;
-    applyReimport(store, s2, new Set([sex.id]), 'Re-import, death declined');
+    const birth = changesOf(s2, '@I3@').find(
+      (c) => c.kind === 'fact.change' && c.after.type === 'BIRT',
+    )!;
+    applyReimport(store, s2, new Set([birth.id]), 'Re-import, death declined');
     closeReimport(s2);
     expect(baseImages()).toEqual([[`event|${death}`]]);
   });

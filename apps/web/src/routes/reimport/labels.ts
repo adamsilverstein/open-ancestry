@@ -53,7 +53,11 @@ export function describeChange(change: ReviewChange, personName: string): string
     case 'fact.add':
       return `Add ${change.owner === 'family' ? 'family fact' : 'fact'}: ${factText(change.fact)}`;
     case 'fact.change':
-      return changeText(change.before, change.after);
+      // A kept place (the user renamed it) isn't part of the change.
+      return changeText(
+        change.before,
+        change.keepPlace ? { ...change.after, place: change.before.place } : change.after,
+      );
     case 'fact.missing':
       return `Not in the new export: ${factText(change.fact)}`;
     case 'citation.add':
@@ -84,5 +88,17 @@ export function describeChange(change: ReviewChange, personName: string): string
       return `Possibly merged into ${change.existingName} earlier (shares a relative); not added unless you tick it`;
     case 'merged':
       return `Exported separately as ${change.incomingName}; previously merged into ${personName}, so not added again`;
+  }
+}
+
+/** Why a change is a conflict, said under its checkbox. */
+export function conflictText(conflict: NonNullable<ReviewChange['conflict']>): string {
+  switch (conflict) {
+    case 'local-edit':
+      return 'Edited in this tree since the last import; your edit is kept unless you tick this.';
+    case 'local-delete':
+      return 'You deleted this in this tree; it stays deleted unless you tick this.';
+    case 'renamed-place':
+      return 'You renamed this place in this tree, and the export moves this fact to another place. It stays at your place unless you tick this.';
   }
 }

@@ -44,6 +44,11 @@ export type ReimportChange =
       incomingEventId: string;
       before: FactView;
       after: FactView;
+      /**
+       * The user renamed the fact's place and the export still has its old
+       * name: apply keeps their place, changing only the rest.
+       */
+      keepPlace?: true;
     }
   | { kind: 'fact.missing'; existingEventId: string; fact: FactView }
   | {
@@ -107,8 +112,11 @@ export type ReviewChange = ReimportChange & {
   defaultAccept: boolean;
   /** False for information only (missing people and facts): never applied. */
   applicable: boolean;
-  /** The tree's value was edited locally since it was imported; kept unless overridden. */
-  conflict?: 'local-edit' | 'local-delete';
+  /**
+   * The tree's value was edited (or deleted) locally since it was imported,
+   * or its place renamed while the export moves it elsewhere; kept unless overridden.
+   */
+  conflict?: 'local-edit' | 'local-delete' | 'renamed-place';
   /** Change ids that must also be accepted (a new person this one depends on). */
   requires?: string[];
 };
@@ -532,6 +540,8 @@ interface Removed {
    * name of its place, since (#185).
    */
   baseOf(event: SnapEvent): FactImage | undefined;
+  /** The name the event's place had before the user renamed it, if they did. */
+  renamedPlace(event: SnapEvent): string | undefined;
   /**
    * Notes that a record still differs from the tree although nothing is offered
    * (the user's own change stands), so the exporter regenerates it.
@@ -623,8 +633,24 @@ function diffFacts(
         removed.hold(`person|${e.row.id}`);
         continue;
       }
+      // The user renamed its place (#259). If the export still has the old name, the
+      // rename stands and only the rest is offered; if it moves the fact, that's a conflict.
+      const former = removed.renamedPlace(counterpart);
+      const keepPlace = former !== undefined && sameText(ie.place, former);
+      const mine = keepPlace
+        ? { ...imageOf(counterpart), place_name: ie.place }
+        : imageOf(counterpart);
+      if (keepPlace && sameImage(mine, imageOf(ie))) {
+        removed.hold(`person|${e.row.id}`);
+        continue;
+      }
       // A conflict only if the user's value differs from it (an edit undone by hand is none).
-      const conflict = !!was && !sameImage(was, imageOf(counterpart));
+      const conflict: ReviewChange['conflict'] =
+        former !== undefined && !keepPlace
+          ? 'renamed-place'
+          : was && !sameImage(was, mine)
+            ? 'local-edit'
+            : undefined;
       add(
         {
           kind: 'fact.change',
@@ -632,8 +658,9 @@ function diffFacts(
           incomingEventId: ie.row.id,
           before: factOf(counterpart),
           after: factOf(ie),
+          ...(keepPlace ? { keepPlace: true as const } : {}),
         },
-        conflict ? { conflict: 'local-edit', defaultAccept: false } : {},
+        conflict ? { conflict, defaultAccept: false } : {},
       );
       diffCitations(counterpart, ie, add, undefined, removed, e.row.id);
     } else {
@@ -730,9 +757,11 @@ export function diffTrees(
       const stored = local.base.get(`event|${event.row.id}`) as FactImage | undefined;
       if (stored) return stored;
       // A fact the user left alone, at a place they renamed: its base is the old name.
-      const former = event.row.place_id ? local.renamedPlaces.get(event.row.place_id) : undefined;
+      const former = removed.renamedPlace(event);
       return former === undefined ? undefined : { ...imageOf(event), place_name: former };
     },
+    renamedPlace: (event) =>
+      event.row.place_id ? local.renamedPlaces.get(event.row.place_id) : undefined,
   };
   const people: PersonReview[] = [];
   const reviews = new Map<string, PersonReview>();

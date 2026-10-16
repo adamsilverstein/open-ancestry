@@ -440,7 +440,8 @@ export function applyReimport(
             date_sort: e.date_sort,
             date_sort_end: e.date_sort_end,
             calendar: e.calendar,
-            place_id: ensurePlace(e.place_id),
+            // The user's renamed place stands (the export still has its old name).
+            ...(c.keepPlace ? {} : { place_id: ensurePlace(e.place_id) }),
             value: e.value,
             age: e.age,
             cause: e.cause,

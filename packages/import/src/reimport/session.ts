@@ -6,7 +6,7 @@ import type { ImportInput, ImportOptions, ImportPhase, ImportReport } from '../t
 import { treeRevision } from './apply';
 import { diffTrees, localHistory, type ReimportDiff } from './diff';
 import { matchPeople, type NearMiss, type PersonMatch } from './match';
-import { snapshot } from './snapshot';
+import { snapshot, statedNameTypes } from './snapshot';
 
 /** An updated export read and compared with a tree, waiting for the user's review. */
 export interface ReimportSession {
@@ -143,7 +143,15 @@ function compare(store: TreeStore, incoming: TreeStore) {
   const incomingSnap = snapshot(incoming);
   const nearMisses = new Map<string, NearMiss>();
   const matches = matchPeople(existingSnap, incomingSnap, nearMisses);
-  const diff = diffTrees(existingSnap, incomingSnap, matches, localHistory(store), nearMisses);
+  // In compare, not only prepare, so Compare again keeps the export's stated name types.
+  const diff = diffTrees(
+    existingSnap,
+    incomingSnap,
+    matches,
+    localHistory(store),
+    nearMisses,
+    statedNameTypes(incoming),
+  );
   return { matches, diff, baseRevision: treeRevision(store) };
 }
 

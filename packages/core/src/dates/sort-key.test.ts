@@ -250,32 +250,66 @@ describe('dual dates sort as Julian (#298)', () => {
     );
   });
 
-  it('agrees with the Julian date for any day', () => {
-    const MON = [
-      'JAN',
-      'FEB',
-      'MAR',
-      'APR',
-      'MAY',
-      'JUN',
-      'JUL',
-      'AUG',
-      'SEP',
-      'OCT',
-      'NOV',
-      'DEC',
-    ];
+  const MONTHS = [
+    'JAN',
+    'FEB',
+    'MAR',
+    'APR',
+    'MAY',
+    'JUN',
+    'JUL',
+    'AUG',
+    'SEP',
+    'OCT',
+    'NOV',
+    'DEC',
+  ];
+  // Any real Old Style day: days 29-31 where the month has them in the Julian new-style year.
+  const arbDualDay = fc
+    .tuple(
+      fc.integer({ min: 1000, max: 1998 }),
+      fc.integer({ min: 1, max: 12 }),
+      fc.integer({ min: 1, max: 31 }),
+    )
+    .filter(([year, month, day]) => {
+      const leap = (year + 1) % 4 === 0;
+      const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]!;
+      return day <= days;
+    })
+    .map(([year, month, day]) => ({
+      dual: `${day} ${MONTHS[month - 1]} ${year}/${String((year + 1) % 100).padStart(2, '0')}`,
+      julian: `@#DJULIAN@ ${day} ${MONTHS[month - 1]} ${year + 1}`,
+    }));
+
+  it('agrees with the Julian date for any day, qualified or not', () => {
     fc.assert(
-      fc.property(
-        fc.integer({ min: 1000, max: 1998 }),
-        fc.integer({ min: 1, max: 12 }),
-        fc.integer({ min: 1, max: 28 }),
-        (year, month, day) => {
-          const dual = `${day} ${MON[month - 1]} ${year}/${String((year + 1) % 100).padStart(2, '0')}`;
-          const julian = `@#DJULIAN@ ${day} ${MON[month - 1]} ${year + 1}`;
-          expect(parseDate(dual).sortKey).toBe(parseDate(julian).sortKey);
-        },
-      ),
+      fc.property(arbDualDay, fc.constantFrom('', 'ABT ', 'BEF ', 'AFT ', 'EST '), (day, q) => {
+        expect(parseDate(q + day.dual).valid).toBe(true);
+        expect(parseDate(q + day.dual).sortKey).toBe(parseDate(q + day.julian).sortKey);
+      }),
     );
+  });
+
+  it('agrees with the Julian range for any range of days', () => {
+    fc.assert(
+      fc.property(arbDualDay, arbDualDay, (a, b) => {
+        const [lo, hi] =
+          parseDate(a.julian).sortKey <= parseDate(b.julian).sortKey ? [a, b] : [b, a];
+        const dual = parseDate(`BET ${lo.dual} AND ${hi.dual}`);
+        const julian = parseDate(`BET ${lo.julian} AND ${hi.julian}`);
+        expect(dual.valid).toBe(true);
+        expect([dual.sortKey, dual.sortKeyEnd]).toEqual([julian.sortKey, julian.sortKeyEnd]);
+      }),
+    );
+  });
+
+  it('pins the Old Style / plain order across the year end (pending a decision)', () => {
+    // An Old Style baptism and a burial written plain in the same weeks of
+    // 1732: the dual dates convert (+11 days) and the plain ones do not, so the
+    // dual dates now sort after later plain days. Main had them the other way.
+    // Kept explicit until the trade-off is decided.
+    const key = (text: string) => parseDate(text).sortKey;
+    expect(key('20 MAR 1731/32')).toBeGreaterThan(key('28 MAR 1732'));
+    expect(key('24 MAR 1731/32')).toBeGreaterThan(key('25 MAR 1732'));
   });
 });

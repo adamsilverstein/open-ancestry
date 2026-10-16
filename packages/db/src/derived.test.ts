@@ -113,6 +113,35 @@ describe('derived column refresh', () => {
     store.close();
   });
 
+  it('keeps undo working across a recompute of a dual date (#298)', () => {
+    const store = openMemoryTree();
+    const id = store.transact('seed', (tx) => {
+      const p = persons.create(tx, { names: [{ given: 'Osric', surname: 'Pell' }] });
+      return events.create(tx, {
+        type: 'BAPM',
+        date_text: '20 MAR 1731/32',
+        calendar: 'gregorian',
+        // The key an older parser stored: the day read as Gregorian.
+        date_sort: 17320320,
+        date_sort_end: null,
+        roles: [{ person_id: p.id }],
+      }).id;
+    }).result;
+    store.transact('note it', (tx) => events.update(tx, id, { description: 'at the font' }));
+    expect(refreshDerivedColumns(store, { force: true })).toMatchObject({ event_date_sort: 1 });
+    const fresh = sorts(store);
+    // The logged images carry the stale key; undo must see the recompute as derived.
+    expect(undoLast(store)?.label).toBe('note it');
+    expect(sorts(store)).toEqual(fresh);
+    expect(redoLast(store)?.label).toBe('note it');
+    expect(undoLast(store)?.label).toBe('note it');
+    expect(undoLast(store)?.label).toBe('seed');
+    expect(count(store, 'event')).toBe(0);
+    redoLast(store);
+    expect(sorts(store)).toEqual(fresh);
+    store.close();
+  });
+
   it('runs on open only when the date parser changed, and logs what it did', () => {
     const dir = join(root, 'stale.oatree');
     let store = createTree(dir);

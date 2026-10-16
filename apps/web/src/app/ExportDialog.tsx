@@ -69,7 +69,13 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
   // Off by default: a JSON file is often shared, and the history keeps deleted text (#197).
   const [history, setHistory] = useState(false);
   // Undefined until the user decides: then it follows the tree (on when anyone is hidden).
+  // The decision lasts for one tree and format in one opening of the dialog (#277).
   const [choice, setChoice] = useState<boolean | undefined>();
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setChoice(undefined);
+  }
   const [state, setState] = useState<ExportState>({ status: 'idle' });
   const list = trees.data ?? [];
   // The open tree by default, or the only one there is.
@@ -194,7 +200,10 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
             label="Format"
             options={EXPORT_FORMATS}
             value={format}
-            onValueChange={(value) => setFormat(value as ExportFormat)}
+            onValueChange={(value) => {
+              setFormat(value as ExportFormat);
+              setChoice(undefined);
+            }}
           />
           <Checkbox
             label="Privatize living and private people"

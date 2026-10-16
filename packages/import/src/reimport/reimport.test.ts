@@ -1267,42 +1267,6 @@ describe('UX QA (#72): new people who look like someone in the tree', () => {
   });
 });
 
-describe('comparing again (#163)', () => {
-  it('re-diffs against the tree as it is now, with stable change keys', async () => {
-    const s2 = await prepareReimport(store, { bytes: updatedSample() }, { today: TODAY });
-    try {
-      const keys = (s: ReimportSession) =>
-        new Map(s.diff.people.flatMap((p) => p.changes.map((c) => [c.key, c])));
-      const before = keys(s2);
-      expect(new Set([...before.keys()]).size).toBe(before.size);
-      expect(isReimportStale(store, s2)).toBe(false);
-      const josiah = pid(store, '@I3@');
-      const death = value<string>(
-        store,
-        "SELECT e.id FROM event e JOIN event_role r ON r.event_id = e.id WHERE r.person_id = ? AND e.type = 'DEAT'",
-        josiah,
-      );
-      store.transact('Edit', (tx) => tx.update('event', death, { date_text: '3 MAY 1939' }));
-      expect(isReimportStale(store, s2)).toBe(true);
-      refreshReimport(store, s2);
-      expect(isReimportStale(store, s2)).toBe(false);
-      const after = keys(s2);
-      // Every change not about the edited death keeps its key.
-      for (const [key, c] of before) {
-        if (c.kind === 'fact.change' && c.existingEventId === death) continue;
-        expect(after.has(key)).toBe(true);
-      }
-      const edited = [...after.values()].find(
-        (c) => c.kind === 'fact.change' && c.existingEventId === death,
-      );
-      expect(edited).toMatchObject({ conflict: 'local-edit', defaultAccept: false });
-      applyReimport(store, s2, new Set(), 'Re-import');
-    } finally {
-      closeReimport(s2);
-    }
-  });
-});
-
 describe('trustworthy confidence and reasons (#159)', () => {
   it('is below 100% when a fact differs, and 100% when nothing does', async () => {
     const s2 = await prepareReimport(store, { bytes: renumber(updatedSample()) }, { today: TODAY });

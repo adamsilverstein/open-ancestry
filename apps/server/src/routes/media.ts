@@ -127,9 +127,11 @@ export function mediaRoutes(app: Api, { library }: Deps): void {
       );
       if (!opened) throw notFound(`Media ${id} file is missing`);
       const { handle, info } = opened;
+      const size = Number(info.size);
       let streaming = false;
       try {
-        const etag = `"${info.size.toString(16)}-${Math.floor(info.mtimeMs).toString(16)}"`;
+        // Bigint stats: mtimeMs is already whole milliseconds.
+        const etag = `"${info.size.toString(16)}-${info.mtimeMs.toString(16)}"`;
         const sniffed = sniffMediaType(await readHead(handle));
         reply
           .header('content-security-policy', MEDIA_CSP)
@@ -142,17 +144,17 @@ export function mediaRoutes(app: Api, { library }: Deps): void {
           .type(sniffed ?? OPAQUE_TYPE);
         if (request.headers['if-none-match'] === etag) return reply.code(304).send();
 
-        const range = parseRange(request.headers.range, info.size);
-        if (range === null) return rangeNotSatisfiable(reply, info.size);
+        const range = parseRange(request.headers.range, size);
+        if (range === null) return rangeNotSatisfiable(reply, size);
         if (range) {
           reply
             .code(206)
-            .header('content-range', `bytes ${range.start}-${range.end}/${info.size}`)
+            .header('content-range', `bytes ${range.start}-${range.end}/${size}`)
             .header('content-length', range.end - range.start + 1);
           streaming = true;
           return reply.send(handle.createReadStream({ ...range, autoClose: true }));
         }
-        reply.header('content-length', info.size);
+        reply.header('content-length', size);
         streaming = true;
         return reply.send(handle.createReadStream({ autoClose: true }));
       } finally {

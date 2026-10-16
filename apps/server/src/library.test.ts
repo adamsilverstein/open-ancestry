@@ -247,15 +247,69 @@ describe.skipIf(process.platform === 'win32')('library permissions', () => {
     library.closeAll();
   });
 
+  it('refuses a library folder other accounts can write to, unless it is declared shared', async () => {
+    // Issue #211: another account could swap a tree folder between the checks
+    // and SQLite opening it by path.
+    const root = await temp();
+    chmodSync(root, 0o775);
+    writeFileSync(join(root, 'notes.txt'), 'not a tree');
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(() => new Library(root).list()).toThrow(
+      expect.objectContaining({
+        statusCode: 403,
+        message: expect.stringMatching(/other accounts can change.*--shared-library/s),
+      }),
+    );
+    expect(() => new Library(root).create('Vale')).toThrow(/--shared-library/);
+    for (const writable of [0o757, 0o777]) {
+      chmodSync(root, writable);
+      expect(() => new Library(root).list()).toThrow(/other accounts can change/);
+    }
+    chmodSync(root, 0o775);
+    const shared = new Library(root, { shared: true });
+    shared.create('Vale');
+    expect(shared.list().map((t) => t.id)).toEqual(['Vale']);
+    shared.closeAll();
+    // Not on Windows, where these mode bits mean nothing.
+    expect(() => new Library(root, { platform: 'win32' }).list()).not.toThrow();
+  });
+
+  it('refuses a library folder that belongs to another account', async () => {
+    // Under a parent others can write to (no sticky bit), another account can
+    // swap in its own 0700 folder: the mode looks private, the owner is not you.
+    const root = await temp();
+    expect(() => new Library(root, { uid: -1 }).list()).toThrow(
+      expect.objectContaining({
+        statusCode: 403,
+        message: expect.stringMatching(/belongs to another account.*--shared-library/s),
+      }),
+    );
+    expect(() => new Library(root, { uid: -1 }).open('Any')).toThrow(/another account/);
+    expect(() => new Library(root, { uid: -1, shared: true }).list()).not.toThrow();
+    expect(() => new Library(root, { uid: -1, platform: 'win32' }).list()).not.toThrow();
+    expect(() => new Library(root).list()).not.toThrow();
+  });
+
+  it('refuses a folder of another account even when it holds only trees (tightening branch)', async () => {
+    // A folder of nothing but trees is tightened rather than warned about, and
+    // tightening skips a folder that is not ours: the owner check must still run.
+    const root = join(await temp(), 'Library');
+    new Library(root).create('Vale');
+    new Library(root).closeAll();
+    chmodSync(root, 0o755);
+    expect(() => new Library(root, { uid: -1 }).list()).toThrow(/belongs to another account/);
+    expect(() => new Library(root, { uid: -1, shared: true }).list()).not.toThrow();
+  });
+
   it('leaves a shared folder that holds more than trees alone, with a warning', async () => {
     // e.g. `--library ~` or a group-shared folder: chmod would lock others out.
     const root = await temp();
-    chmodSync(root, 0o775);
+    chmodSync(root, 0o755);
     writeFileSync(join(root, 'notes.txt'), 'not a tree');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const library = new Library(root);
     library.create('Vale');
-    expect(mode(root)).toBe(0o775);
+    expect(mode(root)).toBe(0o755);
     expect(mode(library.dirOf('Vale'))).toBe(0o700);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0]![0])).toMatch(/other accounts can see/);
@@ -266,7 +320,7 @@ describe.skipIf(process.platform === 'win32')('library permissions', () => {
 
   it('warns about a shared library folder once, at startup', async () => {
     const root = await temp();
-    chmodSync(root, 0o775);
+    chmodSync(root, 0o755);
     writeFileSync(join(root, 'notes.txt'), 'not a tree');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const app = createServer({ library: root });

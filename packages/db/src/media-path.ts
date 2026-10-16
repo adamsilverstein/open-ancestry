@@ -6,7 +6,7 @@ import {
   openSync,
   realpathSync,
   statSync,
-  type Stats,
+  type BigIntStats,
 } from 'node:fs';
 import { lstat, open, realpath, stat, type FileHandle } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
@@ -48,14 +48,14 @@ function accept(
   rootIsLink: boolean,
   realRoot: string,
   realFile: string,
-  links: number,
+  links: bigint,
   onRefuse: OnRefuse,
 ): string | null {
   const reason: MediaRefusal | null = rootIsLink
     ? 'symlinked media folder'
     : !realFile.startsWith(realRoot + sep)
       ? 'outside the media folder'
-      : links > 1
+      : links > 1n
         ? 'hard link'
         : null;
   if (reason) onRefuse?.(reason);
@@ -76,13 +76,13 @@ export function checkMediaPathSync(
   mediaRoot: string,
   localPath: string,
   onRefuse?: (reason: MediaRefusal) => void,
-): { path: string; info: Stats } | null {
+): { path: string; info: BigIntStats } | null {
   const candidate = inside(mediaRoot, localPath);
   if (!candidate) {
     onRefuse?.('outside the media folder');
     return null;
   }
-  let checked: [boolean, string, string, Stats];
+  let checked: [boolean, string, string, BigIntStats];
   try {
     const root = resolve(mediaRoot);
     // .native: the same realpath(3) the async version uses, so both agree on case.
@@ -91,7 +91,7 @@ export function checkMediaPathSync(
       lstatSync(root).isSymbolicLink(),
       realpathSync.native(root),
       realFile,
-      statSync(realFile),
+      statSync(realFile, { bigint: true }),
     ];
   } catch {
     onRefuse?.('missing');
@@ -107,21 +107,21 @@ async function resolveChecked(
   mediaRoot: string,
   localPath: string,
   onRefuse: OnRefuse,
-): Promise<{ path: string; info: Stats } | null> {
+): Promise<{ path: string; info: BigIntStats } | null> {
   const candidate = inside(mediaRoot, localPath);
   if (!candidate) {
     onRefuse?.('outside the media folder');
     return null;
   }
-  let checked: [Stats, string, string, Stats];
+  let checked: [BigIntStats, string, string, BigIntStats];
   try {
     const root = resolve(mediaRoot);
     const [rootStat, realRoot, realFile] = await Promise.all([
-      lstat(root),
+      lstat(root, { bigint: true }),
       realpath(root),
       realpath(candidate),
     ]);
-    checked = [rootStat, realRoot, realFile, await stat(realFile)];
+    checked = [rootStat, realRoot, realFile, await stat(realFile, { bigint: true })];
   } catch {
     onRefuse?.('missing');
     return null;
@@ -150,23 +150,25 @@ export async function openMediaFile(
   mediaRoot: string,
   localPath: string,
   onRefuse?: (reason: MediaRefusal) => void,
-  /** Test seam: runs between the check and the open. */
-  hooks: { afterResolve?: () => Promise<void> } = {},
-): Promise<{ handle: FileHandle; info: Stats } | null> {
+  /** Test seams: between the check and the open, and just after the open. */
+  hooks: { afterResolve?: () => Promise<void>; afterOpen?: (handle: FileHandle) => void } = {},
+): Promise<{ handle: FileHandle; info: BigIntStats } | null> {
   const checked = await resolveChecked(mediaRoot, localPath, onRefuse);
   if (!checked) return null;
   await hooks.afterResolve?.();
   let handle: FileHandle | undefined;
   try {
     handle = await open(checked.path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const info = await handle.stat();
+    hooks.afterOpen?.(handle);
+    const info = await handle.stat({ bigint: true });
     const refusal = openedRefusal(checked.info, info);
     if (!refusal) return { handle, info };
     onRefuse?.(refusal);
   } catch {
     onRefuse?.('changed');
   }
-  await handle?.close();
+  // A failed close must not hide the refusal.
+  await handle?.close().catch(() => {});
   return null;
 }
 
@@ -175,20 +177,26 @@ export function openMediaFileSync(
   mediaRoot: string,
   localPath: string,
   onRefuse?: (reason: MediaRefusal) => void,
-): { fd: number; info: Stats } | null {
+): { fd: number; info: BigIntStats } | null {
   const checked = checkMediaPathSync(mediaRoot, localPath, onRefuse);
   if (!checked) return null;
   let fd: number | undefined;
   try {
     fd = openSync(checked.path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const info = fstatSync(fd);
+    const info = fstatSync(fd, { bigint: true });
     const refusal = openedRefusal(checked.info, info);
     if (!refusal) return { fd, info };
     onRefuse?.(refusal);
   } catch {
     onRefuse?.('changed');
   }
-  if (fd !== undefined) closeSync(fd);
+  if (fd !== undefined) {
+    try {
+      closeSync(fd);
+    } catch {
+      // A failed close must not hide the refusal.
+    }
+  }
   return null;
 }
 
@@ -198,7 +206,7 @@ export function openMediaFileSync(
  * of the path: an intermediate folder swapped for a symlink since the check
  * yields another file.
  */
-function openedRefusal(checked: Stats, opened: Stats): MediaRefusal | null {
+function openedRefusal(checked: BigIntStats, opened: BigIntStats): MediaRefusal | null {
   const same = opened.isFile() && opened.dev === checked.dev && opened.ino === checked.ino;
-  return !same ? 'changed' : opened.nlink > 1 ? 'hard link' : null;
+  return !same ? 'changed' : opened.nlink > 1n ? 'hard link' : null;
 }

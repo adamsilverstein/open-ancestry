@@ -8,6 +8,7 @@ import {
   persons,
   places,
   rebuildSearchIndex,
+  countPeople,
   searchPeople,
   type TreeStore,
 } from './index';
@@ -38,6 +39,22 @@ describe('searchPeople', () => {
     expect(searchPeople(store, 'zoe angstrom').map((r) => r.person.id)).toEqual([p.id]);
     expect(searchPeople(store, 'zoe" ( * -').map((r) => r.person.id)).toEqual([p.id]);
     expect(searchPeople(store, '  ')).toEqual([]);
+    store.close();
+  });
+
+  it('orders equally good matches by name and counts every match (#280)', () => {
+    const store = memoryTree();
+    const given = ['Walter', 'Edith', 'Josiah', 'Ruth', 'Daniel', 'Emily', 'Zebulon', 'Ada'];
+    store.transact('add', (tx) => {
+      for (const g of given) persons.create(tx, { names: [{ given: g, surname: 'Ashgrove' }] });
+      persons.create(tx, { names: [{ given: 'Mabel', surname: 'Stone' }] });
+    });
+    const first = searchPeople(store, 'ashgrove', { limit: 5 }).map((r) => r.person.given);
+    expect(first).toEqual(['Ada', 'Daniel', 'Edith', 'Emily', 'Josiah']);
+    expect(countPeople(store, 'ashgrove')).toBe(8);
+    expect(countPeople(store, 'ashgr')).toBe(8);
+    expect(countPeople(store, 'nobody')).toBe(0);
+    expect(countPeople(store, '  ')).toBe(0);
     store.close();
   });
 

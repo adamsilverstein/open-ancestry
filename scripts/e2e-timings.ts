@@ -6,6 +6,7 @@
  * Usage: tsx scripts/e2e-timings.ts test-results/e2e-results.json [count]
  */
 import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 
 interface Result {
   duration: number;
@@ -65,7 +66,7 @@ export function timingsTable(timings: FileTiming[], count = 10): string {
   ].join('\n');
 }
 
-if (import.meta.filename === process.argv[1]) {
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   const [path, count] = process.argv.slice(2);
   if (!path) throw new Error('Usage: tsx scripts/e2e-timings.ts <report.json> [count]');
   const report = JSON.parse(readFileSync(path, 'utf8')) as { suites: Suite[] };

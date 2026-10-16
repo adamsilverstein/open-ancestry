@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { indexGraph, layoutFamily, layoutFan, layoutPedigree } from '@open-ancestry/core';
 import { GraphCache } from './graphCache';
+import { buildRelations, kinshipLabels } from './relations';
 import type { ApiNeighborhood, ApiPersonSummary } from './api';
 
 const summary = (id: string, extra: Partial<ApiPersonSummary> = {}): ApiPersonSummary => ({
@@ -132,6 +133,8 @@ function random(seed: number) {
   };
 }
 
+const RELS = ['biological', 'biological', 'adopted', 'step', 'foster', 'unknown'] as const;
+
 /** Messy slices: missing partners, a person as both partners, children of unloaded families. */
 function randomSlices(seed: number, count: number): ApiNeighborhood[] {
   const rnd = random(seed);
@@ -155,6 +158,8 @@ function randomSlices(seed: number, count: number): ApiNeighborhood[] {
         })),
       children: Array.from({ length: 12 }, () => ({
         ...child(pick(fams), pick(ids), rnd() < 0.5),
+        partner1Rel: pick(RELS),
+        partner2Rel: pick(RELS),
         sortOrder: Math.floor(rnd() * 4),
         childOrder: Math.floor(rnd() * 3),
       })),
@@ -211,6 +216,21 @@ describe('GraphCache.index', () => {
           layoutPedigree(cache.graph(), id, options),
         );
         expect(layoutFan(cache.index(), id)).toEqual(layoutFan(cache.graph(), id));
+      }
+    }
+  });
+
+  it('labels kin from the index as from the merged graph (step, adopted links)', () => {
+    for (let seed = 1; seed <= 20; seed++) {
+      const cache = new GraphCache();
+      for (const slice of randomSlices(seed, 4)) cache.merge(slice);
+      for (let i = 0; i < 40; i += 3) {
+        const layout = layoutFamily(cache.index(), `p${i}`, {});
+        if (!layout.focusKey) continue;
+        const sex = () => 'U' as const;
+        expect(kinshipLabels(buildRelations(layout, cache.index()), layout.focusKey, sex)).toEqual(
+          kinshipLabels(buildRelations(layout, cache.graph()), layout.focusKey, sex),
+        );
       }
     }
   });

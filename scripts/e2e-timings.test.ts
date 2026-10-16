@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { timingsByFile, timingsTable } from './e2e-timings';
+import { notRunCount, stoppedEarly, timingsByFile, timingsTable } from './e2e-timings';
 
 const spec = (file: string, ...durations: number[][]) => ({
   file,
@@ -39,5 +39,35 @@ describe('e2e timings', () => {
       { file: 'editing.spec.ts', ms: 39_312, tests: 2, retries: 1 },
       { file: 'app.spec.ts', ms: 800, tests: 1, retries: 0 },
     ]);
+  });
+
+  it('counts tests a shard never ran after stopping at maxFailures', () => {
+    const report = JSON.parse(
+      readFileSync(join(import.meta.dirname, 'fixtures', 'playwright-report.json'), 'utf8'),
+    );
+    expect(stoppedEarly(report)).toBeUndefined();
+    expect(notRunCount(report)).toBe(0);
+
+    const skipped = (expectedStatus: string) => ({
+      expectedStatus,
+      results: [{ duration: 0, retry: 0, status: 'skipped' }],
+    });
+    const stopped = {
+      suites: [
+        {
+          file: 'x.spec.ts',
+          specs: [{ file: 'x.spec.ts', tests: [skipped('passed'), skipped('passed')] }],
+        },
+        // A test.skip() is not "not run".
+        { file: 'y.spec.ts', specs: [{ file: 'y.spec.ts', tests: [skipped('skipped')] }] },
+      ],
+      errors: [
+        { message: '\u001b[31mTesting stopped early after 10 maximum allowed failures.\u001b[39m' },
+      ],
+    };
+    expect(stoppedEarly(stopped)).toBe('Testing stopped early after 10 maximum allowed failures.');
+    expect(notRunCount(stopped)).toBe(2);
+    expect(timingsTable([], 10, 2)).toContain('**2 tests not run**');
+    expect(timingsTable([], 10, 0)).not.toContain('not run');
   });
 });

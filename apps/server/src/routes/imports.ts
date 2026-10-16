@@ -205,6 +205,12 @@ export function importRoutes(app: Api, deps: Deps): void {
               folders: reimportFolders,
             });
             const stored = reimports.add(tree, upload.fileName, session);
+            // A compare that finished after its cancel was accepted (it runs in a worker)
+            // is dropped: it never changed the tree, and the page was told it stopped.
+            if (signal.aborted) {
+              reimports.remove(stored.id);
+              throw new Error('Re-import was cancelled');
+            }
             return { reimportId: stored.id, counts: session.diff.counts };
           },
           async () => {

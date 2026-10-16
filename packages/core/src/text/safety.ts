@@ -57,3 +57,14 @@ export function displayText(text: string): string {
     .replace(/ {2,}/g, ' ')
     .trim();
 }
+
+/**
+ * Stored text for a sentence such as "Merge X into Y?": cleaned, and wrapped
+ * in a first-strong isolate (U+2068...U+2069) so a right-to-left name cannot
+ * reorder the words around it (#264). Components that show such strings turn
+ * the isolates into `<bdi>`.
+ */
+export function isolate(text: string): string {
+  const shown = displayText(text);
+  return shown ? `⁨${shown}⁩` : '';
+}

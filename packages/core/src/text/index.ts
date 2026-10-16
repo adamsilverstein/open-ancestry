@@ -1,1 +1,1 @@
-export { displayText, unsafeTextReason } from './safety';
+export { displayText, isolate, unsafeTextReason } from './safety';

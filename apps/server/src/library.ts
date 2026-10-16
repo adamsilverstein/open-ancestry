@@ -84,6 +84,13 @@ export function treeNameProblem(name: string): string | null {
 }
 
 /**
+ * Zero-width characters, word joiner, BOM and the direction marks (ALM, LRM,
+ * RLM): harmless in a person's name, but two tree names that differ only by
+ * one look the same in the switcher (#264).
+ */
+const INVISIBLE = /[\u061c\u200b-\u200f\u2060\ufeff]/u;
+
+/**
  * Why `name` cannot be given to a new or renamed tree: `treeNameProblem`, or
  * text that displays as something else, such as a direction override (#190).
  * Every way a tree gets a name (the API, an upload, the CLI) comes through
@@ -91,7 +98,14 @@ export function treeNameProblem(name: string): string | null {
  */
 export function newTreeNameProblem(name: string): string | null {
   const unsafe = unsafeTextReason(name);
-  return treeNameProblem(name) ?? (unsafe ? `Tree name ${unsafe}` : null);
+  const invisible = INVISIBLE.exec(name);
+  return (
+    treeNameProblem(name) ??
+    (unsafe ? `Tree name ${unsafe}` : null) ??
+    (invisible
+      ? `Tree name contains an invisible character (U+${invisible[0].codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}), so it could look like another tree's name`
+      : null)
+  );
 }
 
 /**
@@ -106,6 +120,7 @@ export function treeNameFromFile(fileName: string): string {
     .replace(/\.[^.]*$/, '');
   // displayText drops direction overrides and turns other controls into spaces (#190).
   const name = displayText(base)
+    .replace(new RegExp(INVISIBLE, 'gu'), '')
     // eslint-disable-next-line no-control-regex
     .replace(/[/\\:*?"<>|%\u0000-\u001f\u007f]+/g, ' ')
     .replace(/\s+/g, ' ')
@@ -214,14 +229,22 @@ const HIDDEN_CHARS = /[\p{Cc}\p{Cf}]/gu;
  * depends only on each tree's own folder, so labels never swap between trees.
  */
 function withLabels(trees: TreeInfo[]): TreeInfo[] {
+  // Names that look the same count as the same (one may predate the checks, #264).
+  const seen = (tree: TreeInfo) => tree.label.replace(HIDDEN_CHARS, '');
   const counts = new Map<string, number>();
-  for (const tree of trees) counts.set(tree.name, (counts.get(tree.name) ?? 0) + 1);
+  for (const tree of trees) counts.set(seen(tree), (counts.get(seen(tree)) ?? 0) + 1);
   return trees.map((tree) => {
-    if (counts.get(tree.name)! < 2 || tree.id === tree.name) return tree;
+    if (counts.get(seen(tree))! < 2 || tree.id === tree.name) return tree;
     const folder = tree.id.replace(HIDDEN_CHARS, '') || 'copy';
-    return { ...tree, label: `${tree.name} (${folder})` };
+    return { ...tree, label: `${tree.label} (${folder})` };
   });
 }
+
+/** What a tree's name shows as: a name stored before the checks is cleaned (#264). */
+const treeLabel = (name: string, id: string) =>
+  displayText(name).replace(new RegExp(INVISIBLE, 'gu'), '') ||
+  id.replace(HIDDEN_CHARS, '') ||
+  'Untitled tree';
 
 export class Library {
   readonly root: string;
@@ -406,7 +429,7 @@ export class Library {
     if (this.stores.has(id)) return this.info(id);
     const dir = this.dirOf(id);
     const modifiedAt = statSync(treePaths(dir).database).mtime.toISOString();
-    const byFolder = { id, name: id, label: id, modifiedAt };
+    const byFolder = { id, name: id, label: treeLabel(id, id), modifiedAt };
     if ((this.lockedUntil.get(id) ?? 0) > now) return byFolder;
     this.lockedUntil.delete(id);
     let name: string | undefined;
@@ -421,7 +444,7 @@ export class Library {
       return byFolder;
     }
     const stored = name || id;
-    return { id, name: stored, label: stored, modifiedAt };
+    return { id, name: stored, label: treeLabel(stored, id), modifiedAt };
   }
 
   info(id: string): TreeInfo {
@@ -429,7 +452,7 @@ export class Library {
     return {
       id,
       name,
-      label: name,
+      label: treeLabel(name, id),
       modifiedAt: statSync(treePaths(this.dirOf(id)).database).mtime.toISOString(),
     };
   }

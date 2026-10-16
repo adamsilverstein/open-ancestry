@@ -883,3 +883,37 @@ function sortedPeople(
     cache.delete(old);
   return ids;
 }
+
+export interface PlaceSuggestion {
+  id: string;
+  full_name: string;
+}
+
+/**
+ * Places for suggestions while typing (#280): each full name once, those
+ * starting with `query` first (a range on the NOCASE index, so no scan),
+ * then names containing it to fill `limit`. LIKE wildcards in the text are
+ * literal.
+ */
+export function suggestPlaces(store: TreeStore, query: string, limit = 10): PlaceSuggestion[] {
+  const text = query.trim();
+  if (!text || limit < 1) return [];
+  const prefix = store
+    .stmt(
+      `SELECT min(id) AS id, full_name FROM place
+       WHERE full_name >= @text COLLATE NOCASE AND full_name < @text || char(1114111) COLLATE NOCASE
+       GROUP BY full_name COLLATE NOCASE ORDER BY full_name COLLATE NOCASE LIMIT @limit`,
+    )
+    .all({ text, limit }) as PlaceSuggestion[];
+  if (prefix.length >= limit) return prefix;
+  const like = text.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const contains = store
+    .stmt(
+      `SELECT min(id) AS id, full_name FROM place
+       WHERE full_name LIKE '%' || @like || '%' ESCAPE '\\'
+         AND NOT (full_name >= @text COLLATE NOCASE AND full_name < @text || char(1114111) COLLATE NOCASE)
+       GROUP BY full_name COLLATE NOCASE ORDER BY full_name COLLATE NOCASE LIMIT @rest`,
+    )
+    .all({ like, text, rest: limit - prefix.length }) as PlaceSuggestion[];
+  return [...prefix, ...contains];
+}

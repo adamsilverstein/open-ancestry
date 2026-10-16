@@ -1,13 +1,18 @@
 import { toNFC, type MediaKind } from '@open-ancestry/db';
 import { safeEntryPath } from '@open-ancestry/gedcom';
 import {
+  closeSync,
+  constants,
+  fstatSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   readdirSync,
   realpathSync,
-  statSync,
   writeFileSync,
+  type BigIntStats,
   type Stats,
 } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
@@ -84,6 +89,54 @@ export function kindFromType(value: string | undefined): MediaKind | undefined {
   if (/video|film/.test(v)) return 'video';
   if (/photo|image|portrait|tombstone|picture/.test(v)) return 'photo';
   return 'document';
+}
+
+/** A media folder file that must not be copied: `reason` completes "Media file X ...". */
+export class MediaRefusedError extends Error {
+  readonly reason: string;
+
+  constructor(path: string, reason: string) {
+    super(`${path} ${reason}`);
+    this.name = 'MediaRefusedError';
+    this.reason = reason;
+  }
+}
+
+/**
+ * Reads a media folder file as the walk found it (#266): through a descriptor
+ * that won't follow a symlink, and only if it is still the same file and has
+ * no other hard link, so neither a link to another of the user's files nor a
+ * swap after the walk is copied into the tree.
+ */
+function readWalked(full: string, path: string, walked: BigIntStats): Uint8Array {
+  const changed = () => new MediaRefusedError(path, 'changed after the media folder was read');
+  // O_NOFOLLOW is 0 where the platform has none (Windows): the checks below still apply.
+  const fd = openSync(full, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    // Bigints: a file index past 2^53 (NTFS, some network file systems) must not round.
+    const opened = fstatSync(fd, { bigint: true });
+    if (
+      opened.dev !== walked.dev ||
+      opened.ino !== walked.ino ||
+      opened.size !== walked.size ||
+      !opened.isFile()
+    ) {
+      throw changed();
+    }
+    if (opened.nlink > 1n) throw new MediaRefusedError(path, 'is a hard link');
+    // At most one byte past the size the caps were checked against: a file growing
+    // while it is read is refused, not read into memory whole.
+    const size = Number(walked.size);
+    const bytes = new Uint8Array(size + 1);
+    let read = 0;
+    for (let n; read <= size && (n = readSync(fd, bytes, read, size + 1 - read, null)) > 0;) {
+      read += n;
+    }
+    if (read !== size) throw changed();
+    return bytes.subarray(0, size);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 interface SourceFile {
@@ -175,16 +228,17 @@ export class MediaSource {
         if (entry.isDirectory()) walk(full, rel, depth + 1);
         // A name with a backslash would not survive as a forward-slash relative path.
         else if (entry.isFile() && safeEntryPath(rel) === rel) {
+          let walked: BigIntStats;
+          try {
+            walked = lstatSync(full, { bigint: true });
+          } catch {
+            continue;
+          }
+          if (!walked.isFile()) continue;
           files.push({
             path: rel,
-            get size() {
-              try {
-                return statSync(full).size;
-              } catch {
-                return 0;
-              }
-            },
-            read: () => readFileSync(full),
+            size: Number(walked.size),
+            read: () => readWalked(full, rel, walked),
           });
         }
       }

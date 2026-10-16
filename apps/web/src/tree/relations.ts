@@ -1,10 +1,10 @@
-import type {
-  ChildRelation,
-  LayoutNode,
-  TreeFamily,
-  TreeFamilyChild,
-  TreeGraph,
-  TreeLayout,
+import {
+  asIndex,
+  type ChildRelation,
+  type GraphSource,
+  type LayoutNode,
+  type TreeFamily,
+  type TreeLayout,
 } from '@open-ancestry/core';
 
 /**
@@ -54,7 +54,7 @@ function linker() {
 
 const rowKey = (n: LayoutNode) => `${n.generation}:${n.y}`;
 
-export function buildRelations(layout: TreeLayout, graph?: TreeGraph): Relations {
+export function buildRelations(layout: TreeLayout, graph?: GraphSource): Relations {
   const nodes = new Map(layout.nodes.map((n) => [n.key, n]));
   const parents = linker();
   const children = linker();
@@ -80,22 +80,15 @@ export function buildRelations(layout: TreeLayout, graph?: TreeGraph): Relations
       }
     }
   }
-  const families = new Map(graph?.families.map((f) => [f.id, f]));
-  // Each family's child entries by person, built once (a scan per child would be k²).
-  const entries = new Map<string, Map<string, TreeFamilyChild>>();
-  const entryOf = (family: TreeFamily, personId: string | undefined) => {
-    let byId = entries.get(family.id);
-    if (!byId) {
-      byId = new Map();
-      for (const c of family.children) if (!byId.has(c.id)) byId.set(c.id, c);
-      entries.set(family.id, byId);
-    }
-    return personId === undefined ? undefined : byId.get(personId);
-  };
+  // Lookups by id through the index (the worker's is kept with its graph cache),
+  // so labelling costs the cards on screen, not every family merged.
+  const index = graph && asIndex(graph);
+  const entryOf = (family: TreeFamily, personId: string | undefined) =>
+    personId === undefined ? undefined : index?.entry(family, personId);
   for (const [group, kids] of groupChildren.lists) {
     const ps = groupParents.lists.get(group) ?? [];
     for (const kid of kids) {
-      const family = families.get(childFamily.get(`${group}\n${kid}`)!);
+      const family = index?.family(childFamily.get(`${group}\n${kid}`)!);
       const entry = family && entryOf(family, nodes.get(kid)?.personId);
       for (const p of ps) {
         parents.push(kid, p);

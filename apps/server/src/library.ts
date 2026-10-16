@@ -8,10 +8,11 @@ import {
   ensurePrivateDir,
   meta,
   openTree,
+  readTreeName,
   treePaths,
   type TreeStore,
 } from '@open-ancestry/db';
-import { ApiError, conflict, notFound } from './errors';
+import { ApiError, busy, conflict, notFound } from './errors';
 import type { ReimportFolders } from './reimport-folders';
 
 /*
@@ -35,6 +36,8 @@ export const MAX_TREE_NAME_LENGTH = 100;
  * since the wait blocks the event loop.
  */
 export const LIBRARY_BUSY_TIMEOUT_MS = 50;
+/** How long the list shows a locked tree by folder name before trying it again. */
+const LOCKED_LIST_MS = 2000;
 
 /** `~/OpenAncestry`, or OA_LIBRARY when set. */
 export function defaultLibraryRoot(env: NodeJS.ProcessEnv = process.env): string {
@@ -121,6 +124,8 @@ export class Library {
   /** Trees that must not be renamed or deleted right now (e.g. importing). */
   /** Trees with an import queued or running, and how many. */
   private readonly busy = new Map<string, number>();
+  /** Trees another process had locked when last listed, until when to skip them. */
+  private readonly lockedUntil = new Map<string, number>();
 
   /**
    * The re-import folders of the server using this library: opening a tree
@@ -267,6 +272,9 @@ export class Library {
 
   list(): TreeInfo[] {
     this.ensureRoot();
+    const now = Date.now();
+    // Forget trees that were locked a while ago, including deleted or renamed ones.
+    for (const [id, until] of this.lockedUntil) if (until <= now) this.lockedUntil.delete(id);
     const trees = readdirSync(this.root, { withFileTypes: true })
       .filter((d) => d.isDirectory() && d.name.endsWith(TREE_EXTENSION) && !d.name.startsWith('.'))
       .map((d) => d.name.slice(0, -TREE_EXTENSION.length))
@@ -275,8 +283,40 @@ export class Library {
           treeNameProblem(id) === null &&
           existsSync(treePaths(join(this.root, `${id}${TREE_EXTENSION}`)).database),
       )
-      .map((id) => this.info(id));
+      .map((id) => this.listedInfo(id, now));
     return withLabels(trees).sort((a, b) => a.label.localeCompare(b.label));
+  }
+
+  /**
+   * What the list shows for a tree. A tree not open yet is read through a
+   * short-lived read-only connection rather than opened: opening runs any
+   * pending upgrade, and waiting on another process's upgrade (up to 30 s)
+   * would freeze every page. A tree that can't be read right now (another
+   * process holds its lock, a crashed writer left it needing recovery, its file
+   * is damaged) is listed under its folder name, so one tree never fails the
+   * whole list; opening it reports the problem. A locked tree is skipped
+   * briefly so each list does not wait on it again.
+   */
+  private listedInfo(id: string, now: number): TreeInfo {
+    if (this.stores.has(id)) return this.info(id);
+    const dir = this.dirOf(id);
+    const modifiedAt = statSync(treePaths(dir).database).mtime.toISOString();
+    const byFolder = { id, name: id, label: id, modifiedAt };
+    if ((this.lockedUntil.get(id) ?? 0) > now) return byFolder;
+    this.lockedUntil.delete(id);
+    let name: string | undefined;
+    try {
+      name = readTreeName(dir, { busyTimeoutMs: LIBRARY_BUSY_TIMEOUT_MS });
+    } catch (error) {
+      // A planted link or another account's file is refused, as when opening.
+      if (error instanceof TreeAccessError) throw new ApiError(403, 'forbidden', error.message);
+      if ((error as { code?: string }).code?.startsWith('SQLITE_BUSY')) {
+        this.lockedUntil.set(id, now + LOCKED_LIST_MS);
+      }
+      return byFolder;
+    }
+    const stored = name || id;
+    return { id, name: stored, label: stored, modifiedAt };
   }
 
   info(id: string): TreeInfo {
@@ -458,7 +498,7 @@ export class Library {
 
   /** Throws 409 while the tree is importing. */
   assertIdle(id: string): void {
-    if (this.isBusy(id)) throw conflict(`Tree "${id}" is busy (an import is running)`);
+    if (this.isBusy(id)) throw busy(`Tree "${id}" is busy (an import is running)`);
   }
 
   private close(tree: string): void {

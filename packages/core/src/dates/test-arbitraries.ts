@@ -173,6 +173,19 @@ export const arbDateText: fc.Arbitrary<string> = fc.oneof(
     .tuple(fc.constantFrom('ABT', 'BEF', 'AFT', 'EST'), arbCalendarText)
     .map(([q, d]) => `${q} ${d}`),
   arbMixedRange,
+  // A note after a qualified date (#272): the qualifier is kept.
+  fc
+    .tuple(
+      fc.constantFrom('ABT', 'CAL', 'EST', 'BEF', 'AFT'),
+      arbPoint,
+      fc.constantFrom('per census', 'family story', 'from age 40'),
+    )
+    .map(([q, p, note]) => `${q} ${pointText(p)} (${note})`),
+  // Dual-dated leap days, which exist only in the new-style year (#272).
+  fc
+    .integer({ min: 1000, max: 1998 })
+    .filter((y) => ((y + 1) % 4 === 0 && (y + 1) % 100 !== 0) || (y + 1) % 400 === 0)
+    .map((y) => `29 FEB ${y}/${String((y + 1) % 100).padStart(2, '0')}`),
 
   arbSpanDate.map((d) => d.text),
 );

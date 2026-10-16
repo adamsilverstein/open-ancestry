@@ -182,6 +182,95 @@ test('highlights in the fan chart too', async ({ page, request }) => {
   );
 });
 
+type Box = { x: number; y: number; width: number; height: number };
+const overlaps = (a: Box, b: Box) =>
+  a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+
+test('keeps the top-of-tree notice clear of the highlight pill', async ({ page, request }) => {
+  const base = `/api/trees/${encodeURIComponent(tree)}`;
+  await send(request, seedSession, 'post', `${base}/people/${rowan}/parents`, {
+    person: person('Edmund', 'Ashdown', 'M', '1850'),
+  });
+  await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+  await page.goto(`/tree/${rowan}?tag=${smiths}&layout=fan&up=10`);
+  const note = page.getByRole('status').filter({ hasText: 'The fan shows 6 generations' });
+  const pill = page.getByRole('status').filter({ hasText: 'tagged Smiths' });
+  await expect(note).toBeVisible();
+  await expect(pill).toBeVisible();
+  expect(overlaps((await note.boundingBox())!, (await pill.boundingBox())!)).toBe(false);
+  // Nothing on top of the link: a click reaches it.
+  await note.getByRole('link', { name: 'Open the pedigree' }).click({ trial: true });
+  await note.getByRole('link', { name: 'Open the pedigree' }).click();
+  await expect(page).toHaveURL(/layout=pedigree/);
+});
+
+test.describe('highlight pill on a phone', () => {
+  test.use({ viewport: { width: 320, height: 640 }, hasTouch: true, isMobile: true });
+
+  test.beforeEach(async ({ request }) => {
+    // Grandparents to children: more rows than fit, so the view starts at the top.
+    const base = `/api/trees/${encodeURIComponent(tree)}`;
+    const parent = async (child: string, name: string, sex: 'M' | 'F', year: string) =>
+      (
+        await send<{ parentId: string }>(
+          request,
+          seedSession,
+          'post',
+          `${base}/people/${child}/parents`,
+          {
+            person: person(name, 'Ashdown', sex, year),
+          },
+        )
+      ).parentId;
+    const edmund = await parent(rowan, 'Edmund', 'M', '1850');
+    await parent(rowan, 'Clara', 'F', '1853');
+    await parent(edmund, 'Silas', 'M', '1820');
+    await parent(edmund, 'Maud', 'F', '1824');
+    await send(request, seedSession, 'post', `${base}/people/${rowan}/children`, {
+      person: person('Tobias', 'Ashdown', 'M', '1910'),
+    });
+  });
+
+  test('leaves the focus card and the rows above it uncovered', async ({ page }) => {
+    await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+    await page.goto(`/tree/${rowan}?tag=${smiths}`);
+    const pill = page.getByRole('status').filter({ hasText: 'tagged Smiths' });
+    await expect(pill).toBeVisible();
+    await expect(page.getByTestId('tree-world')).not.toHaveAttribute('data-animating');
+    const pillBox = (await pill.boundingBox())!;
+    for (const name of ['Rowan Ashdown', 'Edmund Ashdown', 'Silas Ashdown']) {
+      const card = page.locator(`[data-key][aria-label^="${name}"]`).first();
+      await expect(card).toBeVisible();
+      expect(overlaps((await card.boundingBox())!, pillBox), name).toBe(false);
+    }
+  });
+
+  test('gives the pill buttons 44px touch targets', async ({ page, request }) => {
+    const base = `/api/trees/${encodeURIComponent(tree)}`;
+    const wren = (
+      await send<{ person: { id: string } }>(
+        request,
+        seedSession,
+        'post',
+        `${base}/people`,
+        person('Wren', 'Hollis', 'F', '1900'),
+      )
+    ).person.id;
+    await send(request, seedSession, 'post', `${base}/people/${wren}/tags`, { tagId: smiths });
+    await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+    await page.goto(`/tree/${rowan}?tag=${smiths}`);
+    const pill = page.getByRole('status').filter({ hasText: 'tagged Smiths' });
+    const buttons = pill.getByRole('button');
+    await expect(buttons).toHaveCount(2);
+    for (const button of await buttons.all()) {
+      const b = (await button.boundingBox())!;
+      const name = (await button.textContent()) ?? '';
+      expect(b.height, name).toBeGreaterThanOrEqual(44);
+      expect(b.width, name).toBeGreaterThanOrEqual(44);
+    }
+  });
+});
+
 test('is reachable from the command palette and the people list', async ({ page }) => {
   await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
   await page.goto('/people');

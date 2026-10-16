@@ -709,7 +709,7 @@ export function applyReimport(
       for (const u of lines) tx.insert('unmapped_line', { ...u, id: undefined } as never);
     }
     recordStale(tx, batch.id, stale);
-    recordBase(tx, batch.id, session, incAll);
+    recordBase(tx, batch.id, session, incAll, chosen);
     return applied;
   };
   let batchId: string;
@@ -756,6 +756,8 @@ function recordBase(
   importBatchId: string,
   session: ReimportSession,
   incAll: <T>(sql: string, ...params: unknown[]) => T[],
+  /** Changes the user ticked for this apply. */
+  chosen: ReadonlySet<string>,
 ) {
   const images: Record<string, unknown> = {};
   for (const person of session.diff.people) {
@@ -764,7 +766,12 @@ function recordBase(
       else if (c.kind === 'fact.add' && c.deletedEventId) {
         images[`event|${c.deletedEventId}`] = imageOfView(c.fact);
       } else if (c.kind === 'media.replace') {
-        // The export's file, applied or declined: a declined one stays settled.
+        // Only a replacement left unticked stores the export's file, so it stays
+        // settled. A ticked one stores nothing: written, its media row write is
+        // the new base; its copy refused (too large, unsafe), it is not settled at
+        // all, and the next re-import offers it again (the one exception to "a
+        // row written settles it", by decision on #252/#257).
+        if (chosen.has(c.id)) continue;
         const m = incAll<{ sha256: string | null }>(
           'SELECT sha256 FROM media WHERE id = ?',
           c.incomingMediaId,

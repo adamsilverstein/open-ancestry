@@ -1008,8 +1008,17 @@ export function diffTrees(
         return m ? `media-file|${c.existingMediaId}|${m.sha256 ?? ''}` : undefined;
       }
       case 'person.new': {
+        // Name and birth year, and who their parents and partners are: two people
+        // of one name and year are told apart by their family, as matching does.
         const p = incoming.people.get(c.incomingId);
-        return p ? `person|${norm(displayName(p))}|${p.birthYear ?? ''}` : undefined;
+        if (!p) return undefined;
+        const names = (ids: string[]) =>
+          ids
+            .map((id) => incoming.people.get(id))
+            .map((x) => (x ? norm(displayName(x)) : ''))
+            .sort()
+            .join('+');
+        return `person|${norm(displayName(p))}|${p.birthYear ?? ''}|${names(p.parents)}|${names(p.spouses)}`;
       }
       case 'family.add':
         return `family|${c.partnerNames.map(norm).sort().join('+')}`;

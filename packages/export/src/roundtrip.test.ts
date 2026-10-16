@@ -193,3 +193,42 @@ describe('decade and century periods', () => {
     expect(columns(await importInto(exportGedcom(store, { now: TODAY })))).toEqual(before);
   });
 });
+
+describe(
+  'dual-dated leap days and qualified dates with a phrase (#272)',
+  { timeout: 30_000 },
+  () => {
+    const source = ged(
+      '0 @I1@ INDI',
+      '1 NAME Ada /Leap/',
+      '1 BIRT',
+      '2 DATE 29 FEB 1751/52',
+      '1 RESI',
+      '2 DATE BEF 1850 (per census)',
+    );
+
+    it('writes GEDCOM 7 with the new-style year and the qualifier, the original as PHRASE', async () => {
+      const store = await importInto(source);
+      const out = exportGedcom(store, { version: '7', now: TODAY });
+      expect(gedcom7Problems(out)).toEqual([]);
+      // 29 February only exists in the new-style year.
+      expect(out).toContain('2 DATE 29 FEB 1752\n3 PHRASE 29 FEB 1751/52\n');
+      expect(out).toContain('2 DATE BEF 1850\n3 PHRASE BEF 1850 (per census)\n');
+      const again = await importInto(out);
+      expect(rows(again, 'SELECT date_text, date_qualifier FROM event ORDER BY date_text')).toEqual(
+        [
+          { date_text: '29 FEB 1751/52', date_qualifier: 'exact' },
+          { date_text: 'BEF 1850 (per census)', date_qualifier: 'before' },
+        ],
+      );
+    });
+
+    it('keeps both dates as written in GEDCOM 5.5.1', async () => {
+      const store = await importInto(source);
+      store.db.exec('DELETE FROM raw_record');
+      const out = exportGedcom(store, { version: '5.5.1', now: TODAY });
+      expect(out).toContain('2 DATE 29 FEB 1751/52\n');
+      expect(out).toContain('2 DATE BEF 1850 (per census)\n');
+    });
+  },
+);

@@ -227,14 +227,21 @@ describe('lifetime window', () => {
 
   describe('family events that may follow the death', () => {
     const partner = detail.partnerFamilies[0]!;
-    const withPartnerDeath = (dateText: string, dateSort: number) =>
+    const withPartnerDeath = (dateText: string, dateSort: number, sex: 'M' | 'F' | 'U' = 'M') =>
       buildTimeline({
         ...withSummary('1880', '4 NOV 1911'),
         summary: {
           ...withSummary('1880', '4 NOV 1911').summary,
+          sex,
           death: { ...brief('4 NOV 1911', 19111104), type: 'DEAT' },
         },
-        events: detail.events.filter((e) => e.event.type === 'DEAT'),
+        // The person's own death, on the date the summary gives.
+        events: detail.events
+          .filter((e) => e.event.type === 'DEAT')
+          .map((e) => ({
+            ...e,
+            event: { ...e.event, date_text: '4 NOV 1911', date_sort: 19111104 },
+          })),
         parentFamilies: [],
         partnerFamilies: [
           {
@@ -247,15 +254,28 @@ describe('lifetime window', () => {
       });
     const titles = (entries: ReturnType<typeof buildTimeline>) => entries.map((e) => e.title);
 
-    it('keeps a BEF death that straddles the death date before it, with no age', () => {
+    it('sorts a BEF death that straddles the death date by its date, with no age (#278)', () => {
+      // "bef. 1920" sorts after a 1911 death, like every other date in the app.
       const entries = withPartnerDeath('BEF 1920', 19200100);
-      expect(titles(entries)).toEqual(['Death of wife Iris Vale', 'Death']);
-      expect(entries[0]!.age).toBeUndefined();
+      expect(titles(entries)).toEqual([
+        'Death',
+        'Death of wife Iris Vale (may be after his death)',
+      ]);
+      expect(entries[1]!.age).toBeUndefined();
+    });
+
+    it('says "their death" when the person’s sex is unknown', () => {
+      expect(titles(withPartnerDeath('BEF 1920', 19200100, 'U'))).toContain(
+        'Death of wife Iris Vale (may be after their death)',
+      );
     });
 
     it('keeps an AFT death that starts in the lifetime, with no age', () => {
       const entries = withPartnerDeath('AFT 1905', 19051232);
-      expect(titles(entries)).toEqual(['Death of wife Iris Vale', 'Death']);
+      expect(titles(entries)).toEqual([
+        'Death of wife Iris Vale (may be after his death)',
+        'Death',
+      ]);
       expect(entries[0]!.age).toBeUndefined();
     });
 

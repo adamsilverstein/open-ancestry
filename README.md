@@ -6,6 +6,7 @@ An open source, local-first, very fast family tree app. Import your Ancestry.com
 - Implementation plan: [docs/spec/plan.md](docs/spec/plan.md)
 - Design system: [docs/design-system.md](docs/design-system.md)
 - Contributing: [AGENTS.md](AGENTS.md)
+- What v1 does: [docs/CHANGELOG.md](docs/CHANGELOG.md)
 
 Status: under active initial development.
 

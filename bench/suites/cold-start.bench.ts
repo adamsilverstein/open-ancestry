@@ -1,15 +1,15 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BenchCase } from '../types';
+import { makeTempDir } from '../../fixtures/temp-dir';
 
 // design.md section 7: server cold start to first API response < 300ms; issue
 // #54 targets a 200ms median. Measured on the built CLI exactly as users start
 // it: process spawn until /api/health answers.
 const cli = join(import.meta.dirname, '..', '..', 'apps', 'cli', 'dist', 'cli.js');
-const library = mkdtempSync(join(tmpdir(), 'oa-bench-cold-'));
+const library = makeTempDir('oa-bench-cold-');
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {

@@ -44,7 +44,8 @@ import type {
   Span,
 } from './types';
 import { isVirtualParent } from './graph';
-import { isBirthParent, lineQualifier, parentLink } from '../kin';
+import type { ChildRelation } from '../layout/types';
+import { isBirthParent, isParent, lineQualifier, parentLink } from '../kin';
 
 interface Arrival {
   id: string;
@@ -129,16 +130,6 @@ function joinPath(a: Arrival, b: Arrival): RelationshipPath {
   };
 }
 
-/** Recorded parent ids of `child` (not parentless-family stand-ins), biological only when `bio`. */
-function parentSet(g: KinshipGraph, child: string, bio: boolean): Set<string> {
-  return new Set(
-    g
-      .parents(child)
-      .filter((p) => (!bio || isBirthParent(p.rel)) && !isVirtualParent(p.id))
-      .map((p) => p.id),
-  );
-}
-
 /**
  * Half when the two children below the common ancestor have different
  * recorded parents. Compared by person, not family record, so duplicate
@@ -147,10 +138,37 @@ function parentSet(g: KinshipGraph, child: string, bio: boolean): Set<string> {
  * nothing to compare, so the siblings count as full.
  */
 function isHalf(g: KinshipGraph, childA: string, childB: string, bio: boolean): boolean {
-  const pa = parentSet(g, childA, bio);
-  const pb = parentSet(g, childB, bio);
+  // Compared by birth, a shared parent who is the birth parent of exactly one
+  // of them (the other adopted, say) makes them half, as core siblingKind
+  // says; one who is birth parent to neither leaves them full.
+  const set = (child: string) =>
+    new Set(
+      g
+        .parents(child)
+        .filter((p) => !isVirtualParent(p.id) && (!bio || isBirthParent(p.rel)))
+        .map((p) => p.id),
+    );
+  const pa = set(childA);
+  const pb = set(childB);
   if (pa.size === 0 || pb.size === 0) return false;
   return pa.size !== pb.size || [...pa].some((p) => !pb.has(p));
+}
+
+/**
+ * Of several lines through different parents, the one naming the
+ * relationship when none is by birth: by birth or adoption (family) first,
+ * then one with a step link, then care, as core siblingKind ranks them.
+ */
+function bestLine<T>(lines: readonly T[], rels: (line: T) => (ChildRelation | undefined)[]): T {
+  const rank = (line: T) => {
+    const links = rels(line);
+    if (links.every((r) => isParent(r))) return 0;
+    if (links.some((r) => parentLink(r) === 'step')) return 1;
+    return 2;
+  };
+  let best = lines[0] as T;
+  for (const line of lines) if (rank(line) < rank(best)) best = line;
+  return best;
 }
 
 /** The ancestors of one person: walked fresh, or from a calculator's cache. */
@@ -187,15 +205,22 @@ function bloodRelationships(
   const named = [...groups.values()].map((lines) => {
     const shape: Shape = { up: lines[0]!.a.depth, down: lines[0]!.b.depth };
     const bio = lines.filter((l) => l.a.bio && l.b.bio);
-    const main = bio[0] ?? lines[0]!;
+    const main = bio[0] ?? bestLine(lines, (l) => [...l.a.steps, ...l.b.steps].map((s) => s.rel));
     const path = joinPath(main.a, main.b);
     const collateral = shape.up > 0 && shape.down > 0;
     const half = collateral && isHalf(g, main.a.path.at(-2)!, main.b.path.at(-2)!, bio.length > 0);
     const modifier = bio.length ? undefined : modifierOf(path, shape.up);
-    return { lines, shape, half, name: bloodName(shape, g.sex(a), half, modifier, style), path };
+    const name = bloodName(shape, g.sex(a), half, modifier, style);
+    return { lines, shape, half, blood: bio.length > 0, name, path };
   });
+  // Closest first; at one distance, blood before adoption, step or care: a
+  // half-uncle by birth is named so, not as an adoptive uncle by the same
+  // family (one rule with the tree cards, through core kin).
   named.sort(
-    (x, y) => x.shape.up + x.shape.down - (y.shape.up + y.shape.down) || x.shape.up - y.shape.up,
+    (x, y) =>
+      x.shape.up + x.shape.down - (y.shape.up + y.shape.down) ||
+      x.shape.up - y.shape.up ||
+      Number(y.blood) - Number(x.blood),
   );
 
   const byName = new Map<string, Relationship>();
@@ -361,9 +386,34 @@ function peaks(segment: Segment): Segment[] {
 function runName(g: KinshipGraph, run: Segment, style: NameStyle): { shape: Shape; name: string } {
   const up = run.steps.filter((s) => s.kind === 'parent').length;
   const shape: Shape = { up, down: run.steps.length - up };
-  const bio = run.steps.every((s) => !s.rel || isBirthParent(s.rel));
+  const birth = (s: PathStep) => !s.rel || isBirthParent(s.rel);
+  let bio = run.steps.every(birth);
+  // The search may have crossed the top through an adoptive or step parent
+  // while the two children below it also share a birth parent: blood wins,
+  // as in bloodRelationships (a half-uncle, not an adoptive uncle).
+  let steps = run.steps;
+  if (!bio && shape.up > 0 && shape.down > 0) {
+    const [a, b] = [run.ids[up - 1]!, run.ids[up + 1]!];
+    // Every parent the two children share, with each child's link to them.
+    const theirs = new Map(g.parents(b).map((p) => [p.id, p.rel]));
+    const tops = g
+      .parents(a)
+      .filter((p) => theirs.has(p.id) && !isVirtualParent(p.id))
+      .map(
+        (p) => [p.rel, theirs.get(p.id)] as [ChildRelation | undefined, ChildRelation | undefined],
+      );
+    const rest = run.steps.every((s, i) => i === up - 1 || i === up || birth(s));
+    if (tops.length) {
+      const top =
+        tops.find(([x, y]) => isBirthParent(x) && isBirthParent(y)) ?? bestLine(tops, (t) => t);
+      steps = run.steps.map((s, i) =>
+        i === up - 1 ? { ...s, rel: top[0]! } : i === up ? { ...s, rel: top[1]! } : s,
+      );
+      bio = rest && isBirthParent(top[0]) && isBirthParent(top[1]);
+    }
+  }
   const half = shape.up > 0 && shape.down > 0 && isHalf(g, run.ids[up - 1]!, run.ids[up + 1]!, bio);
-  const modifier = bio ? undefined : modifierOf(run, up);
+  const modifier = bio ? undefined : modifierOf({ ...run, steps }, up);
   return { shape, name: bloodName(shape, g.sex(run.ids[0]!), half, modifier, style) };
 }
 

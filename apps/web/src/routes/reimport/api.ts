@@ -15,18 +15,22 @@ export type ReviewChange = {
   key: string;
   defaultAccept: boolean;
   applicable: boolean;
-  conflict?: 'local-edit' | 'local-delete';
+  conflict?: 'local-edit' | 'local-delete' | 'renamed-place';
   requires?: string[];
+  /** Part of a place rename (`diff.exportPlaceRenames`, by key): shown and chosen with it. */
+  exportPlaceRename?: string;
 } & (
   | { kind: 'person.new'; incomingId: string }
   | { kind: 'sex'; before: string; after: string }
-  | { kind: 'name.add'; name: string; nameType: string }
+  | { kind: 'name.add'; name: string; nameType: string | null; was?: string }
   | { kind: 'fact.add'; fact: FactView; owner: 'person' | 'family' }
-  | { kind: 'fact.change'; before: FactView; after: FactView }
+  | { kind: 'fact.change'; before: FactView; after: FactView; keepPlace?: true }
   | { kind: 'fact.missing'; fact: FactView }
   | { kind: 'citation.add'; source: string; page: string | null; apid: string | null }
   | { kind: 'tag.add'; tag: string }
   | { kind: 'media.add'; title: string | null }
+  | { kind: 'media.file'; title: string | null }
+  | { kind: 'media.replace'; title: string | null }
   | { kind: 'family.add'; partnerNames: string[] }
   | { kind: 'child.add'; parentNames: string[] }
   | { kind: 'person.missing' }
@@ -51,6 +55,13 @@ export interface PersonReview {
   changes: ReviewChange[];
 }
 
+export interface ExportPlaceRename {
+  key: string;
+  from: string;
+  to: string;
+  changeIds: string[];
+}
+
 export interface ReimportReview {
   id: string;
   tree: string;
@@ -63,6 +74,8 @@ export interface ReimportReview {
   comparison: number;
   diff: {
     people: PersonReview[];
+    /** Places the export renamed (#279): one item for every fact change that only moves facts there. */
+    exportPlaceRenames: ExportPlaceRename[];
     counts: {
       incoming: number;
       matched: number;
@@ -95,10 +108,13 @@ export const refreshReimport = (id: string) =>
   apiSend<ReimportReview>('POST', `/reimports/${seg(id)}/refresh`);
 
 export const applyReimport = (id: string, comparison: number, accept: string[]) =>
-  apiSend<{ batchId: string; applied: number; skipped: number; blocked: string[] }>(
-    'POST',
-    `/reimports/${seg(id)}/apply`,
-    { accept, comparison },
-  );
+  apiSend<{
+    batchId: string;
+    applied: number;
+    skipped: number;
+    blocked: string[];
+    /** Added people's incoming ids to their ids in the tree. */
+    newPeople: Record<string, string>;
+  }>('POST', `/reimports/${seg(id)}/apply`, { accept, comparison });
 
 export const discardReimport = (id: string) => apiSend<void>('DELETE', `/reimports/${seg(id)}`);

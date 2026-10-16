@@ -1,0 +1,135 @@
+{
+  "config": { "version": "1.64.0", "workers": 2 },
+  "suites": [
+    {
+      "title": "editing.spec.ts",
+      "file": "editing.spec.ts",
+      "line": 0,
+      "column": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "person",
+          "file": "editing.spec.ts",
+          "line": 27,
+          "column": 6,
+          "specs": [
+            {
+              "title": "edits names, sex and living status",
+              "ok": true,
+              "tags": [],
+              "id": "a1",
+              "file": "editing.spec.ts",
+              "line": 28,
+              "column": 3,
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "chromium",
+                  "projectName": "chromium",
+                  "status": "flaky",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "status": "failed",
+                      "duration": 30012,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-16T02:55:20.000Z",
+                      "attachments": []
+                    },
+                    {
+                      "workerIndex": 1,
+                      "status": "passed",
+                      "duration": 4100,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 1,
+                      "startTime": "2026-10-16T02:55:51.000Z",
+                      "attachments": []
+                    }
+                  ]
+                },
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "webkit",
+                  "projectName": "webkit",
+                  "status": "expected",
+                  "results": [
+                    {
+                      "workerIndex": 1,
+                      "status": "passed",
+                      "duration": 5200,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-16T02:55:20.000Z",
+                      "attachments": []
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "app.spec.ts",
+      "file": "app.spec.ts",
+      "line": 0,
+      "column": 0,
+      "specs": [
+        {
+          "title": "loads the app shell",
+          "ok": true,
+          "tags": [],
+          "id": "b1",
+          "file": "app.spec.ts",
+          "line": 4,
+          "column": 1,
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "chromium",
+              "projectName": "chromium",
+              "status": "expected",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "status": "passed",
+                  "duration": 800,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-16T02:55:20.000Z",
+                  "attachments": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-16T02:55:19.000Z",
+    "duration": 36000,
+    "expected": 2,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 1
+  }
+}

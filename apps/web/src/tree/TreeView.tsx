@@ -634,7 +634,10 @@ export function TreeView({
           ? { focus: id, up: 3, down: 0 }
           : direction === 'down' && cache.needsChildren(id)
             ? { focus: id, up: 0, down: 3 }
-            : null;
+            : direction === 'siblings' && cache.needsSiblings(id)
+              ? // The person's parents and every child of theirs, half siblings too.
+                { focus: id, up: 1, down: 0, siblingsDepth: 1 }
+              : null;
       if (more) {
         // On failure the rest of the tree stays, with a Retry notice.
         ensure(more).catch(() =>

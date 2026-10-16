@@ -32,6 +32,7 @@ export const {
   NeighborhoodQuery,
   RelationshipQuery,
   SearchQuery,
+  PlacesQuery,
   HistoryQuery,
   UndoQuery,
   HomeBody,

@@ -57,14 +57,63 @@ function scanHeader(bytes: Uint8Array): { charset?: string; version?: string } {
   const head = end === -1 ? rest : rest.slice(0, end);
   return {
     charset: /^[ \t]*1[ \t]+CHAR[ \t]+(\S+)/m.exec(head)?.[1],
-    version: /^[ \t]*2[ \t]+VERS[ \t]+(\S+)/m.exec(head.slice(head.search(/GEDC/)))?.[1],
+    version: gedcVersion(head),
   };
 }
 
+/** `HEAD.GEDC.VERS`: the first VERS after a level 1 GEDC line (not a product's VERS). */
+function gedcVersion(head: string): string | undefined {
+  const gedc = /^[ \t]*1[ \t]+GEDC\b.*$/m.exec(head);
+  if (!gedc) return undefined;
+  const after = head.slice(gedc.index + gedc[0].length);
+  const end = after.search(/^[ \t]*[01][ \t]/m);
+  return /^[ \t]*2[ \t]+VERS[ \t]+(\S+)/m.exec(end === -1 ? after : after.slice(0, end))?.[1];
+}
+
+/** Index of the first byte at or above 0x80, or -1 for pure ASCII. */
+export function firstHighByte(bytes: Uint8Array): number {
+  for (let i = 0; i < bytes.length; i++) if (bytes[i]! >= 0x80) return i;
+  return -1;
+}
+
 /**
- * Picks the encoding for a GEDCOM byte stream from its first bytes. Order:
- * explicit option, BOM, `HEAD.CHAR`, then sniffing (UTF-16 byte patterns,
- * UTF-8 validity, CP1252 as the last resort).
+ * Whether the choice can wait for the first non-ASCII byte: every candidate
+ * (the label, UTF-8, Windows-1252) reads ASCII the same, so the bytes before
+ * it say nothing. A BOM, an option, UTF-16 or a UTF-8 label decides at once.
+ */
+export function canDefer(info: EncodingInfo): boolean {
+  if (info.source === 'option' || info.source === 'bom') return false;
+  if (info.encoding === 'utf-16le' || info.encoding === 'utf-16be') return false;
+  return !(info.source === 'header' && info.encoding === 'utf-8');
+}
+
+/**
+ * The encoding once non-ASCII bytes appear, from `window`, which starts at
+ * the first of them. Exports often say ANSEL or ANSI but write UTF-8; valid
+ * multi-byte UTF-8 is very unlikely by accident, so the bytes beat the label.
+ * An unlabelled file is UTF-8 if valid, else Windows-1252. `truncated` says
+ * the window may end inside a multi-byte sequence.
+ */
+export function chooseAtHighBytes(
+  info: EncodingInfo,
+  window: Uint8Array,
+  truncated: boolean,
+): EncodingInfo {
+  const utf8 = isValidUtf8(
+    window.subarray(0, DETECT_BYTES),
+    truncated || window.length > DETECT_BYTES,
+  );
+  if (info.source === 'header')
+    return utf8 ? { ...info, encoding: 'utf-8', source: 'sniff' } : info;
+  return { ...info, encoding: utf8 ? 'utf-8' : 'windows-1252' };
+}
+
+/**
+ * Picks the encoding for a GEDCOM byte stream. Order: explicit option, BOM,
+ * `HEAD.CHAR`, then sniffing (UTF-16 byte patterns, UTF-8 validity from the
+ * first non-ASCII byte on, CP1252 as the last resort). With `complete` the
+ * whole buffer is searched for that byte; otherwise only the first 64 KiB,
+ * and `parseGedcomStream` waits for it.
  */
 export function detectEncoding(
   bytes: Uint8Array,
@@ -89,17 +138,14 @@ export function detectEncoding(
   // GEDCOM 7 is always UTF-8 and has no CHAR.
   const mapped =
     declared && !version?.startsWith('7') ? CHARSETS[declared.toUpperCase()] : undefined;
-  const prefix = bytes.subarray(0, DETECT_BYTES);
-  const truncated = !options.complete || bytes.length > DETECT_BYTES;
-  if (mapped) {
-    // Exports often say ANSEL or ANSI but write UTF-8. Valid multi-byte UTF-8
-    // is very unlikely by accident, so believe the bytes over the label.
-    const multibyte = mapped !== 'utf-8' && prefix.some((b) => b >= 0x80);
-    if (multibyte && isValidUtf8(prefix, truncated)) return info('utf-8', 'sniff');
-    return info(mapped, 'header');
-  }
-
-  return info(isValidUtf8(prefix, truncated) ? 'utf-8' : 'windows-1252', 'sniff');
+  const chosen = mapped ? info(mapped, 'header') : info('utf-8', 'sniff');
+  if (!canDefer(chosen)) return chosen;
+  // Until the first non-ASCII byte every candidate reads the same. A complete
+  // file is searched to its end; a stream's prefix only (the stream defers).
+  const scanned = options.complete ? bytes : bytes.subarray(0, DETECT_BYTES);
+  const at = firstHighByte(scanned);
+  if (at === -1) return chosen;
+  return chooseAtHighBytes(chosen, bytes.subarray(at), !options.complete);
 }
 
 /** Streaming decoder that counts bytes it could not map. */

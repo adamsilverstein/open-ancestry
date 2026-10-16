@@ -1,0 +1,87 @@
+import { describe, expect, it } from 'vitest';
+import { formatLifespan, lifeDate, parseDate } from './index';
+
+/** A stored event brief, as the database keeps a parsed date. */
+const brief = (text: string) => {
+  const d = parseDate(text);
+  return { dateSort: d.sortKey, dateQualifier: d.qualifier, dateText: text };
+};
+
+describe('lifeDate', () => {
+  it.each([
+    ['5 SEP 1941', { year: 1941 }],
+    ['ABT 1842', { year: 1842, qualifier: 'abt' }],
+    ['Abt. 1842', { year: 1842, qualifier: 'abt' }],
+    ['BEF 1920', { year: 1920, qualifier: 'bef' }],
+    ['AFT 1950', { year: 1950, qualifier: 'aft' }],
+    ['EST 1800', { year: 1800, qualifier: 'est' }],
+    ['CAL 1840', { year: 1840, qualifier: 'cal' }],
+    // A range reads as about its middle year; an open period as before or after its bound.
+    ['BET 1870 AND 1872', { year: 1871, qualifier: 'abt' }],
+    ['FROM 1870 TO 1880', { year: 1875, qualifier: 'abt' }],
+    ['1850s', { year: 1850, label: '1850s' }],
+    ['Abt. 1850s', { year: 1850, label: '1850s' }],
+    ['1700s', { year: 1700, label: '1700s' }],
+    ['BET JAN 1871 AND DEC 1871', { year: 1871 }],
+    ['BET 1870 AND 1880', { year: 1875, qualifier: 'abt' }],
+    // A wide range shows its start bound, not a precise-looking middle.
+    ['BET 1800 AND 1850', { year: 1800, qualifier: 'aft' }],
+    ['FROM 1700 TO 1790', { year: 1700, qualifier: 'aft' }],
+    ['BET 1870 AND 1881', { year: 1870, qualifier: 'aft' }],
+    ['FROM 1890', { year: 1890, qualifier: 'aft' }],
+    ['TO 1890', { year: 1890, qualifier: 'bef' }],
+    ['1750/51', { year: 1750, dualYear: 1751 }],
+    ['ABT 11 FEB 1731/32', { year: 1731, dualYear: 1732, qualifier: 'abt' }],
+    // A note after the date keeps its qualifier (#272).
+    ['ABT 1842 (per census)', { year: 1842, qualifier: 'abt' }],
+    ['BEF 1920 (family story)', { year: 1920, qualifier: 'bef' }],
+    ['05/28/1960', { year: 1960 }],
+    ['44 B.C.', { year: -44 }],
+  ])('%s -> %j', (text, date) => {
+    expect(lifeDate(brief(text))).toEqual(date);
+  });
+
+  it('falls back to the first year of a range without its text', () => {
+    expect(lifeDate({ dateSort: 18700101, dateQualifier: 'between' })).toEqual({
+      year: 1870,
+      qualifier: 'abt',
+    });
+  });
+
+  it('is undefined without a sortable date', () => {
+    expect(lifeDate(null)).toBeUndefined();
+    expect(lifeDate({ dateSort: null, dateQualifier: 'text' })).toBeUndefined();
+  });
+});
+
+describe('formatLifespan', () => {
+  const life = (birth?: string, death?: string, living = false) => ({
+    birth: birth ? lifeDate(brief(birth)) : undefined,
+    death: death ? lifeDate(brief(death)) : undefined,
+    living,
+  });
+  it.each([
+    [life('3 MAR 1846', 'BEF 1920'), '1846–bef. 1920'],
+    [life('BET 1870 AND 1872', 'AFT 1950'), 'abt. 1871–aft. 1950'],
+    [life('Abt. 1842', '4 NOV 1911'), 'abt. 1842–1911'],
+    [life('CAL 1840', '1899'), 'cal. 1840–1899'],
+    [life('1947', undefined, true), '1947–Living'],
+    [life(undefined, undefined, true), 'Living'],
+    [life('1820'), 'b. 1820'],
+    [life(undefined, '1880'), 'd. 1880'],
+    [life('44 B.C.', '10'), '44 B.C.–10'],
+    // Periods and ranges get a compact form; dual dates read as written.
+    [life('TO 1860'), 'b. bef. 1860'],
+    [life('FROM 1850', '1900'), 'aft. 1850–1900'],
+    [life('FROM 1850 TO 1860', '1900'), 'abt. 1855–1900'],
+    [life('BET 1800 AND 1850', '1900'), 'aft. 1800–1900'],
+    [life('BET JAN 1871 AND DEC 1871', '1940'), '1871–1940'],
+    [life('1850s', 'ABT 1920'), '1850s–abt. 1920'],
+    [life('ABT 1842 (per census)', 'BEF 1920 (family story)'), 'abt. 1842–bef. 1920'],
+    [life('1750/51', '11 FEB 1801/02'), '1750/51–1801/02'],
+    [life('1699/00', '1760'), '1699/00–1760'],
+    [life(), ''],
+  ])('%j -> %s', (lifespan, text) => {
+    expect(formatLifespan(lifespan)).toBe(text);
+  });
+});

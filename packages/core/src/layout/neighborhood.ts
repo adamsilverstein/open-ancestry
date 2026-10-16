@@ -3,6 +3,7 @@
  * core cannot depend on db, so the input is described structurally here; the
  * db `Neighborhood` type satisfies it.
  */
+import { formatLifespan, lifeDate } from '../dates';
 import type {
   ChildRelation,
   PartnerRelationship,
@@ -22,8 +23,16 @@ export interface NeighborhoodPerson {
   prefix?: string | null;
   suffix?: string | null;
   surnamePrefix?: string | null;
-  birth: { dateSort: number | null } | null;
-  death: { dateSort: number | null } | null;
+  birth: {
+    dateSort: number | null;
+    dateQualifier?: string | null;
+    dateText?: string | null;
+  } | null;
+  death: {
+    dateSort: number | null;
+    dateQualifier?: string | null;
+    dateText?: string | null;
+  } | null;
 }
 
 export interface NeighborhoodInput {
@@ -47,49 +56,47 @@ export interface NeighborhoodInput {
   }[];
   moreUp: string[];
   moreDown: string[];
+  /** People with siblings not loaded yet: their cards get a siblings chevron. */
+  moreSiblings?: string[];
 }
 
-const year = (event: { dateSort: number | null } | null) =>
-  event?.dateSort ? Math.floor(event.dateSort / 10000) : undefined;
-
-/** `1911–1957`, `1947–Living`, `b. 1820`, `d. 1900`, or nothing (LifespanText style). */
-function lifespan(born: number | undefined, died: number | undefined, living: boolean) {
-  if (born !== undefined && died !== undefined) return `${born}–${died}`;
-  if (born !== undefined) return living ? `${born}–Living` : `b. ${born}`;
-  if (died !== undefined) return `d. ${died}`;
-  return living ? 'Living' : undefined;
+/** One person as the layout sees them; the `more*` flags are the hasMore hints. */
+export function toTreePerson(
+  p: NeighborhoodPerson,
+  moreParents: boolean,
+  moreChildren: boolean,
+  moreSiblings = false,
+): TreePerson {
+  const living = p.living !== 'dead' && p.living !== 'inferred_dead';
+  const name = [p.prefix, p.given, p.surnamePrefix, p.surname, p.suffix]
+    .filter((part) => part)
+    .join(' ');
+  const person: TreePerson = { id: p.id, sex: p.sex, name, living };
+  // The shared formatter, so cards keep qualifiers like every other view.
+  const span = formatLifespan({
+    birth: lifeDate(p.birth),
+    death: lifeDate(p.death),
+    living: living && !p.death?.dateSort,
+  });
+  if (span) person.lifespan = span;
+  if (p.birth?.dateSort) person.birthSortKey = p.birth.dateSort;
+  if (moreParents) person.hasMoreParents = true;
+  if (moreChildren) person.hasMoreChildren = true;
+  if (moreSiblings) person.hasMoreSiblings = true;
+  return person;
 }
 
-export function fromNeighborhood(result: NeighborhoodInput): TreeGraph {
-  const up = new Set(result.moreUp);
-  const down = new Set(result.moreDown);
-  const people = new Map<string, TreePerson>();
-  for (const p of result.people) {
-    const living = p.living !== 'dead' && p.living !== 'inferred_dead';
-    const name = [p.prefix, p.given, p.surnamePrefix, p.surname, p.suffix]
-      .filter((part) => part)
-      .join(' ');
-    const person: TreePerson = { id: p.id, sex: p.sex, name, living };
-    const span = lifespan(year(p.birth), year(p.death), living);
-    if (span) person.lifespan = span;
-    if (p.birth?.dateSort) person.birthSortKey = p.birth.dateSort;
-    if (up.has(p.id)) person.hasMoreParents = true;
-    if (down.has(p.id)) person.hasMoreChildren = true;
-    people.set(p.id, person);
-  }
-
-  const children = new Map<string, NeighborhoodInput['children']>();
-  for (const c of result.children) {
-    const list = children.get(c.familyId);
-    if (list) list.push(c);
-    else children.set(c.familyId, [c]);
-  }
-  const families = result.families.map((f): TreeFamily => ({
+/** One family with its children (in any order; sorted here by `sortOrder`, stably). */
+export function toTreeFamily(
+  f: NeighborhoodInput['families'][number],
+  children: readonly NeighborhoodInput['children'][number][],
+): TreeFamily {
+  return {
     id: f.id,
     partners: [f.partner1Id, f.partner2Id],
     partnerOrder: [f.partner1Order, f.partner2Order],
     relationship: f.relationshipType,
-    children: (children.get(f.id) ?? [])
+    children: [...children]
       .sort((a, b) => a.sortOrder - b.sortOrder)
       .map((c) => ({
         id: c.childId,
@@ -98,6 +105,24 @@ export function fromNeighborhood(result: NeighborhoodInput): TreeGraph {
         preferred: c.isPreferred,
         order: c.childOrder,
       })),
-  }));
+  };
+}
+
+export function fromNeighborhood(result: NeighborhoodInput): TreeGraph {
+  const up = new Set(result.moreUp);
+  const down = new Set(result.moreDown);
+  const sideways = new Set(result.moreSiblings);
+  const people = new Map<string, TreePerson>();
+  for (const p of result.people) {
+    people.set(p.id, toTreePerson(p, up.has(p.id), down.has(p.id), sideways.has(p.id)));
+  }
+
+  const children = new Map<string, NeighborhoodInput['children']>();
+  for (const c of result.children) {
+    const list = children.get(c.familyId);
+    if (list) list.push(c);
+    else children.set(c.familyId, [c]);
+  }
+  const families = result.families.map((f) => toTreeFamily(f, children.get(f.id) ?? []));
   return { people, families };
 }

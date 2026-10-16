@@ -9,6 +9,7 @@ const base: ApiPersonSummary = {
   privacy: 'public',
   primaryMediaId: null,
   primaryPhotoLocal: false,
+  primaryPhotoVersion: null,
   given: 'Ada',
   surname: 'Vale',
   surnamePrefix: null,
@@ -19,7 +20,8 @@ const base: ApiPersonSummary = {
     eventId: 'e1',
     type: 'BIRT',
     dateText: 'ABT 1911',
-    dateQualifier: 'abt',
+    // Stored as core's qualifier name, which the card abbreviates.
+    dateQualifier: 'about',
     dateSort: 19110000,
     place: 'Wexmoor, Westmere',
   },

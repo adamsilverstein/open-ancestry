@@ -76,8 +76,13 @@ function bloodTerm(run: BloodStep[], sex: Sex | undefined, style: NameStyle): st
   const rels = [...ups, ...downs].map((s) => s.rel);
   const siblingRel = kind ? SIBLING_REL[kind] : undefined;
   if (siblingRel) rels.push(siblingRel);
-  // "adopted son" when the adoption is on the card's side, "adoptive father" on the focus side.
-  const adoptedBelow = downs.some((s) => parentLink(s.rel) === 'adoptive') || kind === 'adopted';
+  // "adopted son" when the adoption is on the card's side, "adoptive father" on
+  // the focus side, as the calculator decides. A sibling step's shared links
+  // say which side: theirs is the card's, mine the focus person's.
+  const adoptive = (rel: ChildRelation | undefined) => parentLink(rel) === 'adoptive';
+  const adoptedBelow =
+    downs.some((s) => adoptive(s.rel)) ||
+    (sibling?.shared ? sibling.shared.some(([, theirs]) => adoptive(theirs)) : kind === 'adopted');
   const qualifier = lineQualifier(rels, adoptedBelow ? 'adopted' : 'adoptive');
   return bloodName(shape, sex, kind === 'half' && !qualifier, qualifier, style);
 }

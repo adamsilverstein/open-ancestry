@@ -1,11 +1,11 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { generateGedcom } from '../../fixtures/generate';
 import { openMemoryTree } from '../../packages/db/src/index';
 import { importGedcom } from '../../packages/import/src/index';
 import type { BenchCase } from '../types';
+import { makeTempDir } from '../../fixtures/temp-dir';
 
 // design.md section 7: a 10k-person Ancestry GEDCOM imports in under 3s,
 // 100k in under 30s (parse + map + load + search index). The on-disk case is
@@ -39,7 +39,7 @@ function fixtureFile(people: number): string {
   if (!existsSync(cli)) throw new Error(`${cli} is missing; run npm run build first`);
   let file = files.get(people);
   if (!file) {
-    file = join(mkdtempSync(join(tmpdir(), 'oa-bench-ged-')), `synthetic-${people}.ged`);
+    file = join(makeTempDir('oa-bench-ged-'), `synthetic-${people}.ged`);
     writeFileSync(file, input(people));
     files.set(people, file);
   }
@@ -47,7 +47,7 @@ function fixtureFile(people: number): string {
 }
 
 function coldCli(people: number) {
-  const library = mkdtempSync(join(tmpdir(), 'oa-bench-cli-'));
+  const library = makeTempDir('oa-bench-cli-');
   try {
     const child = spawnSync(
       process.execPath,
@@ -73,7 +73,7 @@ function coldCli(people: number) {
 }
 
 async function runOnDisk(people: number) {
-  const root = mkdtempSync(join(tmpdir(), 'oa-bench-'));
+  const root = makeTempDir('oa-bench-');
   try {
     const report = await importGedcom({ bytes: input(people) }, { dir: join(root, 'b.oatree') });
     if (report.records.INDI !== people) throw new Error(`imported ${report.records.INDI} people`);

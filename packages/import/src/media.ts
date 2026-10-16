@@ -1,16 +1,21 @@
 import { toNFC, type MediaKind } from '@open-ancestry/db';
 import { safeEntryPath } from '@open-ancestry/gedcom';
 import {
+  closeSync,
+  constants,
+  fstatSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   readdirSync,
   realpathSync,
-  statSync,
   writeFileSync,
+  type BigIntStats,
   type Stats,
 } from 'node:fs';
-import { dirname, join, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 /** What a GEDCOM `FILE` value points at. */
 export type FileRef =
@@ -86,6 +91,54 @@ export function kindFromType(value: string | undefined): MediaKind | undefined {
   return 'document';
 }
 
+/** A media folder file that must not be copied: `reason` completes "Media file X ...". */
+export class MediaRefusedError extends Error {
+  readonly reason: string;
+
+  constructor(path: string, reason: string) {
+    super(`${path} ${reason}`);
+    this.name = 'MediaRefusedError';
+    this.reason = reason;
+  }
+}
+
+/**
+ * Reads a media folder file as the walk found it (#266): through a descriptor
+ * that won't follow a symlink, and only if it is still the same file and has
+ * no other hard link, so neither a link to another of the user's files nor a
+ * swap after the walk is copied into the tree.
+ */
+function readWalked(full: string, path: string, walked: BigIntStats): Uint8Array {
+  const changed = () => new MediaRefusedError(path, 'changed after the media folder was read');
+  // O_NOFOLLOW is 0 where the platform has none (Windows): the checks below still apply.
+  const fd = openSync(full, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    // Bigints: a file index past 2^53 (NTFS, some network file systems) must not round.
+    const opened = fstatSync(fd, { bigint: true });
+    if (
+      opened.dev !== walked.dev ||
+      opened.ino !== walked.ino ||
+      opened.size !== walked.size ||
+      !opened.isFile()
+    ) {
+      throw changed();
+    }
+    if (opened.nlink > 1n) throw new MediaRefusedError(path, 'is a hard link');
+    // At most one byte past the size the caps were checked against: a file growing
+    // while it is read is refused, not read into memory whole.
+    const size = Number(walked.size);
+    const bytes = new Uint8Array(size + 1);
+    let read = 0;
+    for (let n; read <= size && (n = readSync(fd, bytes, read, size + 1 - read, null)) > 0;) {
+      read += n;
+    }
+    if (read !== size) throw changed();
+    return bytes.subarray(0, size);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 interface SourceFile {
   path: string;
   size: number;
@@ -107,9 +160,14 @@ export class MediaSource {
   private readonly byLowerPath = new Map<string, SourceFile>();
   private readonly byName = new Map<string, SourceFile[]>();
   readonly available: boolean;
+  /** Whether the files' bytes are held in memory (a GEDZIP's entries). */
+  readonly inMemory: boolean;
+  private readonly files: SourceFile[];
 
-  private constructor(files: SourceFile[], available: boolean) {
+  private constructor(files: SourceFile[], available: boolean, inMemory = false) {
     this.available = available;
+    this.inMemory = inMemory;
+    this.files = files;
     for (const file of files) {
       const path = toNFC(file.path);
       this.byPath.set(path, file);
@@ -129,7 +187,28 @@ export class MediaSource {
     return new MediaSource(
       [...entries].map(([path, bytes]) => ({ path, size: bytes.length, read: () => bytes })),
       true,
+      true,
     );
+  }
+
+  /**
+   * Writes in-memory files to `dir` and returns a source that reads them from
+   * there, so a long-lived holder (a re-import review) keeps no bytes in
+   * memory. Paths that aren't safe relative paths are dropped.
+   */
+  spill(dir: string): MediaSource {
+    const files: SourceFile[] = [];
+    for (const file of this.files) {
+      const rel = safeEntryPath(file.path);
+      if (!rel) continue;
+      const full = join(dir, ...rel.split('/'));
+      // Private to the owner, like every other writer of media (0700/0600).
+      mkdirSync(dirname(full), { recursive: true, mode: 0o700 });
+      writeFileSync(full, file.read(), { mode: 0o600 });
+      const size = file.size;
+      files.push({ path: file.path, size, read: () => readFileSync(full) });
+    }
+    return new MediaSource(files, this.available);
   }
 
   static fromDir(root: string): MediaSource {
@@ -149,16 +228,17 @@ export class MediaSource {
         if (entry.isDirectory()) walk(full, rel, depth + 1);
         // A name with a backslash would not survive as a forward-slash relative path.
         else if (entry.isFile() && safeEntryPath(rel) === rel) {
+          let walked: BigIntStats;
+          try {
+            walked = lstatSync(full, { bigint: true });
+          } catch {
+            continue;
+          }
+          if (!walked.isFile()) continue;
           files.push({
             path: rel,
-            get size() {
-              try {
-                return statSync(full).size;
-              } catch {
-                return 0;
-              }
-            },
-            read: () => readFileSync(full),
+            size: Number(walked.size),
+            read: () => readWalked(full, rel, walked),
           });
         }
       }
@@ -209,6 +289,49 @@ export interface StoredMedia {
   folder: string | undefined;
 }
 
+/** A media folder that would lead outside the tree: not under its root, a symlink, or not a folder. */
+export class MediaFolderOutsideError extends Error {
+  constructor(relPath: string) {
+    super(`media folder for ${relPath} leads outside the tree`);
+    this.name = 'MediaFolderOutsideError';
+  }
+}
+
+/**
+ * Creates the folders from `root` down to `dir` one level at a time, refusing
+ * any that already exists as a symlink or not as a folder, so nothing is
+ * created through a link before the containment check (mkdir -p would).
+ * Returns the first folder created, for cleanup, or undefined.
+ */
+export function makeFoldersInside(root: string, dir: string, relPath: string): string | undefined {
+  const rel = relative(root, dir);
+  // Only folders under root: never climb out of it, whatever `dir` says.
+  if (isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) {
+    throw new MediaFolderOutsideError(relPath);
+  }
+  let first: string | undefined;
+  let current = root;
+  for (const part of rel.split(sep).filter(Boolean)) {
+    current = join(current, part);
+    const stat = lstatOrNull(current);
+    if (!stat) {
+      try {
+        mkdirSync(current, { mode: 0o700 });
+        first ??= current;
+      } catch (error) {
+        // Another server made it meanwhile: fine if it is a real folder.
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        if (!lstatOrNull(current)?.isDirectory()) {
+          throw new MediaFolderOutsideError(relPath);
+        }
+      }
+    } else if (!stat.isDirectory()) {
+      throw new MediaFolderOutsideError(relPath);
+    }
+  }
+  return first;
+}
+
 /**
  * Stores a media file under the tree's media folder without ever overwriting
  * one: identical bytes already at the path are reused, different bytes get a
@@ -234,7 +357,7 @@ export function storeMediaFile(
       }
       continue;
     }
-    const folder = mkdirSync(dirname(target), { recursive: true });
+    const folder = makeFoldersInside(root, dirname(target), relPath);
     // A symlinked folder inside media/ must not carry the write elsewhere.
     const realRoot = realpathSync(root);
     const realDir = realpathSync(dirname(target));

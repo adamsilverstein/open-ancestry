@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { constants, createReadStream, createWriteStream } from 'node:fs';
-import { copyFile, lstat, mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
+import { copyFile, lstat, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Transform } from 'node:stream';
@@ -14,7 +14,9 @@ import {
   type MediaRow,
   type TreeStore,
 } from '@open-ancestry/db';
+import { MediaFolderOutsideError, makeFoldersInside } from '@open-ancestry/import';
 import type { Api, Deps } from '../context';
+import { ATTACH_PREFIX } from './imports';
 import { edit, requireRow } from '../edits';
 import { formatBytes } from '../bytes';
 import { ApiError, badRequest, notFound } from '../errors';
@@ -187,9 +189,11 @@ async function hashFile(path: string): Promise<string> {
 
 export function galleryRoutes(
   app: Api,
-  { library, thumbnails, mediaUploadLimit: uploadLimit }: Deps,
+  { library, thumbnails, mediaUploadLimit: uploadLimit, maxConcurrentAttaches }: Deps,
 ): void {
   const attachLocks = new KeyedLock();
+  /** Attaches streaming to a temp folder now: each may hold up to the upload limit on disk. */
+  let attaching = 0;
   app.get(
     '/api/trees/:tree/people/:id/media',
     { schema: { params: TreeIdParams } },
@@ -229,7 +233,10 @@ export function galleryRoutes(
 
   app.post('/api/trees/:tree/media', { schema: { params: TreeParams } }, async (request, reply) => {
     const { tree } = request.params;
-    const store = library.open(tree);
+    // Opened again after the upload has streamed: the tree may have been
+    // deleted or renamed meanwhile, which is a 404, not a closed database
+    // (500) or a media folder recreated where the tree was (#275 L7).
+    library.open(tree);
     if (!request.isMultipart()) {
       throw new ApiError(415, 'unsupported_media_type', 'Upload the file as multipart/form-data');
     }
@@ -237,11 +244,20 @@ export function galleryRoutes(
       const ownerType = fields.owner_type as (typeof OWNER_TYPES)[number];
       if (!OWNER_TYPES.includes(ownerType)) throw badRequest('owner_type must be person or event');
       const ownerId = fields.owner_id ?? '';
-      requireRow(store, ownerType, ownerId);
+      requireRow(library.open(tree), ownerType, ownerId);
       return { ownerType, ownerId };
     };
-    const temp = await mkdtemp(join(tmpdir(), 'oa-attach-'));
+    if (attaching >= maxConcurrentAttaches) {
+      throw new ApiError(
+        429,
+        'too_many_jobs',
+        'Too many photos are uploading at once; try again when one finishes',
+      );
+    }
+    attaching++;
+    let temp: string | undefined;
     try {
+      temp = await mkdtemp(join(tmpdir(), ATTACH_PREFIX));
       const fields: Record<string, string> = {};
       let upload: { path: string; name: string; sha256: string; size: number } | undefined;
       const parts = request.parts({
@@ -277,91 +293,109 @@ export function galleryRoutes(
 
       // One attach per tree at a time, so two uploads of the same bytes cannot
       // both miss the sha256 lookup and store the file twice.
-      const mediaId = await attachLocks.run(tree, async () => {
-        const mediaRoot = treePaths(library.dirOf(tree)).media;
-        // Same bytes already in the tree: link the existing media instead of a second copy.
-        let existing = store
-          .stmt('SELECT * FROM media WHERE sha256 = ? AND local_path IS NOT NULL ORDER BY id')
-          .all(upload.sha256) as MediaRow[];
-        const present = await Promise.all(
-          existing.map(async (m) => fileExists(await resolveMediaPath(mediaRoot, m.local_path!))),
-        );
-        existing = existing.filter((_, i) => present[i]);
+      // Busy while it writes, so a delete or rename gets 409 rather than
+      // moving the tree out from under the copy (#289).
+      const mediaId = await attachLocks.run(tree, () =>
+        library.whileBusy(tree, async () => {
+          const store = library.open(tree);
+          const mediaRoot = treePaths(library.dirOf(tree)).media;
+          // Same bytes already in the tree: link the existing media instead of a second copy.
+          let existing = store
+            .stmt('SELECT * FROM media WHERE sha256 = ? AND local_path IS NOT NULL ORDER BY id')
+            .all(upload.sha256) as MediaRow[];
+          const present = await Promise.all(
+            existing.map(async (m) => fileExists(await resolveMediaPath(mediaRoot, m.local_path!))),
+          );
+          existing = existing.filter((_, i) => present[i]);
 
-        let fresh: Omit<MediaRow, 'id' | 'created_at' | 'updated_at'> | undefined;
-        if (!existing[0]) {
-          const name = safeFileName(upload.name);
-          const localPath = `${ATTACHED_DIR}/${upload.sha256.slice(0, 12)}-${name}`;
-          const target = join(mediaRoot, ATTACHED_DIR, `${upload.sha256.slice(0, 12)}-${name}`);
-          await mkdir(join(mediaRoot, ATTACHED_DIR), { recursive: true });
-          // A symlinked attached/ (or media/) folder must not carry the copy out of the tree.
-          if (!(await insideTree(library.dirOf(tree), join(mediaRoot, ATTACHED_DIR)))) {
-            throw new ApiError(409, 'conflict', 'The media folder leads outside the tree');
+          let fresh: Omit<MediaRow, 'id' | 'created_at' | 'updated_at'> | undefined;
+          if (!existing[0]) {
+            const name = safeFileName(upload.name);
+            const localPath = `${ATTACHED_DIR}/${upload.sha256.slice(0, 12)}-${name}`;
+            const target = join(mediaRoot, ATTACHED_DIR, `${upload.sha256.slice(0, 12)}-${name}`);
+            // Checked again after the awaits above: mkdir must not recreate a
+            // folder for a tree deleted or renamed meanwhile.
+            if (!library.exists(tree)) throw notFound(`Tree "${tree}" not found`);
+            // One level at a time from the tree folder, refusing a symlinked media/
+            // or attached/, so nothing is created where a link points (#314).
+            try {
+              makeFoldersInside(library.dirOf(tree), join(mediaRoot, ATTACHED_DIR), ATTACHED_DIR);
+            } catch (error) {
+              if (!(error instanceof MediaFolderOutsideError)) throw error;
+              throw new ApiError(409, 'conflict', 'The media folder leads outside the tree');
+            }
+            // A symlinked attached/ (or media/) folder must not carry the copy out of the tree.
+            if (!(await insideTree(library.dirOf(tree), join(mediaRoot, ATTACHED_DIR)))) {
+              throw new ApiError(409, 'conflict', 'The media folder leads outside the tree');
+            }
+            try {
+              await copyFile(upload.path, target, constants.COPYFILE_EXCL);
+              // A copy may carry the upload's mode: make it private, as media is.
+              restrictMode(target, PRIVATE_FILE_MODE);
+            } catch (error) {
+              // Same name and hash prefix: keep the file that is there if it is these bytes
+              // (and a real file, not a symlink to somewhere else).
+              const there = await lstat(target).catch(() => null);
+              const same =
+                (error as NodeJS.ErrnoException).code === 'EEXIST' &&
+                there?.isFile() === true &&
+                (await hashFile(target)) === upload.sha256;
+              if (!same) throw error;
+            }
+            // The first bytes decide the type; the upload is never read into memory whole.
+            const head = await readHead(upload.path);
+            const tiff = isTiff(head);
+            const mime = sniffMediaType(head) ?? (tiff ? 'image/tiff' : null);
+            fresh = {
+              kind: kindOf(mime),
+              mime,
+              local_path: localPath,
+              remote_url: null,
+              ancestry_oid: null,
+              title: name.replace(/\.[^.]*$/, '') || name,
+              date_text: null,
+              description: null,
+              sha256: upload.sha256,
+              byte_size: upload.size,
+              ...(mime?.startsWith('image/')
+                ? await dimensions(target)
+                : { width: null, height: null }),
+              external_id: null,
+              import_batch_id: null,
+            };
           }
-          try {
-            await copyFile(upload.path, target, constants.COPYFILE_EXCL);
-            // A copy may carry the upload's mode: make it private, as media is.
-            restrictMode(target, PRIVATE_FILE_MODE);
-          } catch (error) {
-            // Same name and hash prefix: keep the file that is there if it is these bytes
-            // (and a real file, not a symlink to somewhere else).
-            const there = await lstat(target).catch(() => null);
-            const same =
-              (error as NodeJS.ErrnoException).code === 'EEXIST' &&
-              there?.isFile() === true &&
-              (await hashFile(target)) === upload.sha256;
-            if (!same) throw error;
-          }
-          // The first bytes decide the type; the upload is never read into memory whole.
-          const head = await readHead(upload.path);
-          const tiff = isTiff(head);
-          const mime = sniffMediaType(head) ?? (tiff ? 'image/tiff' : null);
-          fresh = {
-            kind: kindOf(mime),
-            mime,
-            local_path: localPath,
-            remote_url: null,
-            ancestry_oid: null,
-            title: name.replace(/\.[^.]*$/, '') || name,
-            date_text: null,
-            description: null,
-            sha256: upload.sha256,
-            byte_size: upload.size,
-            ...(mime?.startsWith('image/')
-              ? await dimensions(target)
-              : { width: null, height: null }),
-            external_id: null,
-            import_batch_id: null,
-          };
-        }
 
-        const { batchId, result: mediaId } = edit(store, 'Attach media', (tx) => {
-          const id = existing[0]?.id ?? tx.insert('media', fresh!).id;
-          const linked = store
-            .stmt('SELECT 1 FROM media_link WHERE media_id = ? AND owner_type = ? AND owner_id = ?')
-            .get(id, ownerType, ownerId);
-          if (!linked) {
-            const { n } = store
+          const { batchId, result: mediaId } = edit(store, 'Attach media', (tx) => {
+            const id = existing[0]?.id ?? tx.insert('media', fresh!).id;
+            const linked = store
               .stmt(
-                'SELECT coalesce(max(sort_order) + 1, 0) AS n FROM media_link WHERE owner_type = ? AND owner_id = ?',
+                'SELECT 1 FROM media_link WHERE media_id = ? AND owner_type = ? AND owner_id = ?',
               )
-              .get(ownerType, ownerId) as { n: number };
-            tx.insert('media_link', {
-              media_id: id,
-              owner_type: ownerType,
-              owner_id: ownerId,
-              sort_order: n,
-            });
-          }
-          return id;
-        });
-        return { batchId, mediaId };
-      });
-      const media = store.getRow('media', mediaId.mediaId)!;
+              .get(id, ownerType, ownerId);
+            if (!linked) {
+              const { n } = store
+                .stmt(
+                  'SELECT coalesce(max(sort_order) + 1, 0) AS n FROM media_link WHERE owner_type = ? AND owner_id = ?',
+                )
+                .get(ownerType, ownerId) as { n: number };
+              tx.insert('media_link', {
+                media_id: id,
+                owner_type: ownerType,
+                owner_id: ownerId,
+                sort_order: n,
+              });
+            }
+            return id;
+          });
+          return { batchId, mediaId };
+        }),
+      );
+      const media = library.open(tree).getRow('media', mediaId.mediaId)!;
       thumbnails.enqueue(library.dirOf(tree), media.id, media.local_path);
       return reply.code(201).send({ media, batchId: mediaId.batchId });
     } finally {
-      await rm(temp, { recursive: true, force: true });
+      attaching--;
+      if (temp) await rm(temp, { recursive: true, force: true });
     }
   });
 }

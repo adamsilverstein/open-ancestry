@@ -17,6 +17,10 @@ import { readSeed, type PerfTree } from './tree-view-fixtures';
  *   (~500+ people painted) and at 35-45% zoom (cards mounted as DOM), each warm
  *   (the keyboard rested on the card past the prefetch dwell, so its layout was
  *   prepared) and cold (Enter at once, as after Find).
+ * - Re-focus after browsing: the cached round trip (40 re-focuses) before and
+ *   after 50 re-focuses on different people seven generations deep (each merges
+ *   another slice): the end p95 < 50ms and the end median within 1.5x of the
+ *   start (+10ms), so a long session does not slow re-focus down (#210).
  * - Pan and zoom with 2,000+ laid-out cards, at fit and with cards mounted:
  *   median frame at 58fps or better and under 5% of frames over 33ms. Long
  *   tasks and the longest frame are reported, not asserted: on a loaded machine
@@ -84,8 +88,16 @@ async function stats(page: Page) {
   };
 }
 
-async function refocusCount(page: Page) {
-  return page.evaluate(() => performance.getEntriesByName('oa-tree-refocus', 'measure').length);
+/**
+ * Which re-focus measure is the latest (its end time), to wait for the next.
+ * Not a count: the app keeps at most 100 and starts over, so a long session
+ * would see the count drop back to 1.
+ */
+async function refocusStamp(page: Page) {
+  return page.evaluate(() => {
+    const last = performance.getEntriesByName('oa-tree-refocus', 'measure').at(-1);
+    return last ? last.startTime + last.duration : -1;
+  });
 }
 
 async function lastRefocus(page: Page) {
@@ -245,9 +257,9 @@ for (const tree of trees) {
           // Warm: rest on the card past the prefetch dwell, as a user reading it
           // would, so its layout is prepared. Cold: Enter at once, as after Find.
           if (warm) await page.waitForTimeout(300);
-          const before = await refocusCount(page);
+          const before = await refocusStamp(page);
           await page.keyboard.press('Enter');
-          await expect.poll(() => refocusCount(page)).toBeGreaterThan(before);
+          await expect.poll(() => refocusStamp(page)).not.toBe(before);
           await ready(page);
           await settled(page);
           const now = await stats(page);
@@ -290,6 +302,132 @@ for (const tree of trees) {
         expect(median).toBeLessThan(budget);
       });
     }
+
+    test('re-focus after browsing 50 people stays as fast as at the start', async ({ page }) => {
+      // About 140 re-focuses, each waiting for its frame to settle.
+      test.setTimeout(240_000);
+      // Seven generations down: each new focus merges a slice of up to 5,000
+      // people, so 50 of them merge tens of thousands in the 100k tree.
+      await page.goto(url(tree.wideId, '&down=7&up=1'));
+      await ready(page);
+      const refocusOn = async (key: string) => {
+        await canvas(page).locator(`[data-key="${key}"]`).focus();
+        const before = await refocusStamp(page);
+        await page.keyboard.press('Enter');
+        await expect.poll(() => refocusStamp(page)).not.toBe(before);
+        await ready(page);
+        await settled(page);
+        return lastRefocus(page);
+      };
+      const mountedKeys = () =>
+        canvas(page)
+          .locator('[data-key]')
+          .evaluateAll((cards) =>
+            cards
+              .map((card) => ({
+                key: card.getAttribute('data-key')!,
+                y: card.getBoundingClientRect().y,
+              }))
+              .filter((c) => !c.key.includes('~'))
+              .sort((x, y) => x.y - y.y)
+              .map((c) => c.key),
+          );
+      /**
+       * The cached round trip from the focus person to a child (or parent) and
+       * back, by keyboard as in the re-focus checks (the relative is always on
+       * screen, unlike a card picked by position): p95 and median of 40.
+       */
+      const roundTrip = async (from: string) => {
+        // Down to a child and back, or up to a parent when there is no child.
+        const card = canvas(page).locator(`[data-key="${from}"]`);
+        await card.focus();
+        await page.keyboard.press('ArrowDown');
+        const moved = await page.evaluate(
+          (key) => (document.activeElement as HTMLElement | null)?.dataset.key !== key,
+          from,
+        );
+        const [there, back] = moved ? ['ArrowDown', 'ArrowUp'] : ['ArrowUp', 'ArrowDown'];
+        await card.focus();
+        const step = async (key: string) => {
+          await page.keyboard.press(key);
+          const before = await refocusStamp(page);
+          await page.keyboard.press('Enter');
+          await expect.poll(() => refocusStamp(page)).not.toBe(before);
+          await ready(page);
+          await settled(page);
+          return lastRefocus(page);
+        };
+        // The first visit to the child fetches its neighborhood; then both are cached.
+        await step(there);
+        await step(back);
+        const durations: number[] = [];
+        for (let i = 0; i < 20; i++) {
+          durations.push(await step(there));
+          durations.push(await step(back));
+        }
+        return { p95: percentile(durations, 0.95), median: percentile(durations, 0.5) };
+      };
+
+      const start = await roundTrip(tree.wideId);
+      // Browse: re-focus on 50 different people, each the topmost card on screen
+      // not visited yet. Going up reaches ancestors and their siblings, whose
+      // seven generations of descendants each merge a large new slice.
+      // The worker's own time for every layout it runs while browsing
+      // (oa-tree-layout measures, taken and cleared after each visit).
+      const takeLayoutTimes = () =>
+        page.evaluate(() => {
+          const times = performance
+            .getEntriesByName('oa-tree-layout', 'measure')
+            .map((e) => e.duration);
+          performance.clearMeasures('oa-tree-layout');
+          return times;
+        });
+      await takeLayoutTimes();
+      const layoutTimes: number[][] = [];
+      const seen = new Set<string>([tree.wideId]);
+      let current = tree.wideId;
+      for (let visit = 0; visit < 50; visit++) {
+        const keys = await mountedKeys();
+        const next = keys.find((key) => !seen.has(key)) ?? keys.find((k) => k !== current);
+        expect(next, `visit ${visit}: a card to move to`).toBeTruthy();
+        seen.add(next!);
+        await refocusOn(next!);
+        layoutTimes.push(await takeLayoutTimes());
+        current = next!;
+      }
+      const end = await roundTrip(current);
+
+      const budget = 50 * factor;
+      // Laying out from everything merged made each re-focus slower as the
+      // session went on (#210): the end must stay close to the start.
+      const allowed = start.median * 1.5 + 10 * factor;
+      report(
+        tree,
+        `Re-focus after browsing 50 people, cached, p95 and median of 40 (start vs end)`,
+        `start ${start.median.toFixed(1)}ms (p95 ${start.p95.toFixed(1)}); end ${end.median.toFixed(1)}ms (p95 ${end.p95.toFixed(1)})`,
+        `end p95 < ${budget}ms; end median < ${allowed.toFixed(0)}ms`,
+        end.p95 < budget && end.median < allowed,
+      );
+
+      // The regression check (#210): the worker's layout time, first ten visits
+      // against the last ten. Laying out from everything merged made it grow
+      // with the session; laid out from the cache's index it does not.
+      const early = percentile(layoutTimes.slice(0, 10).flat(), 0.5);
+      const late = percentile(layoutTimes.slice(-10).flat(), 0.5);
+      const slack = early * 1.5 + 2 * factor;
+      report(
+        tree,
+        `Worker layout time while browsing 50 people (${seen.size} visited, ending at ${current}), median of visits 1-10 vs 41-50`,
+        `${early.toFixed(1)}ms vs ${late.toFixed(1)}ms`,
+        `late < ${slack.toFixed(0)}ms`,
+        late < slack,
+      );
+      expect(end.median).toBeLessThan(allowed);
+      expect(end.p95).toBeLessThan(budget);
+      // The whole walk, to reproduce a run.
+      console.log(`[${people}] visited: ${[...seen].join(' ')}`);
+      expect(late).toBeLessThan(slack);
+    });
 
     for (const scenario of [
       {
@@ -360,9 +498,9 @@ for (const tree of trees) {
       const round = async () => {
         for (const key of ['ArrowDown', 'ArrowUp', 'ArrowDown', 'ArrowUp']) {
           await page.keyboard.press(key);
-          const before = await refocusCount(page);
+          const before = await refocusStamp(page);
           await page.keyboard.press('Enter');
-          await expect.poll(() => refocusCount(page)).toBeGreaterThan(before);
+          await expect.poll(() => refocusStamp(page)).not.toBe(before);
           await ready(page);
           await settled(page);
         }
@@ -409,9 +547,9 @@ test.describe('one family with 2,000 children', { tag: '@perf' }, () => {
     await canvas(page).locator(`[data-key="${fatherId}"]`).focus();
     const refocus = async (key: string) => {
       await page.keyboard.press(key);
-      const before = await refocusCount(page);
+      const before = await refocusStamp(page);
       await page.keyboard.press('Enter');
-      await expect.poll(() => refocusCount(page)).toBeGreaterThan(before);
+      await expect.poll(() => refocusStamp(page)).not.toBe(before);
       await ready(page);
       await settled(page);
       return lastRefocus(page);

@@ -262,8 +262,14 @@ export class RecordWriter {
     const record = n('FAM');
     record.xref = xref;
     const { children } = record;
-    if (family.partner1_id) children.push(p('HUSB', this.ctx.ref('person', family.partner1_id)));
-    if (family.partner2_id) children.push(p('WIFE', this.ctx.ref('person', family.partner2_id)));
+    const [tag1, tag2] = this.partnerTags(family);
+    const partners = [
+      family.partner1_id && p(tag1, this.ctx.ref('person', family.partner1_id)),
+      family.partner2_id && p(tag2, this.ctx.ref('person', family.partner2_id)),
+    ];
+    // The importer fills partner2 from the first WIFE, so two WIFEs go second slot first.
+    if (tag1 === 'WIFE' && tag2 === 'WIFE') partners.reverse();
+    for (const partner of partners) if (partner) children.push(partner);
     const isPrivate = this.ctx.isPrivateFamily(family.id);
     const roles = isPrivate ? [] : (this.data.rolesByFamily.get(family.id) ?? []);
     if (!isPrivate) {
@@ -282,6 +288,22 @@ export class RecordWriter {
       children.push(...this.attachments('family', family.id));
     }
     return setLevels(record);
+  }
+
+  /**
+   * HUSB or WIFE for each partner slot. The importer fills partner1 from HUSB
+   * and partner2 from WIFE, and a second HUSB or WIFE (a same-sex couple) takes
+   * the other slot, so HUSB + WIFE writes back the imported tags. A couple of
+   * the same known sex is written with that sex's tag twice, as 5.5.1 readers
+   * take HUSB as male and WIFE as female. GEDCOM 7 keeps HUSB + WIFE.
+   */
+  private partnerTags(family: FamilyRow): [string, string] {
+    if (this.v7 || !family.partner1_id || !family.partner2_id) return ['HUSB', 'WIFE'];
+    const sex1 = this.data.person.get(family.partner1_id)?.sex;
+    const sex2 = this.data.person.get(family.partner2_id)?.sex;
+    if (sex1 === sex2 && sex1 === 'M') return ['HUSB', 'HUSB'];
+    if (sex1 === sex2 && sex1 === 'F') return ['WIFE', 'WIFE'];
+    return ['HUSB', 'WIFE'];
   }
 
   source(source: SourceRow, xref: string): GedcomNode {

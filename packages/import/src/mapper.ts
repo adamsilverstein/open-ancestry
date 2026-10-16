@@ -13,7 +13,14 @@ import { CITATION_OWNERS, MEDIA_OWNERS, NOTE_OWNERS, TAG_OWNERS, toNFC } from '@
 import { serializeNode, type GedcomNode, type ParseResult } from '@open-ancestry/gedcom';
 import { createHash } from 'node:crypto';
 import { imageSize } from './image-size';
-import { classifyFile, kindFromType, mediaType, storeMediaFile, type MediaSource } from './media';
+import {
+  classifyFile,
+  kindFromType,
+  MediaRefusedError,
+  mediaType,
+  storeMediaFile,
+  type MediaSource,
+} from './media';
 import { Places, coordinate, placeParts } from './places';
 import {
   BIRTH_SUBSTITUTES,
@@ -1063,8 +1070,9 @@ export class Mapper {
         case '_SIZE': {
           const n = /^\s*\d+\s*$/.test(c.value ?? '') ? Number(c.value) : undefined;
           const column = c.tag === '_WDTH' ? 'width' : c.tag === '_HGHT' ? 'height' : 'byte_size';
-          if (n === undefined || row[column] != null) break;
-          row[column] = n;
+          if (n === undefined) break;
+          // A copied file's own size wins; the tag is still read, so not unmapped (#279).
+          row[column] ??= n;
           this.use(c);
           break;
         }
@@ -1139,6 +1147,15 @@ export class Mapper {
       this.unlinkedFileLines.delete(node.line);
       this.use(node);
     } catch (error) {
+      if (error instanceof MediaRefusedError) {
+        this.rejectedMedia++;
+        this.warn(
+          'media-refused',
+          node.line,
+          `Media file "${file.path}" ${error.reason}; not copied`,
+        );
+        return;
+      }
       const reason = error instanceof Error ? error.message : String(error);
       this.warn(
         'media-copy-failed',

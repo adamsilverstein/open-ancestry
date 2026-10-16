@@ -1,3 +1,4 @@
+import { formatDate } from '@open-ancestry/core';
 import { useRef } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { getRouteApi, Link } from '@tanstack/react-router';
@@ -261,10 +262,10 @@ function PersonRow({
         {person.surname}
       </div>
       <div role="cell" className={styles.cell} data-column="birth">
-        {person.birth?.dateText}
+        {person.birth?.dateText ? formatDate(person.birth.dateText) : null}
       </div>
       <div role="cell" className={styles.cell} data-column="death">
-        {person.death?.dateText}
+        {person.death?.dateText ? formatDate(person.death.dateText) : null}
       </div>
       <div role="cell" className={styles.cell} data-column="place">
         {person.birth?.place}

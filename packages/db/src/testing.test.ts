@@ -1,8 +1,7 @@
 import Database from 'better-sqlite3';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import {
   LATEST_SCHEMA_VERSION,
   createTree,
@@ -13,15 +12,13 @@ import {
 } from './index';
 import { seedSmallFamily } from './test/helpers';
 import { downgradeTree } from './testing';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 const historyDir = join(import.meta.dirname, 'migrations', 'history');
 
 let root: string;
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'oa-downgrade-'));
-});
-afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  root = makeTempDir('oa-downgrade-');
 });
 
 /** A tree written by the current code, with data and undo history. */

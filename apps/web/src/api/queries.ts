@@ -53,6 +53,19 @@ export const treeQuery = (tree: string) =>
       (await apiGet<{ tree: TreeInfo }>(`/trees/${seg(tree)}`, signal)).tree,
   });
 
+/** Places whose name contains `q`, for suggestions while typing a place (#280). */
+export const placesQuery = (tree: string, q: string) =>
+  queryOptions({
+    queryKey: ['places', tree, q],
+    queryFn: async ({ signal }) =>
+      (
+        await apiGet<{ items: { id: string; full_name: string }[] }>(
+          `/trees/${seg(tree)}/places?q=${encodeURIComponent(q)}`,
+          signal,
+        )
+      ).items,
+  });
+
 export const personQuery = (tree: string, id: string) =>
   queryOptions({
     queryKey: ['person', tree, id],

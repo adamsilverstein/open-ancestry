@@ -1,18 +1,8 @@
-import { formatDate, parseDate } from '@open-ancestry/core';
-import type { DateQualifier, LifeDate } from '../lib/lifespan';
+import { formatDate, lifeDate, parseDate } from '@open-ancestry/core';
 import type { PersonSummary } from '../lib/person';
 import type { LifeEvent } from '../components/QuickViewPopover/QuickViewPopover';
 import { avatarUrl } from '../lib/media';
 import type { ApiEventBrief, ApiPersonSummary } from './api';
-
-const QUALIFIERS = new Set<string>(['abt', 'bef', 'aft', 'est', 'cal']);
-
-function lifeDate(event: ApiEventBrief | null): LifeDate | undefined {
-  if (!event?.dateSort) return undefined;
-  const year = Math.floor(event.dateSort / 10000);
-  const q = event.dateQualifier?.toLowerCase();
-  return q && QUALIFIERS.has(q) ? { year, qualifier: q as DateQualifier } : { year };
-}
 
 export function displayName(p: ApiPersonSummary): string {
   const name = [p.prefix, p.given, p.surnamePrefix, p.surname, p.suffix]

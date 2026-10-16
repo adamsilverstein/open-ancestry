@@ -22,9 +22,9 @@ class FakeWorker {
       { type: 'layout' }
     >[];
   }
-  answer(id: number) {
+  answer(id: number, ms = 1) {
     this.onmessage?.({
-      data: { id, layout: null, fan: null, kin: {}, ms: 1 },
+      data: { id, layout: null, fan: null, kin: {}, ms },
     } as MessageEvent<WorkerResponse>);
   }
 }
@@ -36,6 +36,9 @@ const empty: ApiNeighborhood = {
   children: [],
   moreUp: [],
   moreDown: [],
+  childrenLoaded: [],
+  moreSiblings: [],
+  siblingsLoaded: [],
   truncated: false,
 };
 const request = (focusId: string) => ({ kind: 'family' as const, focusId, options: {} });
@@ -87,5 +90,37 @@ describe('LayoutClient', () => {
     client.layout(request('b'), { speculative: true });
     expect(FakeWorker.last.posted[0]).toMatchObject({ type: 'merge' });
     expect(FakeWorker.last.layouts().map((m) => m.focusId)).toEqual(['b']);
+  });
+
+  it('records each worker layout time as an oa-tree-layout measure, at most 100', async () => {
+    performance.clearMeasures('oa-tree-layout');
+    const client = new LayoutClient(() => empty);
+    const first = client.layout(request('a'));
+    FakeWorker.last.answer(first.id, 12.5);
+    await first;
+    const [entry] = performance.getEntriesByName('oa-tree-layout', 'measure');
+    expect(entry!.duration).toBeCloseTo(12.5, 1);
+    for (let i = 0; i < 120; i++) {
+      const next = client.layout(request(`p${i}`));
+      FakeWorker.last.answer(next.id);
+      await next;
+    }
+    expect(performance.getEntriesByName('oa-tree-layout', 'measure').length).toBeLessThanOrEqual(
+      100,
+    );
+  });
+
+  it('still settles a layout when the browser cannot record its time', async () => {
+    const measure = vi.spyOn(performance, 'measure').mockImplementation(() => {
+      throw new TypeError('no timeline');
+    });
+    try {
+      const client = new LayoutClient(() => empty);
+      const done = client.layout(request('a'));
+      FakeWorker.last.answer(done.id);
+      await expect(done).resolves.toMatchObject({ id: done.id });
+    } finally {
+      measure.mockRestore();
+    }
   });
 });

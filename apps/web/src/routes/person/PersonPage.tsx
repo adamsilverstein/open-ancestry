@@ -4,6 +4,7 @@ import { getRouteApi, useRouter } from '@tanstack/react-router';
 import { isNotFound } from '../../api/client';
 import { takeUnsaved } from '../../api/edits';
 import { deletedHere } from '../../api/history';
+import { useUrlTree } from '../../app/useUrlTree';
 import { personQuery } from '../../api/queries';
 import type { PersonDetail } from '../../api/types';
 import { useToast } from '../../components/Toast/Toast';
@@ -70,7 +71,8 @@ function useLeaveWhenGone(tree: string, detail: PersonDetail, error: unknown) {
 export function PersonPage() {
   const { personId } = route.useParams();
   const { tree } = route.useLoaderData();
-  const { tab = 'facts' } = route.useSearch();
+  const { tab = 'facts', tree: urlTree } = route.useSearch();
+  useUrlTree(urlTree);
   const navigate = route.useNavigate();
   // The loader already fetched it, so this never suspends on navigation.
   const { data: detail, error } = useSuspenseQuery(personQuery(tree, personId));
@@ -84,7 +86,12 @@ export function PersonPage() {
         value={tab}
         onValueChange={(value) =>
           void navigate({
-            search: value === 'facts' ? {} : { tab: value as Exclude<PersonTab, 'facts'> },
+            // Keep the rest of the search, `tree` above all: without it the
+            // page would be redirected against whichever tree is current.
+            search: (prev) => ({
+              ...prev,
+              tab: value === 'facts' ? undefined : (value as Exclude<PersonTab, 'facts'>),
+            }),
             replace: true,
           })
         }

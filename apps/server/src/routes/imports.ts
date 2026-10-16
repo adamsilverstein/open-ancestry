@@ -1,11 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
-import { mkdtemp, readdir, rm, stat } from 'node:fs/promises';
+import { lstat, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { prepareReimport } from '@open-ancestry/import';
 import type { FastifyRequest } from 'fastify';
 import type { Api, Deps } from '../context';
 import { formatBytes } from '../bytes';
@@ -17,16 +16,19 @@ export const IMPORT_EXTENSIONS = new Set(['.ged', '.gedcom', '.zip', '.gdz']);
 const ARCHIVE_EXTENSIONS = new Set(['.zip', '.gdz']);
 
 export const UPLOAD_PREFIX = 'oa-upload-';
+/** Photo attach uploads (routes/gallery.ts) stream to folders named like this. */
+export const ATTACH_PREFIX = 'oa-attach-';
 /** Upload folders older than this are left over from a crash and swept on startup. */
 export const STALE_UPLOAD_MS = 6 * 60 * 60 * 1000;
 
-/** Startup: removes upload temp folders an earlier, interrupted server left behind. */
+/** Startup: removes upload and attach temp folders an earlier, interrupted server left behind. */
 export async function sweepStaleUploads(now = Date.now(), dir = tmpdir()): Promise<number> {
   let removed = 0;
   for (const name of await readdir(dir).catch(() => [] as string[])) {
-    if (!name.startsWith(UPLOAD_PREFIX)) continue;
+    if (!name.startsWith(UPLOAD_PREFIX) && !name.startsWith(ATTACH_PREFIX)) continue;
     const path = join(dir, name);
-    const info = await stat(path).catch(() => null);
+    // lstat: a link named like our folder is not ours, and is never followed.
+    const info = await lstat(path).catch(() => null);
     if (!info?.isDirectory() || now - info.mtimeMs < STALE_UPLOAD_MS) continue;
     await rm(path, { recursive: true, force: true });
     removed++;
@@ -36,7 +38,17 @@ export async function sweepStaleUploads(now = Date.now(), dir = tmpdir()): Promi
 
 /** Import uploads (multipart, streamed to a temp file) and job status over JSON and SSE. */
 export function importRoutes(app: Api, deps: Deps): void {
-  const { library, jobs, importer, uploadLimit, archiveUploadLimit, thumbnails, reimports } = deps;
+  const {
+    library,
+    jobs,
+    importer,
+    comparer,
+    uploadLimit,
+    archiveUploadLimit,
+    thumbnails,
+    reimports,
+    reimportFolders,
+  } = deps;
 
   /** Streams the one uploaded file to a private temp folder. */
   async function receive(request: FastifyRequest) {
@@ -106,7 +118,15 @@ export function importRoutes(app: Api, deps: Deps): void {
   function start(tree: string, upload: Awaited<ReturnType<typeof receive>>, marker: string | null) {
     // Busy from queueing to the end of cleanup: no writes may share (or be
     // undone with) the import's transaction (issue #96).
-    const release = library.markBusy(tree);
+    let release: () => void;
+    try {
+      // Throws 409 when another server holds the tree's lock (#289).
+      release = library.markBusy(tree);
+    } catch (error) {
+      void upload.cleanup();
+      if (marker) library.discardFailedImport(tree, marker);
+      throw error;
+    }
     try {
       return jobs.enqueue(
         { tree, fileName: upload.fileName, createdTree: marker !== null },
@@ -185,17 +205,30 @@ export function importRoutes(app: Api, deps: Deps): void {
       const upload = await receive(request);
       // Busy from queueing to the end of cleanup, like an import: the tree is
       // not written, renamed or deleted under the compare.
-      const release = library.markBusy(tree);
+      let release: () => void;
+      try {
+        // Throws 409 when another server holds the tree's lock (#289).
+        release = library.markBusy(tree);
+      } catch (error) {
+        await upload.cleanup();
+        throw error;
+      }
       try {
         const job = jobs.enqueue(
           { tree, fileName: upload.fileName, kind: 'reimport' },
           async (signal, onProgress) => {
-            const session = await prepareReimport(
-              library.open(tree),
-              { path: upload.path },
-              { signal, onProgress: (phase, done, total) => onProgress({ phase, done, total }) },
-            );
+            const session = await comparer(upload.path, library.open(tree), {
+              signal,
+              onProgress,
+              folders: reimportFolders,
+            });
             const stored = reimports.add(tree, upload.fileName, session);
+            // A compare that finished after its cancel was accepted (it runs in a worker)
+            // is dropped: it never changed the tree, and the page was told it stopped.
+            if (signal.aborted) {
+              reimports.remove(stored.id);
+              throw new Error('Re-import was cancelled');
+            }
             return { reimportId: stored.id, counts: session.diff.counts };
           },
           async () => {

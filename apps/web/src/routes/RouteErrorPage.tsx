@@ -1,5 +1,6 @@
 import { useRouter, type ErrorComponentProps } from '@tanstack/react-router';
-import { RefreshCw, TriangleAlert } from 'lucide-react';
+import { Hourglass, RefreshCw, TriangleAlert } from 'lucide-react';
+import { isBusy } from '../api/client';
 import { Button } from '../components/Button/Button';
 import { EmptyState } from '../components/EmptyState/EmptyState';
 import { isChunkLoadError } from '../lib/chunkError';
@@ -29,12 +30,14 @@ export function RouteErrorPage({ error, reset }: ErrorComponentProps) {
       </div>
     );
   }
+  // A tree another process is importing or upgrading: nothing is broken, it just needs a moment.
+  const busy = isBusy(error);
   return (
     <div className={styles.centered}>
       <EmptyState
         level={1}
-        icon={<TriangleAlert size={28} aria-hidden />}
-        title="Something went wrong"
+        icon={busy ? <Hourglass size={28} aria-hidden /> : <TriangleAlert size={28} aria-hidden />}
+        title={busy ? 'This tree is busy' : 'Something went wrong'}
         description={error instanceof Error ? error.message : String(error)}
         action={
           <Button

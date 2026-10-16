@@ -17,6 +17,8 @@ export type ReviewChange = {
   applicable: boolean;
   conflict?: 'local-edit' | 'local-delete' | 'renamed-place';
   requires?: string[];
+  /** Part of a place rename (`diff.exportPlaceRenames`, by key): shown and chosen with it. */
+  exportPlaceRename?: string;
 } & (
   | { kind: 'person.new'; incomingId: string }
   | { kind: 'sex'; before: string; after: string }
@@ -53,6 +55,13 @@ export interface PersonReview {
   changes: ReviewChange[];
 }
 
+export interface ExportPlaceRename {
+  key: string;
+  from: string;
+  to: string;
+  changeIds: string[];
+}
+
 export interface ReimportReview {
   id: string;
   tree: string;
@@ -65,6 +74,8 @@ export interface ReimportReview {
   comparison: number;
   diff: {
     people: PersonReview[];
+    /** Places the export renamed (#279): one item for every fact change that only moves facts there. */
+    exportPlaceRenames: ExportPlaceRename[];
     counts: {
       incoming: number;
       matched: number;

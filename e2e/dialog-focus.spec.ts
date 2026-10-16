@@ -169,6 +169,8 @@ test.describe('focus returns to the opener', () => {
     const add = timeline(page).getByRole('button', { name: 'Add event' });
     await openWithKeyboard(add);
     const addDialog = page.getByRole('dialog', { name: 'Add event' });
+    await addDialog.getByRole('combobox', { name: 'Event type' }).click();
+    await page.getByRole('option', { name: 'Residence' }).click();
     await addDialog.getByRole('textbox', { name: 'Date' }).fill('1905');
     await page.keyboard.press('Enter');
     await expect(addDialog).toBeHidden();

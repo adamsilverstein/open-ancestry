@@ -34,6 +34,7 @@ export {
   restrictMode,
   openMemoryTree,
   openTree,
+  readTreeName,
   treePaths,
   type CreateTreeOptions,
   type TreePaths,

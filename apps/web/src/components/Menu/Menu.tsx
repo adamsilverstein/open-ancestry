@@ -45,6 +45,11 @@ export function MenuRadioItem({
   );
 }
 
+/** Non-interactive text in a menu, such as why some items are unavailable. */
+export function MenuLabel({ className, ...props }: ComponentProps<typeof RadixMenu.Label>) {
+  return <RadixMenu.Label className={cx(styles.label, className)} {...props} />;
+}
+
 export function MenuSeparator() {
   return <RadixMenu.Separator className={styles.separator} />;
 }

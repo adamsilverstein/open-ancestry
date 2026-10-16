@@ -82,6 +82,9 @@ export class TreeStore {
     this.dir = dir;
     this.clock = options.clock ?? (() => new Date().toISOString());
     this.newId = options.newId ?? ulid;
+    // First, so switching to WAL below waits only as long as the caller allows
+    // (better-sqlite3's own default is 5 s, which would block the server).
+    db.pragma(`busy_timeout = ${Math.max(0, Math.floor(options.busyTimeoutMs ?? 5000))}`);
     db.pragma('foreign_keys = ON');
     if (dir !== null) {
       db.pragma('journal_mode = WAL');
@@ -90,7 +93,6 @@ export class TreeStore {
     db.pragma('synchronous = NORMAL');
     db.pragma('temp_store = MEMORY');
     db.pragma('cache_size = -65536');
-    db.pragma(`busy_timeout = ${Math.max(0, Math.floor(options.busyTimeoutMs ?? 5000))}`);
     this.log = options.log ?? ((message) => console.info(message));
     this.migrations = options.migrations ?? MIGRATIONS;
     this.schemaVersion = this.migrations.length;

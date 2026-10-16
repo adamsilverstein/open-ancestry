@@ -26,7 +26,7 @@ import {
   type ReviewChange,
 } from './api';
 import { groupReview, QUESTIONS, type GroupId } from './group';
-import { compareProgress, conflictText, describeChange } from './labels';
+import { compareProgress, conflictText, describeChange, placeRenameText } from './labels';
 import { summarizeApply, type ApplySummary, type SummaryPerson } from './summary';
 import styles from './Reimport.module.css';
 
@@ -165,16 +165,35 @@ function Review({ review }: { review: ReimportReview }) {
   const [comparing, setComparing] = useState(false);
   // A large export can change thousands of people: render cards in pages.
   const [shown, setShown] = useState(PAGE);
-  const [filter, setFilter] = useState<GroupId | 'all'>('all');
-  const groups = useMemo(() => groupReview(review.diff.people), [review]);
+  const [filter, setFilter] = useState<GroupId | 'all' | 'places'>('all');
+  // A renamed place's fact changes are one item above the cards (#279), not repeated on them.
+  const cardPeople = useMemo(
+    () =>
+      review.diff.people
+        .map((p) => ({ ...p, changes: p.changes.filter((c) => !c.exportPlaceRename) }))
+        .filter((p) => p.changes.length),
+    [review],
+  );
+  const groups = useMemo(() => groupReview(cardPeople), [cardPeople]);
+  const renames = review.diff.exportPlaceRenames;
   const visible = groups.filter((g) => g.people.length && (filter === 'all' || g.id === filter));
   const listed = visible.reduce((n, g) => n + g.people.length, 0);
   // Matched people without a card: nothing in the export changed them.
   const unchanged = Math.max(
     0,
+    // People whose only change is a rename were changed: they count with the cards.
     review.diff.counts.matched - review.diff.people.filter((p) => p.status === 'matched').length,
   );
   const active = useMemo(() => effective(review, selected), [review, selected]);
+  // A place rename is one change to the user, however many facts it moves.
+  const applyCount = useMemo(() => {
+    let n = active.size;
+    for (const r of review.diff.exportPlaceRenames) {
+      const on = r.changeIds.filter((id) => active.has(id)).length;
+      if (on) n -= on - 1;
+    }
+    return n;
+  }, [active, review]);
   const { counts } = review.diff;
 
   // Edits elsewhere (another tab) make the review stale: check whenever the page is back in view.
@@ -238,10 +257,16 @@ function Review({ review }: { review: ReimportReview }) {
   }
 
   function toggle(change: ReviewChange, on: boolean) {
+    toggleAll([change.id], on);
+  }
+
+  function toggleAll(ids: string[], on: boolean) {
     setSelected((current) => {
       const next = new Set(current);
-      if (on) next.add(change.id);
-      else next.delete(change.id);
+      for (const id of ids) {
+        if (on) next.add(id);
+        else next.delete(id);
+      }
       return next;
     });
   }
@@ -303,7 +328,7 @@ function Review({ review }: { review: ReimportReview }) {
 
   async function discard() {
     await discardReimport(review.id).catch(() => {});
-    await navigate({ to: '/' });
+    await navigate(backToTree(review.tree));
   }
 
   if (done) return <Applied {...done} tree={review.tree} fileName={review.fileName} />;
@@ -344,7 +369,7 @@ function Review({ review }: { review: ReimportReview }) {
           Accept none
         </Button>
       </div>
-      {review.diff.people.length === 0 ? (
+      {cardPeople.length === 0 && review.diff.exportPlaceRenames.length === 0 ? (
         <p className={importStyles.note}>
           This export matches your tree: there is nothing to change.
         </p>
@@ -352,7 +377,10 @@ function Review({ review }: { review: ReimportReview }) {
         <>
           <div role="group" aria-label="Filter the review" className={styles.filters}>
             {[
-              { id: 'all' as const, title: 'All', count: review.diff.people.length },
+              { id: 'all' as const, title: 'All', count: cardPeople.length + renames.length },
+              ...(renames.length
+                ? [{ id: 'places' as const, title: 'Places renamed', count: renames.length }]
+                : []),
               ...groups
                 .filter((g) => g.people.length)
                 .map((g) => ({ id: g.id, title: g.title, count: g.people.length })),
@@ -372,6 +400,25 @@ function Review({ review }: { review: ReimportReview }) {
               </Button>
             ))}
           </div>
+          {renames.length > 0 && (filter === 'all' || filter === 'places') && (
+            <section aria-labelledby="group-places" className={styles.group}>
+              <h2 id="group-places" className={styles.groupTitle}>
+                Places renamed ({review.diff.exportPlaceRenames.length})
+              </h2>
+              <ul className={styles.changes}>
+                {review.diff.exportPlaceRenames.map((rename) => (
+                  <li key={rename.key}>
+                    <Checkbox
+                      label={placeRenameText(rename)}
+                      checked={rename.changeIds.every((id) => active.has(id))}
+                      description="Every fact at this place moves to the new name."
+                      onChange={(event) => toggleAll(rename.changeIds, event.target.checked)}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           {(() => {
             // Pages run through the groups in reading order.
             let left = shown;
@@ -419,7 +466,7 @@ function Review({ review }: { review: ReimportReview }) {
           disabled={pending || stale || active.size === 0}
           onClick={() => void apply()}
         >
-          Apply {active.size} change{active.size === 1 ? '' : 's'}
+          Apply {applyCount} change{applyCount === 1 ? '' : 's'}
         </Button>
       </div>
     </div>
@@ -519,6 +566,10 @@ function Applied({
   );
 }
 
+/** Back to the tree a re-import compared with (#279): its home person. */
+const backToTree = (tree: string) =>
+  ({ to: '/tree/$personId', params: { personId: 'home' }, search: { tree } }) as const;
+
 /** Follows the comparison job, then shows the review. */
 export function ReimportPage() {
   const { jobId } = useParams({ from: '/reimport/$jobId' });
@@ -565,14 +616,21 @@ export function ReimportPage() {
   /** Stops the comparison, or discards its review if it finished in the meantime. */
   async function cancel() {
     setCancelling(true);
-    // False (409): the comparison already finished, so discard its review.
-    if (!(await cancelJob(jobId).catch(() => false))) {
-      const latest = await getJob(jobId).catch(() => null);
-      const done = latest?.result as unknown as { reimportId?: string } | undefined;
-      if (done?.reimportId) await discardReimport(done.reimportId).catch(() => {});
+    const reviewOf = (j: Awaited<ReturnType<typeof getJob>> | null) =>
+      (j?.result as unknown as { reimportId?: string } | null)?.reimportId;
+    // A comparison that already stopped is discarded quietly, without a refused cancel.
+    const before = await getJob(jobId).catch(() => null);
+    let finished = reviewOf(before);
+    // A job that already completed or failed has nothing left to stop.
+    const stopped = before?.state === 'completed' || before?.state === 'failed';
+    // False (409): it finished in the meantime, so discard its review.
+    if (!stopped && !(await cancelJob(jobId).catch(() => false))) {
+      finished = reviewOf(await getJob(jobId).catch(() => null));
     }
+    if (finished) await discardReimport(finished).catch(() => {});
     toast({ title: 'Re-import cancelled. Your tree was not changed.' });
-    await navigate({ to: '/' });
+    const tree = before?.tree ?? job?.tree;
+    await navigate(tree ? backToTree(tree) : { to: '/' });
   }
 
   return (

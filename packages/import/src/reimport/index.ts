@@ -1,12 +1,21 @@
 export { applyReimport, ReimportStaleError, type ApplyResult } from './apply';
-export type { FactView, PersonReview, ReimportChange, ReimportDiff, ReviewChange } from './diff';
+export type {
+  FactView,
+  PersonReview,
+  ExportPlaceRename,
+  ReimportChange,
+  ReimportDiff,
+  ReviewChange,
+} from './diff';
 export { localHistory, type LocalHistory } from './diff';
 export {
   HIGH_CONFIDENCE,
   MATCH_THRESHOLD,
   jaroWinkler,
+  detectPlaceRenames,
   matchPeople,
   POSSIBLE_MATCH,
+  type PlaceRename,
   type NearMiss,
   type PersonMatch,
 } from './match';

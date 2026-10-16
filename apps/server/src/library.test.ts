@@ -2,6 +2,7 @@ import {
   chmodSync,
   cpSync,
   existsSync,
+  mkdirSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -10,6 +11,8 @@ import {
 import { readdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
+import { getSchemaVersion, migrate } from '@open-ancestry/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from './index';
 import { Library, defaultLibraryRoot, treeNameProblem } from './library';
@@ -116,6 +119,97 @@ describe('Library', () => {
     await running;
     library.rename('Busy', 'Other');
     expect(library.list().map((t) => t.id)).toEqual(['Other']);
+    library.closeAll();
+  });
+
+  it('lists a tree another process is upgrading without waiting for the upgrade', () => {
+    const root = makeTempDir('oa-lib-');
+    // A tree written by an older version, so opening it would upgrade it.
+    const dir = join(root, 'Old.oatree');
+    mkdirSync(join(dir, 'media'), { recursive: true });
+    mkdirSync(join(dir, 'thumbs'));
+    const old = new Database(join(dir, 'tree.sqlite'));
+    migrate(old, { to: 3 });
+    old.prepare("INSERT INTO meta (key, value) VALUES ('tree_name', 'Old family')").run();
+    old.pragma('journal_mode = WAL');
+    // Another server or the CLI is part way through the upgrade: it holds the
+    // write lock, and an upgrade waits for its lock for up to 30 s.
+    old.exec('BEGIN IMMEDIATE');
+    const library = new Library(root);
+    try {
+      const started = performance.now();
+      expect(library.list().map(({ id, name }) => ({ id, name }))).toEqual([
+        { id: 'Old', name: 'Old family' },
+      ]);
+      expect(performance.now() - started).toBeLessThan(1000);
+    } finally {
+      old.exec('ROLLBACK');
+    }
+    // Listing reads the name only: it leaves the upgrade to whoever opens the tree.
+    expect(getSchemaVersion(old)).toBe(3);
+    old.close();
+    library.closeAll();
+  });
+
+  it.each([
+    [
+      'a damaged database file',
+      (file: string) => writeFileSync(file, 'not a database'.repeat(100)),
+    ],
+    [
+      'a database without its meta table',
+      (file: string) => {
+        rmSync(file, { force: true });
+        rmSync(`${file}-wal`, { force: true });
+        rmSync(`${file}-shm`, { force: true });
+        new Database(file).close();
+      },
+    ],
+  ])('still lists the library when one tree has %s', (_, damage) => {
+    const root = makeTempDir('oa-lib-');
+    const setup = new Library(root);
+    setup.create('Settled');
+    setup.create('Broken');
+    setup.closeAll();
+    damage(join(root, 'Broken.oatree', 'tree.sqlite'));
+    const library = new Library(root);
+    expect(library.list().map(({ id, name }) => ({ id, name }))).toEqual([
+      { id: 'Broken', name: 'Broken' },
+      { id: 'Settled', name: 'Settled' },
+    ]);
+    library.closeAll();
+  });
+
+  it('still lists the library while another process is importing into one tree', () => {
+    const root = makeTempDir('oa-lib-');
+    const setup = new Library(root);
+    setup.create('Settled');
+    setup.create('Importing');
+    setup.closeAll();
+    // `open-ancestry import` (or an e2e worker) writing a tree holds its lock
+    // for the whole import, so the server cannot open that one tree yet.
+    const importer = new Database(join(root, 'Importing.oatree', 'tree.sqlite'));
+    importer.pragma('journal_mode = DELETE');
+    importer.exec('BEGIN EXCLUSIVE');
+    const library = new Library(root);
+    try {
+      // The server waits briefly for the lock, not better-sqlite3's default 5 s.
+      const started = performance.now();
+      expect(library.list().map(({ id, name }) => ({ id, name }))).toEqual([
+        { id: 'Importing', name: 'Importing' },
+        { id: 'Settled', name: 'Settled' },
+      ]);
+      expect(performance.now() - started).toBeLessThan(1000);
+      // Opening the locked tree itself still reports it busy, as a 409.
+      expect(() => library.open('Importing')).toThrow(
+        expect.objectContaining({ code: 'SQLITE_BUSY' }),
+      );
+    } finally {
+      importer.exec('ROLLBACK');
+      importer.close();
+    }
+    // Once the import is done the tree opens and shows its stored name.
+    expect(library.info('Importing').name).toBe('Importing');
     library.closeAll();
   });
 

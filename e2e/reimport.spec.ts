@@ -417,7 +417,7 @@ test('an override is not carried onto a newer local value, and a refused compare
       status: 409,
       contentType: 'application/json',
       body: JSON.stringify({
-        error: { code: 'conflict', message: 'Tree is busy (an import is running)' },
+        error: { code: 'busy', message: 'Tree is busy (an import is running)' },
       }),
     }),
   );
@@ -627,15 +627,103 @@ test("a renamed person's export name is offered as an alternate, saying so", asy
   ).toBeVisible();
 });
 
+test('a place the export renamed is one item, and keeps matches sure (#279)', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const josiah = (await personByName(request, seeded.tree, 'Josiah'))!;
+  const OLD = 'Millbrook, Harlow County, Vermont, USA';
+  const NEW = 'Millbrook Falls, Harlow County, Vermont, USA';
+  await startReimport(page, seeded, laterExport().replaceAll(OLD, NEW));
+  const places = page.getByRole('region', { name: 'Places renamed' });
+  const rename = places.getByRole('checkbox', {
+    name: new RegExp(`^Place renamed: ${OLD} → ${NEW} \\(\\d+ facts\\)$`),
+  });
+  await expect(rename).toBeChecked();
+  // Not repeated fact by fact on the cards, and no doubt cast on who was born there.
+  await expect(page.getByRole('checkbox', { name: new RegExp(`${OLD}.*→.*${NEW}`) })).toHaveCount(
+    1,
+  );
+  await expect(card(page, 'Josiah Ashgrove').getByText(/different birth place/)).toHaveCount(0);
+  // The rename has a filter of its own and counts as one change, however many facts it covers.
+  await expect(
+    page
+      .getByRole('group', { name: 'Filter the review' })
+      .getByRole('button', { name: 'Places renamed 1' }),
+  ).toBeVisible();
+  const applyButton = page.getByRole('button', { name: /^Apply \d+ changes?$/ });
+  const count = async () => Number(/\d+/.exec((await applyButton.textContent()) ?? '')![0]);
+  const withRename = await count();
+  // Unticked, nothing moves; ticked again, every fact goes to the new name.
+  await rename.uncheck();
+  await expect(rename).not.toBeChecked();
+  expect(await count()).toBe(withRename - 1);
+  await rename.check();
+  await page.getByRole('button', { name: /^Apply \d+ changes?$/ }).click();
+  await expect(
+    page
+      .getByRole('region', { name: /Notifications/ })
+      .getByRole('listitem')
+      .filter({ hasText: /Applied \d+ change/ }),
+  ).toBeVisible({ timeout: 30_000 });
+  const detail = (await (
+    await request.get(`/api/trees/${encodeURIComponent(seeded.tree)}/people/${josiah}`)
+  ).json()) as { events: { event: { type: string }; place: { full_name: string } | null }[] };
+  expect(detail.events.find((e) => e.event.type === 'BIRT')!.place!.full_name).toBe(NEW);
+});
+
 test('discarding a review changes nothing', async ({ page, request, baseURL }, testInfo) => {
   const seeded = await seed(request, baseURL!, testInfo);
   await startReimport(page, seeded);
   await page.getByRole('button', { name: 'Discard' }).click();
-  await expect(page).toHaveURL(/\/$/);
+  // Back on the tree it was comparing with (#279), not the start page.
+  await expect(page).toHaveURL(/\/tree\/(?!home)[^/?#]+/);
+  await expect(page.getByRole('button', { name: `Tree: ${seeded.tree}` })).toBeVisible();
   const history = (await (
     await request.get(`/api/trees/${encodeURIComponent(seeded.tree)}/history`)
   ).json()) as { items: unknown[] };
   expect(history.items).toEqual([]);
+});
+
+test('cancelling a comparison that already stopped sends no cancel (#308)', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  await page.route('**/api/jobs/*/events', () => {});
+  await page.addInitScript((tree) => localStorage.setItem('oa-tree', tree), seeded.tree);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'File' }).click();
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('menuitem', { name: /Re-import updated export/ }).click();
+  await (
+    await chooser
+  ).setFiles({
+    name: 'Ashgrove 2026.ged',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from(laterExport()),
+  });
+  await expect(page.getByRole('heading', { name: 'Starting the comparison' })).toBeVisible();
+  // The job failed (or was cancelled elsewhere) before Cancel: it has no review to discard.
+  await page.route('**/api/jobs/*', (route) => {
+    if (route.request().method() === 'GET') {
+      const id = /jobs\/([^/?#]+)/.exec(route.request().url())![1]!;
+      return route.fulfill({
+        json: { id, kind: 'reimport', tree: seeded.tree, state: 'failed', result: null },
+      });
+    }
+    return route.continue();
+  });
+  const cancels: string[] = [];
+  page.on('request', (r) => {
+    if (r.method() === 'DELETE' && /\/api\/jobs\//.test(r.url())) cancels.push(r.url());
+  });
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page).toHaveURL(/\/tree\/(?!home)[^/?#]+/);
+  expect(cancels).toEqual([]);
 });
 
 test('cancelling the comparison keeps nothing and changes nothing', async ({
@@ -661,7 +749,7 @@ test('cancelling the comparison keeps nothing and changes nothing', async ({
   await expect(page.getByRole('heading', { name: 'Starting the comparison' })).toBeVisible();
   const jobId = /\/reimport\/([^/?#]+)/.exec(page.url())![1]!;
   await page.getByRole('button', { name: 'Cancel' }).click();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/tree\/(?!home)[^/?#]+/);
   await expect(
     page.getByText('Re-import cancelled. Your tree was not changed.', { exact: true }),
   ).toBeVisible();
@@ -729,4 +817,35 @@ test('a review with nothing in a group offers no filter for it', async ({
   await startReimport(page, seeded, SAMPLE.replace('0 TRLR', `${one}0 TRLR`));
   const filters = page.getByRole('group', { name: 'Filter the review' });
   await expect(filters.getByRole('button')).toHaveText(['All 1', 'New people 1']);
+});
+
+test('a corrected marriage date is offered as a change, not a second marriage (#268)', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const corrected = SAMPLE.replace('2 DATE 14 OCT 1895', '2 DATE 15 OCT 1895').replace(
+    /@([A-Z]+)(\d+)@/g,
+    (_, p: string, n: string) => `@${p}${Number(n) + 100}@`,
+  );
+  await startReimport(page, seeded, corrected);
+  const silas = card(page, 'Silas Corran');
+  await expect(
+    silas.getByRole('checkbox', { name: /Marriage: 14 Oct 1895 → 15 Oct 1895/ }),
+  ).toBeChecked();
+  await expect(silas.getByRole('checkbox', { name: /Add family fact/ })).toHaveCount(0);
+
+  await page.getByRole('button', { name: /^Apply \d+ changes?$/ }).click();
+  await expect(page.getByRole('region', { name: 'Re-import applied' })).toBeVisible({
+    timeout: 30_000,
+  });
+  const id = (await personByName(request, seeded.tree, 'Silas'))!;
+  const detail = (await (
+    await request.get(`/api/trees/${encodeURIComponent(seeded.tree)}/people/${id}`)
+  ).json()) as { partnerFamilies: { events: { event: { type: string; date_text: string } }[] }[] };
+  const marriages = detail.partnerFamilies
+    .flatMap((f) => f.events)
+    .filter((e) => e.event.type === 'MARR');
+  expect(marriages.map((e) => e.event.date_text)).toEqual(['15 OCT 1895']);
 });

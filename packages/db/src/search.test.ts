@@ -365,6 +365,10 @@ describe('full search rebuild', () => {
     store.transact('edge cases', (tx) => {
       persons.create(tx, {}); // no names, no events
       persons.create(tx, { names: [{ given: 'Ada' }, { surname: 'Lyle', type: 'aka' }] });
+      // Names the spelling fold changes (#199): the set-wise rebuild must fold them too.
+      for (const surname of ['Yılmaz', 'Straße', "O'Brien"]) {
+        persons.create(tx, { names: [{ given: 'Fold', surname }] });
+      }
     });
     const docs = () =>
       store.db
@@ -381,6 +385,18 @@ describe('full search rebuild', () => {
     store.db.transaction(() => refreshSearch(store, ids))();
     expect(rebuilt).toEqual(docs());
     expect(rebuilt).toHaveLength(ids.length);
+    store.close();
+  });
+
+  it('folds spellings when a bulk load rebuilds the index', () => {
+    const store = memoryTree();
+    const data = generateSyntheticTree({ people: 20, seed: 3 });
+    const target = data.person_name[0]!;
+    target.surname = 'Yılmaz';
+    bulkInsert(store, data);
+    expect(searchPeople(store, 'Yilmaz').map((r) => r.person.id)).toContain(target.person_id);
+    rebuildSearchIndex(store);
+    expect(searchPeople(store, 'Yilmaz').map((r) => r.person.id)).toContain(target.person_id);
     store.close();
   });
 });

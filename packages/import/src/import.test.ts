@@ -308,6 +308,18 @@ describe('media', () => {
     store.close();
   });
 
+  it.each(['infozip-utf8-names.zip', 'ditto-utf8-names.zip'])(
+    'links a photo with a non-ASCII name from %s (#287)',
+    async (name) => {
+      const gedzip = readFileSync(join(FIXTURES, 'gedzip', name));
+      const report = await importGedcom({ gedzip, fileName: name }, openMemoryTree(), {
+        today: TODAY,
+      });
+      expect(report.media.linked).toBe(1);
+      expect(report.media.missing).toEqual([]);
+    },
+  );
+
   it("maps our own export's _WDTH, _HGHT and _SIZE when the file gives the real values (#279)", async () => {
     // A 3x2 PNG header: the copied file's own size wins, and the tags are still mapped.
     const png = new Uint8Array([

@@ -280,6 +280,49 @@ describe('metadata strippers', () => {
     expect((await sharp(out).metadata()).icc).toBeDefined();
   });
 
+  it('drop PNG colour chunks whose size is wrong, so they cannot carry text', async () => {
+    const plain = await sharp({ create: { width: 4, height: 4, channels: 3, background: '#321' } })
+      .png()
+      .toBuffer();
+    const oversized = withPngChunks(plain, [
+      pngChunk('cICP', Buffer.concat([Buffer.from([1, 13, 0, 1]), latin1(SECRET)])),
+      pngChunk('gAMA', Buffer.concat([Buffer.from([0, 0, 0xb1, 0x8f]), latin1(SECRET)])),
+      pngChunk('pHYs', Buffer.from([0, 0, 0x0b, 0x13, 0, 0, 0x0b, 0x13, 1])),
+    ]);
+    const out = Buffer.from(stripBytes('png', oversized));
+    expect(leaks(out)).toEqual([]);
+    // The well-formed pHYs stays.
+    expect(out.includes('pHYs')).toBe(true);
+    expect(out.includes('cICP')).toBe(false);
+    await sharp(out).raw().toBuffer();
+  });
+
+  it('rename a PNG ICC profile, whose name is free text', async () => {
+    const withIcc = await sharp({
+      create: { width: 4, height: 4, channels: 3, background: '#321' },
+    })
+      .png()
+      .withIccProfile('srgb')
+      .toBuffer();
+    // Give the profile a name holding the synthetic person's name, with a valid CRC.
+    const at = withIcc.indexOf('iCCP') - 4;
+    const length = withIcc.readUInt32BE(at);
+    const data = withIcc.subarray(at + 8, at + 8 + length);
+    const rest = data.subarray(data.indexOf(0));
+    const named = Buffer.concat([
+      withIcc.subarray(0, at),
+      pngChunk('iCCP', Buffer.concat([latin1(SECRET), rest])),
+      withIcc.subarray(at + 12 + length),
+    ]);
+    expect(leaks(named).length).toBeGreaterThan(0);
+    const out = Buffer.from(stripBytes('png', named));
+    expect(leaks(out)).toEqual([]);
+    expect(out.includes('ICC Profile\0')).toBe(true);
+    // Still a valid PNG whose profile decodes.
+    expect((await sharp(out).metadata()).icc).toBeDefined();
+    await sharp(out).raw().toBuffer();
+  });
+
   it('reject a file cut short or not the format it claims', () => {
     expect(() => stripBytes('png', png.subarray(0, png.length - 20))).toThrow(StripError);
     expect(() => stripBytes('jpeg', jpeg.subarray(0, 40))).toThrow(StripError);

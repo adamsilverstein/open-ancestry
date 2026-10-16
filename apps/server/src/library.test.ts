@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
   cpSync,
@@ -9,7 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { readdir } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { getSchemaVersion, migrate } from '@open-ancestry/db';
@@ -45,6 +46,47 @@ describe('tree name length in bytes (#275 P1)', () => {
     expect(Buffer.byteLength(`${name} 1000`)).toBeLessThanOrEqual(MAX_TREE_NAME_BYTES);
     expect(name).toBe('漢'.repeat([...name].length));
     expect(treeNameFromFile(`${'😀'.repeat(100)}.ged`)).not.toMatch(/\uFFFD/);
+  });
+});
+
+describe('a tree busy in another server on the same library (#275 P3)', () => {
+  it('refuses rename, delete and writes while the other server imports', () => {
+    const root = makeTempDir('oa-two-servers-');
+    const first = new Library(root);
+    const second = new Library(root);
+    first.create('Shared');
+    first.closeAll();
+    const release = first.markBusy('Shared');
+    // Same process, separate Library objects: only the lock file can tell.
+    expect(() => second.rename('Shared', 'Moved')).toThrow(/busy in another/);
+    expect(() => second.delete('Shared')).toThrow(/busy in another/);
+    expect(() => second.assertIdle('Shared')).toThrow(expect.objectContaining({ statusCode: 409 }));
+    // The server holding the lock is not blocked by its own file.
+    expect(() => first.assertIdle('Shared')).toThrow(/an import is running/);
+    const again = first.markBusy('Shared');
+    release();
+    expect(() => second.assertIdle('Shared')).toThrow(/busy in another/);
+    again();
+    expect(existsSync(join(root, 'Shared.oatree', 'busy.lock'))).toBe(false);
+    second.rename('Shared', 'Moved');
+    expect(second.list().map((t) => t.id)).toEqual(['Moved']);
+    second.closeAll();
+  });
+
+  it('ignores a lock left by a server process that has exited', () => {
+    const root = makeTempDir('oa-stale-lock-');
+    const library = new Library(root);
+    library.create('Left');
+    library.closeAll();
+    const dead = spawnSync(process.execPath, ['-e', '0']).pid!;
+    writeFileSync(
+      join(root, 'Left.oatree', 'busy.lock'),
+      JSON.stringify({ pid: dead, host: hostname(), owner: 'gone', at: new Date().toISOString() }),
+    );
+    expect(() => library.assertIdle('Left')).not.toThrow();
+    expect(existsSync(join(root, 'Left.oatree', 'busy.lock'))).toBe(false);
+    library.rename('Left', 'Right');
+    library.closeAll();
   });
 });
 

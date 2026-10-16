@@ -2385,6 +2385,31 @@ describe('a place the export renamed (#279)', () => {
     expect(value(store, 'SELECT count(*) FROM place WHERE full_name = ?', `Stray, ${OLD}`)).toBe(1);
   });
 
+  it.each(['rename', 'merge'])(
+    'finishes a %s even when places form a parent cycle (#307 review)',
+    async (how) => {
+      const old = placeId(OLD);
+      store.transact('Corrupt', (tx) => {
+        if (how === 'merge')
+          tx.insert('place', { name: 'Millbrook Falls', full_name: NEW } as never);
+        const a = tx.insert('place', {
+          name: 'Mill Pond',
+          full_name: `Mill Pond, ${OLD}`,
+          parent_id: old,
+        } as never) as { id: string };
+        const b = tx.insert('place', {
+          name: 'Dam',
+          full_name: `Dam, Mill Pond, ${OLD}`,
+          parent_id: a.id,
+        } as never) as { id: string };
+        // Corrupt data: the place is its own ancestor.
+        tx.update('place', old, { parent_id: b.id } as never);
+      });
+      await applyRenames(renamed());
+      expect(value(store, 'SELECT count(*) FROM place WHERE full_name = ?', OLD)).toBe(0);
+    },
+  );
+
   it('moves facts rather than renaming a place whose county changed (#307 review)', async () => {
     const ELDER = 'Elderford, Cask County, Ohio, USA';
     const CO = 'Elderford, Cask Co., Ohio, USA';

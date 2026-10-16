@@ -4,16 +4,19 @@ import {
   exportJson,
   getSchemaVersion,
   importJson,
+  meta,
   migrate,
   openMemoryTree,
   persons,
   undoLast,
 } from './index';
 
-describe('adversarial: undo of history from an imported JSON backup', () => {
+describe('undo of history from an imported JSON backup', () => {
   it('never lets a change_log entry rewrite schema_version', () => {
     const source = openMemoryTree();
-    source.transact('add', (tx) => persons.create(tx, { names: [{ given: 'Ida', surname: 'Wren' }] }));
+    source.transact('add', (tx) =>
+      persons.create(tx, { names: [{ given: 'Ida', surname: 'Wren' }] }),
+    );
     const doc = exportJson(source);
     source.close();
     const current = String(LATEST_SCHEMA_VERSION);
@@ -47,6 +50,43 @@ describe('adversarial: undo of history from an imported JSON backup', () => {
     }
     expect(getSchemaVersion(store.db)).toBe(LATEST_SCHEMA_VERSION);
     expect(() => migrate(store.db)).not.toThrow();
+    store.close();
+  });
+
+  it.each(['schema_version', 'import_pending', 'nfc_merged_ids'])(
+    'refuses a backup whose change_log edits the managed %s key',
+    (key) => {
+      const source = openMemoryTree();
+      source.transact('add', (tx) =>
+        persons.create(tx, { names: [{ given: 'Ida', surname: 'Wren' }] }),
+      );
+      const doc = exportJson(source);
+      source.close();
+      const batch = doc.tables.change_log![0]!.batch_id;
+      doc.tables.change_log!.push({
+        ...doc.tables.change_log![0]!,
+        seq: 999,
+        batch_id: batch,
+        entity: 'meta',
+        entity_id: key,
+        op: 'insert',
+        before_json: null,
+        after_json: JSON.stringify({ key, value: '1' }),
+      } as never);
+      const store = openMemoryTree();
+      expect(() => importJson(store, doc)).toThrow(/managed by the app/);
+      store.close();
+    },
+  );
+
+  it('still replays edits to ordinary meta keys such as the tree name', () => {
+    const source = openMemoryTree();
+    source.transact('rename', (tx) => meta.set(tx, 'tree_name', 'Wren family'));
+    const doc = exportJson(source);
+    source.close();
+    const store = openMemoryTree();
+    importJson(store, doc);
+    expect(undoLast(store)?.label).toBe('rename');
     store.close();
   });
 });

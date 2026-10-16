@@ -1569,6 +1569,23 @@ test.describe('phone width (#139)', () => {
     expect(await reachable(page, up, 44, 24)).toBe(true);
   });
 
+  test('zoomed out in the pedigree, the switcher leaves the up chevron its target (#173 review)', async ({
+    page,
+  }) => {
+    // Pedigree cards are narrower (96), so the switcher's target sits closer
+    // to the up chevron's.
+    await open(page, 'ada', '&layout=pedigree');
+    await settled(page);
+    const zoomOut = toolbar(page).getByRole('button', { name: 'Zoom out' });
+    while ((await transform(page)).scale / 1.25 > 0.35) {
+      await zoomOut.click();
+      await settled(page);
+    }
+    await expect(canvas(page).locator(`[data-switch="${ids.ada}"]`)).toBeAttached();
+    const up = canvas(page).locator(`[data-chevron="up"][data-node="${ids.ada}"]`);
+    expect(await reachable(page, up, 44, 24)).toBe(true);
+  });
+
   test('a double tap on a card re-centers on that person', async ({ page }) => {
     await open(page);
     await settled(page);

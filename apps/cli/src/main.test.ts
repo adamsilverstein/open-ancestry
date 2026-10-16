@@ -28,8 +28,16 @@ describe('parseCliArgs', () => {
       staticDir: undefined,
       importLimits: {},
       importHeapMb: undefined,
+      maxReimports: undefined,
       sharedLibrary: false,
     });
+  });
+
+  it('reads how many re-import reviews to hold from OA_MAX_REIMPORTS', () => {
+    expect(parseCliArgs(['serve'], { OA_MAX_REIMPORTS: '64' })).toMatchObject({
+      maxReimports: 64,
+    });
+    expect(() => parseCliArgs(['serve'], { OA_MAX_REIMPORTS: '0' })).toThrow(/OA_MAX_REIMPORTS/);
   });
 
   it('reads import size and heap limits from flags, then OA_ variables', () => {

@@ -6,7 +6,7 @@ import { currentTreeQuery } from '../api/queries';
 import { useOpenRestored } from '../lib/useOpenRestored';
 import { Button } from '../components/Button/Button';
 import { Dialog } from '../components/Dialog/Dialog';
-import { useToast } from '../components/Toast/Toast';
+import { useDismissToasts, useToast } from '../components/Toast/Toast';
 import styles from './HistoryPanel.module.css';
 
 const relative = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
@@ -34,6 +34,7 @@ interface HistoryPanelProps {
 export default function HistoryPanel({ open, onOpenChange }: HistoryPanelProps) {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const dismiss = useDismissToasts();
   const onRestored = useOpenRestored();
   const { data: tree } = useQuery(currentTreeQuery);
   const { data: history } = useQuery({ ...historyQuery(tree ?? ''), enabled: !!tree });
@@ -43,6 +44,7 @@ export default function HistoryPanel({ open, onOpenChange }: HistoryPanelProps) 
   const run = async (direction: 'undo' | 'redo') => {
     try {
       const result = await undoRedo(queryClient, direction, { onRestored });
+      if (direction === 'undo' && result.batch) dismiss(`batch:${result.batch.id}`);
       // The panel shows what changed; only a step-over needs saying.
       if (result.skipped.length) toast({ ...undoRedoMessage(direction, result), duration: 6000 });
     } catch (error) {

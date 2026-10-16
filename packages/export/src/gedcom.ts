@@ -27,6 +27,7 @@ import {
 } from './canonical';
 import { dirtyRecords, nameTextStates, type NameTextState } from './dirty';
 import { mergeUnmapped, type MergeContext } from './merge';
+import { NameScrubber, type ScrubMode } from './scrub';
 import { TreeData, ownerKey } from './load';
 import type { GedcomExport, GedcomExportOptions } from './types';
 
@@ -84,13 +85,26 @@ function allowlist(record: GedcomNode): void {
     .map((c) => ({ ...c, ...(c.tag === 'NAME' && { value: 'Private' }), children: [] }));
 }
 
+/** Values that are web or mail addresses: names glued into them are matched too. */
+const LINK_TAGS = new Set(['WWW', 'EMAIL', '_LINK', '_URL']);
+
+/**
+ * Values that are not free text and keep their words when privatizing: dates,
+ * places (scrubbing "Rose Hill" for a living Rose would only break them),
+ * enumerations, ids and FILE (scrubbed as the path is chosen).
+ */
+const KEPT_TEXT = new Set(
+  `DATE TIME AGE PLAC SEX RESN FORM MEDI MIME LANG PEDI QUAY ROLE STAT FILE _APID _OID _PRIM
+  _WDTH _HGHT _SIZE VERS GEDC CHAR`.split(/\s+/),
+);
+
 /** Privacy levels a privatized export withholds (not `locked`, which only guards edits). */
 const withheldPrivacy = (privacy: Privacy) => privacy === 'private' || privacy === 'confidential';
 
 /** Options only the GEDZIP writer uses. */
 export interface InternalOptions extends GedcomExportOptions {
   /** FILE value for a media row; also tells the caller which media were written. */
-  filePath?: (media: MediaRow) => string | undefined;
+  filePath?: (media: MediaRow, scrub: (text: string) => string) => string | undefined;
   /** False forces every record through the canonical writer. */
   verbatim?: boolean;
 }
@@ -152,6 +166,8 @@ class GedcomWriter implements WriterContext, MergeContext {
   private importedXrefs: Map<string, { kind: RecordKind; id: string } | null> | undefined;
   /** Imported xrefs, upper-cased, for scrubbing text in privatized exports. */
   private importedIds: Set<string> | undefined;
+  /** Withheld people's names, for `scrubName`. */
+  private scrubber: NameScrubber | undefined;
   private readonly generated = new Map<string, GedcomNode>();
   private readonly slots: Slot[] = [];
   private readonly slotByKey = new Map<string, Slot>();
@@ -223,6 +239,10 @@ class GedcomWriter implements WriterContext, MergeContext {
   }
 
   get quoteLines(): boolean {
+    return !this.privatize;
+  }
+
+  get keepCustomTags(): boolean {
     return !this.privatize;
   }
 
@@ -359,7 +379,9 @@ class GedcomWriter implements WriterContext, MergeContext {
   }
 
   filePath(media: MediaRow): string | undefined {
-    const path = this.options.filePath ? this.options.filePath(media) : this.storedPath(media);
+    const path = this.options.filePath
+      ? this.options.filePath(media, this.scrubName)
+      : this.storedPath(media);
     if (path !== undefined) return path;
     // A file missing at import: its FILE line as written, so the reference is kept.
     const original = this.originalFile(media);
@@ -369,12 +391,11 @@ class GedcomWriter implements WriterContext, MergeContext {
   }
 
   private storedPath(media: MediaRow): string | undefined {
-    if (media.remote_url) return media.remote_url;
+    if (media.remote_url) return this.scrubName(media.remote_url);
     if (!media.local_path) return undefined;
+    const path = this.scrubName(media.local_path);
     // GEDCOM 7 FILE values are URI references.
-    return this.v7
-      ? media.local_path.split('/').map(encodeURIComponent).join('/')
-      : media.local_path;
+    return this.v7 ? path.split('/').map(encodeURIComponent).join('/') : path;
   }
 
   /** The imported FILE line of media whose file was not found, kept in unmapped_line. */
@@ -710,8 +731,13 @@ class GedcomWriter implements WriterContext, MergeContext {
         const rows = this.data.unmapped.get(key)?.filter((r) => !this.usedFileLines.has(r));
         mergeUnmapped(this, node, raws, rows, xref);
       }
-      if (this.privatize && this.scrubXrefs(node)) {
-        this.warn(`${xref}: an imported record id in its text was removed`);
+      if (this.privatize && !hidden) {
+        if (this.scrubXrefs(node)) {
+          this.warn(`${xref}: an imported record id in its text was removed`);
+        }
+        if (this.scrubNames(node)) {
+          this.warn(`${xref}: names of withheld people in its text were replaced with "Private"`);
+        }
       }
       this.generated.set(key, node);
     }
@@ -741,6 +767,43 @@ class GedcomWriter implements WriterContext, MergeContext {
       }
     }
     for (const c of node.children) changed = this.scrubXrefs(c) || changed;
+    return changed;
+  }
+
+  private nameScrubber(): NameScrubber {
+    this.scrubber ??= new NameScrubber(
+      [...this.living].flatMap((id) => this.data.names.get(id) ?? []),
+    );
+    return this.scrubber;
+  }
+
+  /**
+   * Text with every name of a withheld person this recognizes replaced by
+   * "Private" (#195, #212; see scrub.ts). A file name or URL also matches
+   * names inside longer words. A deceased person's own NAME is left alone
+   * (see `scrubNames`).
+   */
+  readonly scrubName = (text: string, mode: ScrubMode = 'file'): string =>
+    this.privatize ? this.nameScrubber().scrub(text, mode) : text;
+
+  /** Applies `scrubName` to a generated record's text. Returns whether anything changed. */
+  private scrubNames(node: GedcomNode): boolean {
+    let changed = false;
+    if (node.value !== undefined && node.pointer === undefined && !KEPT_TEXT.has(node.tag)) {
+      const link = LINK_TAGS.has(node.tag) || /^(?:[a-z][a-z0-9+.-]*:\/\/|www\.)/i.test(node.value);
+      const value = this.scrubName(node.value, link ? 'file' : 'text');
+      if (value !== node.value) {
+        node.value = value;
+        delete node.rawValue;
+        delete node.source;
+        changed = true;
+      }
+    }
+    for (const c of node.children) {
+      // A person's own names stay: a shared surname is theirs too.
+      if (node.tag === 'INDI' && c.tag === 'NAME') continue;
+      changed = this.scrubNames(c) || changed;
+    }
     return changed;
   }
 
@@ -783,7 +846,7 @@ class GedcomWriter implements WriterContext, MergeContext {
   }
 
   fileValue(raw: string): string {
-    const value = raw.trim();
+    const value = this.scrubName(raw.trim());
     if (!this.v7 || /^[a-z][a-z0-9+.-]*:/i.test(value)) return value;
     return value.split('/').map(encodeURIComponent).join('/');
   }

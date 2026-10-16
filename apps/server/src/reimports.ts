@@ -40,7 +40,7 @@ export class ReimportSessions {
 
   add(tree: string, fileName: string, session: ReimportSession): StoredReimport {
     this.expire();
-    // Each holds a parsed tree in memory: keep only the newest few.
+    // Each holds a parsed tree in memory: keep only the few used most recently.
     while (this.sessions.size >= this.maxSessions) {
       this.remove([...this.sessions.keys()][0]!);
     }
@@ -60,9 +60,11 @@ export class ReimportSessions {
   get(id: string): StoredReimport | undefined {
     this.expire();
     const stored = this.sessions.get(id);
-    if (stored) {
-      stored.at = Date.now();
-    }
+    if (!stored) return undefined;
+    stored.at = Date.now();
+    // Least recently used first, so a full set drops the review left longest.
+    this.sessions.delete(id);
+    this.sessions.set(id, stored);
     return stored;
   }
 

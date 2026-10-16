@@ -1379,6 +1379,21 @@ describe('trustworthy confidence and reasons (#159)', () => {
   });
 });
 
+describe('apply reports where new people went (#158)', () => {
+  it('maps each added person to their id in the tree', async () => {
+    const s2 = await prepareReimport(store, { bytes: updatedSample() }, { today: TODAY });
+    try {
+      const noah = s2.diff.people.find((p) => p.name === 'Noah Ashgrove')!;
+      const result = applyReimport(store, s2, defaults(s2), 'Re-import');
+      const id = result.newPeople[noah.incomingId!];
+      expect(id).toBeTruthy();
+      expect(value(store, 'SELECT given FROM person_name WHERE person_id = ?', id)).toBe('Noah');
+    } finally {
+      closeReimport(s2);
+    }
+  });
+});
+
 describe('three-way re-import (#185)', () => {
   const josiahDeath = () =>
     value<string>(
@@ -1615,6 +1630,109 @@ describe('three-way re-import, review findings (#224)', () => {
     } finally {
       closeReimport(s2);
     }
+  });
+
+  it('brings back a deleted residence whose date and place both changed as a plain addition', async () => {
+    // A heuristic: with no shared date, place or value, nothing ties it to the deleted one.
+    const resi = eventIdOf('@I3@', 'RESI');
+    store.transact('Delete residence', (tx) => {
+      for (const r of rows<{ id: string }>(
+        store,
+        'SELECT id FROM event_role WHERE event_id = ?',
+        resi,
+      ))
+        tx.delete('event_role', r.id);
+      tx.delete('event', resi);
+    });
+    let inResi = false;
+    const s2 = await prepareReimport(
+      store,
+      {
+        bytes: edited('@I3@', (l) => {
+          if (l.startsWith('1 ')) inResi = l === '1 RESI';
+          if (!inResi) return l;
+          if (l === '2 DATE 1900') return '2 DATE 1910';
+          if (l.startsWith('2 PLAC ')) return '2 PLAC Millbrook, Harlow County, Vermont, USA';
+          return l;
+        }),
+      },
+      { today: TODAY },
+    );
+    try {
+      const [add, ...rest] = changesOf(s2, '@I3@').filter(
+        (c) => c.kind === 'fact.add' && c.fact.type === 'RESI',
+      );
+      expect(rest).toEqual([]);
+      expect(add).toMatchObject({ defaultAccept: true });
+      expect(add!.conflict).toBeUndefined();
+    } finally {
+      closeReimport(s2);
+    }
+  });
+
+  const baseImages = () =>
+    rows<{ key: string; value: string }>(
+      store,
+      "SELECT key, value FROM meta WHERE key LIKE 'reimport.base:%'",
+    ).map((r) => Object.keys(JSON.parse(r.value) as object).sort());
+
+  it('records no base for changes it applied: the written row is the base', async () => {
+    const s2 = await prepareReimport(store, { bytes: josiah1940() }, { today: TODAY });
+    expect(changesOf(s2, '@I3@')).toEqual([expect.objectContaining({ kind: 'fact.change' })]);
+    applyReimport(store, s2, defaults(s2), 'Re-import');
+    closeReimport(s2);
+    expect(baseImages()).toEqual([]);
+    // The next re-import still follows Ancestry from the applied value.
+    const later = edited('@I3@', (l) => (l === '2 DATE 1939' ? '2 DATE 1941' : l), 200);
+    const s3 = await prepareReimport(store, { bytes: later }, { today: TODAY });
+    try {
+      const [change] = changesOf(s3, '@I3@');
+      expect(change).toMatchObject({ kind: 'fact.change', defaultAccept: true });
+      expect(change!.conflict).toBeUndefined();
+    } finally {
+      closeReimport(s3);
+    }
+  });
+
+  it('compares a base with its place as it was, after the user renamed the place (P4)', async () => {
+    const first = await prepareReimport(store, { bytes: josiah1940() }, { today: TODAY });
+    applyReimport(store, first, defaults(first), 'Re-import');
+    closeReimport(first);
+    const death = eventIdOf('@I3@', 'DEAT');
+    const place = value<string>(store, 'SELECT place_id FROM event WHERE id = ?', death);
+    store.transact('Rename place', (tx) =>
+      tx.update('place', place, { full_name: 'Elderford, Ohio' } as never),
+    );
+    store.transact('Edit', (tx) => tx.update('event', death, { date_text: '2 MAY 1940' }));
+    const again = await prepareReimport(store, { bytes: josiah1940(200) }, { today: TODAY });
+    try {
+      // The export still says what it said: the user's date and place name stand.
+      const deaths = changesOf(again, '@I3@').filter(
+        (c) => c.kind === 'fact.change' && c.after.type === 'DEAT',
+      );
+      expect(deaths).toEqual([]);
+    } finally {
+      closeReimport(again);
+    }
+  });
+
+  it('records the base only for the changes it declined', async () => {
+    const death = eventIdOf('@I3@', 'DEAT');
+    const s2 = await prepareReimport(
+      store,
+      {
+        bytes: edited('@I3@', (l) =>
+          l === '2 DATE 1939' ? '2 DATE 1940' : l === '2 DATE 12 JUN 1868' ? '2 DATE 1868' : l,
+        ),
+      },
+      { today: TODAY },
+    );
+    const birth = changesOf(s2, '@I3@').find(
+      (c) => c.kind === 'fact.change' && c.after.type === 'BIRT',
+    )!;
+    applyReimport(store, s2, new Set([birth.id]), 'Re-import, death declined');
+    closeReimport(s2);
+    expect(baseImages()).toEqual([[`event|${death}`]]);
   });
 });
 

@@ -40,6 +40,8 @@ export interface ApplyResult {
    * thumbnails), and rows kept without a file because it could not be copied.
    */
   media: { copied: string[]; refused: string[] };
+  /** Each added person's incoming id to their id in the tree, for links to them. */
+  newPeople: Record<string, string>;
 }
 
 /**
@@ -442,6 +444,8 @@ export function applyReimport(
       for (const c of p.changes) owners.set(c.id, p.existingId ?? p.incomingId);
     }
     let applied = 0;
+    /** Changes whose rows this batch wrote: those rows are the next comparison's base. */
+    const written = new Set<string>();
     for (const c of toApply.filter((x) => x.kind === 'person.new')) {
       copyPerson((c as { incomingId: string }).incomingId);
       applied++;
@@ -557,6 +561,7 @@ export function applyReimport(
           break;
         }
       }
+      written.add(c.id);
       applied++;
     }
 
@@ -707,7 +712,7 @@ export function applyReimport(
       for (const u of lines) tx.insert('unmapped_line', { ...u, id: undefined } as never);
     }
     recordStale(tx, batch.id, stale);
-    recordBase(tx, batch.id, session, incAll);
+    recordBase(tx, batch.id, session, written, incAll);
     return applied;
   };
   let batchId: string;
@@ -720,12 +725,16 @@ export function applyReimport(
   copier.keepUsed();
 
   const appliedCount = toApply.length;
+  const newPeople: Record<string, string> = {};
+  // New people keep their (fresh ULID) ids from the export's in-memory tree.
+  for (const c of toApply) if (c.kind === 'person.new') newPeople[c.incomingId] = c.incomingId;
   return {
     batchId,
     applied: appliedCount,
     skipped: changes.filter((c) => c.applicable).length - appliedCount,
     blocked,
     media: { copied, refused },
+    newPeople,
   };
 }
 
@@ -744,20 +753,29 @@ const SAME_ANYWAY = new Set([
 ]);
 
 /**
- * What the export said for every row it offered a change to, applied or
- * declined: the base of the next re-import's three-way comparison (#224).
- * Without it a declined change would come back as a conflict every time.
+ * What the export said for each row it offered a change to whose row this
+ * batch did not write: the base of the next re-import's three-way comparison
+ * (#224). Without it a declined change would come back as a conflict every
+ * time. A written row needs none, since the write is its base. A change that
+ * was chosen but wrote nothing keeps its image, except a refused media copy,
+ * which stores none so it's offered again, ticked (see #252).
  * Written in the re-import's batch, so undo removes it.
+ *
+ * One meta row per re-import, never pruned: `localHistory` reads these from
+ * the change log, where later batches' images replace earlier ones row by row,
+ * and deleting an old meta row would only log a copy of it.
  */
 function recordBase(
   tx: Tx,
   importBatchId: string,
   session: ReimportSession,
+  written: ReadonlySet<string>,
   incAll: <T>(sql: string, ...params: unknown[]) => T[],
 ) {
   const images: Record<string, unknown> = {};
   for (const person of session.diff.people) {
     for (const c of person.changes) {
+      if (written.has(c.id)) continue;
       if (c.kind === 'fact.change') images[`event|${c.existingEventId}`] = imageOfView(c.after);
       else if (c.kind === 'fact.add' && c.deletedEventId) {
         images[`event|${c.deletedEventId}`] = imageOfView(c.fact);

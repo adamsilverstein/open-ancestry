@@ -34,6 +34,8 @@ const SERVE_OPTIONS = `Options for serve:
   --port <n>           Port to listen on (default ${DEFAULT_PORT})
   --host <host>        Interface to bind (default ${DEFAULT_HOST}; loopback only)
   --library <dir>      Folder holding your trees (default $OA_LIBRARY or ~/OpenAncestry)
+  --shared-library     Open trees even if other accounts can write to the library folder
+                       (also OA_SHARED_LIBRARY=1); they could swap a tree while it is open
   --no-open            Do not open the app in your browser (opened by default on a terminal)
   --open               Open it even when output is not a terminal
   --static-dir <dir>   Built web app to serve (default: bundled build)
@@ -43,6 +45,8 @@ const IMPORT_OPTIONS = `Options for import:
   --name <tree>        Tree name (default: the file name)
   --media <dir>        Folder holding the media files a .ged file refers to
   --library <dir>      Folder holding your trees (default $OA_LIBRARY or ~/OpenAncestry)
+  --shared-library     Open trees even if other accounts can write to the library folder
+                       (also OA_SHARED_LIBRARY=1); they could swap a tree while it is open
 
 Import size limits (serve and import):
   --max-gedcom-mb <n>  Largest GEDCOM text, also inside a GEDZIP (default 64; $OA_MAX_GEDCOM_MB)
@@ -108,6 +112,7 @@ export type CliCommand =
       importLimits: Partial<ImportLimits>;
       /** Heap for each import worker, in MB (default IMPORT_RESOURCE_LIMITS). */
       importHeapMb: number | undefined;
+      sharedLibrary: boolean;
     }
   | {
       command: 'import';
@@ -116,6 +121,7 @@ export type CliCommand =
       media: string | undefined;
       library: string;
       importLimits: Partial<ImportLimits>;
+      sharedLibrary: boolean;
     };
 
 const MiB = 1024 * 1024;
@@ -174,6 +180,7 @@ export function parseCliArgs(
         'max-gedcom-mb': { type: 'string' },
         'max-archive-mb': { type: 'string' },
         'import-heap-mb': { type: 'string' },
+        'shared-library': { type: 'boolean' },
       },
     });
   } catch (error) {
@@ -183,6 +190,8 @@ export function parseCliArgs(
     throw new UsageError(option ? `Unknown option: ${option}` : (error as Error).message, topic);
   }
   const { positionals, values } = parsed;
+  // Opting in to a library folder other accounts can write to (issue #211).
+  const sharedLibrary = values['shared-library'] ?? env.OA_SHARED_LIBRARY === '1';
   const [command, second] = positionals;
   if (command === undefined) return { command: 'help' };
   if (command === 'help')
@@ -199,6 +208,7 @@ export function parseCliArgs(
       media: values.media,
       library: values.library ?? defaultLibraryRoot(env),
       importLimits: importLimits(values, env),
+      sharedLibrary,
     };
   }
 
@@ -215,6 +225,7 @@ export function parseCliArgs(
     open: values.open ?? tty,
     staticDir: values['static-dir'],
     importLimits: importLimits(values, env),
+    sharedLibrary,
     importHeapMb: megabytes('import-heap-mb', values['import-heap-mb'], env, 'OA_IMPORT_HEAP_MB'),
   };
 }
@@ -430,7 +441,7 @@ async function importCommand(
   const name = cli.name ?? basename(cli.file, extname(cli.file)).trim();
   const problem = treeNameProblem(name);
   if (problem) throw new Error(`${problem}: "${name}". Choose another with --name.`);
-  const library = new Library(cli.library);
+  const library = new Library(cli.library, { shared: cli.sharedLibrary });
   library.ensureRoot();
   const dir = library.dirOf(name);
   if (existsSync(dir)) {
@@ -510,6 +521,7 @@ export async function run(
     host: cli.host,
     port: cli.port,
     library: cli.library,
+    sharedLibrary: cli.sharedLibrary,
     staticDir: cli.staticDir ?? bundledStaticDir(),
     importer: serverImporter(cli.importLimits, cli.importHeapMb),
     importLimits: cli.importLimits,

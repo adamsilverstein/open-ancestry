@@ -572,6 +572,8 @@ test.describe('family view', () => {
 
     // Single-key shortcuts only act while focus is in the tree (WCAG 2.1.4).
     await expect(card(page, 'Ada Vale')).toHaveAccessibleName(/focus person/);
+    // Keyboard focus follows the re-focus to Ada; let it land before moving on.
+    await expect(card(page, 'Ada Vale')).toBeFocused();
     await card(page, 'Bram Vale').focus();
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
@@ -1102,6 +1104,155 @@ test.describe('fan chart keyboard', () => {
     await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?.*layout=fan`));
     await expect(segment(page, 'Bram Vale')).toHaveAccessibleName(/focus person/);
     await expect(segment(page, 'Bram Vale')).toBeFocused();
+  });
+});
+
+for (const [width, height] of [
+  [320, 568],
+  [390, 844],
+  [568, 320],
+  [680, 900],
+  [844, 390],
+] as const) {
+  test.describe(`quick view at ${width}x${height}`, () => {
+    test.use({ viewport: { width, height }, hasTouch: true });
+
+    test('stays on screen, below the top bar, off its card, with reachable actions', async ({
+      page,
+    }) => {
+      // Four cards, each opened, measured and closed.
+      test.slow();
+      await open(page);
+      await settled(page);
+      // The minimap picks its corner after the view settles; measure after that,
+      // or a card clear of it now can be under it in the next fresh view.
+      await minimapRested(page);
+      const topBar = (await page.getByRole('banner').boundingBox())!;
+      const top = topBar.y + topBar.height;
+      const touchTargets = await page.evaluate(
+        () => window.matchMedia('(pointer: coarse), (max-width: 640px)').matches,
+      );
+      // The leftmost, rightmost, topmost and bottommost cards fully on screen and
+      // not under the toolbar or minimap.
+      const onScreen = await page.evaluate(
+        ({ top, width, height }) =>
+          [...document.querySelectorAll<HTMLElement>('[role="application"] [data-key]')]
+            .map((el) => ({ key: el.dataset.key!, b: el.getBoundingClientRect() }))
+            .filter(({ key, b }) => {
+              if (b.x < 0 || b.y < top || b.right > width || b.bottom > height) return false;
+              const hit = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+              return hit?.closest<HTMLElement>('[data-key]')?.dataset.key === key;
+            })
+            .map(({ key, b }) => ({ key, x: b.x, y: b.y })),
+        { top, width, height },
+      );
+      expect(onScreen.length).toBeGreaterThanOrEqual(1);
+      const by = (f: (o: (typeof onScreen)[number]) => number) =>
+        [...onScreen].sort((a, b) => f(a) - f(b))[0]!.key;
+      const picks = [
+        ...new Set([by((o) => o.x), by((o) => -o.x), by((o) => o.y), by((o) => -o.y)]),
+      ].map((key) => canvas(page).locator(`[data-key="${key}"]`));
+      for (const [i, target] of picks.entries()) {
+        // Each from a fresh view: closing with Escape returns keyboard focus to the
+        // card, which may scroll the view to show it.
+        if (i > 0) {
+          await open(page);
+          await settled(page);
+          await minimapRested(page);
+        }
+        const name = (await target.getAttribute('aria-label'))!.split(',')[0]!;
+        const cardBox = await box(target);
+        await target.tap();
+        const quick = page.getByRole('dialog', { name });
+        await expect(quick).toBeVisible();
+        // Let the positioning settle (it can take a frame or two after opening).
+        let b = await box(quick);
+        await expect
+          .poll(async () => {
+            const now = await box(quick);
+            const same = now.x === b.x && now.y === b.y && now.height === b.height;
+            b = now;
+            return same;
+          })
+          .toBe(true);
+        expect(b.x, name).toBeGreaterThanOrEqual(0);
+        expect(b.y, name).toBeGreaterThanOrEqual(top);
+        expect(b.x + b.width, name).toBeLessThanOrEqual(width);
+        expect(b.y + b.height, name).toBeLessThanOrEqual(height);
+        // It does not cover the card it describes.
+        const overlap =
+          b.x < cardBox.x + cardBox.width &&
+          cardBox.x < b.x + b.width &&
+          b.y < cardBox.y + cardBox.height &&
+          cardBox.y < b.y + b.height;
+        expect(
+          overlap,
+          `${name} covered by its quick view: ${JSON.stringify({ b, cardBox })}`,
+        ).toBe(false);
+        // The name stays in sight, not scrolled under the actions.
+        const title = quick.getByText(name, { exact: true });
+        const t = await box(title);
+        const shown = await page.evaluate(
+          ({ x, y }) => document.elementFromPoint(x, y)?.textContent ?? '',
+          { x: t.x + Math.min(t.width / 2, 20), y: t.y + t.height / 2 },
+        );
+        expect(shown, `${name} hidden in its quick view`).toBe(name);
+        const actions = [
+          quick.getByRole('link', { name: 'Profile' }),
+          quick.getByRole('button', { name: 'Make focus' }),
+          quick.getByRole('button', { name: 'Edit' }),
+        ];
+        // Initial focus is on the first action.
+        await expect(actions[0]!).toBeFocused();
+        for (const action of actions) {
+          const a = await box(action);
+          expect(a.x, name).toBeGreaterThanOrEqual(0);
+          expect(a.y, name).toBeGreaterThanOrEqual(top);
+          expect(a.x + a.width, name).toBeLessThanOrEqual(width);
+          expect(a.y + a.height, name).toBeLessThanOrEqual(height);
+          if (touchTargets) {
+            expect(a.height).toBeGreaterThanOrEqual(44);
+            expect(a.width).toBeGreaterThanOrEqual(44);
+          }
+        }
+        await page.keyboard.press('Escape');
+        await expect(quick).toHaveCount(0);
+      }
+    });
+  });
+}
+
+test.describe('quick view above a bottom toolbar', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+  test('keeps clear of the phone layout bottom bar', async ({ page }) => {
+    await open(page);
+    await settled(page);
+    // Stand in for the phone toolbar: the layout publishes its height on the tree region.
+    const bar = 120;
+    await page.evaluate((height) => {
+      document
+        .querySelector<HTMLElement>('[data-tree-region]')!
+        .style.setProperty('--oa-tree-bottom-bar', `${height}px`);
+    }, bar);
+    // Pan so Ada's card ends where the popover fits below it on the bare screen
+    // but not above the bar.
+    const ada = await box(card(page, 'Ada Vale'));
+    const dy = 500 - (ada.y + ada.height);
+    await page.mouse.move(200, 400);
+    await page.mouse.down();
+    await page.mouse.move(200, 400 + dy, { steps: 5 });
+    await page.mouse.up();
+    const lowest = ids.ada;
+    expect(lowest).toBeTruthy();
+    const target = canvas(page).locator(`[data-key="${lowest}"]`);
+    const name = (await target.getAttribute('aria-label'))!.split(',')[0]!;
+    await target.tap();
+    const quick = page.getByRole('dialog', { name });
+    await expect(quick).toBeVisible();
+    await expect
+      .poll(async () => (await box(quick)).y + (await box(quick)).height)
+      .toBeLessThanOrEqual(844 - bar);
   });
 });
 

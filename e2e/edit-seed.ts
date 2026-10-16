@@ -66,6 +66,18 @@ export function uniqueTreeName(prefix: string, label: string): string {
   return `${prefix} ${unique} ${label.replace(/[^\w ]/g, '')}`.slice(0, 100).trimEnd();
 }
 
+/** A new tree with nobody in it, as made by Tree > New tree. */
+export async function createEmptyTree(
+  request: APIRequestContext,
+  baseURL: string,
+  label: string,
+): Promise<string> {
+  const s = await session(request, baseURL);
+  const tree = uniqueTreeName('empty', label);
+  await send(request, s, 'post', '/api/trees', { name: tree });
+  return tree;
+}
+
 export async function seedTree(
   request: APIRequestContext,
   baseURL: string,

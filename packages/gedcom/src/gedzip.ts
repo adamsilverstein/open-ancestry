@@ -125,16 +125,53 @@ function readCentralDirectory(bytes: Uint8Array, maxEntries: number): Omit<ZipEn
   return entries;
 }
 
-/** Returns an entry's compressed bytes, located through its local header. */
-function entryData(bytes: Uint8Array, entry: ZipEntry): Uint8Array {
+/** Where an entry's local record and compressed data lie, and the name its local header gives. */
+function localRecord(bytes: Uint8Array, entry: ZipEntry) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const p = entry.localOffset;
   if (p + 30 > bytes.length || view.getUint32(p, true) !== 0x04034b50) {
     throw invalid(`Corrupt local header for ${entry.path}`);
   }
-  const start = p + 30 + view.getUint16(p + 26, true) + view.getUint16(p + 28, true);
+  const nameLength = view.getUint16(p + 26, true);
+  if (p + 30 + nameLength > bytes.length) throw invalid(`Corrupt local header for ${entry.path}`);
+  const start = p + 30 + nameLength + view.getUint16(p + 28, true);
   if (start + entry.compressedSize > bytes.length) throw invalid(`${entry.path} is truncated`);
-  return bytes.subarray(start, start + entry.compressedSize);
+  const name = new TextDecoder(
+    view.getUint16(p + 6, true) & 0x800 ? 'utf-8' : 'windows-1252',
+  ).decode(bytes.subarray(p + 30, p + 30 + nameLength));
+  return { start, end: start + entry.compressedSize, name };
+}
+
+/** Returns an entry's compressed bytes, located through its local header. */
+function entryData(bytes: Uint8Array, entry: ZipEntry): Uint8Array {
+  const { start, end } = localRecord(bytes, entry);
+  return bytes.subarray(start, end);
+}
+
+/**
+ * Each entry must have a local record of its own (#265): central entries that
+ * share or overlap one would inflate the same compressed bytes many times,
+ * each looking like an honest ratio. Its local name must match, too.
+ */
+function assertDistinctRecords(bytes: Uint8Array, entries: ZipEntry[]) {
+  const ranges = entries.map((entry) => {
+    const { end, name } = localRecord(bytes, entry);
+    return { entry, start: entry.localOffset, end, name };
+  });
+  ranges.sort((a, b) => a.start - b.start || a.end - b.end);
+  for (let i = 1; i < ranges.length; i++) {
+    const before = ranges[i - 1]!;
+    const range = ranges[i]!;
+    if (range.start === before.start) {
+      throw invalid(`${range.entry.path} shares its data with ${before.entry.path}`);
+    }
+    if (range.start < before.end) {
+      throw invalid(`${range.entry.path} overlaps ${before.entry.path}`);
+    }
+  }
+  for (const { entry, name } of ranges) {
+    if (name !== entry.name) throw invalid(`${entry.path} is named ${name} in its local header`);
+  }
 }
 
 /** Running totals across every entry inflated in one `readGedzip` call. */
@@ -283,11 +320,16 @@ export function readGedzip(bytes: Uint8Array, options: GedzipOptions = {}): Gedz
 
   const mediaEntries = entries.filter((e) => e !== gedEntry);
   const toRead = includeMedia ? [gedEntry, ...mediaEntries] : [gedEntry];
+  assertDistinctRecords(bytes, toRead);
   const total = toRead.reduce((sum, e) => sum + e.size, 0);
   if (total > maxTotalSize) {
     throw new GedzipError('too-large', `Archive expands to more than ${maxTotalSize} bytes`);
   }
-  const compressed = toRead.reduce((sum, e) => sum + e.compressedSize, 0);
+  // No more compressed bytes than the archive has, whatever the headers claim.
+  const compressed = Math.min(
+    bytes.length,
+    toRead.reduce((sum, e) => sum + e.compressedSize, 0),
+  );
   if (total > RATIO_MIN_SIZE && total / Math.max(1, compressed) > maxRatio) {
     throw new GedzipError(
       'ratio',

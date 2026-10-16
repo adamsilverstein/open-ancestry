@@ -151,6 +151,35 @@ describe('Library', () => {
     library.closeAll();
   });
 
+  it.each([
+    [
+      'a damaged database file',
+      (file: string) => writeFileSync(file, 'not a database'.repeat(100)),
+    ],
+    [
+      'a database without its meta table',
+      (file: string) => {
+        rmSync(file, { force: true });
+        rmSync(`${file}-wal`, { force: true });
+        rmSync(`${file}-shm`, { force: true });
+        new Database(file).close();
+      },
+    ],
+  ])('still lists the library when one tree has %s', (_, damage) => {
+    const root = makeTempDir('oa-lib-');
+    const setup = new Library(root);
+    setup.create('Settled');
+    setup.create('Broken');
+    setup.closeAll();
+    damage(join(root, 'Broken.oatree', 'tree.sqlite'));
+    const library = new Library(root);
+    expect(library.list().map(({ id, name }) => ({ id, name }))).toEqual([
+      { id: 'Broken', name: 'Broken' },
+      { id: 'Settled', name: 'Settled' },
+    ]);
+    library.closeAll();
+  });
+
   it('still lists the library while another process is importing into one tree', () => {
     const root = makeTempDir('oa-lib-');
     const setup = new Library(root);

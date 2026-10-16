@@ -272,6 +272,9 @@ export class Library {
 
   list(): TreeInfo[] {
     this.ensureRoot();
+    const now = Date.now();
+    // Forget trees that were locked a while ago, including deleted or renamed ones.
+    for (const [id, until] of this.lockedUntil) if (until <= now) this.lockedUntil.delete(id);
     const trees = readdirSync(this.root, { withFileTypes: true })
       .filter((d) => d.isDirectory() && d.name.endsWith(TREE_EXTENSION) && !d.name.startsWith('.'))
       .map((d) => d.name.slice(0, -TREE_EXTENSION.length))
@@ -280,7 +283,7 @@ export class Library {
           treeNameProblem(id) === null &&
           existsSync(treePaths(join(this.root, `${id}${TREE_EXTENSION}`)).database),
       )
-      .map((id) => this.listedInfo(id));
+      .map((id) => this.listedInfo(id, now));
     return withLabels(trees).sort((a, b) => a.label.localeCompare(b.label));
   }
 
@@ -288,26 +291,30 @@ export class Library {
    * What the list shows for a tree. A tree not open yet is read through a
    * short-lived read-only connection rather than opened: opening runs any
    * pending upgrade, and waiting on another process's upgrade (up to 30 s)
-   * would freeze every page. A tree another process holds locked (an import,
-   * an upgrade) is listed under its folder name until it can be read, and that
-   * answer is kept briefly so each list does not wait on it again.
+   * would freeze every page. A tree that can't be read right now (another
+   * process holds its lock, a crashed writer left it needing recovery, its file
+   * is damaged) is listed under its folder name, so one tree never fails the
+   * whole list; opening it reports the problem. A locked tree is skipped
+   * briefly so each list does not wait on it again.
    */
-  private listedInfo(id: string): TreeInfo {
+  private listedInfo(id: string, now: number): TreeInfo {
     if (this.stores.has(id)) return this.info(id);
     const dir = this.dirOf(id);
     const modifiedAt = statSync(treePaths(dir).database).mtime.toISOString();
     const byFolder = { id, name: id, label: id, modifiedAt };
-    if ((this.lockedUntil.get(id) ?? 0) > Date.now()) return byFolder;
+    if ((this.lockedUntil.get(id) ?? 0) > now) return byFolder;
+    this.lockedUntil.delete(id);
     let name: string | undefined;
     try {
       name = readTreeName(dir, { busyTimeoutMs: LIBRARY_BUSY_TIMEOUT_MS });
     } catch (error) {
+      // A planted link or another account's file is refused, as when opening.
       if (error instanceof TreeAccessError) throw new ApiError(403, 'forbidden', error.message);
-      if (!(error as { code?: string }).code?.startsWith('SQLITE_BUSY')) throw error;
-      this.lockedUntil.set(id, Date.now() + LOCKED_LIST_MS);
+      if ((error as { code?: string }).code?.startsWith('SQLITE_BUSY')) {
+        this.lockedUntil.set(id, now + LOCKED_LIST_MS);
+      }
       return byFolder;
     }
-    this.lockedUntil.delete(id);
     const stored = name || id;
     return { id, name: stored, label: stored, modifiedAt };
   }

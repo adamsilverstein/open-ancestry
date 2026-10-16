@@ -8,7 +8,6 @@ import {
   openMemoryTree,
   persons,
   places,
-  searchPeople,
 } from './index';
 
 const NFD = (s: string) => s.normalize('NFD');

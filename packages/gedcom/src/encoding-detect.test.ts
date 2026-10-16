@@ -73,6 +73,57 @@ describe('streaming waits for the first non-ASCII byte to choose (#269)', () => 
   });
 });
 
+describe('review of #292', () => {
+  /** Streams `bytes` cut at each of `offsets`. */
+  async function* cutAt(bytes: Uint8Array, offsets: number[]) {
+    let from = 0;
+    for (const to of [...offsets, bytes.length]) {
+      yield bytes.subarray(from, to);
+      from = to;
+    }
+  }
+
+  it('reads a character split across chunks at the first non-ASCII byte', async () => {
+    const bytes = file('ANSI', 1000);
+    const at = bytes.findIndex((b) => b >= 0x80);
+    expect(at).toBeGreaterThan(64 * 1024);
+    // Between the two bytes of é, and right before it.
+    for (const offsets of [[at + 1], [at], [1000, at + 1, at + 2]]) {
+      const doc = await parseGedcomStream(cutAt(bytes, offsets));
+      expect(nameIn(doc), `cut at ${offsets.join(', ')}`).toBe('José /Müller/');
+      expect(doc.warnings.map((w) => w.code)).not.toContain('invalid-bytes');
+    }
+  });
+
+  it('joins an ASCII NOTE with a CONC line that brings the first non-ASCII byte', async () => {
+    const text = new TextDecoder()
+      .decode(file('ANSEL', 1000))
+      .replace('0 @X1@ INDI\n', '0 @X1@ INDI\n1 NOTE Plain start, \n2 CONC then café\n');
+    const bytes = new TextEncoder().encode(text);
+    const note = (doc: ReturnType<typeof parseGedcom>) =>
+      doc.records.find((r) => r.xref === '@X1@')!.children.find((c) => c.tag === 'NOTE')!.value;
+    expect(note(parseGedcom(bytes))).toBe('Plain start, then café');
+    for (const size of [1000, 65536]) {
+      expect(note(await parseGedcomStream(chunks(bytes, size))), `chunks of ${size}`).toBe(
+        'Plain start, then café',
+      );
+    }
+  });
+
+  it('warns that the bytes override an ANSEL label', async () => {
+    const bytes = file('ANSEL', 1000);
+    for (const doc of [parseGedcom(bytes), await parseGedcomStream(chunks(bytes, 4096))]) {
+      expect(doc.encoding).toMatchObject({ encoding: 'utf-8', source: 'sniff', declared: 'ANSEL' });
+      expect(doc.warnings).toContainEqual(
+        expect.objectContaining({
+          code: 'charset-mismatch',
+          message: expect.stringContaining('HEAD.CHAR says ANSEL'),
+        }),
+      );
+    }
+  });
+});
+
 describe('HEAD scan and a product VERS (#269)', () => {
   it('decodes an ANSEL file whose SOUR name contains "GEDC" and whose product version is 7.x', () => {
     const ascii = (s: string) => [...new TextEncoder().encode(s)];

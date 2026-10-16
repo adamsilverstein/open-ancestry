@@ -23,3 +23,12 @@
   border-color: var(--oa-border-strong);
   border-radius: 50%;
 }
+
+/* Touch: a target of more than 44px around the 28px button. */
+@media (pointer: coarse) {
+  .dismiss::before {
+    position: absolute;
+    inset: -10px;
+    content: '';
+  }
+}

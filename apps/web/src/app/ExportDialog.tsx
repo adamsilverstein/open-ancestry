@@ -40,7 +40,7 @@ function exposure(living: number, marked: number, json: boolean, history: boolea
     .filter(Boolean)
     .join(' and ');
   return json
-    ? `JSON is a full backup: it includes everything about ${who}.${history ? ' It also keeps your edit history, including anything you have deleted.' : ''}`
+    ? `JSON includes everything about ${who}.${history ? ' With the edit history it is a full backup, keeping anything you have deleted.' : ''}`
     : `This export includes everything about ${who}.`;
 }
 
@@ -227,7 +227,7 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
             description={
               canPrivatize(format)
                 ? 'Living people, and anyone marked private or confidential, are written as "Private" with only their family links. Names of theirs that the export recognizes are also replaced in notes, titles, file names and links on other records, and imported custom tags are left out. In a GEDZIP, photos lose their embedded details (camera, place, captions) and other files, such as PDFs, are left out. This is best effort: other wording can still identify someone, so read the notes before you share.'
-                : 'JSON is a full backup and always includes everyone.'
+                : 'JSON always includes everyone.'
             }
             checked={privatize}
             disabled={!canPrivatize(format)}
@@ -239,7 +239,7 @@ export function ExportDialog({ open, onOpenChange, returnFocus }: ExportDialogPr
           {format === 'json' && (
             <Checkbox
               label="Include edit history"
-              description="Undo history, including anything you have deleted. Leaving it out removes most deleted text, not yet all of it, so check the file before you share it."
+              description="Makes this a full backup: the undo history, including anything you have deleted. Leaving it out removes most deleted text, not yet all of it, so check the file before you share it."
               checked={history}
               onChange={(event) => setHistory(event.target.checked)}
             />

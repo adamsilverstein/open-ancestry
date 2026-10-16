@@ -66,6 +66,8 @@ const LOD_SCALE = 0.35;
 const LIGHT_SCALE = 0.6;
 const ANIMATION_MS = 180;
 const FIT_PADDING = 64;
+/** Two taps this close together are a double tap. */
+const DOUBLE_TAP_MS = 350;
 const DRAG_THRESHOLD = 4;
 
 export interface TreeCanvasHandle {
@@ -540,6 +542,8 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     updateVisibleRef.current = updateVisible;
   }, [updateVisible]);
 
+  const coarse = useRef(window.matchMedia('(pointer: coarse)').matches);
+  const hitScale = useRef(0);
   const apply = useCallback(
     (t: Transform) => {
       transform.current = t;
@@ -549,6 +553,13 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         world.dataset.x = String(t.x);
         world.dataset.y = String(t.y);
         world.dataset.scale = String(t.scale);
+        // Touch targets stay 44px on screen at any zoom (see .chevron::before).
+        // Only on touch screens, and only on a real change: the property
+        // restyles every card.
+        if (coarse.current && Math.abs(t.scale - hitScale.current) > hitScale.current * 0.05) {
+          hitScale.current = t.scale;
+          world.style.setProperty('--oa-tree-scale', String(t.scale));
+        }
       }
       placeGutter();
       if (!frame.current) {
@@ -641,7 +652,12 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
    * first view), as Ancestry does; other views center the focus card.
    */
   const centeredOnFocus = useCallback((t: Transform, fitRows = false): Transform => {
-    const { width, height } = size.current;
+    const { width } = size.current;
+    // On phones the toolbar runs along the bottom: frame the space above it.
+    const bar = viewportRef.current
+      ? parseFloat(getComputedStyle(viewportRef.current).getPropertyValue('--oa-tree-bottom-bar'))
+      : 0;
+    const height = size.current.height - (bar || 0);
     const { layout: current, fan: currentFan } = latest.current;
     const focus = current?.nodes.find((n) => n.isFocus);
     if (focus && current && latest.current.kind === 'family') {
@@ -685,8 +701,8 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
       return { x, y, scale };
     }
     const pad = 32;
-    // Clear of the floating toolbar on the left.
-    const toolbar = 80;
+    // Clear of the floating toolbar on the left (along the bottom on phones).
+    const toolbar = bar ? 0 : 80;
     const fitScale = (w: number, h: number) =>
       Math.max(
         LOD_SCALE + 0.05,
@@ -1063,7 +1079,29 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     pointers.current.delete(event.pointerId);
     if (pointers.current.size < 2) pinch.current = null;
     if (drag.current?.moved) suppressClick.current = true;
+    else if (event.type === 'pointerup' && event.pointerType === 'touch') onTap(event);
     if (pointers.current.size === 0) drag.current = null;
+  }
+
+  /*
+   * Double tap re-focuses, like a double click. Not every browser turns two
+   * taps into a dblclick (WebKit does not), so count touch taps here.
+   */
+  const lastTap = useRef<{ key: string; time: number; x: number; y: number } | null>(null);
+  const tapRefocused = useRef(0);
+  function onTap(event: PointerEvent<HTMLDivElement>) {
+    const node = nodeOf(event.target);
+    const tap = { key: node?.key ?? '', time: event.timeStamp, x: event.clientX, y: event.clientY };
+    const last = lastTap.current;
+    lastTap.current = tap;
+    if (!node || !last || last.key !== tap.key) return;
+    if (tap.time - last.time > DOUBLE_TAP_MS || Math.hypot(tap.x - last.x, tap.y - last.y) > 24) {
+      return;
+    }
+    lastTap.current = null;
+    if (node.isDuplicate || node.isFocus) return;
+    tapRefocused.current = tap.time;
+    refocus(node.personId);
   }
 
   /** Re-focus from inside the canvas: keyboard focus follows to the new focus card. */
@@ -1133,6 +1171,8 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
   }
 
   function onDoubleClick(event: MouseEvent<HTMLDivElement>) {
+    // The taps that made this dblclick already re-focused.
+    if (event.timeStamp - tapRefocused.current < DOUBLE_TAP_MS) return;
     const node = nodeOf(event.target);
     if (node && !node.isDuplicate && !node.isFocus) refocus(node.personId);
   }

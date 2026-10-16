@@ -1680,6 +1680,203 @@ test.describe('wide descendant charts (#74)', () => {
   });
 });
 
+test.describe('phone held in landscape (#173 review)', () => {
+  test.use({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true });
+
+  test('gets the phone layout: bottom toolbar, minimap hidden', async ({ page }) => {
+    await open(page);
+    await settled(page);
+    const tools = page.getByRole('toolbar', { name: 'Tree tools' });
+    await expect(tools).toHaveAttribute('aria-orientation', 'horizontal');
+    await expect(page.getByTestId('tree-minimap')).toHaveCount(0);
+  });
+});
+
+test.describe('phone width (#139)', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  const toolbar = (page: Page) => page.getByRole('toolbar', { name: 'Tree tools' });
+  type Box = { x: number; y: number; width: number; height: number };
+  const overlaps = (a: Box, b: Box) =>
+    a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+
+  /**
+   * True when the element takes taps across a target at least `size` px wide
+   * and tall around its center (the target may reach further one way than
+   * the other, away from its card).
+   */
+  /** Whether a tap target spans `size` px across and `tall` px down (default: the same). */
+  async function reachable(page: Page, locator: Locator, size = 44, tall = size) {
+    return locator.evaluate(
+      (el, [min, minTall]) => {
+        const box = el.getBoundingClientRect();
+        const [cx, cy] = [box.x + box.width / 2, box.y + box.height / 2];
+        const reach = (dx: number, dy: number) => {
+          let n = 0;
+          while (
+            n < 120 &&
+            el.contains(document.elementFromPoint(cx + dx * (n + 1), cy + dy * (n + 1)))
+          )
+            n++;
+          return n;
+        };
+        return reach(-1, 0) + reach(1, 0) + 1 >= min && reach(0, -1) + reach(0, 1) + 1 >= minTall;
+      },
+      [size, tall] as const,
+    );
+  }
+
+  test('starts without the minimap, which the toolbar still shows', async ({ page }) => {
+    await open(page);
+    await settled(page);
+    await expect(page.getByTestId('tree-minimap')).toHaveCount(0);
+    await toolbar(page).getByRole('button', { name: 'Minimap' }).click();
+    await expect(page.getByTestId('tree-minimap')).toBeVisible();
+    const close = page.getByRole('button', { name: 'Hide minimap' });
+    expect(await reachable(page, close)).toBe(true);
+  });
+
+  test('the toolbar covers no card from the grandparents to the children', async ({ page }) => {
+    await open(page);
+    await settled(page);
+    const bar = await box(toolbar(page));
+    const rowOf = async (name: string) => (await box(card(page, name))).y;
+    const rows = new Set(
+      await Promise.all(['Otto Vale', 'Bram Vale', 'Ada Vale', 'Wren Ash'].map(rowOf)),
+    );
+    for (const el of await canvas(page).locator('[data-key]').all()) {
+      const b = await el.boundingBox();
+      if (!b || ![...rows].some((y) => Math.abs(y - b.y) < 1)) continue;
+      expect(overlaps(bar, b), String(await el.getAttribute('aria-label'))).toBe(false);
+    }
+  });
+
+  for (const width of [390, 320]) {
+    test(`chevrons and the parent switcher take a 44px tap at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 844 });
+      await open(page);
+      await settled(page);
+      const view = await box(canvas(page));
+      const bar = await box(toolbar(page));
+      let checked = 0;
+      for (const el of await canvas(page).locator('[data-chevron], [data-switch]').all()) {
+        const b = await el.boundingBox();
+        if (!b) continue;
+        const c = { x: b.x + b.width / 2 - 22, y: b.y + b.height / 2 - 22, width: 44, height: 44 };
+        // Only targets fully on screen and clear of the toolbar.
+        if (c.x < view.x || c.y < view.y || c.x + 44 > view.x + view.width) continue;
+        if (c.y + 44 > view.y + view.height || overlaps(c, bar)) continue;
+        expect(await reachable(page, el), String(await el.getAttribute('aria-label'))).toBe(true);
+        checked++;
+      }
+      expect(checked).toBeGreaterThan(2);
+    });
+  }
+
+  test('the explicitly opened minimap always shows, never just a pressed button', async ({
+    page,
+  }) => {
+    await open(page);
+    await settled(page);
+    const button = toolbar(page).getByRole('button', { name: 'Minimap' });
+    await expect(button).toHaveAttribute('aria-pressed', 'false');
+    await button.click();
+    await expect(button).toHaveAttribute('aria-pressed', 'true');
+    const minimap = page.getByTestId('tree-minimap');
+    await expect(minimap).not.toHaveAttribute('data-settling');
+    await expect(minimap).toBeVisible();
+    // Panning cards under it does not hide it again.
+    await page.touchscreen.tap(200, 300);
+    await expect(minimap).not.toHaveAttribute('data-settling');
+    await expect(minimap).toBeVisible();
+    // Above the toolbar, not under it.
+    expect(overlaps(await box(minimap), await box(toolbar(page)))).toBe(false);
+  });
+
+  test('the bottom bar height is shared for other overlays to clear', async ({ page }) => {
+    await open(page);
+    await settled(page);
+    const bar = await box(toolbar(page));
+    const reserved = await page.evaluate(() =>
+      parseFloat(
+        getComputedStyle(document.querySelector('[data-tree-region]')!).getPropertyValue(
+          '--oa-tree-bottom-bar',
+        ),
+      ),
+    );
+    const view = page.viewportSize()!;
+    // From the toolbar's top to the bottom of the screen.
+    expect(reserved).toBeGreaterThanOrEqual(view.height - bar.y);
+    expect(reserved).toBeLessThan(view.height - bar.y + 16);
+  });
+
+  test('zoomed out, a tap on a card’s top opens it, not the chevron above (#173 review)', async ({
+    page,
+  }) => {
+    await open(page);
+    await settled(page);
+    // Down to the last zoom that still mounts cards (just above 0.35), where the
+    // rows are closest and the targets largest.
+    const zoomOut = toolbar(page).getByRole('button', { name: 'Zoom out' });
+    while ((await transform(page)).scale / 1.25 > 0.35) {
+      await zoomOut.click();
+      await settled(page);
+    }
+    expect((await transform(page)).scale).toBeGreaterThan(0.35);
+    // A quarter of the way down a card, right under its up chevron, and under
+    // the down chevron of the row above; and near the top of Ada's spouse to the
+    // right, beside her parent switcher.
+    for (const [name, key, down] of [
+      ['Ada Vale', ids.ada, 0.25],
+      ['Wren Ash', ids.wren, 0.25],
+      ['Lucan Reed', ids.lucan, 0.1],
+    ] as const) {
+      const b = await box(canvas(page).locator(`[data-key="${key}"]`));
+      await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height * down);
+      await expect(page.getByRole('dialog', { name })).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog', { name })).toHaveCount(0);
+    }
+    // The parent switcher's pill stays on its own card's corner.
+    const pill = await box(canvas(page).locator(`[data-switch="${ids.ada}"]`));
+    const ada = await box(canvas(page).locator(`[data-key="${ids.ada}"]`));
+    expect(pill.x).toBeLessThan(ada.x + ada.width);
+    expect(pill.x + pill.width).toBeGreaterThan(ada.x);
+    // The chevron still takes a 44px-wide tap; the rows leave room for 24px
+    // down (WCAG 2.5.8) without reaching into the next row's cards.
+    const up = canvas(page).locator(`[data-chevron="up"][data-node="${ids.ada}"]`);
+    expect(await reachable(page, up, 44, 24)).toBe(true);
+  });
+
+  test('zoomed out in the pedigree, the switcher leaves the up chevron its target (#173 review)', async ({
+    page,
+  }) => {
+    // Pedigree cards are narrower (96), so the switcher's target sits closer
+    // to the up chevron's.
+    await open(page, 'ada', '&layout=pedigree');
+    await settled(page);
+    const zoomOut = toolbar(page).getByRole('button', { name: 'Zoom out' });
+    while ((await transform(page)).scale / 1.25 > 0.35) {
+      await zoomOut.click();
+      await settled(page);
+    }
+    await expect(canvas(page).locator(`[data-switch="${ids.ada}"]`)).toBeAttached();
+    const up = canvas(page).locator(`[data-chevron="up"][data-node="${ids.ada}"]`);
+    expect(await reachable(page, up, 44, 24)).toBe(true);
+  });
+
+  test('a double tap on a card re-centers on that person', async ({ page }) => {
+    await open(page);
+    await settled(page);
+    const b = await box(card(page, 'Bram Vale'));
+    const [x, y] = [b.x + b.width / 2, b.y + b.height / 2];
+    await page.touchscreen.tap(x, y);
+    await page.waitForTimeout(80);
+    await page.touchscreen.tap(x, y);
+    await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
+  });
+});
+
 test('the fan has no minimap, so its toolbar offers none (#134)', async ({ page }) => {
   await open(page, 'ada', '&layout=fan');
   const tools = page.getByRole('toolbar', { name: 'Tree tools' });

@@ -5,6 +5,7 @@
  * children loaded, so expanding them never fetches the rest.
  */
 import { describe, expect, it } from 'vitest';
+import { layoutFamily } from '@open-ancestry/core';
 import { families, getNeighborhood, persons } from '@open-ancestry/db';
 import { memoryTree } from '../../../../packages/db/src/test/helpers';
 import { GraphCache } from './graphCache';
@@ -97,6 +98,10 @@ describe('GraphCache needsSiblings', () => {
     expect(cache.needsSiblings(ids.dad)).toBe(true);
     const people = cache.graph().people as ReadonlyMap<string, { hasMoreSiblings?: boolean }>;
     expect(people.get(ids.dad)?.hasMoreSiblings).toBe(true);
+    // The worker lays out from the lazy index: the hint must reach it too.
+    expect(cache.index().person(ids.dad)?.hasMoreSiblings).toBe(true);
+    const dad = layoutFamily(cache.index(), ids.me, {}).nodes.find((n) => n.personId === ids.dad);
+    expect(dad?.canExpandSiblings).toBe(true);
     // A slice that holds all of Grandpa's children holds Dad's siblings too.
     const viaParent = new GraphCache();
     viaParent.merge(

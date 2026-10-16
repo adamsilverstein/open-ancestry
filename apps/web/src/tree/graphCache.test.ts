@@ -185,6 +185,8 @@ function randomSlices(seed: number, count: number): ApiNeighborhood[] {
       moreUp: ids.filter(() => rnd() < 0.1),
       moreDown: ids.filter(() => rnd() < 0.1),
       childrenLoaded: ids.filter(() => rnd() < 0.1),
+      moreSiblings: ids.filter(() => rnd() < 0.1),
+      siblingsLoaded: ids.filter(() => rnd() < 0.05),
       truncated: s % 2 === 0,
     };
   });

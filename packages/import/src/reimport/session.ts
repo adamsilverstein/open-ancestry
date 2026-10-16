@@ -5,8 +5,8 @@ import { MediaSource } from '../media';
 import type { ImportInput, ImportOptions, ImportPhase, ImportReport } from '../types';
 import { treeRevision } from './apply';
 import { diffTrees, localHistory, type ReimportDiff } from './diff';
-import { matchPeople, type NearMiss, type PersonMatch } from './match';
-import { snapshot, statedNameTypes } from './snapshot';
+import { detectPlaceRenames, matchPeople, type NearMiss, type PersonMatch } from './match';
+import { norm, snapshot, statedNameTypes } from './snapshot';
 
 /** An updated export read and compared with a tree, waiting for the user's review. */
 export interface ReimportSession {
@@ -142,7 +142,10 @@ function compare(store: TreeStore, incoming: TreeStore) {
   const existingSnap = snapshot(store);
   const incomingSnap = snapshot(incoming);
   const nearMisses = new Map<string, NearMiss>();
-  const matches = matchPeople(existingSnap, incomingSnap, nearMisses);
+  // A place the export renamed is one review item, and no reason to doubt a match (#279).
+  const renames = detectPlaceRenames(existingSnap, incomingSnap);
+  const alias = new Map(renames.map((r) => [norm(r.to), norm(r.from)]));
+  const matches = matchPeople(existingSnap, incomingSnap, nearMisses, undefined, alias);
   // In compare, not only prepare, so Compare again keeps the export's stated name types.
   const diff = diffTrees(
     existingSnap,
@@ -151,6 +154,7 @@ function compare(store: TreeStore, incoming: TreeStore) {
     localHistory(store),
     nearMisses,
     statedNameTypes(incoming),
+    renames,
   );
   return { matches, diff, baseRevision: treeRevision(store) };
 }

@@ -36,6 +36,23 @@ interface Pending {
 }
 
 /**
+ * The worker's time for each layout, as an `oa-tree-layout` measure, so tests
+ * (and the browser's performance panel) can see it; at most 100 are kept, like
+ * the re-focus measures. Best effort: it never stands in the layout's way.
+ */
+function recordLayoutTime(ms: number) {
+  try {
+    if (performance.getEntriesByName('oa-tree-layout', 'measure').length >= 100) {
+      performance.clearMeasures('oa-tree-layout');
+    }
+    const end = performance.now();
+    performance.measure('oa-tree-layout', { start: Math.max(0, end - ms), end });
+  } catch {
+    // No performance timeline here (or a bad time): nothing to record.
+  }
+}
+
+/**
  * Promise wrapper around the layout worker. The worker starts on first use.
  * After `dispose` (a StrictMode remount) or a crash, the next call starts a
  * new one seeded with `snapshot()`, the merged graph so far, and re-sends any
@@ -71,6 +88,7 @@ export class LayoutClient {
       this.pending.delete(event.data.id);
       this.posted.delete(event.data.id);
       this.drain();
+      recordLayoutTime(event.data.ms);
       if (!request) return;
       if (event.data.error) request.reject(new Error(`Layout failed: ${event.data.error}`));
       else request.resolve(event.data);

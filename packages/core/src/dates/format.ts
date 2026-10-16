@@ -50,13 +50,14 @@ export function formatDate(date: DateInput, style: DateStyle = 'long'): string {
     }
     return parts.join('') + year;
   };
+  let text: string;
   if (end) {
     const last = point(end, parsed.endCalendar);
-    return parsed.qualifier === 'between'
-      ? `bet. ${point(start)} and ${last}`
-      : `from ${point(start)} to ${last}`;
-  }
-  const text = (DISPLAY_PREFIX[parsed.qualifier] ?? '') + point(start);
+    text =
+      parsed.qualifier === 'between'
+        ? `bet. ${point(start)} and ${last}`
+        : `from ${point(start)} to ${last}`;
+  } else text = (DISPLAY_PREFIX[parsed.qualifier] ?? '') + point(start);
   return parsed.phrase ? `${text} (${parsed.phrase})` : text;
 }
 
@@ -97,7 +98,9 @@ function isSafePoint(p: DatePoint | undefined, calendar: Calendar): boolean {
   }
   if (p.day !== undefined) {
     if (p.month === undefined || !Number.isSafeInteger(p.day) || p.day < 1) return false;
-    if (p.day > daysInMonth(calendar, p.year, p.month)) return false;
+    // A dual-dated day is an Old Style (Julian) day in the new-style year.
+    const rules = p.dualYear === undefined ? calendar : 'julian';
+    if (p.day > daysInMonth(rules, p.dualYear ?? p.year, p.month)) return false;
   }
   return p.dualYear === undefined || p.dualYear === p.year + 1;
 }
@@ -116,7 +119,7 @@ export function gedcomPhrase(text: unknown): string {
 
 /**
  * GEDCOM DATE payload, always a single line. Version 7 has no dual years, INT
- * or date phrases in the value: dual years keep the first year, and the caller
+ * or date phrases in the value: dual years use the new-style year, and the caller
  * should write the original text as a PHRASE (escaped by its own writer) when
  * the result is empty or the date was interpreted.
  */
@@ -132,11 +135,17 @@ export function toGedcom(date: DateInput, version: GedcomVersion = '5.5.1'): str
     const phrase = gedcomPhrase(parsed.phrase ?? parsed.text);
     return phrase && `(${phrase})`;
   }
-  const point = (p: DatePoint, cal: Calendar = calendar): string => {
+  const point = (p: DatePoint, given: Calendar = calendar): string => {
+    // GEDCOM 7 has no dual years. A dual date is an Old Style (Julian) date,
+    // so it is written as one in its new-style year: 29 FEB 1699/1700 becomes
+    // JULIAN 29 FEB 1700, a day the Gregorian calendar does not have.
+    const dual = v7 && p.dualYear !== undefined;
+    const cal = dual && given === 'gregorian' ? 'julian' : given;
     const parts = [(v7 ? GEDCOM7_CALENDAR : GEDCOM551_CALENDAR)[cal]];
     if (p.day !== undefined) parts.push(`${p.day} `);
     if (p.month !== undefined) parts.push(`${monthCode(p.month, cal)} `);
-    parts.push(v7 ? (p.year < 0 ? `${-p.year} BCE` : String(p.year)) : yearText(p, 'B.C.'));
+    const year = p.dualYear ?? p.year;
+    parts.push(v7 ? (year < 0 ? `${-year} BCE` : String(year)) : yearText(p, 'B.C.'));
     return parts.join('');
   };
   if (end) {

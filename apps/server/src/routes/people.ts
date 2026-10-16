@@ -10,6 +10,7 @@ import {
   listPeople,
   meta,
   searchPeople,
+  suggestPlaces,
   type LivingStatus,
 } from '@open-ancestry/db';
 import type { Api, Deps } from '../context';
@@ -20,6 +21,7 @@ import {
   PeopleQuery,
   RelationshipQuery,
   SearchQuery,
+  PlacesQuery,
   TreeIdParams,
   TreeParams,
 } from '../schemas';
@@ -131,6 +133,17 @@ export function peopleRoutes(app: Api, { library }: Deps): void {
       return {
         items: searchPeople(library.open(request.params.tree), q, { limit, phoneticKeys }),
       };
+    },
+  );
+
+  // Places whose full name contains the text, those starting with it first: the
+  // event form suggests them so a typed place reuses the existing row (#280).
+  app.get(
+    '/api/trees/:tree/places',
+    { schema: { params: TreeParams, querystring: PlacesQuery } },
+    async (request) => {
+      const { q, limit = 10 } = request.query;
+      return { items: suggestPlaces(library.open(request.params.tree), q, limit) };
     },
   );
 }

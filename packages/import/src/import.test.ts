@@ -3,6 +3,7 @@ import { zipSync } from 'fflate';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
+  linkSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -319,6 +320,38 @@ describe('media', () => {
     },
   );
 
+  it("maps our own export's _WDTH, _HGHT and _SIZE when the file gives the real values (#279)", async () => {
+    // A 3x2 PNG header: the copied file's own size wins, and the tags are still mapped.
+    const png = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0,
+      3, 0, 0, 0, 2, 8, 2, 0, 0, 0,
+    ]);
+    const text = ged(
+      '0 @I1@ INDI',
+      '1 OBJE @O1@',
+      '0 @O1@ OBJE',
+      '1 FILE photos/a.png',
+      '2 FORM image/png',
+      '1 _WDTH 30',
+      '1 _HGHT 20',
+      `1 _SIZE ${png.length}`,
+    );
+    const dir = join(tmp, 'w.oatree');
+    const report = await importGedcom(
+      { gedzip: zipSync({ 'gedcom.ged': enc(text), 'photos/a.png': png }) },
+      { dir },
+      { today: TODAY },
+    );
+    expect(report.unmapped).toEqual([]);
+    const store = openTree(dir);
+    expect(row(store, 'SELECT width, height, byte_size FROM media')).toEqual({
+      width: 3,
+      height: 2,
+      byte_size: png.length,
+    });
+    store.close();
+  });
+
   it('detects a GEDZIP by content when given bytes or a path', async () => {
     const zip = zipSync({ 'gedcom.ged': sample() });
     const file = join(tmp, 'export.zip');
@@ -355,6 +388,28 @@ describe('media', () => {
     expect(existsSync(join(dir, 'media', 'photos', 'inline.png'))).toBe(false);
     expect(report.warnings.map((w) => w.code)).toContain('media-too-large');
     expect(report.media.linked).toBe(0);
+  });
+
+  it('refuses a hard-linked file in the media folder, reporting it rejected (#266)', async () => {
+    const media = join(tmp, 'src');
+    mkdirSync(join(media, 'photos'), { recursive: true });
+    // Someone who can write to the media folder links in another of the user's files.
+    writeFileSync(join(tmp, 'secret.txt'), 'secret');
+    linkSync(join(tmp, 'secret.txt'), join(media, 'photos', 'portrait.JPG'));
+    writeFileSync(join(media, 'photos', 'inline.png'), 'x');
+    const dir = join(tmp, 'h.oatree');
+    const report = await importGedcom({ bytes: MEDIA_GED }, { dir }, { mediaDir: media });
+    expect(existsSync(join(dir, 'media', 'photos', 'portrait.JPG'))).toBe(false);
+    // The hard link, and MEDIA_GED's ../../etc/passwd.
+    expect(report.media.rejected).toBe(2);
+    expect(report.warnings).toContainEqual(
+      expect.objectContaining({
+        code: 'media-refused',
+        message: 'Media file "photos/portrait.JPG" is a hard link; not copied',
+      }),
+    );
+    // An ordinary file next to it is still copied.
+    expect(existsSync(join(dir, 'media', 'photos', 'inline.png'))).toBe(true);
   });
 
   it('reports local files as missing when no media source is given', async () => {

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { changeText, compareProgress, conflictText, describeChange, factText } from './labels';
+import {
+  changeText,
+  compareProgress,
+  conflictText,
+  describeChange,
+  factText,
+  placeRenameText,
+} from './labels';
 import type { ReviewChange } from './api';
 
 const fact = (date: string | null, place: string | null = 'Elderford') => ({
@@ -206,5 +213,15 @@ describe('conflict wording (#160)', () => {
     expect(
       conflictText({ ...base, kind: 'tag.add', tag: 't' } as ReviewChange, 'X'),
     ).toBeUndefined();
+  });
+});
+
+describe('place renames (#279)', () => {
+  it('names the old and new place and how many facts move', () => {
+    const rename = { key: 'k', from: 'Millbrook', to: 'Millbrook Falls', changeIds: ['c1', 'c2'] };
+    expect(placeRenameText(rename)).toBe('Place renamed: Millbrook → Millbrook Falls (2 facts)');
+    expect(placeRenameText({ ...rename, changeIds: ['c1'] })).toBe(
+      'Place renamed: Millbrook → Millbrook Falls (1 fact)',
+    );
   });
 });

@@ -37,7 +37,10 @@ export interface ParsedDate {
   sortKeyEnd?: number;
   /** False only when qualifier is 'text'. */
   valid: boolean;
-  /** Free text from `INT date (phrase)` or a bare `(phrase)`. */
+  /**
+   * Free text in parentheses: `INT date (phrase)`, a note after a date
+   * (`BEF 1850 (per census)`, qualifier kept), or a bare `(phrase)`.
+   */
   phrase?: string;
   /**
    * Calendar of `end` when it differs from `calendar`, as in an Old Style to

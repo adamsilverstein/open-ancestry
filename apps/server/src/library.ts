@@ -111,7 +111,10 @@ export function treeNameFromFile(fileName: string): string {
     .replace(/\s+/g, ' ')
     .replace(/^[\s.]+|[\s.]+$/g, '')
     .trim();
-  const short = truncate(name, MAX_TREE_NAME_LENGTH - 10, MAX_TREE_NAME_BYTES - 10).trim();
+  // Cleaned again after shortening: a cut inside an isolate leaves it unclosed (#215).
+  const short = displayText(truncate(name, MAX_TREE_NAME_LENGTH - 10, MAX_TREE_NAME_BYTES - 10))
+    .replace(/^[\s.]+|[\s.]+$/g, '')
+    .trim();
   return !short || WINDOWS_DEVICE.test(short) ? `Imported ${short}`.trim() : short;
 }
 

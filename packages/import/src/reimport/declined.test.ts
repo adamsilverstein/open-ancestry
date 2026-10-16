@@ -154,29 +154,31 @@ describe('places in re-imported facts (#271)', () => {
 });
 
 describe('a declined new person (#271)', () => {
-  it('does not re-offer a declined new child, ticked, for the same export', async () => {
-    const withNoah = (offset: number) =>
-      renumber(
-        append(
-          SAMPLE.replace(
+  /** The export with a new Noah Ashgrove, born 1992, a child of `family`. */
+  const withNoah = (offset: number, family = '@F9@') =>
+    renumber(
+      append(
+        SAMPLE.replace(
+          '0 @F1@ FAM',
+          [
+            '0 @I27@ INDI',
+            '1 NAME Noah /Ashgrove/',
+            '1 SEX M',
+            '1 BIRT',
+            '2 DATE 1992',
+            `1 FAMC ${family}`,
             '0 @F1@ FAM',
-            [
-              '0 @I27@ INDI',
-              '1 NAME Noah /Ashgrove/',
-              '1 SEX M',
-              '1 BIRT',
-              '2 DATE 1992',
-              '1 FAMC @F9@',
-              '0 @F1@ FAM',
-            ].join('\n'),
-          ),
-          '@F9@',
-          ['1 CHIL @I27@'],
+          ].join('\n'),
         ),
-        offset,
-      );
+        family,
+        ['1 CHIL @I27@'],
+      ),
+      offset,
+    );
+  const noah = (s: ReimportSession) => s.diff.people.find((p) => p.name === 'Noah Ashgrove');
+
+  it('does not re-offer a declined new child, ticked, for the same export', async () => {
     const first = await prepareReimport(store, { bytes: withNoah(100) }, { today: TODAY });
-    const noah = (s: ReimportSession) => s.diff.people.find((p) => p.name === 'Noah Ashgrove');
     expect(noah(first)?.changes.find((c) => c.kind === 'person.new')?.defaultAccept).toBe(true);
     applyReimport(store, first, new Set(), 'Re-import, Noah declined');
     closeReimport(first);
@@ -186,6 +188,19 @@ describe('a declined new person (#271)', () => {
       expect(noah(again)?.changes.find((c) => c.kind === 'person.new')?.defaultAccept).toBe(false);
     } finally {
       closeReimport(again);
+    }
+  });
+
+  it('does not untick a different person with the same name and birth year', async () => {
+    const first = await prepareReimport(store, { bytes: withNoah(100) }, { today: TODAY });
+    applyReimport(store, first, new Set(), 'Re-import, Noah declined');
+    closeReimport(first);
+    // Another Noah Ashgrove born 1992, in another family: not the one the user declined.
+    const other = await prepareReimport(store, { bytes: withNoah(200, '@F1@') }, { today: TODAY });
+    try {
+      expect(noah(other)?.changes.find((c) => c.kind === 'person.new')?.defaultAccept).toBe(true);
+    } finally {
+      closeReimport(other);
     }
   });
 });

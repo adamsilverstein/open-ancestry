@@ -1,6 +1,8 @@
+import { closeSync, fstatSync } from 'node:fs';
 import { link, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { openMediaFileSync } from '@open-ancestry/db';
 import { openMediaFile, resolveMediaPath, resolveMediaPathSync } from './routes/media';
 import { makeTempDir } from '../../../fixtures/temp-dir';
 
@@ -154,6 +156,19 @@ describe('media path resolvers', () => {
     expect(async).toBe(expected);
     expect(sync).toBe(async);
     expect(reasons).toEqual(c.reason ? [c.reason, c.reason] : []);
+  });
+
+  // The GEDZIP export opens media synchronously, by the same rules.
+  it.each(cases.map((c) => [c.name, c] as const))('%s (sync open)', async (_name, c) => {
+    const [root, localPath] = await c.setup();
+    const reasons: string[] = [];
+    const opened = openMediaFileSync(root, localPath, (r) => reasons.push(r));
+    expect(opened !== null).toBe(c.expected !== null);
+    expect(reasons).toEqual(c.reason ? [c.reason] : []);
+    if (opened) {
+      expect(fstatSync(opened.fd).ino).toBe(opened.info.ino);
+      closeSync(opened.fd);
+    }
   });
 });
 

@@ -6,6 +6,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir, hostname } from 'node:os';
@@ -120,8 +121,14 @@ function assertTreeName(name: string): void {
 
 /** A tree's lock file while an import or compare runs in some server (#275 P3). */
 const BUSY_LOCK = 'busy.lock';
-/** A lock from another machine is trusted this long, as its process cannot be checked. */
-const STALE_LOCK_MS = 24 * 60 * 60 * 1000;
+/**
+ * Liveness, as for re-import folders (#243): the holder re-touches its lock
+ * every LOCK_HEARTBEAT_MS, and a lock silent for LOCK_SILENT_MS is stale on any
+ * host. A pid is only a fast "definitely gone" check on the machine that wrote
+ * it, so a reused pid (pid 1 in every container) can delay, never extend, it.
+ */
+const LOCK_HEARTBEAT_MS = 30_000;
+const LOCK_SILENT_MS = 5 * 60_000;
 
 interface BusyLock {
   pid: number;
@@ -549,9 +556,11 @@ export class Library {
   markBusy(tree: string): () => void {
     const id = this.canonical(tree);
     const count = this.busy.get(id) ?? 0;
+    // Other servers on this library see the busy state through a lock file,
+    // created exclusively: of two servers marking the tree, one wins, the
+    // other gets 409 before counting anything busy (#289).
+    if (count === 0) this.takeLock(id);
     this.busy.set(id, count + 1);
-    // Other servers on this library see the busy state through a lock file.
-    if (count === 0) this.writeLock(id);
     let released = false;
     return () => {
       if (released) return;
@@ -560,34 +569,83 @@ export class Library {
       if (left > 0) this.busy.set(id, left);
       else {
         this.busy.delete(id);
-        this.removeLock(id);
+        this.dropLock(id);
       }
     };
   }
 
   /** This Library's mark in lock files, so it never mistakes its own lock for another server's. */
   private readonly owner = randomUUID();
+  /** Trees whose lock file this Library holds, re-touched by the heartbeat. */
+  private readonly locks = new Set<string>();
+  private heartbeat: ReturnType<typeof setInterval> | undefined;
 
   private lockPath(id: string): string {
     return join(this.root, `${id}${TREE_EXTENSION}`, BUSY_LOCK);
   }
 
-  private writeLock(id: string): void {
+  private takeLock(id: string): void {
+    const path = this.lockPath(id);
     const lock: BusyLock = {
       pid: process.pid,
       host: hostname(),
       owner: this.owner,
       at: new Date().toISOString(),
     };
-    try {
-      writeFileSync(this.lockPath(id), JSON.stringify(lock), { mode: 0o600 });
-    } catch {
-      // No tree folder (yet): nothing for another server to find either.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        writeFileSync(path, JSON.stringify(lock), { mode: 0o600, flag: 'wx' });
+        this.locks.add(id);
+        this.startHeartbeat();
+        return;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        // No tree folder (yet): nothing for another server to find either.
+        if (code === 'ENOENT') return;
+        if (code !== 'EEXIST') throw error;
+      }
+      const held = this.readLock(id);
+      if (held?.owner === this.owner) return;
+      if (attempt === 0 && (!held || this.lockStale(id, held))) {
+        // Take over a stale lock: move it aside (only one taker can), then retry.
+        const aside = `${path}.stale-${randomUUID()}`;
+        try {
+          renameSync(path, aside);
+          rmSync(aside, { force: true });
+        } catch {
+          // Another server moved it first; the retry decides.
+        }
+        continue;
+      }
+      break;
     }
+    throw this.busyElsewhereError(id);
   }
 
-  private removeLock(id: string): void {
+  private dropLock(id: string): void {
+    if (!this.locks.delete(id)) return;
     if (this.readLock(id)?.owner === this.owner) rmSync(this.lockPath(id), { force: true });
+    if (this.locks.size === 0) this.stopHeartbeat();
+  }
+
+  private startHeartbeat(): void {
+    if (this.heartbeat) return;
+    this.heartbeat = setInterval(() => {
+      const now = new Date();
+      for (const id of this.locks) {
+        try {
+          utimesSync(this.lockPath(id), now, now);
+        } catch {
+          // Renamed or deleted with the tree: the next release forgets it.
+        }
+      }
+    }, LOCK_HEARTBEAT_MS);
+    this.heartbeat.unref();
+  }
+
+  private stopHeartbeat(): void {
+    clearInterval(this.heartbeat);
+    this.heartbeat = undefined;
   }
 
   private readLock(id: string): BusyLock | null {
@@ -598,22 +656,31 @@ export class Library {
     }
   }
 
-  /**
-   * Whether another server holds the tree's lock file. A lock from a process on
-   * this machine that has exited is stale and removed; one from another machine
-   * (a library on a network share) counts until it is a day old.
-   */
+  /** Whether another holder's lock has stopped: its process here is gone, or it went silent. */
+  private lockStale(id: string, lock: BusyLock): boolean {
+    if (lock.host === hostname() && !processAlive(lock.pid)) return true;
+    try {
+      return Date.now() - statSync(this.lockPath(id)).mtimeMs >= LOCK_SILENT_MS;
+    } catch {
+      return true;
+    }
+  }
+
+  /** Whether another live server holds the tree's lock file; a stale one is removed. */
   private busyElsewhere(tree: string): boolean {
     const id = this.canonical(tree);
     if (!existsSync(this.lockPath(id))) return false;
     const lock = this.readLock(id);
     if (!lock || lock.owner === this.owner) return false;
-    const alive =
-      lock.host === hostname()
-        ? processAlive(lock.pid)
-        : Date.now() - Date.parse(lock.at) < STALE_LOCK_MS;
-    if (!alive) rmSync(this.lockPath(id), { force: true });
-    return alive;
+    if (!this.lockStale(id, lock)) return true;
+    rmSync(this.lockPath(id), { force: true });
+    return false;
+  }
+
+  private busyElsewhereError(id: string): ApiError {
+    return busy(
+      `Tree "${id}" is busy in another Open Ancestry server using this library (an import is running)`,
+    );
   }
 
   /** Marks a tree busy for the duration of `fn`. */
@@ -633,11 +700,7 @@ export class Library {
   /** Throws 409 while the tree is importing. */
   assertIdle(id: string): void {
     if (this.isBusy(id)) throw busy(`Tree "${id}" is busy (an import is running)`);
-    if (this.busyElsewhere(id)) {
-      throw busy(
-        `Tree "${id}" is busy in another Open Ancestry server using this library (an import is running)`,
-      );
-    }
+    if (this.busyElsewhere(id)) throw this.busyElsewhereError(id);
   }
 
   private close(tree: string): void {
@@ -647,6 +710,7 @@ export class Library {
   }
 
   closeAll(): void {
+    this.stopHeartbeat();
     for (const id of [...this.stores.keys()]) this.close(id);
   }
 }

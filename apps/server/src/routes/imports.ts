@@ -118,7 +118,15 @@ export function importRoutes(app: Api, deps: Deps): void {
   function start(tree: string, upload: Awaited<ReturnType<typeof receive>>, marker: string | null) {
     // Busy from queueing to the end of cleanup: no writes may share (or be
     // undone with) the import's transaction (issue #96).
-    const release = library.markBusy(tree);
+    let release: () => void;
+    try {
+      // Throws 409 when another server holds the tree's lock (#289).
+      release = library.markBusy(tree);
+    } catch (error) {
+      void upload.cleanup();
+      if (marker) library.discardFailedImport(tree, marker);
+      throw error;
+    }
     try {
       return jobs.enqueue(
         { tree, fileName: upload.fileName, createdTree: marker !== null },
@@ -197,7 +205,14 @@ export function importRoutes(app: Api, deps: Deps): void {
       const upload = await receive(request);
       // Busy from queueing to the end of cleanup, like an import: the tree is
       // not written, renamed or deleted under the compare.
-      const release = library.markBusy(tree);
+      let release: () => void;
+      try {
+        // Throws 409 when another server holds the tree's lock (#289).
+        release = library.markBusy(tree);
+      } catch (error) {
+        await upload.cleanup();
+        throw error;
+      }
       try {
         const job = jobs.enqueue(
           { tree, fileName: upload.fileName, kind: 'reimport' },

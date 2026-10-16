@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { changeText, conflictText, describeChange, factText } from './labels';
+import { changeText, compareProgress, conflictText, describeChange, factText } from './labels';
 import type { ReviewChange } from './api';
 
 const fact = (date: string | null, place: string | null = 'Elderford') => ({
@@ -134,6 +134,19 @@ describe('re-import labels', () => {
     } as ReviewChange;
     expect(conflictText(moved, 'Josiah Ashgrove')).toBe(
       'You renamed this place in this tree, and the export moves this fact to another place. It stays at your place unless you tick this.',
+    );
+  });
+});
+
+describe('compare progress (#161)', () => {
+  it('names the phase, with counts while reading records', () => {
+    expect(compareProgress(null)).toBe('Uploading');
+    expect(compareProgress({ phase: 'parse', done: 0, total: 0 })).toBe('Reading the file');
+    expect(compareProgress({ phase: 'map', done: 1200, total: 10000 })).toBe(
+      'Reading people and families (1,200 of 10,000 records)',
+    );
+    expect(compareProgress({ phase: 'compare', done: 0, total: 1 })).toBe(
+      'Comparing with your tree',
     );
   });
 });

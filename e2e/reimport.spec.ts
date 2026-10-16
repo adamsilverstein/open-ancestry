@@ -512,6 +512,58 @@ test('the review lists what needs a decision first, filters by group, and format
   expect(results.violations).toEqual([]);
 });
 
+test('the comparison page names the file and phase while it runs (#161)', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  // Hold the job at the compare phase, however fast the real one is. The page
+  // reads the job again when the stream ends, so that read is held too.
+  const held = (id: string) => ({
+    id,
+    kind: 'reimport',
+    tree: seeded.tree,
+    fileName: 'Ashgrove 2026.ged',
+    createdTree: false,
+    state: 'running',
+    progress: { phase: 'compare', done: 0, total: 1 },
+    result: null,
+    error: null,
+    cancelled: false,
+  });
+  await page.route('**/api/jobs/*/events', (route) => {
+    const id = /jobs\/([^/]+)\/events/.exec(route.request().url())![1]!;
+    void route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: `event: state\ndata: ${JSON.stringify(held(id))}\n\n`,
+    });
+  });
+  await page.route('**/api/jobs/*', (route) => {
+    if (route.request().method() !== 'GET') return void route.continue();
+    const id = /jobs\/([^/?#]+)/.exec(route.request().url())![1]!;
+    void route.fulfill({ status: 200, contentType: 'application/json', json: held(id) });
+  });
+  await page.addInitScript((tree) => localStorage.setItem('oa-tree', tree), seeded.tree);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'File' }).click();
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('menuitem', { name: /Re-import updated export/ }).click();
+  await (
+    await chooser
+  ).setFiles({
+    name: 'Ashgrove 2026.ged',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from(laterExport()),
+  });
+  await expect(
+    page.getByRole('heading', { name: 'Comparing Ashgrove 2026.ged with your tree' }),
+  ).toBeVisible();
+  await expect(page.getByText('Comparing with your tree', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+});
+
 test('a second re-import follows Ancestry for a value the first one set (#185)', async ({
   page,
   request,
@@ -614,10 +666,13 @@ test('cancelling the comparison keeps nothing and changes nothing', async ({
     page.getByText('Re-import cancelled. Your tree was not changed.', { exact: true }),
   ).toBeVisible();
   // Whether the job was stopped or had already finished, no review is left behind.
-  const job = (await (await request.get(`/api/jobs/${jobId}`)).json()) as {
-    state: string;
-    result?: { reimportId: string } | null;
-  };
+  // A worker job settles after its cancel (up to the grace period): wait for it.
+  type Job = { state: string; result?: { reimportId: string } | null };
+  const read = async () => (await (await request.get(`/api/jobs/${jobId}`)).json()) as Job;
+  await expect
+    .poll(async () => (await read()).state, { timeout: 10_000 })
+    .toMatch(/^(completed|failed)$/);
+  const job = await read();
   if (job.result?.reimportId) {
     expect((await request.get(`/api/reimports/${job.result.reimportId}`)).status()).toBe(404);
   } else {

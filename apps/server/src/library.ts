@@ -355,6 +355,18 @@ export class Library {
     return removed;
   }
 
+  /**
+   * At startup: removes the trees' re-import folders whose owner is gone,
+   * by the same ownership rule as the sweep when a tree opens (see
+   * reimport-folders.ts), so another live server's reviews are kept.
+   */
+  sweepReimportLeftovers(): string[] {
+    if (!existsSync(this.root)) return [];
+    const folders = this.reimportFolders;
+    if (!folders) return [];
+    return this.list().flatMap(({ id }) => folders.sweep(this.dirOf(id)));
+  }
+
   private isPendingImport(id: string, marker: string): boolean {
     const store = this.open(id);
     if (meta.get(store, IMPORT_PENDING_KEY) !== marker) return false;

@@ -14,10 +14,12 @@ import {
   DEFAULT_HOST,
   Library,
   defaultLibraryRoot,
+  devWorkerComparer,
   devWorkerImporter,
   isLoopbackHost,
   startServer,
   treeNameProblem,
+  workerComparer,
   workerImporter,
   type RunningServer,
   type WorkerImporterOptions,
@@ -271,6 +273,18 @@ function serverImporter(limits: Partial<ImportLimits>, heapMb: number | undefine
   return existsSync(fileURLToPath(bundled))
     ? workerImporter(bundled, options)
     : devWorkerImporter(options);
+}
+
+/** Re-import compares run in the same worker script (#161), so they never block the server. */
+function serverComparer(limits: Partial<ImportLimits>, heapMb: number | undefined) {
+  const options: WorkerImporterOptions = {
+    limits,
+    ...(heapMb !== undefined && { resourceLimits: { maxOldGenerationSizeMb: heapMb } }),
+  };
+  const bundled = new URL('./import-worker.js', import.meta.url);
+  return existsSync(fileURLToPath(bundled))
+    ? workerComparer(bundled, options)
+    : devWorkerComparer(options);
 }
 
 /** The web build copied next to the bundled CLI (dist/public). */
@@ -554,6 +568,7 @@ export async function run(
     maxQueuedImports: cli.maxQueuedImports,
     staticDir: cli.staticDir ?? bundledStaticDir(),
     importer: serverImporter(cli.importLimits, cli.importHeapMb),
+    comparer: serverComparer(cli.importLimits, cli.importHeapMb),
     importLimits: cli.importLimits,
   });
   log(`open-ancestry running at ${escapeControls(server.url)}`);

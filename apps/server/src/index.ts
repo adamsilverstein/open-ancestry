@@ -9,11 +9,16 @@ import fastifyEtag from '@fastify/etag';
 import fastifyMultipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
-import { IMPORT_LIMITS, resolveImportLimits, type ImportLimits } from '@open-ancestry/import';
+import {
+  IMPORT_LIMITS,
+  prepareReimport,
+  resolveImportLimits,
+  type ImportLimits,
+} from '@open-ancestry/import';
 import Fastify, { type FastifyInstance, type FastifyReply } from 'fastify';
 import type { Deps } from './context';
 import { errorBody, registerErrorHandling, toApiError } from './errors';
-import { JobManager, type Importer } from './jobs';
+import { JobManager, type Comparer, type Importer } from './jobs';
 import { Library, defaultLibraryRoot } from './library';
 import { checkRoutes } from './routes/checks';
 import { editRoutes } from './routes/edit';
@@ -42,7 +47,9 @@ export {
 export { SECURITY_HEADERS, TOKEN_HEADER, isLoopbackHost } from './security';
 export {
   IMPORT_RESOURCE_LIMITS,
+  devWorkerComparer,
   devWorkerImporter,
+  workerComparer,
   workerImporter,
   type WorkerImporterOptions,
 } from './import-runner';
@@ -64,6 +71,11 @@ export interface ServerOptions {
   library?: string | Library;
   /** GEDCOM importer; without one the import endpoint answers 501. */
   importer?: Importer;
+  /**
+   * Re-import compare; default runs on the server's thread (fine for tests).
+   * The CLI and dev server pass `workerComparer` so it never blocks (#161).
+   */
+  comparer?: Comparer;
   /** Mutation token; random per process by default. */
   token?: string;
   /** Hostnames accepted in the Host header besides loopback. */
@@ -176,10 +188,34 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   // This server's re-import working folders; opening a tree sweeps others' leftovers.
   const reimportFolders = new ReimportFolders();
   library.reimportFolders = reimportFolders;
+  // Leftovers whose owner is gone: a crash, or a server that has stopped.
+  library.sweepReimportLeftovers();
   const deps: Deps = {
     library,
     jobs,
     importer: options.importer,
+    comparer:
+      options.comparer ??
+      (async (path, store, { onProgress, signal, folders }) => {
+        let spilled: string | undefined;
+        try {
+          return await prepareReimport(
+            store,
+            { path },
+            {
+              signal,
+              onProgress: (phase, done, total) => onProgress({ phase, done, total }),
+              // Owned by this server, so another server's sweep leaves it alone.
+              ...(store.dir && {
+                spillDir: () => (spilled = folders.create(store.dir!, 'media')),
+              }),
+            },
+          );
+        } catch (error) {
+          folders.release(spilled);
+          throw error;
+        }
+      }),
     uploadLimit: options.uploadLimit ?? importLimits.maxBytes,
     archiveUploadLimit: options.archiveUploadLimit ?? importLimits.maxArchiveBytes,
     mediaUploadLimit: options.mediaUploadLimit ?? DEFAULT_MEDIA_UPLOAD_LIMIT,

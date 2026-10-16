@@ -5,7 +5,6 @@ import { tmpdir } from 'node:os';
 import { basename, extname, join } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { prepareReimport } from '@open-ancestry/import';
 import type { FastifyRequest } from 'fastify';
 import type { Api, Deps } from '../context';
 import { formatBytes } from '../bytes';
@@ -40,6 +39,7 @@ export function importRoutes(app: Api, deps: Deps): void {
     library,
     jobs,
     importer,
+    comparer,
     uploadLimit,
     archiveUploadLimit,
     thumbnails,
@@ -199,27 +199,19 @@ export function importRoutes(app: Api, deps: Deps): void {
         const job = jobs.enqueue(
           { tree, fileName: upload.fileName, kind: 'reimport' },
           async (signal, onProgress) => {
-            const store = library.open(tree);
-            let spilled: string | undefined;
-            try {
-              const session = await prepareReimport(
-                store,
-                { path: upload.path },
-                {
-                  signal,
-                  onProgress: (phase, done, total) => onProgress({ phase, done, total }),
-                  // Owned by this server, so another server's sweep leaves it alone.
-                  ...(store.dir && {
-                    spillDir: () => (spilled = reimportFolders.create(store.dir!, 'media')),
-                  }),
-                },
-              );
-              const stored = reimports.add(tree, upload.fileName, session);
-              return { reimportId: stored.id, counts: session.diff.counts };
-            } catch (error) {
-              reimportFolders.release(spilled);
-              throw error;
+            const session = await comparer(upload.path, library.open(tree), {
+              signal,
+              onProgress,
+              folders: reimportFolders,
+            });
+            const stored = reimports.add(tree, upload.fileName, session);
+            // A compare that finished after its cancel was accepted (it runs in a worker)
+            // is dropped: it never changed the tree, and the page was told it stopped.
+            if (signal.aborted) {
+              reimports.remove(stored.id);
+              throw new Error('Re-import was cancelled');
             }
+            return { reimportId: stored.id, counts: session.diff.counts };
           },
           async () => {
             await upload.cleanup();

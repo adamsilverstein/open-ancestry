@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { importFile } from '@open-ancestry/import';
+import { importFile, prepareReimport } from '@open-ancestry/import';
 import { zipSync } from 'fflate';
 import sharp from 'sharp';
+import { devWorkerComparer } from './import-runner';
 import { MUTATION_HEADERS, testApi, type TestApi } from './test/helpers';
 
 const SAMPLE = readFileSync(
@@ -332,5 +333,64 @@ describe('re-import', () => {
     expect(job.state).toBe('failed');
     expect(job.error).toMatch(/does not look like GEDCOM/);
     expect((await api.get(base)).json().tree.peopleCount).toBe(26);
+  });
+});
+
+describe('re-import compare in a worker (#161)', () => {
+  it('compares through the worker comparer and applies the review', async () => {
+    await api.close();
+    api = await testApi({ importer: importFile, comparer: devWorkerComparer() });
+    const base = await importedTree();
+    const { reimportId, counts } = await startReimport(base);
+    expect(counts).toMatchObject({ matched: 26, newPeople: 1 });
+    const review = (await api.get(`/api/reimports/${reimportId}`)).json();
+    const accept = review.diff.people.flatMap(
+      (p: { changes: { id: string; defaultAccept: boolean }[] }) =>
+        p.changes.filter((c) => c.defaultAccept).map((c) => c.id),
+    );
+    const applied = await api.post(`/api/reimports/${reimportId}/apply`, {
+      accept,
+      comparison: review.comparison,
+    });
+    expect(applied.statusCode).toBe(200);
+    expect((await api.get(base)).json().tree.peopleCount).toBe(27);
+  }, 60_000);
+});
+
+describe('cancelling a re-import compare (#161)', () => {
+  it('keeps no review when the compare finishes after a cancel was accepted', async () => {
+    await api.close();
+    let compared!: () => void;
+    const finishedCompare = new Promise<void>((resolve) => (compared = resolve));
+    api = await testApi({
+      importer: importFile,
+      // Like the worker: the compare runs to the end and ignores the abort.
+      comparer: async (path, store, { signal }) => {
+        const session = await prepareReimport(store, { path });
+        await new Promise((resolve) => signal.addEventListener('abort', resolve, { once: true }));
+        compared();
+        return session;
+      },
+    });
+    const base = await importedTree();
+    const res = await api.inject({
+      method: 'POST',
+      url: `${base}/reimport`,
+      ...multipart('Family 2026.ged', laterSample()),
+    });
+    const jobId = res.json().jobId as string;
+    await vi.waitFor(async () => {
+      expect((await api.get(`/api/jobs/${jobId}`)).json().state).toBe('running');
+    });
+    const cancel = await api.inject({
+      method: 'DELETE',
+      url: `/api/jobs/${jobId}`,
+      headers: MUTATION_HEADERS,
+    });
+    expect(cancel.statusCode).toBeLessThan(300);
+    await finishedCompare;
+    const job = await waitForJob(jobId);
+    // The cancel was accepted, so it wins: no review is left for anyone to apply.
+    expect(job).toMatchObject({ state: 'failed', cancelled: true, result: null });
   });
 });

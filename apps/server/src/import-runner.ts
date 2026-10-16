@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { Worker, type ResourceLimits } from 'node:worker_threads';
-import type { ImportLimits } from '@open-ancestry/import';
-import type { Importer } from './jobs';
+import { reimportFromData, type ImportLimits, type ReimportData } from '@open-ancestry/import';
+import type { Comparer, Importer, ImporterOptions } from './jobs';
 import type { WorkerInput, WorkerMessage } from './import-worker';
 
 /*
@@ -26,6 +26,79 @@ export interface WorkerImporterOptions {
   graceMs?: number;
 }
 
+/** Runs one job in a worker thread and settles once the worker has exited. */
+function runInWorker(
+  script: URL | string,
+  workerData: WorkerInput,
+  {
+    resourceLimits,
+    graceMs,
+    execArgv,
+  }: Required<Pick<WorkerImporterOptions, 'graceMs'>> & {
+    resourceLimits: ResourceLimits;
+    execArgv?: string[];
+  },
+  { onProgress, signal }: ImporterOptions,
+  what: string,
+): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(script, {
+      workerData,
+      resourceLimits,
+      ...(execArgv && { execArgv }),
+    });
+    let outcome: { ok: true; value: unknown } | { ok: false; error: Error } | undefined;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    // finalize and commit run to the end: terminating there could lose the
+    // report of an import that did commit. The server refuses cancels in
+    // those phases; a cancel that raced into them waits for the outcome.
+    // A re-import compare writes only its own export tree, so it never saves.
+    let saving = false;
+    const onAbort = () => {
+      worker.postMessage('cancel');
+      if (!saving) killTimer = setTimeout(() => void worker.terminate(), graceMs);
+    };
+    if (signal.aborted) onAbort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+
+    worker.on('message', (message: WorkerMessage) => {
+      if (message.type === 'progress') {
+        if (!workerData.reimport && SAVING_PHASES.has(message.progress.phase)) {
+          saving = true;
+          clearTimeout(killTimer);
+        }
+        onProgress(message.progress);
+      } else if (message.type === 'done') outcome ??= { ok: true, value: message.report };
+      else outcome ??= { ok: false, error: new Error(message.message) };
+    });
+    worker.on('error', (error: Error & { code?: string }) => {
+      outcome ??= {
+        ok: false,
+        error:
+          error.code === 'ERR_WORKER_OUT_OF_MEMORY'
+            ? new Error(`The ${what} ran out of memory; the file is too large or malformed`)
+            : error,
+      };
+    });
+    // Settle only once the worker is gone, so cleanup never races its writes.
+    worker.on('exit', (code) => {
+      clearTimeout(killTimer);
+      signal.removeEventListener('abort', onAbort);
+      // The worker's own report wins: a cancel only counts if it stopped the work.
+      const result = outcome ?? {
+        ok: false as const,
+        error: new Error(
+          signal.aborted
+            ? `${what[0]!.toUpperCase()}${what.slice(1)} was cancelled`
+            : `The ${what} stopped unexpectedly (exit ${code})`,
+        ),
+      };
+      if (result.ok) resolve(result.value);
+      else reject(result.error);
+    });
+  });
+}
+
 export function workerImporter(
   script: URL | string,
   {
@@ -37,67 +110,68 @@ export function workerImporter(
     execArgv?: string[];
   } = {},
 ): Importer {
-  return (path, store, { onProgress, signal }) =>
-    new Promise((resolve, reject) => {
-      if (!store.dir) return reject(new Error('Imports need a tree on disk'));
-      const workerData: WorkerInput = { path, treeDir: store.dir, limits };
-      const worker = new Worker(script, {
-        workerData,
-        resourceLimits,
-        ...(execArgv && { execArgv }),
-      });
-      let outcome: { ok: true; value: unknown } | { ok: false; error: Error } | undefined;
-      let killTimer: ReturnType<typeof setTimeout> | undefined;
-      // finalize and commit run to the end: terminating there could lose the
-      // report of an import that did commit. The server refuses cancels in
-      // those phases; a cancel that raced into them waits for the outcome.
-      let saving = false;
-      const onAbort = () => {
-        worker.postMessage('cancel');
-        if (!saving) killTimer = setTimeout(() => void worker.terminate(), graceMs);
-      };
-      if (signal.aborted) onAbort();
-      else signal.addEventListener('abort', onAbort, { once: true });
+  return (path, store, options) => {
+    if (!store.dir) return Promise.reject(new Error('Imports need a tree on disk'));
+    return runInWorker(
+      script,
+      { path, treeDir: store.dir, limits },
+      { resourceLimits, graceMs, execArgv },
+      options,
+      'import',
+    );
+  };
+}
 
-      worker.on('message', (message: WorkerMessage) => {
-        if (message.type === 'progress') {
-          if (SAVING_PHASES.has(message.progress.phase)) {
-            saving = true;
-            clearTimeout(killTimer);
-          }
-          onProgress(message.progress);
-        } else if (message.type === 'done') outcome ??= { ok: true, value: message.report };
-        else outcome ??= { ok: false, error: new Error(message.message) };
-      });
-      worker.on('error', (error: Error & { code?: string }) => {
-        outcome ??= {
-          ok: false,
-          error:
-            error.code === 'ERR_WORKER_OUT_OF_MEMORY'
-              ? new Error('The import ran out of memory; the file is too large or malformed')
-              : error,
-        };
-      });
-      // Settle only once the worker is gone, so cleanup never races its writes.
-      worker.on('exit', (code) => {
-        clearTimeout(killTimer);
-        signal.removeEventListener('abort', onAbort);
-        // The worker's own report wins: a cancel only counts if it stopped the work.
-        const result = outcome ?? {
-          ok: false as const,
-          error: new Error(
-            signal.aborted
-              ? 'Import was cancelled'
-              : `The import stopped unexpectedly (exit ${code})`,
-          ),
-        };
-        if (result.ok) resolve(result.value);
-        else reject(result.error);
-      });
-    });
+/**
+ * Compares an updated export with a tree in a worker thread (#161): the
+ * export is imported into a tree of its own in a `.reimport-*` folder inside
+ * the tree, compared there, and the review reopened here. Cancelling or
+ * failing removes the folder; closing the review does too.
+ */
+export function workerComparer(
+  script: URL | string,
+  {
+    resourceLimits = IMPORT_RESOURCE_LIMITS,
+    limits = {},
+    graceMs = 2000,
+    execArgv,
+  }: WorkerImporterOptions & {
+    execArgv?: string[];
+  } = {},
+): Comparer {
+  return async (path, store, options) => {
+    if (!store.dir) throw new Error('Re-imports need a tree on disk');
+    const { folders, ...run } = options;
+    // Made here, so this server owns them; the worker only fills them.
+    const incomingDir = folders.create(store.dir, 'export');
+    const mediaDir = folders.create(store.dir, 'media');
+    try {
+      const data = (await runInWorker(
+        script,
+        { path, treeDir: store.dir, limits, reimport: { incomingDir, mediaDir } },
+        { resourceLimits, graceMs, execArgv },
+        run,
+        're-import',
+      )) as ReimportData;
+      // Not a GEDZIP: no media waited there.
+      if (!data.mediaDir) folders.release(mediaDir);
+      return reimportFromData(data);
+    } catch (error) {
+      folders.release(incomingDir);
+      folders.release(mediaDir);
+      throw error;
+    }
+  };
 }
 
 /** The worker from TypeScript source, for `npm run dev` and tests (needs tsx). */
+export function devWorkerComparer(options: WorkerImporterOptions = {}): Comparer {
+  return workerComparer(fileURLToPath(new URL('./import-worker.ts', import.meta.url)), {
+    ...options,
+    execArgv: ['--import', 'tsx'],
+  });
+}
+
 export function devWorkerImporter(options: WorkerImporterOptions = {}): Importer {
   return workerImporter(fileURLToPath(new URL('./import-worker.ts', import.meta.url)), {
     ...options,

@@ -1,5 +1,6 @@
 import { formatDate } from '@open-ancestry/core';
 import { eventLabel } from '../../lib/timeline';
+import type { ImportProgress } from '../../library/api';
 import type { FactView, ReviewChange } from './api';
 
 const SEX: Record<string, string> = { M: 'male', F: 'female', X: 'other', U: 'unknown' };
@@ -116,4 +117,24 @@ export function describeChange(change: ReviewChange, personName: string): string
     case 'merged':
       return `Exported separately as ${change.incomingName}; previously merged into ${personName}, so not added again`;
   }
+}
+
+const COMPARE_PHASES: Record<ImportProgress['phase'], string> = {
+  read: 'Reading the file',
+  parse: 'Reading the file',
+  map: 'Reading people and families',
+  finalize: 'Reading people and families',
+  commit: 'Reading people and families',
+  done: 'Comparing with your tree',
+  compare: 'Comparing with your tree',
+};
+
+/** What a re-import's comparison is doing, for its progress page (#161). */
+export function compareProgress(progress: ImportProgress | null | undefined): string {
+  if (!progress) return 'Uploading';
+  const counts =
+    progress.phase === 'map' && progress.total > 0
+      ? ` (${progress.done.toLocaleString('en-US')} of ${progress.total.toLocaleString('en-US')} records)`
+      : '';
+  return `${COMPARE_PHASES[progress.phase]}${counts}`;
 }

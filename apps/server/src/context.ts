@@ -6,7 +6,7 @@ import type {
   RawRequestDefaultExpression,
   RawServerDefault,
 } from 'fastify';
-import type { Importer, JobManager } from './jobs';
+import type { Comparer, Importer, JobManager } from './jobs';
 import type { Library } from './library';
 import type { ThumbnailQueue } from './thumbnails';
 import type { ReimportFolders } from './reimport-folders';
@@ -25,6 +25,8 @@ export interface Deps {
   library: Library;
   jobs: JobManager;
   importer: Importer | undefined;
+  /** Re-import compare (see ServerOptions.comparer). */
+  comparer: Comparer;
   /** Largest accepted GEDCOM (.ged, .gedcom) upload, in bytes. */
   uploadLimit: number;
   /** Largest accepted GEDZIP (.zip, .gdz) upload, in bytes. */

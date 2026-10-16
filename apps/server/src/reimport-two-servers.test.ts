@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { zipSync } from 'fflate';
 import { importFile } from '@open-ancestry/import';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { devWorkerComparer } from './import-runner';
 import { MUTATION_HEADERS, testApi, type TestApi } from './test/helpers';
 
 /*
@@ -120,6 +121,28 @@ it('refuses to rename or delete a tree while a review of it is open', async () =
   expect((await a.del(`/api/reimports/${reimportId}`)).statusCode).toBe(204);
   expect((await a.patch(base, { name: 'Other' })).statusCode).toBe(200);
 });
+
+it("a second server starting up keeps the first server's worker-compare export (#246)", async () => {
+  await a.close();
+  a = await testApi({ importer: importFile, comparer: devWorkerComparer() });
+  const { base, treeDir, reimportId } = await openReview();
+  const before = reimportFolders(treeDir);
+  expect(before.some((n) => n.startsWith('.reimport-export-'))).toBe(true);
+  // Its startup sweep and its opening the tree both leave the first server's folders alone.
+  b = await testApi({ library: a.root, importer: importFile });
+  expect((await b.get(base)).statusCode).toBe(200);
+  expect(reimportFolders(treeDir)).toEqual(before);
+  const review = (await a.get(`/api/reimports/${reimportId}`)).json();
+  expect(
+    (
+      await a.post(`/api/reimports/${reimportId}/apply`, {
+        accept: [],
+        comparison: review.comparison,
+      })
+    ).statusCode,
+  ).toBe(200);
+  expect(reimportFolders(treeDir)).toEqual([]);
+}, 60_000);
 
 it("refuses to rename or delete a tree while another server's review of it is open", async () => {
   const { base, treeDir } = await openReview();

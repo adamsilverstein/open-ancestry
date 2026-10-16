@@ -75,6 +75,7 @@ export class ReimportSessions {
     closeReimport(stored.session);
     // Its working folder and owner file go with it.
     this.folders?.release(stored.session.mediaDir);
+    this.folders?.release(stored.session.incomingDir);
   }
 
   closeAll(): void {

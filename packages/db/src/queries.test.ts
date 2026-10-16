@@ -663,6 +663,23 @@ describe('getNeighborhood moreSiblings', () => {
     store.close();
   });
 
+  it('does not flag an ancestor whose siblings the slice already holds', () => {
+    const store = memoryTree();
+    const ids = store.transact('seed', (tx) => {
+      const p = (given: string) => persons.create(tx, { names: [{ given, surname: 'Synth' }] }).id;
+      const [gp, dad, uncle, me, sis] = [p('Gp'), p('Dad'), p('Uncle'), p('Me'), p('Sis')];
+      families.create(tx, { partner1_id: gp, children: [{ child_id: dad }, { child_id: uncle }] });
+      families.create(tx, { partner1_id: dad, children: [{ child_id: me }, { child_id: sis }] });
+      // Synthetic: Sis married Uncle, so he comes with her as her partner.
+      families.create(tx, { partner1_id: uncle, partner2_id: sis, children: [] });
+      return { dad, me, uncle };
+    }).result;
+    const n = getNeighborhood(store, ids.me, { up: 2, down: 0, siblingsDepth: 1 });
+    expect(n.people.map((x) => x.id)).toContain(ids.uncle);
+    expect(n.moreSiblings).not.toContain(ids.dad);
+    store.close();
+  });
+
   it('does not flag an ancestor without siblings', () => {
     const store = memoryTree();
     const ids = store.transact('seed', (tx) => {

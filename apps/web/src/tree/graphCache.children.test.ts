@@ -84,7 +84,7 @@ describe('GraphCache needsSiblings', () => {
       const [gp, dad, aunt, me] = [p('Gp'), p('Dad'), p('Aunt'), p('Me')];
       families.create(tx, { partner1_id: gp, children: [{ child_id: dad! }, { child_id: aunt! }] });
       families.create(tx, { partner1_id: dad, children: [{ child_id: me! }] });
-      return { dad: dad!, aunt: aunt!, me: me! };
+      return { gp: gp!, dad: dad!, aunt: aunt!, me: me! };
     }).result;
     const cache = new GraphCache();
     cache.merge(
@@ -97,6 +97,23 @@ describe('GraphCache needsSiblings', () => {
     expect(cache.needsSiblings(ids.dad)).toBe(true);
     const people = cache.graph().people as ReadonlyMap<string, { hasMoreSiblings?: boolean }>;
     expect(people.get(ids.dad)?.hasMoreSiblings).toBe(true);
+    // A slice that holds all of Grandpa's children holds Dad's siblings too.
+    const viaParent = new GraphCache();
+    viaParent.merge(
+      getNeighborhood(store, ids.me, {
+        up: 2,
+        down: 0,
+        siblingsDepth: 1,
+      }) as unknown as ApiNeighborhood,
+    );
+    viaParent.merge(
+      getNeighborhood(store, ids.gp, {
+        up: 0,
+        down: 1,
+        siblingsDepth: 0,
+      }) as unknown as ApiNeighborhood,
+    );
+    expect(viaParent.needsSiblings(ids.dad)).toBe(false);
     // Expanding fetches a slice on Dad with his siblings.
     cache.merge(
       getNeighborhood(store, ids.dad, {

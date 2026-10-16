@@ -149,8 +149,9 @@ export class MediaSource {
       const rel = safeEntryPath(file.path);
       if (!rel) continue;
       const full = join(dir, ...rel.split('/'));
-      mkdirSync(dirname(full), { recursive: true });
-      writeFileSync(full, file.read());
+      // Private to the owner, like every other writer of media (0700/0600).
+      mkdirSync(dirname(full), { recursive: true, mode: 0o700 });
+      writeFileSync(full, file.read(), { mode: 0o600 });
       const size = file.size;
       files.push({ path: file.path, size, read: () => readFileSync(full) });
     }

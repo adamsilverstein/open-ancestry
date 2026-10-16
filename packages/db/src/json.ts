@@ -40,7 +40,7 @@ export interface ExportOptions {
   /**
    * Include change_batch and change_log (default true). Without them, import
    * warnings (which can quote imported lines) are left out too, and so are
-   * places, notes and media that only deleted records used.
+   * places, notes, media, citations and sources that only deleted records used.
    */
   history?: boolean;
   /**
@@ -106,33 +106,71 @@ function unusedPlaces(store: TreeStore): Set<string> {
   return new Set([...parent.keys()].filter((id) => !used.has(id)));
 }
 
+type Orphaned = 'place' | 'media' | 'note' | 'citation' | 'source';
+
 /**
  * Rows a history-free export leaves out because only deleted records used
- * them: places no remaining event uses, then media and notes no remaining
- * record links to. A deleted person's links go with them, but these shared
- * rows stay, and would otherwise keep their text and whereabouts.
+ * them. A delete removes a record's own notes, media and citations, but rows
+ * shared with what remains (a place, a note on a place, a citation on that
+ * note) stay, and would keep the deleted record's text and whereabouts:
+ * - places no remaining event uses (directly or as a parent of a used place);
+ * - media, notes and citations no remaining record links to, repeated until
+ *   nothing changes, since they can hang off one another;
+ * - sources whose citations all went that way, unless they are shared
+ *   reference data (in a repository, or with notes or media of their own),
+ *   the rule a delete itself follows.
  */
-function orphans(store: TreeStore): Record<'place' | 'media' | 'note', Set<string>> {
-  const place = unusedPlaces(store);
+function orphans(store: TreeStore): Record<Orphaned, Set<string>> {
+  const rows = <T>(sql: string) => store.db.prepare(sql).all() as T[];
   const ids = (sql: string) => store.db.prepare(sql).pluck().all() as string[];
-  // Links still counted: those whose owner is not itself left out.
-  const linkedBy = (table: 'media_link' | 'note_link', column: string, gone: Set<string>[]) => {
-    const rows = store.db
-      .prepare(`SELECT ${column} AS id, owner_type, owner_id FROM ${table}`)
-      .all() as { id: string; owner_type: string; owner_id: string }[];
-    const owners: Record<string, Set<string>> = { place, media: gone[0] ?? new Set() };
-    return new Set(rows.filter((r) => !owners[r.owner_type]?.has(r.owner_id)).map((r) => r.id));
+  const gone: Record<Orphaned, Set<string>> = {
+    place: unusedPlaces(store),
+    media: new Set(),
+    note: new Set(),
+    citation: new Set(),
+    source: new Set(),
+  };
+  type Link = { target: string; owner_type: string; owner_id: string };
+  const links = {
+    media: rows<Link>('SELECT media_id AS target, owner_type, owner_id FROM media_link'),
+    note: rows<Link>('SELECT note_id AS target, owner_type, owner_id FROM note_link'),
+    citation: rows<Link>('SELECT citation_id AS target, owner_type, owner_id FROM citation_link'),
+  };
+  const all = {
+    media: ids('SELECT id FROM media'),
+    note: ids('SELECT id FROM note'),
+    citation: ids('SELECT id FROM citation'),
   };
   const primary = new Set(
     ids('SELECT primary_media_id FROM person WHERE primary_media_id IS NOT NULL'),
   );
-  const mediaLinked = linkedBy('media_link', 'media_id', []);
-  const media = new Set(
-    ids('SELECT id FROM media').filter((id) => !mediaLinked.has(id) && !primary.has(id)),
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const kind of ['media', 'note', 'citation'] as const) {
+      const live = new Set(
+        links[kind]
+          .filter((l) => !gone[l.owner_type as Orphaned]?.has(l.owner_id))
+          .map((l) => l.target),
+      );
+      for (const id of all[kind]) {
+        if (gone[kind].has(id) || live.has(id) || (kind === 'media' && primary.has(id))) continue;
+        gone[kind].add(id);
+        changed = true;
+      }
+    }
+  }
+  const cited = rows<{ id: string; source_id: string }>('SELECT id, source_id FROM citation');
+  const stillCited = new Set(cited.filter((c) => !gone.citation.has(c.id)).map((c) => c.source_id));
+  const shared = new Set(
+    ids(`SELECT id FROM source WHERE repository_id IS NOT NULL
+         OR id IN (SELECT owner_id FROM note_link WHERE owner_type = 'source')
+         OR id IN (SELECT owner_id FROM media_link WHERE owner_type = 'source')`),
   );
-  const noteLinked = linkedBy('note_link', 'note_id', [media]);
-  const note = new Set(ids('SELECT id FROM note').filter((id) => !noteLinked.has(id)));
-  return { place, media, note };
+  for (const c of cited) {
+    if (gone.citation.has(c.id) && !stillCited.has(c.source_id) && !shared.has(c.source_id))
+      gone.source.add(c.source_id);
+  }
+  return gone;
 }
 
 /** Whether a row is one of `gone`, or belongs to one (a link, citation link or imported text). */
@@ -142,7 +180,8 @@ function belongsTo(name: string, row: Record<string, unknown>, gone: Record<stri
     return true;
   return (
     (name === 'media_link' && gone.media!.has(String(row.media_id))) ||
-    (name === 'note_link' && gone.note!.has(String(row.note_id)))
+    (name === 'note_link' && gone.note!.has(String(row.note_id))) ||
+    (name === 'citation_link' && gone.citation!.has(String(row.citation_id)))
   );
 }
 

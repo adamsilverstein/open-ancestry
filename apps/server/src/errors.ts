@@ -11,6 +11,7 @@ export type ErrorCode =
   | 'forbidden_host'
   | 'not_found'
   | 'conflict'
+  | 'stale'
   /** Undo with `expect`: that batch is no longer the newest. */
   | 'not_newest'
   | 'payload_too_large'
@@ -40,6 +41,8 @@ export class ApiError extends Error {
 export const notFound = (message: string) => new ApiError(404, 'not_found', message);
 export const badRequest = (message: string) => new ApiError(400, 'bad_request', message);
 export const conflict = (message: string) => new ApiError(409, 'conflict', message);
+/** The client edited from data that has changed since it loaded it (another tab, undo). */
+export const stale = (message: string) => new ApiError(409, 'stale', message);
 export const notNewest = (message: string) => new ApiError(409, 'not_newest', message);
 
 export function errorBody(code: ErrorCode, message: string): ErrorBody {

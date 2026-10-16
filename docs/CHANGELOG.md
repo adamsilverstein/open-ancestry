@@ -2,7 +2,9 @@
 
 ## v1.0.0 (draft)
 
-The first release of open-ancestry: a local-first family tree app. Import your Ancestry.com tree, then browse, search, edit and export it on your own computer. Nothing leaves your machine.
+The first release of open-ancestry: a local-first family tree app. Import your Ancestry.com tree, then browse, search, edit and export it on your own computer. The app sends nothing anywhere; what you export is up to you, and exports leave living people's details out by default (see [Privacy and export](#privacy-and-export)).
+
+open-ancestry is for one person per computer account. Don't run it on a shared or multi-user machine (see [Security](#security)).
 
 PR numbers point to the change on GitHub.
 
@@ -14,10 +16,17 @@ PR numbers point to the change on GitHub.
 - **Import report** with counts, warnings by line number, and the tags that could not be mapped. (#30, #43)
 - **Media from a GEDZIP or a media folder** is linked by its relative path. Missing files are reported but keep their path, so an export still names them, and existing files are never overwritten. (#45, #51, #221)
 - **Re-import an updated Ancestry export** into an existing tree. People are matched, with a confidence and the reasons for each match, and a review screen lets you accept or reject each change before anything is written. The review is grouped by what needs a decision, with counts that filter the list, conflicts marked by more than colour, and dates written the app's way. Matching stays fast on large trees by comparing people nearest in birth year. (#72, #184, #192, #194, #222)
+- **Re-import does not yet:**
+  - copy new media files from an updated GEDZIP or media folder (#243);
+  - offer a photo whose file changed (#252);
+  - tell values an earlier re-import brought in apart from your own edits, so those are treated as edits, and your edits are offered again on each re-import (#185).
+
+  People missing from the new export are listed but never removed, by design: re-import adds and updates, it doesn't sync deletions.
 - **Dates as they appear in real trees**: `ABT`, `BEF`, `AFT`, `BET … AND`, `FROM … TO`, US-style `05/28/1960`, ISO dates, decades, centuries and year ranges. Text that is not a date is kept as typed. (#21, #52, #66)
 - **GEDCOM 7** files, including calendar dates, which are validated. (#64, #142)
 - **Accented names stay consistent**: text is normalized to NFC on import and edit, so names, places and media paths match however they were typed. (#164)
-- **Imports run in the background** in their own worker, with size limits that can be configured. A GEDZIP is limited by its GEDCOM text, not by its photos, an upload that can't succeed is refused before it is sent, and an import can be cancelled. (#156)
+- **Imports run in the background** in their own worker, with size limits that can be configured (`--max-gedcom-mb` for the GEDCOM text, `--max-archive-mb` for a whole GEDZIP, 1 GB by default). An upload that can't succeed is refused before it is sent, and an import can be cancelled. (#156)
+- **GEDZIP files are plain ZIP**: imports and exports stop at 4 GiB or 65,535 files (ZIP64 archives are not read), and imports also stop at `--max-archive-mb`. A larger media library needs a GEDCOM plus a media folder instead. (#156, #227)
 - Writes to a tree are refused while it is importing. (#149)
 - **Command line and import polish**: `--help` and clear usage errors, `serve` opens the browser, blank tree names are refused with a plain message, a fuller import report, a size check before upload, and focus moves to the import result so it is announced. (#228)
 
@@ -71,21 +80,21 @@ PR numbers point to the change on GitHub.
 
 - **Your data stays on your computer.** Each tree is a folder (a SQLite database plus media) in your library. The app makes no third-party network requests. (#23, #29)
 - **Export GEDCOM 5.5.1** (Ancestry compatible, keeping Ancestry's custom tags), **GEDCOM 7**, **GEDZIP** with media, and **JSON** for backup and tools. Original records are re-read by their own GEDCOM version, so nothing is lost when a GEDCOM 7 import is exported as 5.5.1, and a line that should point at a record but holds text is reported, not silently dropped. GEDCOM 7 exports give each media file's format as a MIME type. (#23, #46, #221, #223)
-- **GEDZIP exports stream** one media file at a time, so a large media library exports without loading it all, and an archive too big for the ZIP format is refused before anything is sent. The export applies the same media checks as the app, so a file from outside the tree can't end up in the archive. (#227, #248)
+- **GEDZIP exports stream** one media file at a time, so a large media library exports without loading it all, and an archive past the ZIP limits (4 GiB or 65,535 files) is refused before anything is sent. The export applies the same media checks as the app, so a file from outside the tree can't end up in the archive. (#227, #248)
 - **JSON exports can leave out edit history**, and do by default from the export dialog, since that history holds anything you deleted. (#220)
 - **Privatize living people**, on by default when exporting. Private and confidential records are hidden, and record ids are renumbered so nothing about a hidden person leaks. (#46, #104)
 - **Living status** is worked out from dates and can be set by hand. (#21, #48)
 
 ### Security
 
-- The server listens on `127.0.0.1` only. Requests are checked by Host and Origin, every change needs a per-session token, and a strict Content Security Policy is sent with no inline scripts. Nothing in the app trips that policy, and every end-to-end test fails if anything does. (#29, #34, #47, #174)
+- The server listens on `127.0.0.1` only. Requests are checked by Host and Origin, every change needs a per-session token, which stops other websites, not other programs on this computer, and a strict Content Security Policy is sent with no inline scripts. No page the end-to-end tests open trips that policy, and every end-to-end test fails if one does. (#29, #34, #47, #174)
 - GEDCOM files are treated as untrusted. Values cannot inject extra GEDCOM lines on export, text that looks like a pointer stays text, coordinates are parsed safely, and control characters are escaped in command-line output. (#26, #150, #166, #179)
 - Media is served without path traversal, hard-linked media files and a symlinked media folder are refused, and uploads have size limits. (#29, #51, #236)
 - The library's files are private to your user account, and the API refuses navigations from other sites, so another site can't drop an export into Downloads. open-ancestry assumes one user per computer: a running app answers anyone on that machine at `127.0.0.1`. A library folder that other accounts can write to is refused unless you start the app with `--shared-library`. (#151, #237)
 
 ### Performance
 
-Budgets are checked in CI on 10,000-person and 100,000-person synthetic trees. (#38, #63)
+Budgets are checked in CI on 10,000-person and 100,000-person synthetic trees. (#38, #63) The figures below are for an M-series laptop; CI's shared runners check them scaled by 2.5 (`OA_BENCH_FACTOR`).
 
 | What | Budget on a 10,000-person tree |
 | --- | --- |
@@ -98,6 +107,11 @@ Budgets are checked in CI on 10,000-person and 100,000-person synthetic trees. (
 | Pan and zoom | 60 fps with 2,000 cards (#63) |
 
 Other speed-ups include faster imports that build indexes once at the end and batch their writes (#204), cached people lists and marriage indexes (#47, #150), a tree view cache that starts over cleanly after an edit (#147), sibling links built in linear time so very large families lay out at once (#218), and stored sort keys so the people list opens sorted by birth or death in a 100,000-person tree without scanning it (#244).
+
+### Known limitations
+
+- Search matches surnames phonetically, but not yet common spelling equivalents across scripts: Yılmaz and Yilmaz, Straße and Strasse, pointed and unpointed Hebrew, O'Brien and OBrien (#199).
+- A name containing right-to-left override or other control characters can change how the text after it is displayed (#190).
 
 ### For contributors
 

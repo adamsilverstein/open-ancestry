@@ -28,6 +28,7 @@ import type {
   Point,
   TreeLayout,
 } from './types';
+import { maxOf, minOf, pushAll } from './arrays';
 
 /** Least vertical distance between two couple lanes. */
 const LANE_SPACING = 8;
@@ -111,7 +112,7 @@ function layoutVertical(
           : 'left';
     // The spouse's parents take that side of the focus row, so cousins can't.
     if (side !== 'center') b.spouseParentsSide = side === 'left' ? 'right' : 'left';
-    descQueue.push(...b.addSiblings(descRoot, side, 'up', gaps.sibling));
+    pushAll(descQueue, b.addSiblings(descRoot, side, 'up', gaps.sibling));
     const ancRoot = b.unit(descRoot.cards, 0);
     const queue = descRoot.cards.flatMap((card, i) => {
       if ((card.role !== 'focus' && card.role !== 'spouse') || card.upBlocked) return [];
@@ -279,8 +280,8 @@ function verticalEdges(
     group: string,
     xs: number[],
     barY: number,
-    lo = Math.min(...xs),
-    hi = Math.max(...xs),
+    lo = minOf(xs),
+    hi = maxOf(xs),
   ) => {
     const { familyId } = link;
     if (lo < hi) {
@@ -365,7 +366,7 @@ function verticalEdges(
       childEdges(link, group, xs, link.children[0]!.card.y - halfAt(link.children[0]!.card.y));
       return;
     }
-    const drop = { link, group, start, parents, lo: Math.min(...xs), hi: Math.max(...xs), xs };
+    const drop = { link, group, start, parents, lo: minOf(xs), hi: maxOf(xs), xs };
     // Every family dropping into one row is routed together: cousins slid
     // out past the focus row's half siblings must nest with their lines.
     const row = link.children[0]!.card.y;

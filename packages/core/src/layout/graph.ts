@@ -134,15 +134,23 @@ const PREFERENCE: Record<ChildRelation, number> = {
  * `preferred` (GEDCOM/Ancestry preferred parents), else the most biological
  * family (both partners' relations scored), ties going to the first.
  */
+/**
+ * A person's parent families that have a parent to draw: a GEDCOM FAM with
+ * only CHIL lines has none, so it is never shown or offered by the switcher.
+ */
+export function partneredParentFamilies(index: GraphIndex, personId: string): TreeFamily[] {
+  return index.parentFamilies(personId).filter((f) => {
+    const [a, b] = index.partners(f);
+    return a !== null || b !== null;
+  });
+}
+
 export function chooseParentFamily(
   index: GraphIndex,
   personId: string,
   selected: Readonly<Record<string, string>>,
 ): TreeFamily | undefined {
-  const families = index.parentFamilies(personId).filter((f) => {
-    const [a, b] = index.partners(f);
-    return a !== null || b !== null;
-  });
+  const families = partneredParentFamilies(index, personId);
   const wanted = Object.hasOwn(selected, personId) ? selected[personId] : undefined;
   const chosen = families.find((f) => f.id === wanted);
   if (chosen) return chosen;

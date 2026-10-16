@@ -5,9 +5,16 @@
  * father on the start (left) side. Missing ancestors leave empty slots.
  */
 import { Builder, settingsFrom } from './build';
-import { asIndex, chooseParentFamily, coupleOrder, type GraphSource } from './graph';
+import {
+  asIndex,
+  chooseParentFamily,
+  coupleOrder,
+  partneredParentFamilies,
+  type GraphSource,
+} from './graph';
 import { boundsOf } from './output';
 import type { Bounds, FanLayout, FanOptions, FanSegment, FanSlot } from './types';
+import { maxOf, minOf } from './arrays';
 
 export function layoutFan(
   graph: GraphSource,
@@ -66,7 +73,7 @@ export function layoutFan(
       continue;
     }
     segments.push(segment);
-    const families = index.parentFamilies(personId);
+    const families = partneredParentFamilies(index, personId);
     const family = chooseParentFamily(index, personId, b.s.selected);
     if (family && families.length > 1) {
       b.alternates[personId] = { selected: family.id, families: families.map((f) => f.id) };
@@ -113,9 +120,9 @@ function sectorBounds(start: number, sweep: number, radius: number): Bounds {
     add(k * (Math.PI / 2));
   }
   const clean = (n: number) => Math.round(n * 1e6) / 1e6 + 0;
-  const minX = clean(Math.min(...xs));
-  const maxX = clean(Math.max(...xs));
-  const minY = clean(Math.min(...ys));
-  const maxY = clean(Math.max(...ys));
+  const minX = clean(minOf(xs));
+  const maxX = clean(maxOf(xs));
+  const minY = clean(minOf(ys));
+  const maxY = clean(maxOf(ys));
   return { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
 }

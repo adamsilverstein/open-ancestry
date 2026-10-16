@@ -115,6 +115,12 @@ export const MAX_SEARCH_WORDS = 8;
 export const YEAR_SLACK = 2;
 /** Most rows read by score before near-ties are put in name order; past it, ties go by id. */
 export const TIEBREAK_CAP = 2000;
+/**
+ * Above this many matches in a tier (a broad prefix such as "19" or "we") the
+ * name tiebreak is skipped: scoring and keeping every match costs more than the
+ * order is worth, so those go by score, then id, as before #305.
+ */
+export const TIEBREAK_MAX_MATCHES = 20_000;
 
 /** FTS5 expression for one query word in one tier, or null if the word cannot match in it. */
 function wordMatch(word: string, tier: SearchMatch, keys: string[]): string {
@@ -226,12 +232,25 @@ export function searchPeople(
      ORDER BY round(b.score, 1) DESC, ps.surname COLLATE NOCASE, ps.given COLLATE NOCASE, d.person_id
      LIMIT @limit`,
   );
+  const count = store
+    .stmt('SELECT count(*) FROM person_search WHERE person_search MATCH ?')
+    .pluck();
+  const byScore = store.stmt(
+    `SELECT d.person_id AS id, -bm25(person_search, 10.0, 5.0, 1.0, 1.0) AS score
+     FROM person_search JOIN search_doc d ON d.doc_id = person_search.rowid
+     WHERE person_search MATCH @match ORDER BY score DESC, d.person_id LIMIT @limit`,
+  );
   TIERS.forEach((tier, rank) => {
     if (hits.length >= limit || (tier === 'phonetic' && !hasPhonetic)) return;
     const match = parsed.match(tier);
     // Ask for enough rows to fill the limit after skipping earlier tiers' hits.
     const wanted = limit + seen.size;
-    const rows = statement.all({ match, cap: TIEBREAK_CAP, last: wanted - 1, limit: wanted }) as {
+    const broad = (count.get(match) as number) > TIEBREAK_MAX_MATCHES;
+    const rows = (
+      broad
+        ? byScore.all({ match, limit: wanted })
+        : statement.all({ match, cap: TIEBREAK_CAP, last: wanted - 1, limit: wanted })
+    ) as {
       id: string;
       score: number;
     }[];

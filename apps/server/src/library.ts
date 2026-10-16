@@ -32,6 +32,11 @@ export const TRASH_DIR = '.trash';
 export const IMPORT_PENDING_KEY = 'import_pending';
 export const MAX_TREE_NAME_LENGTH = 100;
 /**
+ * The same cap in UTF-8 bytes. Most Linux file systems allow 255 bytes per
+ * name; the folder adds ".oatree", and the trash a timestamp (#275 P1).
+ */
+export const MAX_TREE_NAME_BYTES = 200;
+/**
  * How long a server connection waits for another connection's write lock (an
  * import worker's) before SQLITE_BUSY, which the API answers with 409. Short,
  * since the wait blocks the event loop.
@@ -57,6 +62,8 @@ export function treeNameProblem(name: string): string | null {
   if (name.trim().length === 0) return 'Enter a tree name';
   if (name.length > MAX_TREE_NAME_LENGTH)
     return `Tree name is longer than ${MAX_TREE_NAME_LENGTH} characters`;
+  if (Buffer.byteLength(name) > MAX_TREE_NAME_BYTES)
+    return 'Tree name is too long for a folder name';
   if (name !== name.trim()) return 'Tree name has leading or trailing spaces';
   if (name.startsWith('.')) return 'Tree name cannot start with a dot';
   if (name.endsWith('.')) return 'Tree name cannot end with a dot';
@@ -80,9 +87,22 @@ export function treeNameFromFile(fileName: string): string {
     .replace(/[/\\:*?"<>|%\u0000-\u001f\u007f]+/g, ' ')
     .replace(/\s+/g, ' ')
     .replace(/^[\s.]+|[\s.]+$/g, '')
-    .slice(0, MAX_TREE_NAME_LENGTH - 10)
     .trim();
-  return !name || WINDOWS_DEVICE.test(name) ? `Imported ${name}`.trim() : name;
+  const short = truncate(name, MAX_TREE_NAME_LENGTH - 10, MAX_TREE_NAME_BYTES - 10).trim();
+  return !short || WINDOWS_DEVICE.test(short) ? `Imported ${short}`.trim() : short;
+}
+
+/** `text` cut to whole characters (code points) within both a character and a UTF-8 byte budget. */
+function truncate(text: string, maxLength: number, maxBytes: number): string {
+  let out = '';
+  let bytes = 0;
+  for (const char of text) {
+    const size = Buffer.byteLength(char);
+    if (out.length + char.length > maxLength || bytes + size > maxBytes) break;
+    out += char;
+    bytes += size;
+  }
+  return out;
 }
 
 function assertTreeName(name: string): void {

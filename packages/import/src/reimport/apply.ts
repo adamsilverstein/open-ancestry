@@ -847,7 +847,11 @@ function recordStale(tx: Tx, importBatchId: string, stale: Set<string>) {
   }
 }
 
-/** Links a place can own (the owner_type CHECKs allow place for these), and what they point at. */
+/**
+ * Links a place can own (the owner_type CHECKs allow place for these), and what they point
+ * at. Places have no records of their own in a GEDCOM, so no raw_record or unmapped_line
+ * names one as its owner: there is nothing of that kind to move.
+ */
 const PLACE_LINKS = [
   ['media_link', 'media_id'],
   ['note_link', 'note_id'],
@@ -893,12 +897,18 @@ const childName = (child: PlaceRow, oldParent: string, newParent: string) =>
     ? `${child.full_name.slice(0, -oldParent.length - 2)}, ${newParent}`
     : `${child.name}, ${newParent}`;
 
-/** Renames a place and, through parent_id, every place under it ("Old Cemetery, Millbrook, ..."). */
-function renamePlace(tx: Tx, id: string, fullName: string) {
+/**
+ * Renames a place and, through parent_id, every place under it ("Old Cemetery,
+ * Millbrook, ..."). `seen` stops at a place already visited: corrupt data can
+ * make a place its own ancestor.
+ */
+function renamePlace(tx: Tx, id: string, fullName: string, seen = new Set<string>()) {
+  if (seen.has(id)) return;
+  seen.add(id);
   const row = tx.store.getRow('place', id) as PlaceRow;
   tx.update('place', id, { full_name: fullName });
   for (const child of childrenOf(tx, id)) {
-    renamePlace(tx, child.id, childName(child, row.full_name, fullName));
+    renamePlace(tx, child.id, childName(child, row.full_name, fullName), seen);
   }
 }
 
@@ -908,7 +918,10 @@ function renamePlace(tx: Tx, id: string, fullName: string) {
  * target that has none, and its child places move under the target, merging
  * into a child of the same name already there.
  */
-function mergePlace(tx: Tx, old: string, target: string) {
+function mergePlace(tx: Tx, old: string, target: string, seen = new Set<string>()) {
+  // A parent_id cycle (corrupt data) must not merge or rename forever.
+  if (seen.has(old) || old === target) return;
+  seen.add(old);
   const row = tx.store.getRow('place', old) as PlaceRow;
   const kept = tx.store.getRow('place', target) as PlaceRow;
   if (kept.latitude == null && kept.longitude == null && row.latitude != null) {
@@ -937,10 +950,10 @@ function mergePlace(tx: Tx, old: string, target: string) {
   for (const child of childrenOf(tx, old)) {
     const name = childName(child, row.full_name, kept.full_name);
     const twin = twins.get(name);
-    if (twin) mergePlace(tx, child.id, twin);
-    else {
+    if (twin) mergePlace(tx, child.id, twin, seen);
+    else if (!seen.has(child.id)) {
       tx.update('place', child.id, { parent_id: target });
-      renamePlace(tx, child.id, name);
+      renamePlace(tx, child.id, name, seen);
     }
   }
   places.delete(tx, old);

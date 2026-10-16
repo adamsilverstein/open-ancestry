@@ -1,9 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { ChevronDown, FileDown, FileUp, RefreshCw } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import buttonStyles from '../components/Button/Button.module.css';
-import { Menu, MenuContent, MenuItem, MenuSeparator, MenuTrigger } from '../components/Menu/Menu';
+import {
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuLabel,
+  MenuSeparator,
+  MenuTrigger,
+} from '../components/Menu/Menu';
 import { useToast } from '../components/Toast/Toast';
 import {
   BAD_FILE_MESSAGE,
@@ -28,6 +35,13 @@ export default function FileMenu() {
   const reimportInput = useRef<HTMLInputElement>(null);
   const { data: tree = null } = useQuery(currentTreeQuery);
   const navigate = useNavigate();
+  const whyOff = useId();
+  /*
+   * With no tree, Re-import and Export stay focusable but aria-disabled, so the
+   * keyboard reaches them and hears why through aria-describedby (a disabled
+   * Radix item is skipped by the arrow keys and typeahead).
+   */
+  const off = tree ? {} : { 'aria-disabled': true, 'aria-describedby': whyOff };
 
   async function reimport(file: File | undefined) {
     if (!file || !tree) return;
@@ -90,19 +104,32 @@ export default function FileMenu() {
             <FileUp size={16} aria-hidden />
             Import GEDCOM…
           </MenuItem>
-          <MenuItem disabled={!tree} onSelect={() => reimportInput.current?.click()}>
+          <MenuItem
+            {...off}
+            onSelect={(event) => {
+              if (tree) reimportInput.current?.click();
+              else event.preventDefault();
+            }}
+          >
             <RefreshCw size={16} aria-hidden />
             Re-import updated export…
           </MenuItem>
-          <MenuItem disabled={!tree} onSelect={() => setExporting(true)}>
+          <MenuItem
+            {...off}
+            onSelect={(event) => {
+              if (tree) setExporting(true);
+              else event.preventDefault();
+            }}
+          >
             <FileDown size={16} aria-hidden />
             Export…
           </MenuItem>
           {!tree && (
             <>
               <MenuSeparator />
-              {/* Disabled items cannot say why on their own (#280). */}
-              <MenuItem disabled>Re-import and export need a tree. Import a GEDCOM first.</MenuItem>
+              <MenuLabel id={whyOff}>
+                Re-import and export need a tree. Import a GEDCOM first.
+              </MenuLabel>
             </>
           )}
         </MenuContent>

@@ -36,7 +36,7 @@ export default function HistoryPanel({ open, onOpenChange }: HistoryPanelProps) 
   const toast = useToast();
   const dismiss = useDismissToasts();
   const onRestored = useOpenRestored();
-  const { data: tree } = useQuery(currentTreeQuery);
+  const { data: tree, isError: noTreeList } = useQuery(currentTreeQuery);
   const { data: history } = useQuery({ ...historyQuery(tree ?? ''), enabled: !!tree });
   // While an edit is on its way the list is about to change; undo waits for it anyway.
   const saving = useIsMutating({ mutationKey: editKey(tree ?? '') }) > 0;
@@ -87,7 +87,11 @@ export default function HistoryPanel({ open, onOpenChange }: HistoryPanelProps) 
         </>
       }
     >
-      {tree === null ? (
+      {noTreeList ? (
+        <p className={styles.muted}>
+          Could not load the tree list, so there is no history to show.
+        </p>
+      ) : tree === null ? (
         <p className={styles.muted}>Import a GEDCOM or create a tree, and its changes show here.</p>
       ) : !history ? (
         <p className={styles.muted}>Loading…</p>

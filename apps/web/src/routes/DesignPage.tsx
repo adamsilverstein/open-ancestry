@@ -29,6 +29,7 @@ import {
   Menu,
   MenuContent,
   MenuItem,
+  MenuLabel,
   MenuSeparator,
   MenuTrigger,
   Minimap,
@@ -798,8 +799,16 @@ export function DesignPage() {
           <MenuContent>
             <MenuItem>Rename</MenuItem>
             <MenuItem disabled>Merge (disabled)</MenuItem>
+            <MenuItem
+              aria-disabled
+              aria-describedby="design-menu-why"
+              onSelect={(e) => e.preventDefault()}
+            >
+              Export (unavailable, still reachable)
+            </MenuItem>
             <MenuSeparator />
             <MenuItem>Delete</MenuItem>
+            <MenuLabel id="design-menu-why">Export needs a tree. Import one first.</MenuLabel>
           </MenuContent>
         </Menu>
       </Section>

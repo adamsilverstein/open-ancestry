@@ -670,8 +670,9 @@ const SAME_ANYWAY = new Set([
  * What the export said for each row it offered a change to whose row this
  * batch did not write: the base of the next re-import's three-way comparison
  * (#224). Without it a declined change would come back as a conflict every
- * time. A written row needs none, since the write is its base; a change that
- * was chosen but wrote nothing (a refused copy) keeps its image.
+ * time. A written row needs none, since the write is its base. A change that
+ * was chosen but wrote nothing keeps its image, except a refused media copy,
+ * which stores none so it's offered again, ticked (see #252).
  * Written in the re-import's batch, so undo removes it.
  *
  * One meta row per re-import, never pruned: `localHistory` reads these from

@@ -301,7 +301,7 @@ describe('step, adoptive and foster links', () => {
     }
   });
 
-  it('treats guardian and other links like birth for siblings, as for parents', () => {
+  it('names guardian links as the relationship calculator does', () => {
     const g: TreeGraph = {
       people: kin.people,
       families: [
@@ -317,8 +317,9 @@ describe('step, adoptive and foster links', () => {
     };
     const l = layoutFamily(g, 'peter', {});
     const k = kinshipLabels(buildRelations(l, g), l.focusKey!, sexOfKin);
-    expect(k.harold).toBe('father');
-    expect(k.thomas).toBe('brother');
+    // Guardianship is care, not parenthood: guardian, and the guardian's child a foster brother.
+    expect(k.harold).toBe('guardian');
+    expect(k.thomas).toBe('foster brother');
   });
 
   it('treats a missing relationship as by birth', () => {

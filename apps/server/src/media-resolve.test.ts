@@ -1,7 +1,9 @@
+import { closeSync, fstatSync } from 'node:fs';
 import { link, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { openMediaFileSync } from '@open-ancestry/db';
 import { openMediaFile, resolveMediaPath, resolveMediaPathSync } from './routes/media';
 
 /*
@@ -155,6 +157,19 @@ describe('media path resolvers', () => {
     expect(sync).toBe(async);
     expect(reasons).toEqual(c.reason ? [c.reason, c.reason] : []);
   });
+
+  // The GEDZIP export opens media synchronously, by the same rules.
+  it.each(cases.map((c) => [c.name, c] as const))('%s (sync open)', async (_name, c) => {
+    const [root, localPath] = await c.setup();
+    const reasons: string[] = [];
+    const opened = openMediaFileSync(root, localPath, (r) => reasons.push(r));
+    expect(opened !== null).toBe(c.expected !== null);
+    expect(reasons).toEqual(c.reason ? [c.reason] : []);
+    if (opened) {
+      expect(fstatSync(opened.fd, { bigint: true }).ino).toBe(opened.info.ino);
+      closeSync(opened.fd);
+    }
+  });
 });
 
 describe('openMediaFile', () => {
@@ -177,7 +192,44 @@ describe('openMediaFile', () => {
   it('opens a file that stays put', async () => {
     await plainMedia();
     const opened = await openMediaFile(media(), 'photos/a.jpg');
-    expect(opened?.info.size).toBe(1);
+    expect(opened?.info.size).toBe(1n);
     await opened?.handle.close();
+  });
+
+  it('compares device and inode as bigints, so a large inode is never rounded into a match', async () => {
+    await plainMedia();
+    const opened = await openMediaFile(media(), 'photos/a.jpg');
+    expect(typeof opened?.info.dev).toBe('bigint');
+    expect(typeof opened?.info.ino).toBe('bigint');
+    await opened?.handle.close();
+    const sync = openMediaFileSync(media(), 'photos/a.jpg');
+    expect(typeof sync?.info.ino).toBe('bigint');
+    if (sync) closeSync(sync.fd);
+  });
+
+  it('still reports the refusal when closing the refused file fails', async () => {
+    await plainMedia();
+    await mkdir(join(outside, 'photos'));
+    await writeFile(join(outside, 'photos', 'a.jpg'), 'secret');
+    const reasons: string[] = [];
+    let closed = false;
+    const opened = await openMediaFile(media(), 'photos/a.jpg', (r) => reasons.push(r), {
+      afterResolve: async () => {
+        await rm(join(media(), 'photos'), { recursive: true });
+        await symlink(join(outside, 'photos'), join(media(), 'photos'));
+      },
+      // The refused file's close closes the descriptor, then fails.
+      afterOpen: (handle) => {
+        const realClose = handle.close.bind(handle);
+        handle.close = async () => {
+          await realClose();
+          closed = true;
+          throw new Error('EIO');
+        };
+      },
+    });
+    expect(opened).toBeNull();
+    expect(reasons).toEqual(['changed']);
+    expect(closed).toBe(true);
   });
 });

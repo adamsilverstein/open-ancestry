@@ -87,11 +87,18 @@ export class TreeAccessError extends Error {}
  * another account could have planted in a shared library: a symlink,
  * anything owned by another account, a FIFO or other special file where a
  * folder or file belongs, or a database file with a second hard link (it
- * could be any file of yours, linked in under the tree's name).
+ * could be any file of yours, linked in under the tree's name). On Windows
+ * only the owner check is skipped. `platform` and `uid` are for tests.
  */
-function assertOwnTree(paths: TreePaths): void {
-  if (process.platform === 'win32') return;
-  const uid = typeof process.getuid === 'function' ? process.getuid() : undefined;
+export function assertOwnTree(
+  paths: TreePaths,
+  {
+    platform = process.platform,
+    uid = typeof process.getuid === 'function' ? process.getuid() : undefined,
+  }: { platform?: NodeJS.Platform; uid?: number | undefined } = {},
+): void {
+  // Symlinks and hard links exist on NTFS too; only owner ids do not compare there.
+  const owner = platform === 'win32' ? undefined : uid;
   const files = [paths.database, `${paths.database}-wal`, `${paths.database}-shm`];
   const folders = [paths.root, paths.media, paths.thumbs];
   for (const path of [...folders, ...files]) {
@@ -104,7 +111,7 @@ function assertOwnTree(paths: TreePaths): void {
     if (stat.isSymbolicLink()) {
       throw new TreeAccessError(`Refusing to open ${path}: it is a symbolic link`);
     }
-    if (uid !== undefined && stat.uid !== uid) {
+    if (owner !== undefined && stat.uid !== owner) {
       throw new TreeAccessError(`Refusing to open ${path}: it belongs to another account`);
     }
     if (folders.includes(path) && !stat.isDirectory()) {

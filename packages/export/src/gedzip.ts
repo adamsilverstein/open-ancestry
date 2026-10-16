@@ -1,9 +1,15 @@
-import { treePaths, type MediaRow, type TreeStore } from '@open-ancestry/db';
+import {
+  checkMediaPathSync,
+  openMediaFile,
+  openMediaFileSync,
+  treePaths,
+  type MediaRefusal,
+  type MediaRow,
+  type TreeStore,
+} from '@open-ancestry/db';
 import { safeEntryPath } from '@open-ancestry/gedcom';
 import { Zip, ZipDeflate, ZipPassThrough, zipSync, type Zippable } from 'fflate';
-import { constants, lstatSync, readFileSync, realpathSync } from 'node:fs';
-import { open } from 'node:fs/promises';
-import { join, sep } from 'node:path';
+import { closeSync, fstatSync, readFileSync, type BigIntStats } from 'node:fs';
 import { Readable } from 'node:stream';
 import { buildGedcomExport } from './gedcom';
 import type { GedcomExport, GedzipExport, GedzipExportOptions } from './types';
@@ -40,13 +46,17 @@ export interface GedzipPlanOptions extends GedzipExportOptions {
 /** A media file to add to the archive, as it was when the export was planned. */
 interface PlannedFile {
   entry: string;
-  /** Real path, inside the tree's media folder. */
-  path: string;
+  /** The tree's media folder, and the file's path inside it (opened through the media path rules). */
+  root: string;
+  localPath: string;
   size: number;
-  mtimeMs: number;
-  /** Device and inode, so a file swapped for another of the same size and time is noticed. */
-  dev: number;
-  ino: number;
+  mtimeNs: bigint;
+  /**
+   * Device and inode, so a file swapped for another of the same size and time
+   * is noticed. Bigints, as a number can round a large inode into a match.
+   */
+  dev: bigint;
+  ino: bigint;
   level: 0 | 6;
 }
 
@@ -75,7 +85,6 @@ export function planGedzipExport(
   { maxArchiveBytes = ZIP32_MAX_BYTES, ...options }: GedzipPlanOptions = {},
 ): GedzipPlan {
   const root = store.dir ? treePaths(store.dir).media : null;
-  const realRoot = root ? safeRealpath(root) : null;
   const files = new Map<string, PlannedFile>();
   // Reserved: media named like either goes under media/.
   const entries = new Set<string>([GEDCOM_ENTRY, WARNINGS_ENTRY]);
@@ -94,14 +103,18 @@ export function planGedzipExport(
     if (!media.local_path) return media.remote_url ?? undefined;
     const path = safeEntryPath(media.local_path);
     let file = files.get(media.id);
-    if (!file && path && realRoot) {
-      const found = statInside(realRoot, join(root!, ...path.split('/')));
-      if (found) {
+    if (!file && path && root) {
+      let refusal: MediaRefusal = 'missing';
+      const found = checkMediaPathSync(root, path, (reason) => (refusal = reason));
+      if (found?.info.isFile()) {
         const entry = entryName(path);
-        file = { entry, ...found, level: STORED.test(entry) ? 0 : 6 };
+        const { mtimeNs, dev, ino } = found.info;
+        const size = Number(found.info.size);
+        const level = STORED.test(entry) ? 0 : 6;
+        file = { entry, root, localPath: path, size, mtimeNs, dev, ino, level };
         files.set(media.id, file);
       } else {
-        warnings.push(`Media file ${media.local_path} is missing or outside the media folder`);
+        warnings.push(`Media file ${media.local_path} was left out (${refusal})`);
       }
     } else if (!file) {
       warnings.push(`Media file ${media.local_path} is not in this tree's media folder`);
@@ -200,10 +213,16 @@ async function* gedzipChunks(plan: GedzipPlan): AsyncGenerator<Uint8Array> {
         yield* flush();
       }
       entry.push(new Uint8Array(0), true);
-      if (read !== file.size) late.push(`Media file ${file.entry} changed during the export`);
+      // Its bytes are already sent, so a file rewritten in place while it was
+      // read (same inode, maybe the same length) can only be warned about.
+      if (read !== file.size || !asPlanned(file, await handle.stat({ bigint: true }))) {
+        late.push(
+          `Media file ${file.entry} changed while it was exported; its copy here may not match`,
+        );
+      }
       yield* flush();
     } finally {
-      await handle.close();
+      await handle.close().catch(() => {});
     }
   }
   if (late.length) {
@@ -218,24 +237,27 @@ async function* gedzipChunks(plan: GedzipPlan): AsyncGenerator<Uint8Array> {
   yield* flush();
 }
 
-/** Opens a planned file if it is still the same regular file inside the media folder. */
+/**
+ * Opens a planned file through the media path rules (inside the folder, no
+ * symlinked folder, a single link, opened without following a symlink and
+ * checked through the descriptor) if it is still the file that was planned.
+ */
 async function openUnchanged(file: PlannedFile) {
-  if (safeRealpath(file.path) !== file.path) return undefined;
-  try {
-    const handle = await open(file.path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const stat = await handle.stat();
-    const same =
-      stat.isFile() &&
-      stat.dev === file.dev &&
-      stat.ino === file.ino &&
-      stat.size === file.size &&
-      stat.mtimeMs === file.mtimeMs;
-    if (same) return handle;
-    await handle.close();
-  } catch {
-    // Gone or replaced: left out.
-  }
+  const opened = await openMediaFile(file.root, file.localPath);
+  if (!opened) return undefined;
+  if (asPlanned(file, opened.info)) return opened.handle;
+  await opened.handle.close().catch(() => {});
   return undefined;
+}
+
+/** The same file, unchanged since the plan: a swap of the same size and time is caught by inode. */
+function asPlanned(file: PlannedFile, info: BigIntStats): boolean {
+  return (
+    info.dev === file.dev &&
+    info.ino === file.ino &&
+    Number(info.size) === file.size &&
+    info.mtimeNs === file.mtimeNs
+  );
 }
 
 /**
@@ -255,10 +277,21 @@ export function buildGedzipExport(
   };
   const zip: Zippable = { [GEDCOM_ENTRY]: new TextEncoder().encode(result.text) };
   for (const file of files) {
+    const opened = openMediaFileSync(file.root, file.localPath);
     try {
-      zip[file.entry] = [readFileSync(file.path), { level: file.level }];
+      if (!opened || !asPlanned(file, opened.info)) throw new Error('changed');
+      const bytes = readFileSync(opened.fd);
+      // Rewritten in place while it was read: left out, unlike a streamed export.
+      if (!asPlanned(file, fstatSync(opened.fd, { bigint: true }))) throw new Error('changed');
+      zip[file.entry] = [bytes, { level: file.level }];
     } catch {
       result.warnings.push(`Media file ${file.entry} could not be read`);
+    } finally {
+      try {
+        if (opened) closeSync(opened.fd);
+      } catch {
+        // A failed close must not hide the warning or the rest of the archive.
+      }
     }
   }
   return { ...result, bytes: zipSync(zip, { level: 6 }) };
@@ -266,29 +299,4 @@ export function buildGedzipExport(
 
 export function exportGedzip(store: TreeStore, options: GedzipExportOptions = {}): Uint8Array {
   return buildGedzipExport(store, options).bytes;
-}
-
-function safeRealpath(path: string): string | null {
-  try {
-    return realpathSync(path);
-  } catch {
-    return null;
-  }
-}
-
-/** Real path, size and mtime when `path` resolves to a regular file inside `realRoot`. */
-function statInside(
-  realRoot: string,
-  path: string,
-): { path: string; size: number; mtimeMs: number; dev: number; ino: number } | undefined {
-  const real = safeRealpath(path);
-  if (!real || !real.startsWith(realRoot + sep)) return undefined;
-  try {
-    const stat = lstatSync(real);
-    if (!stat.isFile()) return undefined;
-    const { size, mtimeMs, dev, ino } = stat;
-    return { path: real, size, mtimeMs, dev, ino };
-  } catch {
-    return undefined;
-  }
 }

@@ -72,6 +72,7 @@ export default function TreeSwitcher() {
       }
     } else if (/^\/(tree|person)\//.test(pathname)) {
       // The tree view keeps its layout and generations; the new tree's home person is the focus.
+      // `tag` is dropped on purpose: tag ids belong to one tree, so a highlight cannot follow.
       await navigate({
         to: '/tree/$personId',
         params: { personId: 'home' },

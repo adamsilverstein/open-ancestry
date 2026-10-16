@@ -1451,6 +1451,103 @@
                 }
               },
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["op", "id", "patch"],
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "const": "tag.update"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[0-9A-Za-z_-]+$"
+                },
+                "patch": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100
+                    },
+                    "category": {
+                      "type": "string",
+                      "maxLength": 100
+                    },
+                    "color": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "maxLength": 32,
+                          "pattern": "^[#A-Za-z0-9(),.% -]+$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["op", "id"],
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "const": "tag.delete"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[0-9A-Za-z_-]+$"
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["op", "from", "to"],
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "const": "tag.renameCategory"
+                },
+                "from": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                },
+                "to": {
+                  "type": "string",
+                  "maxLength": 100
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": ["op", "category"],
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "const": "tag.deleteCategory"
+                },
+                "category": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100
+                }
+              },
+              "additionalProperties": false
             }
           ]
         },
@@ -1903,6 +2000,103 @@
             "minLength": 1,
             "maxLength": 64,
             "pattern": "^[0-9A-Za-z_-]+$"
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": ["op", "id", "patch"],
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "tag.update"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[0-9A-Za-z_-]+$"
+          },
+          "patch": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "category": {
+                "type": "string",
+                "maxLength": 100
+              },
+              "color": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 32,
+                    "pattern": "^[#A-Za-z0-9(),.% -]+$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": ["op", "id"],
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "tag.delete"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[0-9A-Za-z_-]+$"
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": ["op", "from", "to"],
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "tag.renameCategory"
+          },
+          "from": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "to": {
+            "type": "string",
+            "maxLength": 100
+          }
+        },
+        "additionalProperties": false
+      },
+      {
+        "type": "object",
+        "required": ["op", "category"],
+        "properties": {
+          "op": {
+            "type": "string",
+            "const": "tag.deleteCategory"
+          },
+          "category": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
           }
         },
         "additionalProperties": false

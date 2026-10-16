@@ -21,20 +21,13 @@ import { EditPersonDialog } from './edit/EditPersonDialog';
 import { TagsEditor } from './edit/TagsEditor';
 import { cx } from '../../lib/cx';
 import { fullName, isLivingStatus } from '../../lib/person';
-import type { TagColor } from '../../lib/person';
+import { tagColor } from '../../lib/tags';
 import { relationshipCharts } from '../../lib/relationship';
 import { RelationshipCalculator } from './RelationshipCalculator';
 import { formatDate } from '@open-ancestry/core';
 import type { EventBrief } from '../../api/types';
 import styles from './PersonPage.module.css';
 import { PersonName } from '../../components/PersonName/PersonName';
-
-/** Stable tag color from its id, until tags carry a palette index. */
-function tagColor(id: string): TagColor {
-  let hash = 0;
-  for (const ch of id) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
-  return ((hash % 8) + 1) as TagColor;
-}
 
 function Vital({
   label,
@@ -194,7 +187,7 @@ export function PersonHeader({ tree, detail }: { tree: string; detail: PersonDet
             <ul className={styles.tags} aria-label="Tags">
               {detail.tags.map((tag) => (
                 <li key={tag.id}>
-                  <TagBadge label={tag.name} color={tagColor(tag.id)} />
+                  <TagBadge label={tag.name} color={tagColor(tag)} />
                 </li>
               ))}
             </ul>

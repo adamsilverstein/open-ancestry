@@ -141,7 +141,9 @@
   text-overflow: ellipsis;
 }
 
-.checkLink {
+.toolLinks {
+  display: flex;
+  gap: var(--oa-space-3);
   margin-left: auto;
   font: var(--oa-text-sm);
   font-weight: var(--oa-weight-medium);

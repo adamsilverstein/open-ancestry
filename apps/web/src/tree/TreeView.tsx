@@ -9,7 +9,7 @@ import {
   type RefObject,
 } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { UserRoundX } from 'lucide-react';
 import {
@@ -31,7 +31,8 @@ import { useToast } from '../components/Toast/Toast';
 import type { PersonSummary } from '../lib/person';
 import { TreeToolbar, type TreeLayout as LayoutKind } from '../components/TreeToolbar/TreeToolbar';
 import { Skeleton } from '../components/Skeleton/Skeleton';
-import { isMissingPerson } from '../api/client';
+import { apiGet, isMissingPerson, seg } from '../api/client';
+import { tagsQuery } from '../api/search';
 import {
   fetchHome,
   fetchNeighborhood,
@@ -57,6 +58,8 @@ export interface TreeSearch {
   layout?: LayoutKind;
   up?: number;
   down?: number;
+  /** Tag id whose people are highlighted. */
+  tag?: string;
 }
 
 /** Search params with `undefined` entries dropped (the route's search has optional keys). */
@@ -66,6 +69,7 @@ function cleanSearch(search: { [K in keyof TreeSearch]?: TreeSearch[K] | undefin
   if (search.layout !== undefined) out.layout = search.layout;
   if (search.up !== undefined) out.up = search.up;
   if (search.down !== undefined) out.down = search.down;
+  if (search.tag !== undefined) out.tag = search.tag;
   return out;
 }
 
@@ -293,6 +297,27 @@ interface ViewState {
   parents: Record<string, string>;
 }
 
+/** The people carrying `tagId`, for highlighting them in the tree. */
+function useTagHighlight(tree: string, tagId: string | undefined) {
+  const { data: tags } = useQuery({ ...tagsQuery(tree), enabled: !!tagId });
+  const { data: people } = useQuery({
+    queryKey: ['tag-people', tree, tagId],
+    queryFn: ({ signal }) =>
+      apiGet<{ personIds: string[] }>(`/trees/${seg(tree)}/tags/${seg(tagId!)}/people`, signal),
+    enabled: !!tagId,
+  });
+  return useMemo(() => {
+    const tag = tags?.find((t) => t.id === tagId);
+    if (!tag || !people) return null;
+    return {
+      /** In id order, for stepping through them. */
+      ids: people.personIds,
+      personIds: new Set(people.personIds),
+      label: `tagged ${tag.name}`,
+    };
+  }, [tags, people, tagId]);
+}
+
 /** The tree canvas around one focus person: data, layout worker, toolbar, popover, find. */
 export function TreeView({
   tree,
@@ -314,6 +339,8 @@ export function TreeView({
   const fanCapped = kind === 'fan' && requestedUp > MAX_FAN_GENERATIONS;
   const up = fanCapped ? MAX_FAN_GENERATIONS : requestedUp;
   const down = parseGenerations(search.down) ?? DEFAULT_DEPTH[kind].down;
+
+  const highlight = useTagHighlight(tree, search.tag);
 
   const canvas = useRef<TreeCanvasHandle>(null);
   // The page remounts this view per tree, so one cache and worker per tree.
@@ -384,6 +411,28 @@ export function TreeView({
     return () => {
       observer.disconnect();
       root.removeProperty('--oa-tree-bottom-bar');
+    };
+  }, [phone]);
+  // Likewise the notices and tag pill along the top, down from the top of the
+  // screen, so the first view frames the cards below them.
+  const topRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const stack = topRef.current;
+    const region = stack?.closest<HTMLElement>('[data-tree-region]');
+    if (!phone || !stack || !region) return;
+    const root = region.style;
+    const set = () => {
+      const gap = parseFloat(getComputedStyle(stack).top) || 0;
+      if (stack.offsetHeight)
+        root.setProperty('--oa-tree-top-bar', `${stack.offsetHeight + gap}px`);
+      else root.removeProperty('--oa-tree-top-bar');
+    };
+    set();
+    const observer = new ResizeObserver(set);
+    observer.observe(stack);
+    return () => {
+      observer.disconnect();
+      root.removeProperty('--oa-tree-top-bar');
     };
   }, [phone]);
   const viewKey = `${personId}|${kind}`;
@@ -540,6 +589,17 @@ export function TreeView({
 
   const shownResult = result && result.focus === personId && result.kind === kind ? result : null;
   const busy = !shownResult || rendered !== shownResult;
+  // How many highlighted people are laid out, and the next one (in id order) to step to.
+  const highlightShown = useMemo(() => {
+    if (!highlight || !shownResult) return 0;
+    const shown = new Set<string>();
+    for (const node of shownResult.layout?.nodes ?? []) shown.add(node.personId);
+    for (const segment of shownResult.fan?.segments ?? []) shown.add(segment.personId);
+    return highlight.ids.filter((id) => shown.has(id)).length;
+  }, [highlight, shownResult]);
+  const nextTagged = highlight
+    ? (highlight.ids.find((id) => id > personId) ?? highlight.ids.find((id) => id !== personId))
+    : undefined;
 
   // Until a reset's new layout arrives, the cards on screen keep their details.
   const shownCache = shownResult?.cache ?? cache;
@@ -881,6 +941,7 @@ export function TreeView({
         kind={kind}
         layout={shownResult?.layout ?? null}
         kin={shownResult?.kin ?? NO_KIN}
+        highlight={highlight}
         fan={shownResult?.fan ?? null}
         focusPersonId={personId}
         person={person}
@@ -906,27 +967,66 @@ export function TreeView({
           </div>
         )}
       </TreeCanvas>
-      {missing?.focus === personId && (
-        <div className={styles.notice} role="status" data-surface="raised">
-          Some relatives could not be loaded.
-          <Button size="sm" variant="ghost" onClick={() => void retryMissing()}>
-            Retry
-          </Button>
-        </div>
-      )}
-      {fanCapped && !missing && (
-        <div className={styles.notice} role="status" data-surface="raised" data-tone="info">
-          The fan shows {MAX_FAN_GENERATIONS} generations.
-          <Link
-            to="/tree/$personId"
-            params={{ personId }}
-            search={(prev) => ({ ...prev, layout: 'pedigree' })}
-            className={styles.noticeLink}
-          >
-            Open the pedigree
-          </Link>
-        </div>
-      )}
+      {/* One column, so a notice and the tag pill never cover each other. */}
+      <div ref={topRef} className={styles.topStack}>
+        {missing?.focus === personId && (
+          <div className={styles.notice} role="status" data-surface="raised">
+            Some relatives could not be loaded.
+            <Button size="sm" variant="ghost" onClick={() => void retryMissing()}>
+              Retry
+            </Button>
+          </div>
+        )}
+        {fanCapped && !missing && (
+          <div className={styles.notice} role="status" data-surface="raised" data-tone="info">
+            The fan shows {MAX_FAN_GENERATIONS} generations.
+            <Link
+              to="/tree/$personId"
+              params={{ personId }}
+              search={(prev) => ({ ...prev, layout: 'pedigree' })}
+              className={styles.noticeLink}
+            >
+              Open the pedigree
+            </Link>
+          </div>
+        )}
+        {highlight && (
+          <div className={styles.highlight} role="status" data-surface="raised">
+            <span>
+              Highlighting people {highlight.label}: {highlight.ids.length} tagged, {highlightShown}{' '}
+              shown
+            </span>
+            {nextTagged && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() =>
+                  void navigate({
+                    to: '/tree/$personId',
+                    params: { personId: nextTagged },
+                    search: (prev) => cleanSearch(prev),
+                  })
+                }
+              >
+                Next tagged person
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() =>
+                void navigate({
+                  to: '/tree/$personId',
+                  params: { personId },
+                  search: (prev) => cleanSearch({ ...prev, tag: undefined }),
+                })
+              }
+            >
+              Clear highlight
+            </Button>
+          </div>
+        )}
+      </div>
       {shownResult?.layout && minimap.visible && (
         <TreeMinimap
           onDismiss={() => setMinimap({ visible: false, pinned: false, collapsed: false })}

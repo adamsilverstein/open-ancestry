@@ -116,9 +116,10 @@ function PeopleTable({ tree }: { tree: string }) {
             Clear filters
           </Button>
         )}
-        <Link to="/checker" className={styles.checkLink}>
-          Check tree
-        </Link>
+        <span className={styles.toolLinks}>
+          <Link to="/tags">Manage tags</Link>
+          <Link to="/checker">Check tree</Link>
+        </span>
         {!empty && (
           <Button
             size="sm"

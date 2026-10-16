@@ -40,7 +40,8 @@ export interface ExportOptions {
   /**
    * Include change_batch and change_log (default true). Without them, import
    * warnings (which can quote imported lines) are left out too, and so are
-   * places, notes, media, citations and sources that only deleted records used.
+   * places, notes, media, citations and sources a delete left unused (see
+   * orphans); records never linked to anything stay.
    */
   history?: boolean;
   /**
@@ -78,68 +79,93 @@ function exportedTables(store: TreeStore, history: boolean): string[] {
     .map((t) => t.name);
 }
 
-/**
- * Places no remaining event uses, directly or as a parent of a used place.
- * A deleted record's events go, but its places stay as shared rows; without
- * the history, they must not keep saying where that record was.
- */
-function unusedPlaces(store: TreeStore): Set<string> {
-  const parent = new Map(
-    (
-      store.db.prepare('SELECT id, parent_id FROM place').all() as {
-        id: string;
-        parent_id: string | null;
-      }[]
-    ).map((p) => [p.id, p.parent_id]),
-  );
-  const used = new Set<string>();
-  const direct = store.db
-    .prepare('SELECT DISTINCT place_id FROM event WHERE place_id IS NOT NULL')
-    .pluck()
-    .all() as string[];
-  for (let id of direct as (string | null | undefined)[]) {
-    while (id && !used.has(id)) {
-      used.add(id);
-      id = parent.get(id);
-    }
-  }
-  return new Set([...parent.keys()].filter((id) => !used.has(id)));
-}
-
 type Orphaned = 'place' | 'media' | 'note' | 'citation' | 'source';
 
+/** What deletes in the change log took away: the targets of deleted links, events and citations. */
+function deletedRefs(store: TreeStore) {
+  const refs = {
+    note: new Set<string>(),
+    media: new Set<string>(),
+    citation: new Set<string>(),
+    place: new Set<string>(),
+    source: new Set<string>(),
+  };
+  const rows = store.db
+    .prepare(
+      `SELECT entity, before_json FROM change_log WHERE op = 'delete'
+       AND entity IN ('note_link', 'media_link', 'citation_link', 'event', 'citation')`,
+    )
+    .all() as { entity: string; before_json: string }[];
+  for (const { entity, before_json } of rows) {
+    let row: Record<string, unknown>;
+    try {
+      row = JSON.parse(before_json) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const add = (set: Set<string>, value: unknown) => {
+      if (typeof value === 'string') set.add(value);
+    };
+    if (entity === 'note_link') add(refs.note, row.note_id);
+    else if (entity === 'media_link') add(refs.media, row.media_id);
+    else if (entity === 'citation_link') add(refs.citation, row.citation_id);
+    else if (entity === 'event') add(refs.place, row.place_id);
+    else add(refs.source, row.source_id);
+  }
+  return refs;
+}
+
 /**
- * Rows a history-free export leaves out because only deleted records used
- * them. A delete removes a record's own notes, media and citations, but rows
- * shared with what remains (a place, a note on a place, a citation on that
- * note) stay, and would keep the deleted record's text and whereabouts:
- * - places no remaining event uses (directly or as a parent of a used place);
- * - media, notes and citations no remaining record links to, repeated until
- *   nothing changes, since they can hang off one another;
- * - sources whose citations all went that way, unless they are shared
- *   reference data (in a repository, or with notes or media of their own),
- *   the rule a delete itself follows.
+ * Rows a history-free export leaves out because a delete left them behind
+ * with nothing remaining to use them, and that would keep the deleted
+ * record's text or whereabouts. A delete removes a record's own notes, media
+ * and citations, but shared rows stay: a place, a note on that place, a
+ * citation on that note, a source kept as reference data. The change log
+ * tells which rows lost a use to a delete; rows that were never linked to
+ * anything are the user's and stay.
+ * - places no remaining event uses that a deleted event used (or that are
+ *   above one in the hierarchy);
+ * - media, notes and citations with no remaining link that lost a link to a
+ *   delete, or whose links all belong to rows left out; repeated until
+ *   nothing changes, since they hang off one another;
+ * - sources with no remaining citation that lost one to a delete or to the above.
  */
 function orphans(store: TreeStore): Record<Orphaned, Set<string>> {
   const rows = <T>(sql: string) => store.db.prepare(sql).all() as T[];
   const ids = (sql: string) => store.db.prepare(sql).pluck().all() as string[];
+  const deleted = deletedRefs(store);
   const gone: Record<Orphaned, Set<string>> = {
-    place: unusedPlaces(store),
+    place: new Set(),
     media: new Set(),
     note: new Set(),
     citation: new Set(),
     source: new Set(),
   };
+
+  const parent = new Map(
+    rows<{ id: string; parent_id: string | null }>('SELECT id, parent_id FROM place').map((p) => [
+      p.id,
+      p.parent_id,
+    ]),
+  );
+  const above = (start: Iterable<string>) => {
+    const found = new Set<string>();
+    for (let id of start as Iterable<string | null | undefined>) {
+      while (id && !found.has(id)) {
+        found.add(id);
+        id = parent.get(id);
+      }
+    }
+    return found;
+  };
+  const used = above(ids('SELECT DISTINCT place_id FROM event WHERE place_id IS NOT NULL'));
+  for (const id of above(deleted.place)) if (parent.has(id) && !used.has(id)) gone.place.add(id);
+
   type Link = { target: string; owner_type: string; owner_id: string };
   const links = {
     media: rows<Link>('SELECT media_id AS target, owner_type, owner_id FROM media_link'),
     note: rows<Link>('SELECT note_id AS target, owner_type, owner_id FROM note_link'),
     citation: rows<Link>('SELECT citation_id AS target, owner_type, owner_id FROM citation_link'),
-  };
-  const all = {
-    media: ids('SELECT id FROM media'),
-    note: ids('SELECT id FROM note'),
-    citation: ids('SELECT id FROM citation'),
   };
   const primary = new Set(
     ids('SELECT primary_media_id FROM person WHERE primary_media_id IS NOT NULL'),
@@ -147,29 +173,32 @@ function orphans(store: TreeStore): Record<Orphaned, Set<string>> {
   for (let changed = true; changed;) {
     changed = false;
     for (const kind of ['media', 'note', 'citation'] as const) {
-      const live = new Set(
-        links[kind]
-          .filter((l) => !gone[l.owner_type as Orphaned]?.has(l.owner_id))
-          .map((l) => l.target),
-      );
-      for (const id of all[kind]) {
+      const live = new Set<string>();
+      const lostOwner = new Set<string>();
+      for (const l of links[kind]) {
+        (gone[l.owner_type as Orphaned]?.has(l.owner_id) ? lostOwner : live).add(l.target);
+      }
+      for (const id of new Set([...deleted[kind], ...lostOwner])) {
         if (gone[kind].has(id) || live.has(id) || (kind === 'media' && primary.has(id))) continue;
         gone[kind].add(id);
         changed = true;
       }
     }
   }
+  // Only rows that exist: a deleted link may name a row that went with it.
+  for (const kind of ['media', 'note', 'citation'] as const) {
+    const present = new Set(ids(`SELECT id FROM ${kind}`));
+    for (const id of gone[kind]) if (!present.has(id)) gone[kind].delete(id);
+  }
+
   const cited = rows<{ id: string; source_id: string }>('SELECT id, source_id FROM citation');
   const stillCited = new Set(cited.filter((c) => !gone.citation.has(c.id)).map((c) => c.source_id));
-  const shared = new Set(
-    ids(`SELECT id FROM source WHERE repository_id IS NOT NULL
-         OR id IN (SELECT owner_id FROM note_link WHERE owner_type = 'source')
-         OR id IN (SELECT owner_id FROM media_link WHERE owner_type = 'source')`),
-  );
-  for (const c of cited) {
-    if (gone.citation.has(c.id) && !stillCited.has(c.source_id) && !shared.has(c.source_id))
-      gone.source.add(c.source_id);
-  }
+  const lostCitation = new Set([
+    ...deleted.source,
+    ...cited.filter((c) => gone.citation.has(c.id)).map((c) => c.source_id),
+  ]);
+  const sources = new Set(ids('SELECT id FROM source'));
+  for (const id of lostCitation) if (sources.has(id) && !stillCited.has(id)) gone.source.add(id);
   return gone;
 }
 

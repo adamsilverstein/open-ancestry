@@ -3,16 +3,15 @@ import { zipSync } from 'fflate';
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { makeTempDir } from '../../../../fixtures/temp-dir';
 import { importGedcom } from '../import';
 import { TODAY, ged } from '../test-helpers';
 import { applyReimport, closeReimport, prepareReimport, type ReimportSession } from './index';
@@ -83,7 +82,7 @@ function laterZip(files: Record<string, string> = LATER_FILES) {
 }
 
 beforeEach(async () => {
-  tmp = mkdtempSync(join(tmpdir(), 'oa-reimport-media-'));
+  tmp = makeTempDir('oa-reimport-media-');
   dir = join(tmp, 'Vale.oatree');
   await importGedcom(
     { gedzip: zipSync({ 'gedcom.ged': enc(FIRST), 'scans/old.jpg': enc('OLD') }) },
@@ -246,7 +245,14 @@ describe('re-import media without holding memory or the tree lock (#243 review)'
     const session = await prepareReimport(
       store,
       { gedzip: laterZip() },
-      { today: TODAY, spillDir: () => mkdtempSync(join(dir, '.reimport-')) },
+      {
+        today: TODAY,
+        spillDir: () => {
+          const spill = join(dir, '.reimport-spill');
+          mkdirSync(spill);
+          return spill;
+        },
+      },
     );
     expect(spills()).toHaveLength(1);
     expect(readFileSync(join(dir, spills()[0]!, 'photos', 'new.jpg'), 'utf8')).toBe('NEW');

@@ -1,12 +1,12 @@
 import { openTree } from '@open-ancestry/db';
 import { zipSync } from 'fflate';
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { importGedcom } from './import';
 import { MediaSource, classifyFile } from './media';
 import { TODAY, ged, importInto, rows, value } from './test-helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 const NFD = (s: string) => s.normalize('NFD');
 const NFC = (s: string) => s.normalize('NFC');
@@ -14,9 +14,8 @@ const enc = (s: string) => new TextEncoder().encode(s);
 
 let tmp: string;
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'oa-nfc-'));
+  tmp = makeTempDir('oa-nfc-');
 });
-afterEach(() => rmSync(tmp, { recursive: true, force: true }));
 
 describe('NFD text in a GEDCOM file', () => {
   const file = ged(

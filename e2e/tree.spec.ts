@@ -278,6 +278,46 @@ test.describe('family view', () => {
     });
   }
 
+  test('a re-focus reads as settled only once the new focus card is shown', async ({ page }) => {
+    // With reduced motion the re-focus ends synchronously, before the new
+    // person's cards are even queued: the settle must wait for them, not for
+    // the old cards that happen to cover the same grid cells.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await open(page);
+    await page.evaluate((key) => {
+      const w = window as unknown as { __atSettle: string[] };
+      w.__atSettle = [];
+      // The whole page: the re-focus may give the canvas a new world element.
+      new MutationObserver((records) => {
+        const world = records.at(-1)!.target as HTMLElement;
+        if (world.dataset.testid !== 'tree-world' || 'animating' in world.dataset) return;
+        // The focus card: a CSS-module class at card zoom, data-focus as a canvas dot.
+        const el = world.querySelector<HTMLElement>(`[data-key="${key}"]`);
+        const shown = !!el && (el.className.includes('focusPerson') || 'focus' in el.dataset);
+        w.__atSettle.push(shown ? 'final' : 'pending');
+      }).observe(document.body, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['data-animating'],
+      });
+    }, ids.bram);
+    await card(page, 'Ada Vale').focus();
+    await page.keyboard.press('ArrowUp');
+    await expect(card(page, 'Bram Vale')).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(new RegExp(`/tree/${ids.bram}\\?`));
+    // The new layout arrives from the worker after the URL changes: wait for it
+    // (and its settle) before reading what the observer saw at the settle.
+    await expect(
+      canvas(page).locator(`[data-key="${ids.bram}"][class*="focusPerson"]`),
+    ).toBeAttached();
+    await settled(page);
+    const states = await page.evaluate(
+      () => (window as unknown as { __atSettle: string[] }).__atSettle,
+    );
+    expect(states).toEqual(['final']);
+  });
+
   test('expanding ancestors reveals fetched generations and lazy-loads more without moving the focus card', async ({
     page,
   }) => {

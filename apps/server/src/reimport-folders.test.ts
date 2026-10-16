@@ -1,16 +1,16 @@
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   rmSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs';
-import { hostname, tmpdir } from 'node:os';
+import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 import { ReimportFolders } from './reimport-folders';
 
 /*
@@ -23,7 +23,7 @@ import { ReimportFolders } from './reimport-folders';
 let tree: string;
 let folders: ReimportFolders;
 beforeEach(() => {
-  tree = join(mkdtempSync(join(tmpdir(), 'oa-folders-')), 'T.oatree');
+  tree = join(makeTempDir('oa-folders-'), 'T.oatree');
   mkdirSync(tree);
   folders = new ReimportFolders();
 });

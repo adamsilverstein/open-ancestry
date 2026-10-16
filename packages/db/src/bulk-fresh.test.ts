@@ -1,5 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -14,6 +13,7 @@ import {
   searchPeople,
 } from './index';
 import { memoryTree } from './test/helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 /** Loading into a brand-new tree defers secondary indexes and foreign key checks to commit. */
 describe('bulk load into a fresh tree', () => {
@@ -107,7 +107,7 @@ describe('batched inserts', () => {
 
 describe('journal mode during a fresh-tree load', () => {
   it('writes a new on-disk tree without WAL, then switches WAL back on', () => {
-    const root = mkdtempSync(join(tmpdir(), 'oa-fresh-'));
+    const root = makeTempDir('oa-fresh-');
     try {
       const store = createTree(join(root, 'f.oatree'));
       expect(store.db.pragma('journal_mode', { simple: true })).toBe('wal');

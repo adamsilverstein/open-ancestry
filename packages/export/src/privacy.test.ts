@@ -1,12 +1,12 @@
 import { openTree, treePaths } from '@open-ancestry/db';
 import { importGedcom } from '@open-ancestry/import';
 import { unzipSync, zipSync } from 'fflate';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildGedcomExport, buildGedzipExport } from './index';
 import { TODAY, ged, gedcom7Problems, importInto } from './test-helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 /*
  * Privatize beyond living people (security review 2026-10-14): records marked
@@ -91,7 +91,7 @@ afterEach(() => {
 });
 
 async function tree(gedcom: string[] = lines) {
-  const root = mkdtempSync(join(tmpdir(), 'oa-privacy-'));
+  const root = makeTempDir('oa-privacy-');
   dirs.push(root);
   const dir = join(root, 'Canaryfamilyname.oatree');
   const archive = zipSync({

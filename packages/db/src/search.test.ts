@@ -58,6 +58,25 @@ describe('searchPeople', () => {
     store.close();
   });
 
+  it('puts a whole tied bucket in name order, past the read window (#305)', () => {
+    const store = memoryTree();
+    // 40 equally good matches added in reverse name order, so the alphabetically
+    // first ones are the last added: a window of 15 read in insertion order would miss them.
+    const letters = 'abcdefghijklmnopqrstuvwxyz';
+    const given = Array.from(
+      { length: 40 },
+      (_, i) => `G${letters[Math.floor(i / 26)]}${letters[i % 26]}`,
+    )
+      .sort()
+      .reverse();
+    store.transact('add', (tx) => {
+      for (const g of given) persons.create(tx, { names: [{ given: g, surname: 'Kittering' }] });
+    });
+    const first = searchPeople(store, 'kittering', { limit: 5 }).map((r) => r.person.given);
+    expect(first).toEqual([...given].sort().slice(0, 5));
+    store.close();
+  });
+
   it('matches places and years', () => {
     const store = memoryTree();
     const f = seedSmallFamily(store);

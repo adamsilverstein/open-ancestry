@@ -65,6 +65,9 @@ function sameToken(given: unknown, expected: string): boolean {
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
+/** The API, as the router will see it (pathProblem refuses encoded letters first). */
+const API_PATH = /^\/api(?:[/?]|$)/;
+
 function reject(
   reply: FastifyReply,
   status: number,
@@ -145,11 +148,18 @@ export function registerSecurity(app: FastifyInstance, options: SecurityOptions)
     if (problem) return reject(reply, 400, 'bad_request', problem);
 
     // Browsers label requests a cross-site page makes. Only a top-level
-    // navigation (a link to the app) is legitimate; fetches and forms are not.
+    // navigation to the app (a link to it) is legitimate; fetches and forms
+    // are not, and neither is navigating to the API: that would let any site
+    // drop an export into the Downloads folder. The app calls its API
+    // same-origin; typed URLs say `none`; other clients send no label.
     const safe = SAFE_METHODS.has(request.method);
+    const site = request.headers['sec-fetch-site'];
     if (
-      request.headers['sec-fetch-site'] === 'cross-site' &&
-      (!safe || request.headers['sec-fetch-mode'] !== 'navigate')
+      (site === 'cross-site' && (!safe || request.headers['sec-fetch-mode'] !== 'navigate')) ||
+      (site !== undefined &&
+        site !== 'same-origin' &&
+        site !== 'none' &&
+        API_PATH.test(request.url))
     ) {
       return reject(reply, 403, 'forbidden', 'Cross-site requests are not allowed');
     }

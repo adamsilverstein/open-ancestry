@@ -1799,6 +1799,26 @@ test.describe('children of a partly loaded grandparent (#270)', () => {
   });
 });
 
+test.describe('siblings past the fetched depth (#297)', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+
+  test('a great-grandparent with siblings gets a chevron that fetches them', async ({ page }) => {
+    const { tree, ids } = seed.childrenGap;
+    // Zed's view fetches siblings two generations up (Zed's and his father's);
+    // his grandfather Par's sister Una and half-brother Hal are left out.
+    await page.goto(`/tree/${ids.Zed}?tree=${encodeURIComponent(tree)}`);
+    await expect(canvas(page)).toHaveAttribute('aria-busy', 'false');
+    await expect(card(page, 'Una Synth')).toHaveCount(0);
+    const request = page.waitForRequest(
+      (r) => r.url().includes('/neighborhood') && r.url().includes(`focus=${ids.Par}`),
+    );
+    await canvas(page).getByRole('button', { name: 'Show siblings of Par Synth' }).click();
+    await request;
+    await expect(card(page, 'Una Synth')).toBeAttached();
+    await expect(card(page, 'Hal Synth')).toBeAttached();
+  });
+});
+
 test.describe('visual snapshots', () => {
   // Baselines are Linux Chromium only, like design.spec.ts.
   test.skip(

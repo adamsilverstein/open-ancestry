@@ -5,6 +5,7 @@
  * children loaded, so expanding them never fetches the rest.
  */
 import { describe, expect, it } from 'vitest';
+import { layoutFamily } from '@open-ancestry/core';
 import { families, getNeighborhood, persons } from '@open-ancestry/db';
 import { memoryTree } from '../../../../packages/db/src/test/helpers';
 import { GraphCache } from './graphCache';
@@ -72,6 +73,62 @@ describe('GraphCache needsChildren with partly loaded families', () => {
     );
     expect(cache.has(ids.u) && cache.has(ids.h)).toBe(true);
     expect(cache.needsChildren(ids.g)).toBe(false);
+    store.close();
+  });
+});
+
+describe('GraphCache needsSiblings', () => {
+  it('needs siblings a slice left out until a slice holds them', () => {
+    const store = memoryTree();
+    const ids = store.transact('seed', (tx) => {
+      const p = (given: string) => persons.create(tx, { names: [{ given, surname: 'Synth' }] }).id;
+      const [gp, dad, aunt, me] = [p('Gp'), p('Dad'), p('Aunt'), p('Me')];
+      families.create(tx, { partner1_id: gp, children: [{ child_id: dad! }, { child_id: aunt! }] });
+      families.create(tx, { partner1_id: dad, children: [{ child_id: me! }] });
+      return { gp: gp!, dad: dad!, aunt: aunt!, me: me! };
+    }).result;
+    const cache = new GraphCache();
+    cache.merge(
+      getNeighborhood(store, ids.me, {
+        up: 2,
+        down: 0,
+        siblingsDepth: 1,
+      }) as unknown as ApiNeighborhood,
+    );
+    expect(cache.needsSiblings(ids.dad)).toBe(true);
+    const people = cache.graph().people as ReadonlyMap<string, { hasMoreSiblings?: boolean }>;
+    expect(people.get(ids.dad)?.hasMoreSiblings).toBe(true);
+    // The worker lays out from the lazy index: the hint must reach it too.
+    expect(cache.index().person(ids.dad)?.hasMoreSiblings).toBe(true);
+    const dad = layoutFamily(cache.index(), ids.me, {}).nodes.find((n) => n.personId === ids.dad);
+    expect(dad?.canExpandSiblings).toBe(true);
+    // A slice that holds all of Grandpa's children holds Dad's siblings too.
+    const viaParent = new GraphCache();
+    viaParent.merge(
+      getNeighborhood(store, ids.me, {
+        up: 2,
+        down: 0,
+        siblingsDepth: 1,
+      }) as unknown as ApiNeighborhood,
+    );
+    viaParent.merge(
+      getNeighborhood(store, ids.gp, {
+        up: 0,
+        down: 1,
+        siblingsDepth: 0,
+      }) as unknown as ApiNeighborhood,
+    );
+    expect(viaParent.needsSiblings(ids.dad)).toBe(false);
+    // Expanding fetches a slice on Dad with his siblings.
+    cache.merge(
+      getNeighborhood(store, ids.dad, {
+        up: 1,
+        down: 0,
+        siblingsDepth: 1,
+      }) as unknown as ApiNeighborhood,
+    );
+    expect(cache.has(ids.aunt)).toBe(true);
+    expect(cache.needsSiblings(ids.dad)).toBe(false);
     store.close();
   });
 });

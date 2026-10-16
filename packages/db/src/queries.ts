@@ -486,6 +486,13 @@ export interface Neighborhood {
    * than the slice shows, even if some are in it.
    */
   childrenLoaded: string[];
+  /**
+   * Line ancestors past `siblingsDepth` who have siblings (or half siblings)
+   * the slice left out: the tree offers to show them.
+   */
+  moreSiblings: string[];
+  /** People whose siblings, half siblings included, are all in the slice. */
+  siblingsLoaded: string[];
   /** True when the slice hit `maxPeople` and stopped early. */
   truncated: boolean;
 }
@@ -605,6 +612,9 @@ export function getNeighborhood(
     );
 
   const childrenLoaded = new Set<string>();
+  const siblingsLoaded = new Set<string>();
+  /** Line ancestors past siblingsDepth, to their siblings in the database. */
+  const siblingsOf = new Map<string, string[]>();
 
   // Ancestors.
   let frontier = [focusId];
@@ -642,6 +652,24 @@ export function getNeighborhood(
       }
       // Every partner family of these parents came with all its children.
       for (const id of parentIds) childrenLoaded.add(id);
+      for (const id of frontier) siblingsLoaded.add(id);
+    } else if (found.length > 0) {
+      // Past siblingsDepth: say who has siblings (through either parent) left out.
+      for (const { id, sib } of rows<{ id: string; sib: string }>(
+        store,
+        `SELECT DISTINCT me.child_id AS id, sib.child_id AS sib FROM family_child me
+         JOIN family pf ON pf.id = me.family_id
+         JOIN family f ON f.id = pf.id
+           OR f.partner1_id IN (pf.partner1_id, pf.partner2_id)
+           OR f.partner2_id IN (pf.partner1_id, pf.partner2_id)
+         JOIN family_child sib ON sib.family_id = f.id AND sib.child_id <> me.child_id
+         WHERE me.child_id IN (${IDS})`,
+        JSON.stringify(frontier),
+      )) {
+        const list = siblingsOf.get(id);
+        if (list) list.push(sib);
+        else siblingsOf.set(id, [sib]);
+      }
     }
     frontier = next;
   }
@@ -733,8 +761,12 @@ export function getNeighborhood(
   }
   // Cut short (even exactly at the cap), the slice may have dropped anyone's
   // children: claim nothing.
-  if (truncated) childrenLoaded.clear();
+  if (truncated) {
+    childrenLoaded.clear();
+    siblingsLoaded.clear();
+  }
 
+  const keptSet = new Set(kept);
   return {
     focusId,
     people: getPersonSummaries(store, kept),
@@ -743,6 +775,12 @@ export function getNeighborhood(
     moreUp,
     moreDown,
     childrenLoaded: [...childrenLoaded].filter((id) => people.has(id)).sort(),
+    // Only siblings the slice does not already hold (with a partner, say).
+    moreSiblings: [...siblingsOf]
+      .filter(([id, sibs]) => keptSet.has(id) && sibs.some((sib) => !keptSet.has(sib)))
+      .map(([id]) => id)
+      .sort(),
+    siblingsLoaded: [...siblingsLoaded].filter((id) => keptSet.has(id)).sort(),
     truncated,
   };
 }

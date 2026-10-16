@@ -9,7 +9,7 @@ import { conflict, notFound } from '../errors';
 import { JobParams, ReimportApplyBody, ReimportStatusQuery } from '../schemas';
 
 /** Review, apply and discard re-imports started by `POST /api/trees/:tree/reimport`. */
-export function reimportRoutes(app: Api, { library, reimports }: Deps): void {
+export function reimportRoutes(app: Api, { library, reimports, thumbnails }: Deps): void {
   const find = (id: string) => {
     const stored = reimports.get(id);
     if (!stored) throw notFound(`Re-import ${id} not found (it may have expired)`);
@@ -27,13 +27,19 @@ export function reimportRoutes(app: Api, { library, reimports }: Deps): void {
       source: report.source,
       warningCount: report.warningCount,
       lines: report.lines,
+      // Files found in the export (GEDZIP or media folder), as the import report counts them.
+      media: report.media,
       timings: session.timings,
       /** Which comparison the change ids belong to: send it back with apply and status. */
       comparison: session.comparison,
       /** The tree changed since the comparison: apply would be refused (#163). */
       stale: isReimportStale(library.open(tree), session),
       // familyMatches is apply's bookkeeping; the review doesn't need it.
-      diff: { people: session.diff.people, counts: session.diff.counts },
+      diff: {
+        people: session.diff.people,
+        counts: session.diff.counts,
+        exportPlaceRenames: session.diff.exportPlaceRenames,
+      },
     };
   };
 
@@ -88,6 +94,12 @@ export function reimportRoutes(app: Api, { library, reimports }: Deps): void {
           ),
         );
         reimports.remove(stored.id);
+        const dir = library.dirOf(stored.tree);
+        for (const id of result.media.copied) {
+          const media = store.getRow('media', id);
+          // A replaced file (#75) must not keep the old file's thumbnails.
+          if (media?.local_path) await thumbnails.refresh(dir, id, media.local_path);
+        }
         return result;
       } catch (error) {
         if (error instanceof ReimportStaleError) throw conflict(error.message);

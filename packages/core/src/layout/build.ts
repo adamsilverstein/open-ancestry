@@ -5,7 +5,13 @@
  * second time becomes a duplicate card that is never walked again, which
  * handles pedigree collapse and keeps cyclic data finite.
  */
-import { chooseParentFamily, childRelation, coupleOrder, spouseOf } from './graph';
+import {
+  chooseParentFamily,
+  childRelation,
+  coupleOrder,
+  partneredParentFamilies,
+  spouseOf,
+} from './graph';
 import type { GraphIndex } from './graph';
 import type { TidyUnit } from './tidy';
 import type {
@@ -17,6 +23,7 @@ import type {
   PartnerRelationship,
   TreeFamily,
 } from './types';
+import { pushAll } from './arrays';
 
 export type Role =
   | 'focus'
@@ -222,7 +229,9 @@ export class Builder {
     if (card.dupOf !== undefined) return [];
     const family = chooseParentFamily(this.index, card.personId, this.s.selected);
     if (!family) return [];
-    const all = this.index.parentFamilies(card.personId);
+    // Only sets the switcher can show: listing a partnerless family would
+    // strand the sets after it (cycling falls back past it).
+    const all = partneredParentFamilies(this.index, card.personId);
     if (all.length > 1) {
       this.alternates[card.personId] = { selected: family.id, families: all.map((f) => f.id) };
     }
@@ -295,7 +304,7 @@ export class Builder {
       const card = unit.cards[0]!;
       if (siblingGap !== undefined) this.addSiblings(unit, side, 'down', siblingGap);
       const budget = this.budget(card.personId, 'up', base);
-      queue.push(...this.addParents(unit, unit.anchor, budget, rootGap));
+      pushAll(queue, this.addParents(unit, unit.anchor, budget, rootGap));
     }
     return queue.map((p) => p.unit);
   }
@@ -391,7 +400,7 @@ export class Builder {
       card.siblings.push({ card: sibling, rel: c.rel, half: c.half, family: c.family, via: c.via });
       const cards = this.coupleBlock(sibling, 'sibling-spouse');
       own.set(sibling, cards);
-      target.push(...cards);
+      pushAll(target, cards);
     }
     unit.cards = [...before, ...unit.cards, ...after];
     unit.size = unit.cards.length;
@@ -410,7 +419,7 @@ export class Builder {
       const allowed = kind === 'up' ? budget : cousins ? Math.min(budget, 1) : 0;
       if (kind === 'down' && side !== 'center') unit.reserve = side;
       const role: Role = kind === 'up' ? 'descendant' : 'cousin';
-      pending.push(...this.hangChildren(unit, sibling, cards, allowed, kind, role, rootGap));
+      pushAll(pending, this.hangChildren(unit, sibling, cards, allowed, kind, role, rootGap));
     }
     if (kind === 'up') return pending;
     this.growDown(pending);
@@ -530,7 +539,7 @@ export class Builder {
       const { unit, base } = queue[i]!;
       const card = unit.cards[0]!;
       const budget = this.budget(card.personId, 'down', base);
-      queue.push(...this.addFamilies(unit, budget, false, rootGap));
+      pushAll(queue, this.addFamilies(unit, budget, false, rootGap));
     }
     return queue.map((p) => p.unit);
   }

@@ -21,7 +21,10 @@ const person = (
 const result: NeighborhoodInput = {
   people: [
     person('me', 'F', { living: 'inferred_living', birth: { dateSort: 19850315 } }),
-    person('dad', 'M', { birth: { dateSort: 19500101 }, death: { dateSort: 20100101 } }),
+    person('dad', 'M', {
+      birth: { dateSort: 19500701, dateQualifier: 'about' },
+      death: { dateSort: 20100100, dateQualifier: 'before' },
+    }),
     person('mom', 'F', { prefix: 'Dr.', birth: { dateSort: 19520101 } }),
     person('adad', 'M'),
     person('sis', 'F', { living: 'living', birth: { dateSort: 19800101 }, given: null }),
@@ -109,7 +112,7 @@ describe('fromNeighborhood', () => {
       birthSortKey: 19850315,
     });
     expect(people.get('dad')).toMatchObject({
-      lifespan: '1950–2010',
+      lifespan: 'abt. 1950–bef. 2010',
       hasMoreParents: true,
       living: false,
     });

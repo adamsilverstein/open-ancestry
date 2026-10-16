@@ -61,7 +61,8 @@ export interface Snapshot {
   families: Map<string, FamilyRow>;
   familyChildren: FamilyChildRow[];
   /** Family events (marriage, divorce, ...) by family id. */
-  familyEvents: Map<string, EventRow[]>;
+  /** Family facts (marriage, divorce) by family, paired like person facts (#268). */
+  familyEvents: Map<string, SnapEvent[]>;
   /**
    * The latest import's person records by xref, mapped to the person they
    * belong to now. A merge (#70) points several xrefs at one person.
@@ -129,7 +130,7 @@ export function mediaKeys(store: TreeStore): (m: KeyedMedia) => string {
 }
 
 /** Ancestry record ids only: the database-level `1,7602::0` ids are shared by everyone. */
-const isRecordApid = (apid: string | null): apid is string => !!apid && !/::0$/.test(apid);
+export const isRecordApid = (apid: string | null): apid is string => !!apid && !/::0$/.test(apid);
 
 function all<T>(store: TreeStore, sql: string): T[] {
   return store.db.prepare(sql).all() as T[];
@@ -273,15 +274,24 @@ export function snapshot(store: TreeStore): Snapshot {
     people.get(owner_id)?.media.push({ row: row as MediaRow, key: keyOf(row as MediaRow) });
   }
 
-  const familyEvents = new Map<string, EventRow[]>();
-  for (const e of all<EventRow & { family_id: string }>(
+  const familyEvents = new Map<string, SnapEvent[]>();
+  for (const e of all<
+    EventRow & { family_id: string; is_preferred: number; place_name: string | null }
+  >(
     store,
-    `SELECT e.*, r.family_id FROM event_role r JOIN event e ON e.id = r.event_id
+    `SELECT e.*, r.family_id, r.is_preferred, p.full_name AS place_name
+     FROM event_role r JOIN event e ON e.id = r.event_id LEFT JOIN place p ON p.id = e.place_id
      WHERE r.family_id IS NOT NULL ORDER BY r.sort_order, e.id`,
   )) {
-    const { family_id, ...row } = e;
+    const { family_id, is_preferred, place_name, ...row } = e;
     const list = familyEvents.get(family_id) ?? [];
-    list.push(row as EventRow);
+    // Family facts' sources are not compared (as before #268): only the facts are.
+    list.push({
+      row: row as EventRow,
+      place: place_name,
+      isPreferred: is_preferred === 1,
+      citations: [],
+    });
     familyEvents.set(family_id, list);
   }
 
@@ -296,4 +306,34 @@ export function snapshot(store: TreeStore): Snapshot {
   }
 
   return { people, families, familyChildren, familyEvents, importXrefs };
+}
+
+/**
+ * Name ids whose export gave a name type (`2 TYPE` under the NAME). Matched
+ * by the NAME value, which is enough for Ancestry's exports: two identical
+ * NAME lines where only one is typed would both count, and a NAME continued
+ * with CONC would not match. Others
+ * get the importer's default, which the review should not present as fact.
+ */
+export function statedNameTypes(store: TreeStore): Set<string> {
+  const stated = new Set<string>();
+  const typed = new Set<string>();
+  for (const r of all<{ owner_id: string; raw_text: string }>(
+    store,
+    "SELECT owner_id, raw_text FROM raw_record WHERE owner_type = 'person' AND owner_id IS NOT NULL",
+  )) {
+    let name: string | null = null;
+    for (const line of r.raw_text.split('\n')) {
+      if (line.startsWith('1 ')) name = line.startsWith('1 NAME') ? line.slice(7).trim() : null;
+      else if (name !== null && line.startsWith('2 TYPE')) typed.add(`${r.owner_id}|${name}`);
+    }
+  }
+  if (!typed.size) return stated;
+  for (const n of all<{ id: string; person_id: string; full_text: string | null }>(
+    store,
+    'SELECT id, person_id, full_text FROM person_name',
+  )) {
+    if (typed.has(`${n.person_id}|${(n.full_text ?? '').trim()}`)) stated.add(n.id);
+  }
+  return stated;
 }

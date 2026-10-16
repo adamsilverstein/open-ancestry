@@ -19,6 +19,8 @@
  * merge reuses the larger contour, so it costs the smaller one's depth only.
  */
 
+import { maxOf, minOf } from './arrays';
+
 export interface TidyGroup {
   /** Indexes of the block cards these children hang from. */
   anchors: number[];
@@ -160,7 +162,7 @@ export function tidyLayout(units: readonly TidyUnit[], m: TidyMetrics): void {
       const last = pos[i - 1]! + cardCenter(group.children.at(-1)!.anchor);
       groupCenters += (first + last) / 2;
       // Middle of the outermost anchors: a couple's midpoint, or a sibling run's center.
-      anchorCenters += cardCenter((Math.min(...group.anchors) + Math.max(...group.anchors)) / 2);
+      anchorCenters += cardCenter((minOf(group.anchors) + maxOf(group.anchors)) / 2);
     }
     return (groupCenters - anchorCenters) / groups.length;
   };
@@ -230,8 +232,8 @@ export function tidyLayout(units: readonly TidyUnit[], m: TidyMetrics): void {
     const children = (u.downGroups ?? []).flatMap((g) => g.children);
     if (!children.length) continue;
     const level = u.level - 1;
-    let from = Math.min(...children.map((c) => c.x));
-    let to = Math.max(...children.map((c) => c.x + widthOf(c)));
+    let from = minOf(children.map((c) => c.x));
+    let to = maxOf(children.map((c) => c.x + widthOf(c)));
     const row = rows.get(level) ?? [];
     for (let moved = true; moved;) {
       moved = false;

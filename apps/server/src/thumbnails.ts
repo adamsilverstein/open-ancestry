@@ -151,6 +151,37 @@ export class ThumbnailQueue {
     for (const row of rows) this.enqueue(treeDir, row.id, row.local_path);
   }
 
+  /**
+   * Drops a media item's thumbnails and queues new ones: its file changed
+   * (a re-import replaced it). Files are never overwritten in place, so a
+   * changed file always shows as a changed local_path.
+   */
+  async refresh(treeDir: string, mediaId: string, localPath: string | null): Promise<void> {
+    const thumbs = treePaths(treeDir).thumbs;
+    // A thumbs/ symlinked elsewhere must not carry deletes out of the tree.
+    if (await insideTree(treeDir, thumbs)) {
+      for (const size of Object.keys(THUMB_SIZES) as ThumbSize[])
+        await rm(thumbFile(treeDir, mediaId, size), { force: true });
+    }
+    this.enqueue(treeDir, mediaId, localPath);
+  }
+
+  /** `refresh` for every media item whose file a change batch (just undone or redone) swapped. */
+  async refreshBatch(store: TreeStore, treeDir: string, batchId: string): Promise<void> {
+    const ids = store.db
+      .prepare(
+        `SELECT DISTINCT entity_id FROM change_log
+          WHERE batch_id = ? AND entity = 'media' AND op = 'update'
+            AND json_extract(before_json, '$.local_path') IS NOT json_extract(after_json, '$.local_path')`,
+      )
+      .pluck()
+      .all(batchId) as string[];
+    for (const id of ids) {
+      const media = store.getRow('media', id);
+      if (media) await this.refresh(treeDir, id, media.local_path);
+    }
+  }
+
   enqueue(treeDir: string, mediaId: string, localPath: string | null): void {
     this.background++;
     void this.run({ treeDir, mediaId, localPath }, 'background')

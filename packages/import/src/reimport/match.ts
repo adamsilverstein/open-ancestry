@@ -163,11 +163,129 @@ function nameMatch(e: SnapPerson, i: SnapPerson): { score: number; reason: strin
   return { score: (best.given + surname) / 2, reason };
 }
 
+/**
+ * A place the export renamed (#279): the tree's name and the export's for the
+ * same place, as written.
+ */
+export interface PlaceRename {
+  from: string;
+  to: string;
+}
+
+/** Matching's view of renamed places: the export's name (normalized) to the tree's. */
+export type PlaceAlias = ReadonlyMap<string, string>;
+
+/** Whether two place names are one place, allowing for a place the export renamed. */
+function samePlace(tree: string | null, exported: string | null, alias: PlaceAlias): boolean {
+  if (!tree || !exported) return false;
+  if (tree === exported) return true;
+  const a = norm(tree);
+  const b = norm(exported);
+  return a === b || alias.get(b) === a;
+}
+
+/** Facts compared to find renamed places: one per type, with a date to tell them apart. */
+const factsByTypeDate = (p: SnapPerson) => {
+  const out = new Map<string, string>();
+  for (const e of p.events) {
+    if (!e.place || !e.row.date_text) continue;
+    const key = `${e.row.type}|${norm(e.row.date_text)}`;
+    // Two facts of a type on one date can't say which place became which.
+    out.set(key, out.has(key) ? '' : e.place);
+  }
+  return out;
+};
+
+/**
+ * Places the export renamed (#279): a name the tree has and the export no
+ * longer uses, where people the two clearly share (the same xref as the last
+ * import, or the same name and birth date, on one person each side) have
+ * facts of the same type and date there, now under a name the tree doesn't
+ * have. At least two such facts, and at least 80% of those that moved, going
+ * to one name make a rename; a stray fact sent elsewhere stays an ordinary
+ * change. Undated facts can't be paired, so they are no evidence (they still
+ * follow the place when the rename is applied). Worked out before matching,
+ * so the rename doesn't count against anyone's match.
+ */
+export function detectPlaceRenames(existing: Snapshot, incoming: Snapshot): PlaceRename[] {
+  const placesOf = (s: Snapshot) => {
+    const out = new Set<string>();
+    for (const p of s.people.values())
+      for (const e of p.events) if (e.place) out.add(norm(e.place));
+    return out;
+  };
+  const treePlaces = placesOf(existing);
+  const exportPlaces = placesOf(incoming);
+  const keyOf = (p: SnapPerson) => {
+    const name = p.names.find((n) => n.is_primary) ?? p.names[0];
+    const birth = p.events.find((e) => e.row.type === 'BIRT' && e.row.date_text);
+    return name && birth
+      ? `${norm(name.given)}|${norm(name.surname)}|${norm(birth.row.date_text)}`
+      : undefined;
+  };
+  const unique = (s: Snapshot) => {
+    const out = new Map<string, SnapPerson | null>();
+    for (const p of s.people.values()) {
+      const key = keyOf(p);
+      if (key) out.set(key, out.has(key) ? null : p);
+    }
+    return out;
+  };
+  const treeByKey = unique(existing);
+  const incomingByKey = unique(incoming);
+  const pairs: [SnapPerson, SnapPerson][] = [];
+  for (const i of incoming.people.values()) {
+    // The same xref as the last import first: it pairs people without a birth date too.
+    const byXref = i.row.external_id ? existing.importXrefs.get(i.row.external_id) : undefined;
+    const key = keyOf(i);
+    const e =
+      (byXref && existing.people.get(byXref)) ||
+      (key && incomingByKey.get(key) === i ? treeByKey.get(key) : undefined);
+    if (e) pairs.push([e, i]);
+  }
+  // Tree name -> export name -> facts seen; an ambiguous tree name is dropped.
+  const seen = new Map<string, Map<string, { from: string; to: string; count: number }>>();
+  for (const [e, i] of pairs) {
+    const treeFacts = factsByTypeDate(e);
+    for (const [key, to] of factsByTypeDate(i)) {
+      const from = treeFacts.get(key);
+      if (!from || !to) continue;
+      const a = norm(from);
+      const b = norm(to);
+      if (a === b || exportPlaces.has(a) || treePlaces.has(b)) continue;
+      const targets = seen.get(a) ?? new Map();
+      const entry = targets.get(b) ?? { from, to, count: 0 };
+      entry.count++;
+      targets.set(b, entry);
+      seen.set(a, targets);
+    }
+  }
+  const renames: PlaceRename[] = [];
+  const claimed = new Map<string, number>();
+  for (const targets of seen.values()) {
+    let total = 0;
+    let top: [string, { from: string; to: string; count: number }] | undefined;
+    for (const target of targets) {
+      total += target[1].count;
+      if (!top || target[1].count > top[1].count) top = target;
+    }
+    const [b, entry] = top!;
+    // A clear majority: one hand-corrected fact doesn't undo a rename of hundreds.
+    if (entry.count < 2 || entry.count < 0.8 * total) continue;
+    claimed.set(b, (claimed.get(b) ?? 0) + 1);
+    renames.push({ from: entry.from, to: entry.to });
+  }
+  // Two tree places merged into one export name isn't a rename of either.
+  return renames.filter((r) => claimed.get(norm(r.to)) === 1);
+}
+
 function baseScore(
   e: SnapPerson,
   i: SnapPerson,
+  alias: PlaceAlias,
 ): { score: number; reasons: string[]; corroboration: number; differences: number } {
   const reasons: string[] = [];
+  const sameBirthPlace = samePlace(e.birthPlace, i.birthPlace, alias);
   const shared = [...i.apids].filter((apid) => e.apids.has(apid));
   const name = nameMatch(e, i);
   const gap = birthGapOf(e, i);
@@ -176,7 +294,7 @@ function baseScore(
     [0.5, name.score],
     [0.2, birth],
     [0.15, yearScore(e.deathYear, i.deathYear)],
-    [0.15, e.birthPlace && i.birthPlace ? (e.birthPlace === i.birthPlace ? 1 : 0.2) : null],
+    [0.15, e.birthPlace && i.birthPlace ? (sameBirthPlace ? 1 : 0.2) : null],
   ];
   let total = 0;
   let weight = 0;
@@ -189,7 +307,7 @@ function baseScore(
   if (name.reason) reasons.push(name.reason);
   if (birth === 1) reasons.push('same birth year');
   if (e.deathYear !== null && e.deathYear === i.deathYear) reasons.push('same death year');
-  if (e.birthPlace && e.birthPlace === i.birthPlace) reasons.push('same birth place');
+  if (sameBirthPlace) reasons.push('same birth place');
   const sexKnown = e.row.sex !== 'U' && i.row.sex !== 'U';
   if (sexKnown && e.row.sex !== i.row.sex) {
     score *= 0.3;
@@ -211,7 +329,7 @@ function baseScore(
   ] as const) {
     const a = prepare(e).facts[fact];
     const b = prepare(i).facts[fact];
-    if (a && b && a !== b) {
+    if (a && b && a !== b && !(fact === 'BIRT.place' && alias.get(b) === a)) {
       differences++;
       reasons.push(label);
     }
@@ -219,7 +337,7 @@ function baseScore(
   const corroboration =
     ((birth ?? 0) >= 0.7 ? 1 : 0) +
     ((yearScore(e.deathYear, i.deathYear) ?? 0) >= 0.7 ? 1 : 0) +
-    (e.birthPlace && e.birthPlace === i.birthPlace ? 1 : 0) +
+    (sameBirthPlace ? 1 : 0) +
     (shared.length ? 2 : 0);
   return { score, reasons, corroboration, differences };
 }
@@ -258,16 +376,25 @@ const MAX_SURNAME_YEAR = 64;
 /** An Ancestry record id held by more tree people than this is not a blocking key. */
 const MAX_APID_HOLDERS = 32;
 
-/** Given and surname sounds, for every name the person has, so married names meet birth names. */
+/**
+ * Given and surname sounds, for every name the person has: married names meet
+ * birth names, and an alternate given name ("Joe" for Joseph) meets records
+ * that use it (#234). Initials ("J.") are left out: their sound is too broad.
+ * Each key gets the same bounded walk, so a common nickname stays cheap.
+ */
 function nameKeys(p: SnapPerson): { names: string[]; surnames: string[] } {
-  const given = p.given ? soundex(p.given) : '';
+  // Names normalized once per person (see prepare), not on every call.
+  const prepared = prepare(p).names;
+  const raw = new Set([p.given, ...prepared.map((n) => n.given)].filter(Boolean));
+  const givens = [...new Set([...raw].filter((g) => g.length >= 2).map((g) => soundex(g)))];
+  if (!givens.length) givens.push(p.given ? soundex(p.given) : '');
   const surnames = [
     ...new Set(
-      [p.surname, ...p.names.map((n) => norm(n.surname))].filter(Boolean).map((s) => soundex(s!)),
+      [p.surname, ...prepared.map((n) => n.surname)].filter(Boolean).map((s) => soundex(s)),
     ),
   ];
-  const names = surnames.map((s) => `${given}:${s}`);
-  if (!names.length && given) names.push(`${given}:`);
+  const names = surnames.flatMap((s) => givens.map((g) => `${g}:${s}`));
+  if (!names.length) for (const g of givens) if (g) names.push(`${g}:`);
   return { names, surnames };
 }
 
@@ -526,6 +653,8 @@ export function matchPeople(
   incoming: Snapshot,
   nearMisses?: Map<string, NearMiss>,
   stats?: MatchStats,
+  /** Places the export renamed (see `detectPlaceRenames`), by the export's normalized name. */
+  placeAlias: PlaceAlias = new Map(),
 ): Map<string, PersonMatch> {
   // Candidate pairs: same name sounds and birth era, same surname sound and birth year, or a shared record.
   const blocks = new Blocks(existing.people.values());
@@ -556,7 +685,7 @@ export function matchPeople(
     for (const apid of i.apids) for (const id of byApid.get(apid) ?? []) ids.add(id);
     for (const id of ids) {
       if (stats) stats.comparisons++;
-      const base = baseScore(existing.people.get(id)!, i);
+      const base = baseScore(existing.people.get(id)!, i, placeAlias);
       let { score } = base;
       const reasons = [...base.reasons];
       const hint = id === sameXref ? XREF_HINT : 0;

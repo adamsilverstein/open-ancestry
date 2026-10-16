@@ -14,6 +14,13 @@ export class ApiError extends Error {
 export const isNotFound = (error: unknown): boolean =>
   error instanceof ApiError && error.status === 404;
 
+/** Another connection (an import, an upgrade) holds the tree; trying again later works. */
+export const isBusy = (error: unknown): boolean =>
+  error instanceof ApiError && error.code === 'busy';
+
+/** The edit was made from data that changed since it loaded (another tab, an undo). */
+export const isStale = (error: unknown): boolean =>
+  error instanceof ApiError && error.code === 'stale';
 /** The shape of every record id the server accepts (`Id` in the server schemas). */
 export const isValidId = (id: string): boolean => /^[0-9A-Za-z_-]{1,64}$/.test(id);
 

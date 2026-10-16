@@ -6,6 +6,8 @@ import { BulkWriter } from './bulk';
 import { refreshDerivedColumns } from './derived';
 import { ENUM_COLUMNS } from './enums';
 import { listTables, migrate, upgradeRow, type TableRowsByName } from './migrations/index';
+import { nfcRow } from './nfc';
+import { mergeTags, recordMergedIds } from './migrations/v003-nfc-text';
 import type { TreeStore } from './store';
 import { parseLogImage } from './undo';
 import type { ChangeBatchRow, ChangeLogRow, TableRows } from './types';
@@ -39,7 +41,9 @@ export interface OaJsonDocument {
 export interface ExportOptions {
   /**
    * Include change_batch and change_log (default true). Without them, import
-   * warnings (which can quote imported lines) are left out too.
+   * warnings (which can quote imported lines) are left out too, and so are
+   * places, notes, media, citations and sources a delete left unused (see
+   * orphans); records never linked to anything stay.
    */
   history?: boolean;
   /**
@@ -77,11 +81,150 @@ function exportedTables(store: TreeStore, history: boolean): string[] {
     .map((t) => t.name);
 }
 
+type Orphaned = 'place' | 'media' | 'note' | 'citation' | 'source';
+
+/** What deletes in the change log took away: the targets of deleted links, events and citations. */
+function deletedRefs(store: TreeStore) {
+  const refs = {
+    note: new Set<string>(),
+    media: new Set<string>(),
+    citation: new Set<string>(),
+    place: new Set<string>(),
+    source: new Set<string>(),
+  };
+  const rows = store.db
+    .prepare(
+      // Only deletes in effect: an undone batch's delete was put back.
+      `SELECT l.entity, l.before_json FROM change_log l
+       JOIN change_batch b ON b.id = l.batch_id AND b.state = 'applied'
+       WHERE l.op = 'delete'
+       AND l.entity IN ('note_link', 'media_link', 'citation_link', 'event', 'citation')`,
+    )
+    .all() as { entity: string; before_json: string }[];
+  for (const { entity, before_json } of rows) {
+    let row: Record<string, unknown>;
+    try {
+      row = JSON.parse(before_json) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const add = (set: Set<string>, value: unknown) => {
+      if (typeof value === 'string') set.add(value);
+    };
+    if (entity === 'note_link') add(refs.note, row.note_id);
+    else if (entity === 'media_link') add(refs.media, row.media_id);
+    else if (entity === 'citation_link') add(refs.citation, row.citation_id);
+    else if (entity === 'event') add(refs.place, row.place_id);
+    else add(refs.source, row.source_id);
+  }
+  return refs;
+}
+
+/**
+ * Rows a history-free export leaves out because a delete left them behind
+ * with nothing remaining to use them, and that would keep the deleted
+ * record's text or whereabouts. A delete removes a record's own notes, media
+ * and citations, but shared rows stay: a place, a note on that place, a
+ * citation on that note, a source kept as reference data. The change log
+ * tells which rows lost a use to a delete; rows that were never linked to
+ * anything are the user's and stay.
+ * - places no remaining event uses that a deleted event used (or that are
+ *   above one in the hierarchy);
+ * - media, notes and citations with no remaining link that lost a link to a
+ *   delete, or whose links all belong to rows left out; repeated until
+ *   nothing changes, since they hang off one another;
+ * - sources with no remaining citation that lost one to a delete or to the above.
+ */
+function orphans(store: TreeStore): Record<Orphaned, Set<string>> {
+  const rows = <T>(sql: string) => store.db.prepare(sql).all() as T[];
+  const ids = (sql: string) => store.db.prepare(sql).pluck().all() as string[];
+  const deleted = deletedRefs(store);
+  const gone: Record<Orphaned, Set<string>> = {
+    place: new Set(),
+    media: new Set(),
+    note: new Set(),
+    citation: new Set(),
+    source: new Set(),
+  };
+
+  const parent = new Map(
+    rows<{ id: string; parent_id: string | null }>('SELECT id, parent_id FROM place').map((p) => [
+      p.id,
+      p.parent_id,
+    ]),
+  );
+  const above = (start: Iterable<string>) => {
+    const found = new Set<string>();
+    for (let id of start as Iterable<string | null | undefined>) {
+      while (id && !found.has(id)) {
+        found.add(id);
+        id = parent.get(id);
+      }
+    }
+    return found;
+  };
+  const used = above(ids('SELECT DISTINCT place_id FROM event WHERE place_id IS NOT NULL'));
+  for (const id of above(deleted.place)) if (parent.has(id) && !used.has(id)) gone.place.add(id);
+
+  type Link = { target: string; owner_type: string; owner_id: string };
+  const links = {
+    media: rows<Link>('SELECT media_id AS target, owner_type, owner_id FROM media_link'),
+    note: rows<Link>('SELECT note_id AS target, owner_type, owner_id FROM note_link'),
+    citation: rows<Link>('SELECT citation_id AS target, owner_type, owner_id FROM citation_link'),
+  };
+  const primary = new Set(
+    ids('SELECT primary_media_id FROM person WHERE primary_media_id IS NOT NULL'),
+  );
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const kind of ['media', 'note', 'citation'] as const) {
+      const live = new Set<string>();
+      const lostOwner = new Set<string>();
+      for (const l of links[kind]) {
+        (gone[l.owner_type as Orphaned]?.has(l.owner_id) ? lostOwner : live).add(l.target);
+      }
+      for (const id of new Set([...deleted[kind], ...lostOwner])) {
+        if (gone[kind].has(id) || live.has(id) || (kind === 'media' && primary.has(id))) continue;
+        gone[kind].add(id);
+        changed = true;
+      }
+    }
+  }
+  // Only rows that exist: a deleted link may name a row that went with it.
+  for (const kind of ['media', 'note', 'citation'] as const) {
+    const present = new Set(ids(`SELECT id FROM ${kind}`));
+    for (const id of gone[kind]) if (!present.has(id)) gone[kind].delete(id);
+  }
+
+  const cited = rows<{ id: string; source_id: string }>('SELECT id, source_id FROM citation');
+  const stillCited = new Set(cited.filter((c) => !gone.citation.has(c.id)).map((c) => c.source_id));
+  const lostCitation = new Set([
+    ...deleted.source,
+    ...cited.filter((c) => gone.citation.has(c.id)).map((c) => c.source_id),
+  ]);
+  const sources = new Set(ids('SELECT id FROM source'));
+  for (const id of lostCitation) if (sources.has(id) && !stillCited.has(id)) gone.source.add(id);
+  return gone;
+}
+
+/** Whether a row is one of `gone`, or belongs to one (a link, citation link or imported text). */
+function belongsTo(name: string, row: Record<string, unknown>, gone: Record<string, Set<string>>) {
+  if (gone[name]?.has(String(row.id))) return true;
+  if (typeof row.owner_type === 'string' && gone[row.owner_type]?.has(String(row.owner_id)))
+    return true;
+  return (
+    (name === 'media_link' && gone.media!.has(String(row.media_id))) ||
+    (name === 'note_link' && gone.note!.has(String(row.note_id))) ||
+    (name === 'citation_link' && gone.citation!.has(String(row.citation_id)))
+  );
+}
+
 export function exportJson(
   store: TreeStore,
   { history = true, omitImportedText }: ExportOptions = {},
 ): OaJsonDocument {
   const tables: Record<string, unknown[]> = {};
+  const gone = history ? null : orphans(store);
   for (const name of exportedTables(store, history)) {
     let rows = store.db
       .prepare(`SELECT * FROM ${name} ORDER BY ${store.plan(name).key}`)
@@ -94,6 +237,7 @@ export function exportJson(
       );
     }
     if (!history && name === 'import_batch') rows = rows.map(withoutImportedLines);
+    if (gone) rows = rows.filter((r) => !belongsTo(name, r, gone));
     tables[name] = rows;
   }
   return {
@@ -212,6 +356,11 @@ export function importJson(
       `Document does not match the JSON Schema: ${first?.instancePath ?? ''} ${first?.message ?? ''}`.trim(),
     );
   }
+  // Two copies of one tag that differ only in normalization would collide once
+  // stored as NFC; merge them as the v3 upgrade does. Links are copied first
+  // so the caller's document is left as it was.
+  if (tables.tag_link) tables.tag_link = tables.tag_link.map((row) => ({ ...row }));
+  recordMergedIds(tables, mergeTags(tables));
   const valid = doc as OaJsonDocument;
   for (const entry of valid.tables.change_log ?? []) {
     parseLogImage(store, entry.entity, entry.entity_id, entry.before_json, entry.schema_version);
@@ -234,7 +383,11 @@ export function importJson(
         [];
       for (const row of rows) {
         if (name === 'meta' && row.key === 'schema_version') continue;
-        writer.insertAny(name, row);
+        // Text is stored as NFC (#164). An old document got that from the v3
+        // upgrade step; a current one written by another tool may still be NFD.
+        // History images are normalized too, or undo would see the NFC rows as
+        // changed by a later edit.
+        writer.insertAny(name, name === 'change_log' ? nfcLogImages(row) : nfcRow(name, row));
       }
     }
   } catch (error) {
@@ -244,6 +397,19 @@ export function importJson(
   writer.commit();
   // The backup's sort keys came from whatever date parser wrote them.
   refreshDerivedColumns(store, { force: true, reason: 'imported backup' });
+}
+
+/** A change_log row with its before and after images in NFC (a copy only when something changes). */
+function nfcLogImages(row: Record<string, unknown>): Record<string, unknown> {
+  let out: Record<string, unknown> | undefined;
+  for (const column of ['before_json', 'after_json']) {
+    const json = row[column];
+    if (typeof json !== 'string') continue;
+    const image = JSON.parse(json) as Record<string, unknown>;
+    const nfc = nfcRow(String(row.entity), image);
+    if (nfc !== image) (out ??= { ...row })[column] = JSON.stringify(nfc);
+  }
+  return out ?? row;
 }
 
 /**

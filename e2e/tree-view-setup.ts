@@ -11,7 +11,9 @@ import { importGedcom } from '@open-ancestry/import';
 import {
   BIG_FAMILY_TREE,
   FAMILY_TREE,
+  CHILDREN_GAP_TREE,
   FAN_NAMES_TREE,
+  childrenGapGedcom,
   SAMPLE_TREE,
   fanNamesGedcom,
   PERF_TREE,
@@ -77,10 +79,24 @@ export async function seedTreeViewTrees(library: string): Promise<void> {
     .get()!.person_id;
   fanStore.close();
 
+  // A grandparent whose children are only partly loaded by earlier slices (#270).
+  const gapStore = fresh(CHILDREN_GAP_TREE);
+  await importGedcom({ bytes: Buffer.from(childrenGapGedcom()) }, gapStore);
+  const gapIds = Object.fromEntries(
+    gapStore.db
+      .prepare<[], { given: string; person_id: string }>(
+        "SELECT given, person_id FROM person_name WHERE type = 'birth' AND given IS NOT NULL",
+      )
+      .all()
+      .map((row) => [row.given, row.person_id]),
+  );
+  gapStore.close();
+
   const seed: SeedInfo = {
     family: { tree: FAMILY_TREE, ids },
     sample: { tree: SAMPLE_TREE, ids: sampleIds },
     fanNames: { tree: FAN_NAMES_TREE, focusId: fanFocus },
+    childrenGap: { tree: CHILDREN_GAP_TREE, ids: gapIds },
     perf: perfTree(PERF_TREE, 10_000, 7, 'founder'),
   };
   // Another seed, so its first 10,000 people are not the 10k tree, and the

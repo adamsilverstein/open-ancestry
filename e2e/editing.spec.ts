@@ -25,6 +25,18 @@ async function editPerson(page: Page) {
 }
 
 test.describe('person', () => {
+  test('shows a saved nickname on the person page (#280)', async ({ page }) => {
+    await openSeeded(page, seeded);
+    await expect(page.getByTestId('nickname')).toHaveCount(0);
+    const dialog = await editPerson(page);
+    await dialog.getByRole('textbox', { name: 'Nickname' }).first().fill('Ro');
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByTestId('nickname')).toHaveText('Known as “Ro”');
+    await expect(page.getByTestId('nickname').locator('bdi')).toHaveText('Ro');
+    await expect(h1(page)).toHaveText('Rowan Ashdown');
+  });
+
   test('edits names, sex and living status, then undoes and redoes with the keyboard', async ({
     page,
   }) => {
@@ -91,7 +103,7 @@ test.describe('person', () => {
     await expect(h1(page)).toHaveText('Tobias');
     await page.keyboard.press(`${mod}+z`);
     // To the nearest relative (a parent first), not back through history (#189).
-    await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}$`));
+    await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}(\\?tree=[^&]*)?$`));
     await expect(
       toasts(page).filter({ hasText: 'Tobias was deleted (in another window or by undo)' }),
     ).toBeVisible();
@@ -220,14 +232,14 @@ test.describe('person', () => {
     await dialog.getByRole('button', { name: 'Delete person' }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Delete person' }).click();
     // Lands on a parent (#107); e2e/delete-person.spec.ts covers the other cases.
-    await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}$`));
+    await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}(\\?tree=[^&]*)?$`));
     await expect(toasts(page).filter({ hasText: 'Deleted Rowan Ashdown' })).toBeVisible();
 
     await page.keyboard.press(`${mod}+z`);
     await expect(
       toasts(page).filter({ hasText: 'Undid Delete person: Rowan Ashdown' }),
     ).toBeVisible();
-    await expect(page).toHaveURL(new RegExp(`/person/${seeded.rowan}$`));
+    await expect(page).toHaveURL(new RegExp(`/person/${seeded.rowan}(\\?tree=[^&]*)?$`));
     await expect(h1(page)).toHaveText('Rowan Ashdown');
   });
 });
@@ -251,12 +263,49 @@ test.describe('events', () => {
     await date.fill('bet 1900 and 1905');
     await expect(dialog.getByTestId('date-preview')).toHaveText('bet. 1900 and 1905 · between');
 
-    await dialog.getByRole('textbox', { name: 'Place' }).fill('Wexmoor, Westmere');
+    await dialog.getByLabel('Place', { exact: true }).fill('Wexmoor, Westmere');
     await dialog.getByRole('button', { name: 'Save' }).click();
     await expect(dialog).toBeHidden();
     const row = timeline(page).getByRole('listitem').filter({ hasText: 'Residence' });
     await expect(row).toContainText('bet. 1900 and 1905');
     await expect(row).toContainText('Wexmoor, Westmere');
+  });
+
+  test('asks for an event type instead of saving a Birth by default (#280)', async ({ page }) => {
+    await openSeeded(page, seeded);
+    // Counted with hidden items too: the open dialog hides the page behind it.
+    const births = page
+      .getByRole('region', { name: 'Timeline', exact: true, includeHidden: true })
+      .getByRole('listitem', { includeHidden: true })
+      .filter({ has: page.locator('[data-title]', { hasText: /^Birth$/ }) });
+    const before = await births.count();
+    await timeline(page).getByRole('button', { name: 'Add event' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Add event' });
+    await expect(dialog.getByRole('combobox', { name: 'Event type' })).toContainText(
+      'Choose a type',
+    );
+    await dialog.getByRole('textbox', { name: 'Date' }).fill('1905');
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText('Choose an event type')).toBeVisible();
+    await expect(births).toHaveCount(before);
+  });
+
+  test('suggests places already in the tree (#280)', async ({ page }) => {
+    await openSeeded(page, seeded);
+    await timeline(page).getByRole('button', { name: 'Add event' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Add event' });
+    await dialog.getByRole('combobox', { name: 'Event type' }).click();
+    await page.getByRole('option', { name: 'Residence' }).click();
+    const place = dialog.getByLabel('Place', { exact: true });
+    await place.fill('Bracken');
+    const suggestion = dialog.locator('datalist option[value="Brackenford, Westmere"]');
+    await expect(suggestion).toHaveCount(1);
+    await place.fill('Brackenford, Westmere');
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect(dialog).toBeHidden();
+    const row = timeline(page).getByRole('listitem').filter({ hasText: 'Residence' });
+    await expect(row).toContainText('Brackenford, Westmere');
   });
 
   test('edits and deletes an event', async ({ page }) => {

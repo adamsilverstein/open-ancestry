@@ -11,6 +11,9 @@ export type ErrorCode =
   | 'forbidden_host'
   | 'not_found'
   | 'conflict'
+  | 'stale'
+  /** Another import, or another process (`open-ancestry import`, an upgrade), holds the tree. */
+  | 'busy'
   /** Undo with `expect`: that batch is no longer the newest. */
   | 'not_newest'
   | 'payload_too_large'
@@ -40,6 +43,10 @@ export class ApiError extends Error {
 export const notFound = (message: string) => new ApiError(404, 'not_found', message);
 export const badRequest = (message: string) => new ApiError(400, 'bad_request', message);
 export const conflict = (message: string) => new ApiError(409, 'conflict', message);
+/** The client edited from data that has changed since it loaded it (another tab, undo). */
+export const stale = (message: string) => new ApiError(409, 'stale', message);
+/** The tree is busy with an import or another process's write; the same request works later. */
+export const busy = (message: string) => new ApiError(409, 'busy', message);
 export const notNewest = (message: string) => new ApiError(409, 'not_newest', message);
 
 export function errorBody(code: ErrorCode, message: string): ErrorBody {
@@ -73,7 +80,7 @@ export function toApiError(error: FastifyError | Error): ApiError {
   }
   // Backstop for a write that reached a tree inside another writer's transaction.
   if (error instanceof TransactionInProgressError) {
-    return conflict('The tree is busy (an import is running); try again when it finishes');
+    return busy('The tree is busy (an import is running); try again when it finishes');
   }
   // Stored data that cannot be written as valid GEDCOM (export); say what, rather than a bare 500.
   if (error instanceof GedcomSerializeError) {
@@ -82,7 +89,7 @@ export function toApiError(error: FastifyError | Error): ApiError {
   const fastify = error as FastifyError;
   // Another connection (an import worker) holds the write lock.
   if (fastify.code?.startsWith('SQLITE_BUSY')) {
-    return conflict('The tree is busy (an import is running); try again when it finishes');
+    return busy('The tree is busy (an import is running); try again when it finishes');
   }
   // Unique, foreign key and CHECK failures: the request contradicts stored data.
   // The SQLite text names tables and columns; say what it means instead.

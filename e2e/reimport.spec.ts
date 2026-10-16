@@ -166,7 +166,16 @@ test('import, edit, re-import, review, apply, then undo', async ({
       .getByRole('listitem')
       .filter({ hasText: /Applied \d+ change/ }),
   ).toBeVisible({ timeout: 30_000 });
-  await expect(page).toHaveURL(/\/(tree|person)\//);
+  // The result lists what was applied, by person, with links, and what was skipped (#158).
+  const result = page.getByRole('region', { name: 'Re-import applied' });
+  await expect(result).toBeVisible();
+  const thaddeusLink = result.getByRole('link', { name: 'Thaddeus Ashgrove' });
+  await expect(thaddeusLink).toHaveAttribute('href', new RegExp(`/person/${thaddeus}$`));
+  await expect(result.getByRole('link', { name: 'Noah Ashgrove' })).toBeVisible();
+  await expect(
+    result.getByText(/Birth: abt\. 1842 → 12 Mar 1842|Birth: Abt\. 1842 → 12 MAR 1842/),
+  ).toBeVisible();
+  await expect(result.getByText(/^Skipped \d+ change/)).toBeVisible();
   expect((await eventDate(request, seeded.tree, thaddeus, 'BIRT')).date_text).toBe('12 MAR 1842');
   expect((await eventDate(request, seeded.tree, josiah, 'DEAT')).date_text).toBe('3 MAY 1939');
   expect(await personByName(request, seeded.tree, 'Noah')).toBeTruthy();
@@ -180,6 +189,31 @@ test('import, edit, re-import, review, apply, then undo', async ({
       .getByRole('listitem')
       .filter({ hasText: 'Undid Re-import' }),
   ).toBeVisible();
+  // Undo dismisses the Applied toast, so the two don't sit side by side.
+  await expect(
+    page
+      .getByRole('region', { name: /Notifications/ })
+      .getByRole('listitem')
+      .filter({ hasText: /Applied \d+ change/ }),
+  ).toHaveCount(0);
+  // The result page says so too, and stops linking to people the undo removed.
+  const undone = page.getByRole('region', { name: 'Re-import undone' });
+  await expect(undone).toContainText('This re-import was undone');
+  // Noah was added by the re-import, so undo removed him and his link goes;
+  // Thaddeus was only updated, still exists, and keeps his link.
+  await expect(undone.getByRole('link', { name: 'Noah Ashgrove' })).toHaveCount(0);
+  await expect(undone.getByRole('link', { name: 'Thaddeus Ashgrove' })).toHaveAttribute(
+    'href',
+    new RegExp(`/person/${thaddeus}$`),
+  );
+  await expect(undone.getByText('Noah Ashgrove', { exact: true }).first()).toBeVisible();
+  // Redo applies it again, and the page follows.
+  await page.keyboard.press(`Shift+${mod}+z`);
+  await expect(result.getByRole('link', { name: 'Noah Ashgrove' })).toBeVisible();
+  await page.keyboard.press(`${mod}+z`);
+  await expect(undone).toBeVisible();
+  await undone.getByRole('link', { name: 'Go to the tree' }).click();
+  await expect(page).toHaveURL(/\/(tree|person)\//);
   expect((await eventDate(request, seeded.tree, thaddeus, 'BIRT')).date_text).toBe('Abt. 1842');
   expect(await personByName(request, seeded.tree, 'Noah')).toBeUndefined();
 });
@@ -245,7 +279,9 @@ test('a fact deleted here is offered back unticked, and stays deleted by default
     { headers: seeded.headers },
   );
   expect(removed.ok()).toBe(true);
-  await startReimport(page, seeded);
+  // Ancestry changed the fact the user deleted: now both differ, so it asks (#185).
+  // (An export that still has it as it was offers nothing.)
+  await startReimport(page, seeded, laterExport().replace('2 DATE BEF 1920', '2 DATE ABT 1918'));
   const restore = card(page, 'Mercy Bellweather').getByRole('checkbox', {
     name: /Add fact: Death/,
   });
@@ -381,7 +417,7 @@ test('an override is not carried onto a newer local value, and a refused compare
       status: 409,
       contentType: 'application/json',
       body: JSON.stringify({
-        error: { code: 'conflict', message: 'Tree is busy (an import is running)' },
+        error: { code: 'busy', message: 'Tree is busy (an import is running)' },
       }),
     }),
   );
@@ -421,10 +457,11 @@ test('match percent and reasons say what differs, and why a new person is new', 
   await expect(add).not.toBeChecked();
   await page.getByRole('button', { name: 'Accept all high-confidence' }).click();
   await expect(add).not.toBeChecked();
-  // A genuinely new person says so.
+  // A genuinely new person says so, truthfully: nobody was close enough to compare.
   await expect(
-    card(page, 'Noah Ashgrove').getByText(/closest:|no one with a similar name/),
+    card(page, 'Noah Ashgrove').getByText('no close match in your tree', { exact: false }),
   ).toBeVisible();
+  await expect(card(page, 'Noah Ashgrove').getByText(/closest:/)).toHaveCount(0);
 });
 
 test('the review lists what needs a decision first, filters by group, and formats dates', async ({
@@ -475,15 +512,218 @@ test('the review lists what needs a decision first, filters by group, and format
   expect(results.violations).toEqual([]);
 });
 
+test('the comparison page names the file and phase while it runs (#161)', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  // Hold the job at the compare phase, however fast the real one is. The page
+  // reads the job again when the stream ends, so that read is held too.
+  const held = (id: string) => ({
+    id,
+    kind: 'reimport',
+    tree: seeded.tree,
+    fileName: 'Ashgrove 2026.ged',
+    createdTree: false,
+    state: 'running',
+    progress: { phase: 'compare', done: 0, total: 1 },
+    result: null,
+    error: null,
+    cancelled: false,
+  });
+  await page.route('**/api/jobs/*/events', (route) => {
+    const id = /jobs\/([^/]+)\/events/.exec(route.request().url())![1]!;
+    void route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: `event: state\ndata: ${JSON.stringify(held(id))}\n\n`,
+    });
+  });
+  await page.route('**/api/jobs/*', (route) => {
+    if (route.request().method() !== 'GET') return void route.continue();
+    const id = /jobs\/([^/?#]+)/.exec(route.request().url())![1]!;
+    void route.fulfill({ status: 200, contentType: 'application/json', json: held(id) });
+  });
+  await page.addInitScript((tree) => localStorage.setItem('oa-tree', tree), seeded.tree);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'File' }).click();
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('menuitem', { name: /Re-import updated export/ }).click();
+  await (
+    await chooser
+  ).setFiles({
+    name: 'Ashgrove 2026.ged',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from(laterExport()),
+  });
+  await expect(
+    page.getByRole('heading', { name: 'Comparing Ashgrove 2026.ged with your tree' }),
+  ).toBeVisible();
+  await expect(page.getByText('Comparing with your tree', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+});
+
+test('a second re-import follows Ancestry for a value the first one set (#185)', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const josiah = (await personByName(request, seeded.tree, 'Josiah'))!;
+  const applied = () =>
+    expect(
+      page
+        .getByRole('region', { name: /Notifications/ })
+        .getByRole('listitem')
+        .filter({ hasText: /Applied \d+ change/ })
+        .last(),
+    ).toBeVisible({ timeout: 30_000 });
+  await startReimport(page, seeded);
+  await page.getByRole('button', { name: /^Apply \d+ changes?$/ }).click();
+  await applied();
+  expect((await eventDate(request, seeded.tree, josiah, 'DEAT')).date_text).toBe('1940');
+  // The next export changes it again; nobody edited it here, so it is offered ticked.
+  await startReimport(page, seeded, laterExport().replace('2 DATE 1940', '2 DATE 1941'));
+  const death = card(page, 'Josiah Ashgrove').getByRole('checkbox', { name: /Death: 1940 → 1941/ });
+  await expect(death).toBeChecked();
+  await page.getByRole('button', { name: /^Apply \d+ changes?$/ }).click();
+  await applied();
+  expect((await eventDate(request, seeded.tree, josiah, 'DEAT')).date_text).toBe('1941');
+});
+
+test("a renamed person's export name is offered as an alternate, saying so", async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const thaddeus = (await personByName(request, seeded.tree, 'Thaddeus'))!;
+  const detail = (await (
+    await request.get(`/api/trees/${encodeURIComponent(seeded.tree)}/people/${thaddeus}`)
+  ).json()) as { names: { id: string }[] };
+  const renamed = await request.patch(
+    `/api/trees/${encodeURIComponent(seeded.tree)}/names/${detail.names[0]!.id}`,
+    { headers: seeded.headers, data: { given: 'Thad' } },
+  );
+  expect(renamed.ok()).toBe(true);
+  // Ancestry renamed him too, so both sides changed the name (#185).
+  await startReimport(
+    page,
+    seeded,
+    laterExport().replace(
+      '1 NAME Thaddeus /Ashgrove/\n2 GIVN Thaddeus\n',
+      '1 NAME Thaddeus James /Ashgrove/\n2 GIVN Thaddeus James\n',
+    ),
+  );
+  const keep = card(page, 'Thad Ashgrove').getByRole('checkbox', {
+    name: 'Also keep Thaddeus James Ashgrove as an alternate name',
+  });
+  await expect(keep).not.toBeChecked();
+  await expect(
+    card(page, 'Thad Ashgrove').getByText(
+      'The export now calls this person Thaddeus James Ashgrove (it was Thaddeus Ashgrove); you renamed them Thad Ashgrove here. Tick to also keep Thaddeus James Ashgrove as an alternate name; Thad Ashgrove stays the primary name.',
+    ),
+  ).toBeVisible();
+});
+
+test('a place the export renamed is one item, and keeps matches sure (#279)', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const josiah = (await personByName(request, seeded.tree, 'Josiah'))!;
+  const OLD = 'Millbrook, Harlow County, Vermont, USA';
+  const NEW = 'Millbrook Falls, Harlow County, Vermont, USA';
+  await startReimport(page, seeded, laterExport().replaceAll(OLD, NEW));
+  const places = page.getByRole('region', { name: 'Places renamed' });
+  const rename = places.getByRole('checkbox', {
+    name: new RegExp(`^Place renamed: ${OLD} → ${NEW} \\(\\d+ facts\\)$`),
+  });
+  await expect(rename).toBeChecked();
+  // Not repeated fact by fact on the cards, and no doubt cast on who was born there.
+  await expect(page.getByRole('checkbox', { name: new RegExp(`${OLD}.*→.*${NEW}`) })).toHaveCount(
+    1,
+  );
+  await expect(card(page, 'Josiah Ashgrove').getByText(/different birth place/)).toHaveCount(0);
+  // The rename has a filter of its own and counts as one change, however many facts it covers.
+  await expect(
+    page
+      .getByRole('group', { name: 'Filter the review' })
+      .getByRole('button', { name: 'Places renamed 1' }),
+  ).toBeVisible();
+  const applyButton = page.getByRole('button', { name: /^Apply \d+ changes?$/ });
+  const count = async () => Number(/\d+/.exec((await applyButton.textContent()) ?? '')![0]);
+  const withRename = await count();
+  // Unticked, nothing moves; ticked again, every fact goes to the new name.
+  await rename.uncheck();
+  await expect(rename).not.toBeChecked();
+  expect(await count()).toBe(withRename - 1);
+  await rename.check();
+  await page.getByRole('button', { name: /^Apply \d+ changes?$/ }).click();
+  await expect(
+    page
+      .getByRole('region', { name: /Notifications/ })
+      .getByRole('listitem')
+      .filter({ hasText: /Applied \d+ change/ }),
+  ).toBeVisible({ timeout: 30_000 });
+  const detail = (await (
+    await request.get(`/api/trees/${encodeURIComponent(seeded.tree)}/people/${josiah}`)
+  ).json()) as { events: { event: { type: string }; place: { full_name: string } | null }[] };
+  expect(detail.events.find((e) => e.event.type === 'BIRT')!.place!.full_name).toBe(NEW);
+});
+
 test('discarding a review changes nothing', async ({ page, request, baseURL }, testInfo) => {
   const seeded = await seed(request, baseURL!, testInfo);
   await startReimport(page, seeded);
   await page.getByRole('button', { name: 'Discard' }).click();
-  await expect(page).toHaveURL(/\/$/);
+  // Back on the tree it was comparing with (#279), not the start page.
+  await expect(page).toHaveURL(/\/tree\/(?!home)[^/?#]+/);
+  await expect(page.getByRole('button', { name: `Tree: ${seeded.tree}` })).toBeVisible();
   const history = (await (
     await request.get(`/api/trees/${encodeURIComponent(seeded.tree)}/history`)
   ).json()) as { items: unknown[] };
   expect(history.items).toEqual([]);
+});
+
+test('cancelling a comparison that already stopped sends no cancel (#308)', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  await page.route('**/api/jobs/*/events', () => {});
+  await page.addInitScript((tree) => localStorage.setItem('oa-tree', tree), seeded.tree);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'File' }).click();
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('menuitem', { name: /Re-import updated export/ }).click();
+  await (
+    await chooser
+  ).setFiles({
+    name: 'Ashgrove 2026.ged',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from(laterExport()),
+  });
+  await expect(page.getByRole('heading', { name: 'Starting the comparison' })).toBeVisible();
+  // The job failed (or was cancelled elsewhere) before Cancel: it has no review to discard.
+  await page.route('**/api/jobs/*', (route) => {
+    if (route.request().method() === 'GET') {
+      const id = /jobs\/([^/?#]+)/.exec(route.request().url())![1]!;
+      return route.fulfill({
+        json: { id, kind: 'reimport', tree: seeded.tree, state: 'failed', result: null },
+      });
+    }
+    return route.continue();
+  });
+  const cancels: string[] = [];
+  page.on('request', (r) => {
+    if (r.method() === 'DELETE' && /\/api\/jobs\//.test(r.url())) cancels.push(r.url());
+  });
+  await page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(page).toHaveURL(/\/tree\/(?!home)[^/?#]+/);
+  expect(cancels).toEqual([]);
 });
 
 test('cancelling the comparison keeps nothing and changes nothing', async ({
@@ -509,15 +749,18 @@ test('cancelling the comparison keeps nothing and changes nothing', async ({
   await expect(page.getByRole('heading', { name: 'Starting the comparison' })).toBeVisible();
   const jobId = /\/reimport\/([^/?#]+)/.exec(page.url())![1]!;
   await page.getByRole('button', { name: 'Cancel' }).click();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/tree\/(?!home)[^/?#]+/);
   await expect(
     page.getByText('Re-import cancelled. Your tree was not changed.', { exact: true }),
   ).toBeVisible();
   // Whether the job was stopped or had already finished, no review is left behind.
-  const job = (await (await request.get(`/api/jobs/${jobId}`)).json()) as {
-    state: string;
-    result?: { reimportId: string } | null;
-  };
+  // A worker job settles after its cancel (up to the grace period): wait for it.
+  type Job = { state: string; result?: { reimportId: string } | null };
+  const read = async () => (await (await request.get(`/api/jobs/${jobId}`)).json()) as Job;
+  await expect
+    .poll(async () => (await read()).state, { timeout: 10_000 })
+    .toMatch(/^(completed|failed)$/);
+  const job = await read();
   if (job.result?.reimportId) {
     expect((await request.get(`/api/reimports/${job.result.reimportId}`)).status()).toBe(404);
   } else {
@@ -574,4 +817,35 @@ test('a review with nothing in a group offers no filter for it', async ({
   await startReimport(page, seeded, SAMPLE.replace('0 TRLR', `${one}0 TRLR`));
   const filters = page.getByRole('group', { name: 'Filter the review' });
   await expect(filters.getByRole('button')).toHaveText(['All 1', 'New people 1']);
+});
+
+test('a corrected marriage date is offered as a change, not a second marriage (#268)', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seed(request, baseURL!, testInfo);
+  const corrected = SAMPLE.replace('2 DATE 14 OCT 1895', '2 DATE 15 OCT 1895').replace(
+    /@([A-Z]+)(\d+)@/g,
+    (_, p: string, n: string) => `@${p}${Number(n) + 100}@`,
+  );
+  await startReimport(page, seeded, corrected);
+  const silas = card(page, 'Silas Corran');
+  await expect(
+    silas.getByRole('checkbox', { name: /Marriage: 14 Oct 1895 → 15 Oct 1895/ }),
+  ).toBeChecked();
+  await expect(silas.getByRole('checkbox', { name: /Add family fact/ })).toHaveCount(0);
+
+  await page.getByRole('button', { name: /^Apply \d+ changes?$/ }).click();
+  await expect(page.getByRole('region', { name: 'Re-import applied' })).toBeVisible({
+    timeout: 30_000,
+  });
+  const id = (await personByName(request, seeded.tree, 'Silas'))!;
+  const detail = (await (
+    await request.get(`/api/trees/${encodeURIComponent(seeded.tree)}/people/${id}`)
+  ).json()) as { partnerFamilies: { events: { event: { type: string; date_text: string } }[] }[] };
+  const marriages = detail.partnerFamilies
+    .flatMap((f) => f.events)
+    .filter((e) => e.event.type === 'MARR');
+  expect(marriages.map((e) => e.event.date_text)).toEqual(['15 OCT 1895']);
 });

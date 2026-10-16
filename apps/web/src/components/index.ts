@@ -23,6 +23,7 @@ export {
   MenuItem,
   MenuRadioGroup,
   MenuRadioItem,
+  MenuLabel,
   MenuSeparator,
   MenuTrigger,
 } from './Menu/Menu';
@@ -71,7 +72,13 @@ export {
   type TimelineItemProps,
   type TimelineVariant,
 } from './TimelineItem/TimelineItem';
-export { ToastProvider, useToast, type ToastOptions, type ToastVariant } from './Toast/Toast';
+export {
+  ToastProvider,
+  useDismissToasts,
+  useToast,
+  type ToastOptions,
+  type ToastVariant,
+} from './Toast/Toast';
 export { Toolbar, type ToolbarProps } from './Toolbar/Toolbar';
 export { Tooltip, TooltipProvider, type TooltipProps } from './Tooltip/Tooltip';
 export {

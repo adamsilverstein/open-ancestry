@@ -47,7 +47,7 @@ test('saving an edit to a deleted person explains it', async ({ page, request, b
   await expect(toasts(page)).toHaveCount(1);
 
   // The nearest relative: a parent.
-  await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}$`));
+  await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}(\\?tree=[^&]*)?$`));
   await expect(h1(page)).toHaveText('Edmund Ashdown');
 });
 

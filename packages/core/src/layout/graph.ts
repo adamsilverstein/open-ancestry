@@ -16,6 +16,8 @@ export interface GraphIndex {
   children(family: TreeFamily): string[];
   /** The child's entry in the family, found in constant time. */
   entry(family: TreeFamily, childId: string): TreeFamilyChild | undefined;
+  /** A family by id. */
+  family(id: string): TreeFamily | undefined;
 }
 
 const NONE: readonly TreeFamily[] = [];
@@ -24,6 +26,18 @@ interface Indexed {
   partners: [string | null, string | null];
   children: string[];
   entries: Map<string, TreeFamilyChild>;
+}
+
+/**
+ * What the layouts read: a graph, or an index a caller keeps for one so that
+ * laying out the same (large) graph again does not index it again.
+ */
+export type GraphSource = TreeGraph | GraphIndex;
+
+export function asIndex(source: GraphSource): GraphIndex {
+  return typeof (source as GraphIndex).parentFamilies === 'function'
+    ? (source as GraphIndex)
+    : indexGraph(source as TreeGraph);
 }
 
 export function indexGraph(graph: TreeGraph): GraphIndex {
@@ -66,6 +80,7 @@ export function indexGraph(graph: TreeGraph): GraphIndex {
         list.sort((x, y) => x.order - y.order).map((x) => x.family),
       ]),
     );
+  const byId = new Map(graph.families.map((f) => [f.id, f]));
   const parents = sorted(asChild);
   const partnerOf = sorted(asPartner);
 
@@ -76,6 +91,7 @@ export function indexGraph(graph: TreeGraph): GraphIndex {
     partners: (family) => indexed.get(family)!.partners,
     children: (family) => indexed.get(family)!.children,
     entry: (family, childId) => indexed.get(family)!.entries.get(childId),
+    family: (id) => byId.get(id),
   };
 }
 
@@ -118,15 +134,23 @@ const PREFERENCE: Record<ChildRelation, number> = {
  * `preferred` (GEDCOM/Ancestry preferred parents), else the most biological
  * family (both partners' relations scored), ties going to the first.
  */
+/**
+ * A person's parent families that have a parent to draw: a GEDCOM FAM with
+ * only CHIL lines has none, so it is never shown or offered by the switcher.
+ */
+export function partneredParentFamilies(index: GraphIndex, personId: string): TreeFamily[] {
+  return index.parentFamilies(personId).filter((f) => {
+    const [a, b] = index.partners(f);
+    return a !== null || b !== null;
+  });
+}
+
 export function chooseParentFamily(
   index: GraphIndex,
   personId: string,
   selected: Readonly<Record<string, string>>,
 ): TreeFamily | undefined {
-  const families = index.parentFamilies(personId).filter((f) => {
-    const [a, b] = index.partners(f);
-    return a !== null || b !== null;
-  });
+  const families = partneredParentFamilies(index, personId);
   const wanted = Object.hasOwn(selected, personId) ? selected[personId] : undefined;
   const chosen = families.find((f) => f.id === wanted);
   if (chosen) return chosen;

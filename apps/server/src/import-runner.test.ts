@@ -1,11 +1,13 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createTree, type TreeStore } from '@open-ancestry/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { generateGedcom } from '../../../fixtures/generate';
-import { devWorkerImporter, type WorkerImporterOptions } from './import-runner';
+import { applyReimport, closeReimport, importGedcom } from '@open-ancestry/import';
+import { ReimportFolders } from './reimport-folders';
+import { devWorkerComparer, devWorkerImporter, type WorkerImporterOptions } from './import-runner';
 import type { ImportProgress } from './jobs';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 /*
  * Imports run in a worker thread (security review): a hostile file can only
@@ -15,12 +17,11 @@ import type { ImportProgress } from './jobs';
 let root: string;
 let store: TreeStore;
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'oa-runner-'));
+  root = makeTempDir('oa-runner-');
   store = createTree(join(root, 'T.oatree'));
 });
 afterEach(() => {
   store.close();
-  rmSync(root, { recursive: true, force: true });
 });
 
 function file(name: string, content: string) {
@@ -109,5 +110,67 @@ describe('worker importer', () => {
     const report = (await done) as { records: { INDI: number } };
     expect(controller.signal.aborted).toBe(true);
     expect(report.records.INDI).toBe(300);
+  }, 60_000);
+});
+
+describe('worker re-import compare (#161)', () => {
+  let folders: ReimportFolders;
+  beforeEach(() => {
+    folders = new ReimportFolders();
+  });
+  afterEach(() => folders.close());
+
+  it('compares in a worker, keeps the event loop free, and returns a usable review', async () => {
+    const base = generateGedcom({ people: 3000, seed: 5 });
+    await importGedcom({ bytes: base }, store);
+    const later = base.replace(/@I(\d+)@/g, (_, n: string) => `@I${Number(n) + 90000}@`);
+    const progress: ImportProgress[] = [];
+    // Measure how long the main thread goes without running a timer while the worker compares.
+    let worst = 0;
+    let last = performance.now();
+    const tick = setInterval(() => {
+      const now = performance.now();
+      worst = Math.max(worst, now - last);
+      last = now;
+    }, 10);
+    const session = await devWorkerComparer()(file('later.ged', later), store, {
+      onProgress: (p) => progress.push(p),
+      signal: new AbortController().signal,
+      folders,
+    });
+    clearInterval(tick);
+    try {
+      expect(progress.map((p) => p.phase)).toEqual(
+        expect.arrayContaining(['parse', 'map', 'compare']),
+      );
+      expect(session.diff.counts.matched).toBe(3000);
+      expect(session.incoming.dir).toMatch(/\.reimport-/);
+      // Compare work happened off the main thread: no long stall here.
+      expect(worst).toBeLessThan(500);
+      applyReimport(store, session, new Set(), 'Re-import');
+    } finally {
+      closeReimport(session);
+      folders.close();
+    }
+    expect(readdirSync(join(root, 'T.oatree')).filter((n) => n.startsWith('.reimport-'))).toEqual(
+      [],
+    );
+  }, 120_000);
+
+  it('cancels a compare and leaves nothing behind', async () => {
+    await importGedcom({ bytes: generateGedcom({ people: 200, seed: 6 }) }, store);
+    const controller = new AbortController();
+    const progress: ImportProgress[] = [];
+    const done = devWorkerComparer({ graceMs: 200 })(
+      file('big.ged', generateGedcom({ people: 60_000, seed: 7 })),
+      store,
+      { onProgress: (p) => progress.push(p), signal: controller.signal, folders },
+    );
+    while (!progress.some((p) => p.phase === 'parse')) await new Promise((r) => setTimeout(r, 5));
+    controller.abort();
+    await expect(done).rejects.toThrow(/cancelled/i);
+    expect(readdirSync(join(root, 'T.oatree')).filter((n) => n.startsWith('.reimport-'))).toEqual(
+      [],
+    );
   }, 60_000);
 });

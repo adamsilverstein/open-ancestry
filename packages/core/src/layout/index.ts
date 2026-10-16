@@ -4,5 +4,7 @@ export { layoutFan } from './fan';
 export { generationLabel } from './output';
 export { layoutPedigree } from './pedigree';
 export type * from './types';
-export { fromNeighborhood } from './neighborhood';
+export { fromNeighborhood, toTreeFamily, toTreePerson } from './neighborhood';
+export { asIndex, indexGraph } from './graph';
+export type { GraphIndex, GraphSource } from './graph';
 export type { NeighborhoodInput, NeighborhoodPerson } from './neighborhood';

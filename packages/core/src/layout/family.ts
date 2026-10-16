@@ -8,7 +8,7 @@
  */
 import { Builder, settingsFrom } from './build';
 import type { Card, FamilyLink, Role, Unit } from './build';
-import { indexGraph } from './graph';
+import { asIndex, type GraphSource } from './graph';
 import {
   boundsOf,
   DEFAULT_CARD,
@@ -26,9 +26,9 @@ import type {
   LayoutEdge,
   LayoutOptions,
   Point,
-  TreeGraph,
   TreeLayout,
 } from './types';
+import { maxOf, minOf, pushAll } from './arrays';
 
 /** Least vertical distance between two couple lanes. */
 const LANE_SPACING = 8;
@@ -50,7 +50,7 @@ const DESCENDANT_CHEVRONS: Chevrons = {
 
 /** Focus person and spouses in the middle row, ancestors above, descendants below. */
 export function layoutFamily(
-  graph: TreeGraph,
+  graph: GraphSource,
   focusId: string,
   options: LayoutOptions = {},
 ): TreeLayout {
@@ -59,7 +59,7 @@ export function layoutFamily(
 
 /** The lower half of the family view: focus person, spouses and descendants. */
 export function layoutDescendants(
-  graph: TreeGraph,
+  graph: GraphSource,
   focusId: string,
   options: LayoutOptions = {},
 ): TreeLayout {
@@ -67,12 +67,12 @@ export function layoutDescendants(
 }
 
 function layoutVertical(
-  graph: TreeGraph,
+  graph: GraphSource,
   focusId: string,
   options: LayoutOptions,
   withAncestors: boolean,
 ): TreeLayout {
-  const index = indexGraph(graph);
+  const index = asIndex(graph);
   if (!index.person(focusId)) return emptyLayout();
   const size = { ...DEFAULT_CARD, ...options.cardSize };
   const gaps = { ...DEFAULT_GAPS, ...options.gaps };
@@ -112,7 +112,7 @@ function layoutVertical(
           : 'left';
     // The spouse's parents take that side of the focus row, so cousins can't.
     if (side !== 'center') b.spouseParentsSide = side === 'left' ? 'right' : 'left';
-    descQueue.push(...b.addSiblings(descRoot, side, 'up', gaps.sibling));
+    pushAll(descQueue, b.addSiblings(descRoot, side, 'up', gaps.sibling));
     const ancRoot = b.unit(descRoot.cards, 0);
     const queue = descRoot.cards.flatMap((card, i) => {
       if ((card.role !== 'focus' && card.role !== 'spouse') || card.upBlocked) return [];
@@ -280,8 +280,8 @@ function verticalEdges(
     group: string,
     xs: number[],
     barY: number,
-    lo = Math.min(...xs),
-    hi = Math.max(...xs),
+    lo = minOf(xs),
+    hi = maxOf(xs),
   ) => {
     const { familyId } = link;
     if (lo < hi) {
@@ -366,7 +366,7 @@ function verticalEdges(
       childEdges(link, group, xs, link.children[0]!.card.y - halfAt(link.children[0]!.card.y));
       return;
     }
-    const drop = { link, group, start, parents, lo: Math.min(...xs), hi: Math.max(...xs), xs };
+    const drop = { link, group, start, parents, lo: minOf(xs), hi: maxOf(xs), xs };
     // Every family dropping into one row is routed together: cousins slid
     // out past the focus row's half siblings must nest with their lines.
     const row = link.children[0]!.card.y;

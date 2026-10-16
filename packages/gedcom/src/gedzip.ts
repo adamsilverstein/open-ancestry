@@ -64,6 +64,8 @@ export function safeEntryPath(name: string): string | undefined {
 
 interface ZipEntry {
   name: string;
+  /** The name as stored, compared byte for byte with the local header's. */
+  rawName: Uint8Array;
   path: string;
   method: number;
   flags: number;
@@ -76,6 +78,24 @@ interface ZipEntry {
 const INFLATE_SLICE = 4096;
 
 const invalid = (message: string) => new GedzipError('invalid', message);
+
+const utf8 = new TextDecoder('utf-8', { fatal: true });
+const cp1252 = new TextDecoder('windows-1252');
+
+/**
+ * An entry name as text. Bit 11 marks UTF-8, but Info-ZIP and macOS (ditto,
+ * Finder) write UTF-8 without it (#287): a name that is valid UTF-8 is read
+ * as UTF-8, and only anything else as the legacy code page (CP437, which
+ * CP1252 covers for ASCII).
+ */
+function decodeName(raw: Uint8Array, flags: number): string {
+  if (flags & 0x800) return new TextDecoder('utf-8').decode(raw);
+  try {
+    return utf8.decode(raw);
+  } catch {
+    return cp1252.decode(raw);
+  }
+}
 
 /** Reads the end-of-central-directory record and every central directory entry. */
 function readCentralDirectory(bytes: Uint8Array, maxEntries: number): Omit<ZipEntry, 'path'>[] {
@@ -105,16 +125,15 @@ function readCentralDirectory(bytes: Uint8Array, maxEntries: number): Omit<ZipEn
     const nameLength = view.getUint16(p + 28, true);
     const end = p + 46 + nameLength + view.getUint16(p + 30, true) + view.getUint16(p + 32, true);
     if (end > bytes.length) throw invalid('Corrupt central directory');
+    const rawName = bytes.subarray(p + 46, p + 46 + nameLength);
     const entry = {
       flags,
       method: view.getUint16(p + 10, true),
       compressedSize: view.getUint32(p + 20, true),
       size: view.getUint32(p + 24, true),
       localOffset: view.getUint32(p + 42, true),
-      // Bit 11 marks UTF-8 names; older tools write CP437, which CP1252 covers for ASCII.
-      name: new TextDecoder(flags & 0x800 ? 'utf-8' : 'windows-1252').decode(
-        bytes.subarray(p + 46, p + 46 + nameLength),
-      ),
+      rawName,
+      name: decodeName(rawName, flags),
     };
     if ([entry.compressedSize, entry.size, entry.localOffset].includes(0xffffffff)) {
       throw invalid('ZIP64 entries are not supported');
@@ -125,16 +144,58 @@ function readCentralDirectory(bytes: Uint8Array, maxEntries: number): Omit<ZipEn
   return entries;
 }
 
-/** Returns an entry's compressed bytes, located through its local header. */
-function entryData(bytes: Uint8Array, entry: ZipEntry): Uint8Array {
+/** Where an entry's local record and compressed data lie, and the name its local header gives. */
+function localRecord(bytes: Uint8Array, entry: ZipEntry) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const p = entry.localOffset;
   if (p + 30 > bytes.length || view.getUint32(p, true) !== 0x04034b50) {
     throw invalid(`Corrupt local header for ${entry.path}`);
   }
-  const start = p + 30 + view.getUint16(p + 26, true) + view.getUint16(p + 28, true);
+  const nameLength = view.getUint16(p + 26, true);
+  if (p + 30 + nameLength > bytes.length) throw invalid(`Corrupt local header for ${entry.path}`);
+  const start = p + 30 + nameLength + view.getUint16(p + 28, true);
   if (start + entry.compressedSize > bytes.length) throw invalid(`${entry.path} is truncated`);
-  return bytes.subarray(start, start + entry.compressedSize);
+  const rawName = bytes.subarray(p + 30, p + 30 + nameLength);
+  return { start, end: start + entry.compressedSize, rawName };
+}
+
+/** Returns an entry's compressed bytes, located through its local header. */
+function entryData(bytes: Uint8Array, entry: ZipEntry): Uint8Array {
+  const { start, end } = localRecord(bytes, entry);
+  return bytes.subarray(start, end);
+}
+
+/**
+ * Each entry must have a local record of its own (#265): central entries that
+ * share or overlap one would inflate the same compressed bytes many times,
+ * each looking like an honest ratio. Its local name must match, too.
+ */
+function assertDistinctRecords(bytes: Uint8Array, entries: ZipEntry[]) {
+  const ranges = entries.map((entry) => {
+    const { end, rawName } = localRecord(bytes, entry);
+    return { entry, start: entry.localOffset, end, rawName };
+  });
+  ranges.sort((a, b) => a.start - b.start || a.end - b.end);
+  for (let i = 1; i < ranges.length; i++) {
+    const before = ranges[i - 1]!;
+    const range = ranges[i]!;
+    if (range.start === before.start) {
+      throw invalid(`${range.entry.path} shares its data with ${before.entry.path}`);
+    }
+    if (range.start < before.end) {
+      throw invalid(`${range.entry.path} overlaps ${before.entry.path}`);
+    }
+  }
+  // By bytes: a writer may flag UTF-8 (bit 11) in only one of the two headers.
+  const same = (a: Uint8Array, b: Uint8Array) =>
+    a.length === b.length && a.every((byte, i) => byte === b[i]);
+  for (const { entry, rawName } of ranges) {
+    if (!same(rawName, entry.rawName)) {
+      throw invalid(
+        `${entry.path} is named ${decodeName(rawName, entry.flags)} in its local header`,
+      );
+    }
+  }
 }
 
 /** Running totals across every entry inflated in one `readGedzip` call. */
@@ -283,11 +344,16 @@ export function readGedzip(bytes: Uint8Array, options: GedzipOptions = {}): Gedz
 
   const mediaEntries = entries.filter((e) => e !== gedEntry);
   const toRead = includeMedia ? [gedEntry, ...mediaEntries] : [gedEntry];
+  assertDistinctRecords(bytes, toRead);
   const total = toRead.reduce((sum, e) => sum + e.size, 0);
   if (total > maxTotalSize) {
     throw new GedzipError('too-large', `Archive expands to more than ${maxTotalSize} bytes`);
   }
-  const compressed = toRead.reduce((sum, e) => sum + e.compressedSize, 0);
+  // No more compressed bytes than the archive has, whatever the headers claim.
+  const compressed = Math.min(
+    bytes.length,
+    toRead.reduce((sum, e) => sum + e.compressedSize, 0),
+  );
   if (total > RATIO_MIN_SIZE && total / Math.max(1, compressed) > maxRatio) {
     throw new GedzipError(
       'ratio',

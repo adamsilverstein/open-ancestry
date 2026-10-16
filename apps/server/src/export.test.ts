@@ -1,4 +1,4 @@
-import { openMemoryTree, openTree } from '@open-ancestry/db';
+import { importJsonString, openMemoryTree, openTree } from '@open-ancestry/db';
 import { join } from 'node:path';
 import { parseGedcom, readGedzip } from '@open-ancestry/gedcom';
 import { importGedcom } from '@open-ancestry/import';
@@ -212,6 +212,91 @@ describe('JSON export history (#197)', () => {
     expect((await api.get(`${base}/export.json`)).body).toMatch(/SECRET-INLINE-NOTE/);
   });
 
+  it('with history=0 leaves out places, notes, media and citations only deleted records used (#267)', async () => {
+    const base = await createTestTree(api, 'Places');
+    const store = openTree(join(api.root, 'Places.oatree'));
+    await importGedcom(
+      {
+        bytes: [
+          '0 HEAD',
+          '1 GEDC',
+          '2 VERS 5.5.1',
+          '0 @I1@ INDI',
+          '1 NAME Odile /Fernsby/',
+          '1 BIRT',
+          '2 PLAC SECRET-HAMLET, SECRET-PARISH, Kerry',
+          '3 NOTE SECRET-PLACE-NOTE',
+          '3 NOTE @N8@',
+          '1 NOTE SECRET-PERSON-NOTE',
+          '1 OBJE',
+          '2 FILE secret/SECRET-PORTRAIT.jpg',
+          '2 TITL SECRET-PHOTO-TITLE',
+          '1 SOUR @S1@',
+          '2 PAGE SECRET-CITATION-PAGE',
+          '1 SOUR @S2@',
+          '2 PAGE p. 4',
+          '1 NOTE @N9@',
+          '1 OBJE @O9@',
+          '0 @I2@ INDI',
+          '1 NAME Bastien /Corlew/',
+          '1 BIRT',
+          '2 PLAC Tralee, Kerry',
+          '2 SOUR @S1@',
+          '3 PAGE Entry 12',
+          '0 @N8@ NOTE SECRET-PLACE-RECORD-NOTE',
+          '1 SOUR @S1@',
+          '2 PAGE SECRET-PLACE-NOTE-CITATION',
+          '0 @N9@ NOTE SECRET-SHARED-NOTE',
+          '1 SOUR @S1@',
+          '2 PAGE SECRET-NOTE-CITATION',
+          '0 @O9@ OBJE',
+          '1 FILE secret/SECRET-SCAN.jpg',
+          '1 SOUR @S1@',
+          '2 PAGE SECRET-MEDIA-CITATION',
+          '0 @R1@ REPO',
+          '1 NAME County Archive',
+          '0 @S2@ SOUR',
+          '1 TITL SECRET-SOURCE-TITLE',
+          '1 REPO @R1@',
+          '0 @N7@ NOTE Never linked research note',
+          '0 @O7@ OBJE',
+          '1 FILE loose/never-linked.jpg',
+          '1 TITL Never linked photo',
+          '0 @S1@ SOUR',
+          '1 TITL Parish register of Tralee',
+          '0 TRLR',
+          '',
+        ].join('\n'),
+      },
+      store,
+    );
+    const odile = store.db
+      .prepare("SELECT person_id FROM person_name WHERE given = 'Odile'")
+      .pluck()
+      .get() as string;
+    store.close();
+    expect((await api.del(`${base}/people/${odile}`)).statusCode).toBe(200);
+
+    const res = await api.get(`${base}/export.json?history=0`);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).not.toContain('SECRET');
+    const { tables } = res.json() as { tables: { place: { name: string }[] } };
+    // Records never linked to anything are the user's, not a deleted record's: kept.
+    expect(res.body).toContain('Never linked research note');
+    expect(res.body).toContain('Never linked photo');
+    // A repository stays as reference data, though its only source went with the delete.
+    expect(res.body).toContain('County Archive');
+    // The source a remaining citation uses stays, with that citation.
+    expect(res.body).toContain('Parish register of Tralee');
+    expect(res.body).toContain('Entry 12');
+    // Kerry stays: Tralee, which a remaining event uses, sits under it.
+    expect(tables.place.map((p) => p.name).sort()).toEqual(['Kerry', 'Tralee']);
+    // Still a whole document: it loads into an empty tree.
+    expect(() => importJsonString(openMemoryTree(), res.body)).not.toThrow();
+    // The full backup keeps every place, as the history may restore them.
+    expect((await api.get(`${base}/export.json`)).body).toContain('SECRET-HAMLET');
+  });
+
   it('keeps the history by default, as a full backup', async () => {
     await deletedNote();
     const res = await api.get(`${s.base}/export.json`);
@@ -219,5 +304,54 @@ describe('JSON export history (#197)', () => {
     expect(tables.change_log!.length).toBeGreaterThan(0);
     expect(res.body).toContain('SECRET-DELETED-NOTE');
     expect((await api.get(`${s.base}/export.json?history=nope`)).statusCode).toBe(400);
+  });
+});
+
+describe('deleting a person whose only pointers were imported text (#245)', () => {
+  it('leaves none of their NOTE, OBJE or SOUR records in any export', async () => {
+    const base = await createTestTree(api, 'Pointers');
+    const store = openTree(join(api.root, 'Pointers.oatree'));
+    await importGedcom(
+      {
+        bytes: [
+          '0 HEAD',
+          '1 GEDC',
+          '2 VERS 5.5.1',
+          '0 @I1@ INDI',
+          '1 NAME Ozias /Canarydeleted/',
+          '1 ASSO @I2@',
+          '2 NOTE @N5@',
+          '1 _CUSTOM',
+          '2 OBJE @O7@',
+          '2 SOUR @S9@',
+          '0 @I2@ INDI',
+          '1 NAME Petra /Keeper/',
+          '0 @N5@ NOTE Canarynote',
+          '0 @O7@ OBJE',
+          '1 FILE photos/canaryphoto.jpg',
+          '2 FORM jpg',
+          '0 @S9@ SOUR',
+          '1 TITL Canarysource',
+          '0 TRLR',
+          '',
+        ].join('\n'),
+      },
+      store,
+    );
+    const ozias = store.db
+      .prepare("SELECT person_id FROM person_name WHERE given = 'Ozias'")
+      .pluck()
+      .get() as string;
+    store.close();
+    expect((await api.del(`${base}/people/${ozias}`)).statusCode).toBe(200);
+    for (const url of [
+      `${base}/export.ged`,
+      `${base}/export.ged?version=7`,
+      `${base}/export.json?history=0`,
+    ]) {
+      const res = await api.get(url);
+      expect(res.statusCode, url).toBe(200);
+      expect(res.body.match(/canary\w*/gi) ?? [], url).toEqual([]);
+    }
   });
 });

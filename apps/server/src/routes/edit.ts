@@ -38,6 +38,7 @@ import { badRequest, conflict, notFound } from '../errors';
 import { mergePeople } from '../merge';
 import {
   addName,
+  checkSeen,
   createTag,
   deleteName,
   runOperation,
@@ -637,9 +638,10 @@ export function editRoutes(app: Api, { library }: Deps): void {
     async (request) => {
       const store = open(request.params.tree);
       const { label, operations } = request.body;
-      const { batchId, result } = edit(store, label, (tx) =>
-        operations.map((operation) => runOperation(tx, operation)),
-      );
+      const { batchId, result } = edit(store, label, (tx) => {
+        checkSeen(tx.store, operations);
+        return operations.map((operation) => runOperation(tx, operation));
+      });
       return { batchId, results: result };
     },
   );

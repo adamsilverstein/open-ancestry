@@ -1,5 +1,3 @@
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -33,6 +31,7 @@ import {
   type TreeStore,
 } from './index';
 import { memoryTree, seedSmallFamily } from './test/helpers';
+import { makeTempDir } from '../../../fixtures/temp-dir';
 
 describe('person summaries', () => {
   it('returns primary name and vital events', () => {
@@ -105,6 +104,23 @@ describe('person summaries', () => {
     });
     const local = (id: string) => getPersonSummaries(store, [id])[0]!.primaryPhotoLocal;
     expect([f.me, f.dad, f.mom, f.kid].map(local)).toEqual([true, false, false, false]);
+    store.close();
+  });
+
+  it('versions the primary photo by its bytes, so a replaced file gets a new URL', () => {
+    const store = memoryTree();
+    const f = seedSmallFamily(store);
+    store.transact('photos', (tx) => {
+      const photo = media.create(tx, {
+        kind: 'photo',
+        local_path: 'photos/a.png',
+        sha256: 'c0ffee'.repeat(10) + 'beef',
+      });
+      tx.update('person', f.me, { primary_media_id: photo.id });
+    });
+    const version = (id: string) => getPersonSummaries(store, [id])[0]!.primaryPhotoVersion;
+    expect(version(f.me)).toBe('c0ffeec0ffeec0ff');
+    expect(version(f.kid)).toBeNull();
     store.close();
   });
 });
@@ -411,6 +427,10 @@ describe('listPeople', () => {
     expect(listPeople(store, { sex: 'F' }).total).toBe(5);
     // Untyped callers sending an unknown sort get the default order, not an SQL error.
     expect(listPeople(store, { sort: 'bogus' as 'surname' }).items[0]?.surname).toBe('Fenn');
+    // A prototype key is not a sort either (#267): the default, not a crash.
+    for (const sort of ['toString', 'constructor', '__proto__', 'hasOwnProperty']) {
+      expect(listPeople(store, { sort: sort as 'surname' }).items[0]?.surname, sort).toBe('Fenn');
+    }
 
     store.transact('tag', (tx) => {
       const t = tags.create(tx, { name: 'Line A' });
@@ -532,7 +552,7 @@ describe('listPeople', () => {
   });
 
   it('sees writes made through another connection to the same tree', () => {
-    const dir = join(mkdtempSync(join(tmpdir(), 'oa-list-')), 'a.oatree');
+    const dir = join(makeTempDir('oa-list-'), 'a.oatree');
     const store = createTree(dir);
     seedSmallFamily(store);
     expect(listPeople(store, { sort: 'given' }).total).toBe(9);
@@ -556,6 +576,122 @@ describe('listPeople', () => {
     expect(listPeople(store).total).toBe(10);
     store.db.exec('ROLLBACK');
     expect(listPeople(store).total).toBe(9);
+    store.close();
+  });
+});
+
+describe('getNeighborhood childrenLoaded', () => {
+  it('lists the people whose children are all in the slice, and only them', () => {
+    const store = memoryTree();
+    const ids = store.transact('seed', (tx) => {
+      const p = (given: string) => persons.create(tx, { names: [{ given, surname: 'Synth' }] }).id;
+      const [gp, gm, dad, mom, aunt, me, kid, cousin, w2, half] = [
+        p('Gp'),
+        p('Gm'),
+        p('Dad'),
+        p('Mom'),
+        p('Aunt'),
+        p('Me'),
+        p('Kid'),
+        p('Cousin'),
+        p('W2'),
+        p('Half'),
+      ];
+      families.create(tx, {
+        partner1_id: gp,
+        partner2_id: gm,
+        children: [{ child_id: dad }, { child_id: aunt }],
+      });
+      families.create(tx, { partner1_id: dad, partner2_id: mom, children: [{ child_id: me }] });
+      families.create(tx, { partner1_id: dad, partner2_id: w2, children: [{ child_id: half }] });
+      families.create(tx, { partner1_id: aunt, children: [{ child_id: cousin }] });
+      families.create(tx, { partner1_id: me, children: [{ child_id: kid }] });
+      return { gp, dad, aunt, me, kid };
+    }).result;
+    // Parents' families (with half siblings) are complete at siblingsDepth 1;
+    // the grandparents' are not (only Dad, the line child, would be certain).
+    const n = getNeighborhood(store, ids.me, { up: 2, down: 1, siblingsDepth: 1 });
+    expect(n.childrenLoaded).toEqual(expect.arrayContaining([ids.me, ids.dad]));
+    expect(n.childrenLoaded).not.toContain(ids.gp);
+    // Aunt is a leaf sibling of Dad only at siblingsDepth 2: her children are not loaded.
+    const wide = getNeighborhood(store, ids.me, { up: 2, down: 1, siblingsDepth: 2 });
+    expect(wide.childrenLoaded).toContain(ids.gp);
+    expect(wide.childrenLoaded).not.toContain(ids.aunt);
+    expect(wide.moreDown).toContain(ids.aunt);
+    // A slice stopped at the cap, even exactly at it, claims nothing.
+    const capped = getNeighborhood(store, ids.me, { up: 0, down: 2, maxPeople: 2 });
+    expect(capped.truncated).toBe(true);
+    expect(capped.people).toHaveLength(2);
+    expect(capped.childrenLoaded).toEqual([]);
+    // The bottom generation's children are past `down`.
+    expect(getNeighborhood(store, ids.me, { up: 0, down: 0 }).childrenLoaded).toEqual([]);
+    store.close();
+  });
+});
+
+describe('getNeighborhood moreSiblings', () => {
+  it('flags line ancestors whose siblings the slice left out, until a slice holds them', () => {
+    const store = memoryTree();
+    const ids = store.transact('seed', (tx) => {
+      const p = (given: string) => persons.create(tx, { names: [{ given, surname: 'Synth' }] }).id;
+      const [gp, gm, dad, aunt, me, sis] = [
+        p('Gp'),
+        p('Gm'),
+        p('Dad'),
+        p('Aunt'),
+        p('Me'),
+        p('Sis'),
+      ];
+      families.create(tx, {
+        partner1_id: gp,
+        partner2_id: gm,
+        children: [{ child_id: dad }, { child_id: aunt }],
+      });
+      families.create(tx, { partner1_id: dad, children: [{ child_id: me }, { child_id: sis }] });
+      return { dad, me, aunt };
+    }).result;
+    const narrow = getNeighborhood(store, ids.me, { up: 2, down: 0, siblingsDepth: 1 });
+    expect(narrow.moreSiblings).toEqual([ids.dad]);
+    expect(narrow.siblingsLoaded).toContain(ids.me);
+    expect(narrow.siblingsLoaded).not.toContain(ids.dad);
+    const wide = getNeighborhood(store, ids.me, { up: 2, down: 0, siblingsDepth: 2 });
+    expect(wide.moreSiblings).toEqual([]);
+    expect(wide.siblingsLoaded).toEqual(expect.arrayContaining([ids.me, ids.dad]));
+    // A slice on Dad himself, with his siblings.
+    const onDad = getNeighborhood(store, ids.dad, { up: 1, down: 0, siblingsDepth: 1 });
+    expect(onDad.siblingsLoaded).toContain(ids.dad);
+    store.close();
+  });
+
+  it('does not flag an ancestor whose siblings the slice already holds', () => {
+    const store = memoryTree();
+    const ids = store.transact('seed', (tx) => {
+      const p = (given: string) => persons.create(tx, { names: [{ given, surname: 'Synth' }] }).id;
+      const [gp, dad, uncle, me, sis] = [p('Gp'), p('Dad'), p('Uncle'), p('Me'), p('Sis')];
+      families.create(tx, { partner1_id: gp, children: [{ child_id: dad }, { child_id: uncle }] });
+      families.create(tx, { partner1_id: dad, children: [{ child_id: me }, { child_id: sis }] });
+      // Synthetic: Sis married Uncle, so he comes with her as her partner.
+      families.create(tx, { partner1_id: uncle, partner2_id: sis, children: [] });
+      return { dad, me, uncle };
+    }).result;
+    const n = getNeighborhood(store, ids.me, { up: 2, down: 0, siblingsDepth: 1 });
+    expect(n.people.map((x) => x.id)).toContain(ids.uncle);
+    expect(n.moreSiblings).not.toContain(ids.dad);
+    store.close();
+  });
+
+  it('does not flag an ancestor without siblings', () => {
+    const store = memoryTree();
+    const ids = store.transact('seed', (tx) => {
+      const p = (given: string) => persons.create(tx, { names: [{ given, surname: 'Synth' }] }).id;
+      const [gp, dad, me] = [p('Gp'), p('Dad'), p('Me')];
+      families.create(tx, { partner1_id: gp, children: [{ child_id: dad }] });
+      families.create(tx, { partner1_id: dad, children: [{ child_id: me }] });
+      return { me };
+    }).result;
+    expect(
+      getNeighborhood(store, ids.me, { up: 2, down: 0, siblingsDepth: 1 }).moreSiblings,
+    ).toEqual([]);
     store.close();
   });
 });

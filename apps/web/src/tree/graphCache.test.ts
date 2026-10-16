@@ -54,6 +54,7 @@ const first: ApiNeighborhood = {
   children: [child('f1', 'ada')],
   moreUp: ['bram'],
   moreDown: ['ada'],
+  childrenLoaded: [],
   truncated: false,
 };
 
@@ -85,6 +86,7 @@ describe('GraphCache', () => {
       children: [child('f0', 'bram')],
       moreUp: ['otto'],
       moreDown: [],
+      childrenLoaded: [],
       truncated: false,
     });
     expect(cache.needsParents('bram')).toBe(false);
@@ -92,18 +94,23 @@ describe('GraphCache', () => {
     expect(cache.graph().families).toHaveLength(2);
   });
 
-  it('clears the children hint once a partner family has children', () => {
+  it('clears the children hint only once a slice holds all of their children', () => {
     const cache = new GraphCache();
     cache.merge(first);
-    cache.merge({
+    // One child loaded (say as the line child of an ancestor) is not all of them.
+    const some = {
       focusId: 'ada',
       people: [summary('ada'), summary('wren')],
       families: [family('f2', null, 'ada')],
       children: [child('f2', 'wren')],
       moreUp: [],
       moreDown: [],
+      childrenLoaded: [],
       truncated: false,
-    });
+    };
+    cache.merge(some);
+    expect(cache.needsChildren('ada')).toBe(true);
+    cache.merge({ ...some, childrenLoaded: ['ada'] });
     expect(cache.needsChildren('ada')).toBe(false);
   });
 

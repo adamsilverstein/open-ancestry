@@ -36,6 +36,7 @@ const empty: ApiNeighborhood = {
   children: [],
   moreUp: [],
   moreDown: [],
+  childrenLoaded: [],
   truncated: false,
 };
 const request = (focusId: string) => ({ kind: 'family' as const, focusId, options: {} });

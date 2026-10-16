@@ -34,6 +34,8 @@ export class GraphCache {
   private readonly familyChildren = new Map<string, ChildEdge[]>();
   /** Family id to its arrival position ("graph order" for ties when sorting). */
   private readonly familySeq = new Map<string, number>();
+  /** People whose children some slice held in full (the server's `childrenLoaded`). */
+  private readonly childrenLoaded = new Set<string>();
   /** Person id to the families they are a partner in. */
   private readonly partnerFamilies = new Map<string, string[]>();
   private memo: { version: number; graph: TreeGraph } | null = null;
@@ -79,6 +81,12 @@ export class GraphCache {
         this.version++;
       }
     }
+    for (const id of slice.childrenLoaded ?? []) {
+      if (!this.childrenLoaded.has(id)) {
+        this.childrenLoaded.add(id);
+        this.version++;
+      }
+    }
     for (const id of slice.moreDown) {
       if (!this.moreDown.has(id)) {
         this.moreDown.add(id);
@@ -111,10 +119,13 @@ export class GraphCache {
     return this.moreUp.has(id) && !this.parentFamilies.has(id);
   }
 
-  /** The database has children for this person that no slice has loaded yet. */
+  /**
+   * The database has children for this person that no slice has loaded yet.
+   * Some of their children being loaded is not enough: a grandparent comes
+   * with only their line child, so only a slice that held all of them counts.
+   */
   needsChildren(id: string): boolean {
-    if (!this.moreDown.has(id)) return false;
-    return !(this.partnerFamilies.get(id) ?? []).some((f) => this.familyChildren.has(f));
+    return this.moreDown.has(id) && !this.childrenLoaded.has(id);
   }
 
   /** Partners of the person's preferred (else first) parent family. */
@@ -135,6 +146,7 @@ export class GraphCache {
       children: [...this.children.values()],
       moreUp: [...this.moreUp],
       moreDown: [...this.moreDown],
+      childrenLoaded: [...this.childrenLoaded],
       truncated: false,
     };
   }

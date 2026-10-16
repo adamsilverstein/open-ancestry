@@ -479,6 +479,13 @@ export interface Neighborhood {
   moreUp: string[];
   /** People at the bottom edge who have children not included. */
   moreDown: string[];
+  /**
+   * People whose children (in every partner family) are all included: the
+   * focus and descendants above the bottom edge, and ancestors whose
+   * siblings were fetched. A person missing here may have more children
+   * than the slice shows, even if some are in it.
+   */
+  childrenLoaded: string[];
   /** True when the slice hit `maxPeople` and stopped early. */
   truncated: boolean;
 }
@@ -597,6 +604,8 @@ export function getNeighborhood(
       JSON.stringify(familyIds),
     );
 
+  const childrenLoaded = new Set<string>();
+
   // Ancestors.
   let frontier = [focusId];
   const seenUp = new Set(frontier);
@@ -631,6 +640,8 @@ export function getNeighborhood(
         addChild(c);
         if (!line.has(c.child_id)) siblingIds.add(c.child_id);
       }
+      // Every partner family of these parents came with all its children.
+      for (const id of parentIds) childrenLoaded.add(id);
     }
     frontier = next;
   }
@@ -668,6 +679,8 @@ export function getNeighborhood(
       ].sort();
       break;
     }
+    // All the partner families of this generation, with all their children.
+    for (const id of frontier) childrenLoaded.add(id);
     const next: string[] = [];
     for (const k of kids) {
       addChild(k);
@@ -717,6 +730,8 @@ export function getNeighborhood(
     childEdges = childEdges.filter((c) => keep.has(c.childId) && keptFamilies.has(c.familyId));
     moreUp = moreUp.filter((id) => keep.has(id));
     moreDown = moreDown.filter((id) => keep.has(id));
+    // Cut short, the slice may have dropped anyone's children: claim nothing.
+    childrenLoaded.clear();
   }
 
   return {
@@ -726,6 +741,7 @@ export function getNeighborhood(
     children: childEdges,
     moreUp,
     moreDown,
+    childrenLoaded: [...childrenLoaded].filter((id) => people.has(id)).sort(),
     truncated,
   };
 }

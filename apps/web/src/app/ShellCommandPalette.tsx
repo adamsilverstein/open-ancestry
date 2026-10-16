@@ -140,7 +140,11 @@ export default function ShellCommandPalette({
   if (!stale && hits.length > 0 && total > hits.length && !showAll) {
     people.push({
       id: 'people:all',
-      label: `Show all ${total} people`,
+      // The palette lists at most PALETTE_ALL_RESULTS: say so rather than promise all.
+      label:
+        total > PALETTE_ALL_RESULTS
+          ? `Show the first ${PALETTE_ALL_RESULTS} of ${total.toLocaleString()} people`
+          : `Show all ${total} people`,
       keepOpen: true,
       onSelect: () => setAllFor(query),
     });

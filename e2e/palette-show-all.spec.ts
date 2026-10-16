@@ -40,3 +40,32 @@ test('shows the first matches in name order and offers all of them', async ({
   await expect(people.filter({ hasText: 'Quillfeather' })).toHaveCount(12);
   await expect(dialog.getByRole('option', { name: /^Show all/ })).toHaveCount(0);
 });
+
+test('says it lists only the first 100 when more match', async ({
+  page,
+  request,
+  baseURL,
+}, info) => {
+  const s = await session(request, baseURL!);
+  const tree = uniqueTreeName('palette', `${info.project.name} ${info.title}`);
+  await send(request, s, 'post', '/api/trees', { name: tree });
+  const base = `/api/trees/${encodeURIComponent(tree)}`;
+  for (const given of GIVEN) {
+    await send(request, s, 'post', `${base}/people`, person(given, 'Quillfeather', 'M', '1880'));
+  }
+  // As if the tree held far more Quillfeathers than the palette can list.
+  await page.route('**/search?*', async (route) => {
+    const res = await route.fetch();
+    const body = (await res.json()) as { items: unknown[]; total: number };
+    await route.fulfill({ response: res, json: { ...body, total: 1795 } });
+  });
+  await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+  await page.goto('/');
+  await expect(page.locator('html[data-shell-ready]')).toBeAttached();
+  await page.keyboard.press(`${modKey}+k`);
+  const dialog = page.getByRole('dialog', { name: 'Command palette' });
+  await dialog.getByRole('combobox').fill('quillfeather');
+  await expect(
+    dialog.getByRole('option', { name: 'Show the first 100 of 1,795 people' }),
+  ).toBeVisible();
+});

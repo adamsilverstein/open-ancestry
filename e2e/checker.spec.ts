@@ -67,7 +67,7 @@ test('lists duplicates, impossible dates and unsourced people with links', async
     .first()
     .getByRole('link', { name: /Bram Vale/ })
     .click();
-  await expect(page).toHaveURL(new RegExp(`/person/${seeded.backwards}$`));
+  await expect(page).toHaveURL(new RegExp(`/person/${seeded.backwards}(\\?tree=[^&]*)?$`));
 });
 
 test('dismisses an issue, shows it under Dismissed, and undo brings it back', async ({ page }) => {

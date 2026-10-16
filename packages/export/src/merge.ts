@@ -21,6 +21,11 @@ export interface MergeContext {
    * someone withheld.
    */
   readonly quoteLines: boolean;
+  /**
+   * False when privatizing: imported custom (`_`) lines are left out, since
+   * nobody vetted what they say (#195).
+   */
+  readonly keepCustomTags: boolean;
   /** GEDCOM major version of the imported file: 7 escapes `@` and reads padded pointers differently. */
   readonly sourceVersion: number;
 }
@@ -205,7 +210,9 @@ export function mergeUnmapped(
       }
       level = next;
     }
-    new Merger(ctx, label, (node) => unmapped.has(node)).walk(source, record, source.tag);
+    const merger = new Merger(ctx, label, (node) => unmapped.has(node));
+    merger.walk(source, record, source.tag);
+    merger.reportCustom();
   }
   setLevels(record);
 }
@@ -214,6 +221,8 @@ class Merger {
   private readonly ctx: MergeContext;
   private readonly label: string;
   private readonly isUnmapped: (node: GedcomNode, path: string) => boolean;
+  /** Custom lines left out of a privatized export. */
+  private droppedCustom = 0;
   /** Lines this merge inserted, as opposed to lines the generator wrote. */
   private readonly merged = new WeakSet<GedcomNode>();
 
@@ -234,6 +243,14 @@ class Merger {
     }
     const line = `${node.tag}${node.pointer ? ` ${node.pointer}` : node.value ? ` ${node.value.split('\n')[0]}` : ''}`;
     this.ctx.warn(`${this.label}: "${line}" (${path}) was not carried over: ${why}`);
+  }
+
+  reportCustom(): void {
+    if (!this.droppedCustom) return;
+    const lines = this.droppedCustom === 1 ? 'line was' : 'lines were';
+    this.ctx.warn(
+      `${this.label}: ${this.droppedCustom} imported custom (_) ${lines} left out of the privatized export`,
+    );
   }
 
   /** Adds a whole subtree at the end of `target` (top-level lines without imported text). */
@@ -309,6 +326,10 @@ class Merger {
 
   /** The subtree as it will be written, minus lines that cannot be (reported). */
   private prepare(node: GedcomNode, path: string): GedcomNode | undefined {
+    if (!this.ctx.keepCustomTags && node.tag.startsWith('_')) {
+      this.droppedCustom++;
+      return undefined;
+    }
     if (path.endsWith('ASSO.RELA') && this.ctx.v7) return relaToRole(node.value);
     if (path.endsWith('ASSO.ROLE') && !this.ctx.v7) return roleToRela(node);
     if (this.ctx.v7 && !node.tag.startsWith('_') && !GEDCOM7_TAGS.has(node.tag)) {
@@ -424,4 +445,5 @@ function fallback(ctx: MergeContext, record: GedcomNode, lines: UnmappedLineRow[
   const doc = parseGedcom(`0 _UNMAPPED\n${kept.join('\n')}\n`);
   const merger = new Merger(ctx, label, () => true);
   for (const c of doc.records[0]!.children) merger.append(c, record, `${record.tag}.${c.tag}`);
+  merger.reportCustom();
 }

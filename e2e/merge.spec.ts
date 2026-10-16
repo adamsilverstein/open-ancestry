@@ -52,7 +52,7 @@ test('compares two records, merges with the chosen facts, and undoes', async ({ 
   });
   await confirm.getByRole('button', { name: 'Merge', exact: true }).click();
 
-  await expect(page).toHaveURL(new RegExp(`/person/(${rowan}|${twin})$`));
+  await expect(page).toHaveURL(new RegExp(`/person/(${rowan}|${twin})(\\?tree=[^&]*)?$`));
   const id = new URL(page.url()).pathname.split('/').pop()!;
   const timeline = page.getByRole('region', { name: 'Timeline', exact: true });
   const births = timeline
@@ -95,7 +95,7 @@ test('can swap which record is kept and take its name', async ({ page }) => {
   await table.getByRole('radio', { name: 'Name from Rowan Ashdown: Rowan Ashdown' }).check();
   await page.getByRole('button', { name: 'Merge', exact: true }).click();
   await page.getByRole('alertdialog').getByRole('button', { name: 'Merge', exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/person/${twin}$`));
+  await expect(page).toHaveURL(new RegExp(`/person/${twin}(\\?tree=[^&]*)?$`));
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Rowan Ashdown');
 });
 

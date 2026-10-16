@@ -91,7 +91,7 @@ test.describe('person', () => {
     await expect(h1(page)).toHaveText('Tobias');
     await page.keyboard.press(`${mod}+z`);
     // To the nearest relative (a parent first), not back through history (#189).
-    await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}$`));
+    await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}(\\?tree=[^&]*)?$`));
     await expect(
       toasts(page).filter({ hasText: 'Tobias was deleted (in another window or by undo)' }),
     ).toBeVisible();
@@ -220,14 +220,14 @@ test.describe('person', () => {
     await dialog.getByRole('button', { name: 'Delete person' }).click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Delete person' }).click();
     // Lands on a parent (#107); e2e/delete-person.spec.ts covers the other cases.
-    await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}$`));
+    await expect(page).toHaveURL(new RegExp(`/person/${seeded.edmund}(\\?tree=[^&]*)?$`));
     await expect(toasts(page).filter({ hasText: 'Deleted Rowan Ashdown' })).toBeVisible();
 
     await page.keyboard.press(`${mod}+z`);
     await expect(
       toasts(page).filter({ hasText: 'Undid Delete person: Rowan Ashdown' }),
     ).toBeVisible();
-    await expect(page).toHaveURL(new RegExp(`/person/${seeded.rowan}$`));
+    await expect(page).toHaveURL(new RegExp(`/person/${seeded.rowan}(\\?tree=[^&]*)?$`));
     await expect(h1(page)).toHaveText('Rowan Ashdown');
   });
 });

@@ -50,8 +50,11 @@ test('adds the first person to an empty tree, who becomes home, then undoes and 
   await fillWithKeyboard(page);
 
   await expect(h1(page)).toHaveText('Wren Ashby');
-  await expect(page).toHaveURL(/\/person\/[0-9A-Z]+$/);
-  const personId = page.url().split('/').pop()!;
+  // Person URLs name their tree (#172): it must be the new, empty one.
+  await expect(page).toHaveURL(/\/person\/[0-9A-Z]+\?tree=[^&]+$/);
+  const url = new URL(page.url());
+  expect(url.searchParams.get('tree')).toBe(tree);
+  const personId = url.pathname.split('/').pop()!;
   const home = await (await request.get(`/api/trees/${encodeURIComponent(tree)}/home`)).json();
   expect(home.personId).toBe(personId);
 

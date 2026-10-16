@@ -58,5 +58,10 @@
     "better-sqlite3@13.0.3": true,
     "esbuild@0.28.2": true,
     "fsevents": false
+  },
+  "overrides": {
+    "@istanbuljs/load-nyc-config": {
+      "js-yaml": "^4.1.0"
+    }
   }
 }

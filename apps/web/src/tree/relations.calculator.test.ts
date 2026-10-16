@@ -140,3 +140,24 @@ describe('adoption on the focus side of an uncle (#296 review)', () => {
     expect(labels(g, 'p76').p37).toBe('adoptive uncle');
   });
 });
+
+describe('siblings sharing a birth mother and a non-birth father (#296 review)', () => {
+  // The most common adoption pattern in imported trees: a mother's two
+  // children, both adopted by (or both stepchildren of) her later husband,
+  // with their birth father unrecorded. They are brothers, not half-brothers.
+  for (const rel of ['adopted', 'step'] as const) {
+    it(`calls them brothers when both are ${rel} to the husband`, () => {
+      const g = mk({ mum: 'F', hus: 'M', a: 'M', b: 'M' }, [['F', 'hus', 'mum', ['a', 'b']]]);
+      for (const kid of g.families[0]!.children as { rel1?: ChildRelation }[]) kid.rel1 = rel;
+      expect(calc(g, 'b', 'a')).toBe('brother');
+      expect(labels(g, 'a').b).toBe('brother');
+    });
+  }
+
+  it('still calls them half when the husband is the birth father of only one', () => {
+    const g = mk({ mum: 'F', hus: 'M', a: 'M', b: 'M' }, [['F', 'hus', 'mum', ['a', 'b']]]);
+    (g.families[0]!.children[0] as { rel1?: ChildRelation }).rel1 = 'adopted';
+    expect(calc(g, 'b', 'a')).toBe('half-brother');
+    expect(labels(g, 'a').b).toBe('half-brother');
+  });
+});

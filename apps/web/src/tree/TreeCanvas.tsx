@@ -653,11 +653,13 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
    */
   const centeredOnFocus = useCallback((t: Transform, fitRows = false): Transform => {
     const { width } = size.current;
-    // On phones the toolbar runs along the bottom: frame the space above it.
-    const bar = viewportRef.current
-      ? parseFloat(getComputedStyle(viewportRef.current).getPropertyValue('--oa-tree-bottom-bar'))
-      : 0;
-    const height = size.current.height - (bar || 0);
+    // On phones the toolbar runs along the bottom and the notices and tag pill
+    // along the top: frame the space between them.
+    const style = viewportRef.current ? getComputedStyle(viewportRef.current) : null;
+    const bar = style ? parseFloat(style.getPropertyValue('--oa-tree-bottom-bar')) : 0;
+    const topBar = (style && parseFloat(style.getPropertyValue('--oa-tree-top-bar'))) || 0;
+    const height = size.current.height - (bar || 0) - topBar;
+    const below = (r: Transform): Transform => ({ ...r, y: r.y + topBar });
     const { layout: current, fan: currentFan } = latest.current;
     const focus = current?.nodes.find((n) => n.isFocus);
     if (focus && current && latest.current.kind === 'family') {
@@ -698,7 +700,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         const room = width - pad - (right * scale + x);
         if (overlap > 0) x += Math.max(0, Math.min(overlap, room));
       }
-      return { x, y, scale };
+      return below({ x, y, scale });
     }
     const pad = 32;
     // Clear of the floating toolbar on the left (along the bottom on phones).
@@ -720,25 +722,27 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         ? fitScale(width - toolbar - 2 * pad, height - 2 * pad - heads)
         : t.scale;
       const b = current.bounds;
-      return {
+      return below({
         x: toolbar + pad - focus.x * scale,
         y: (height + heads) / 2 - (b.minY + b.height / 2) * scale,
         scale,
-      };
+      });
     }
     if (focus && current && latest.current.kind === 'descendants') {
       // Focus at the top center, descendants below.
       const scale = fitRows ? fitScale(width - 2 * pad, height - 2 * pad - 28) : t.scale;
       const centered = centerOn({ ...t, scale }, focus.x + focus.width / 2, 0, width, height);
-      return { x: centered.x, y: pad + 14 - focus.y * scale, scale };
+      return below({ x: centered.x, y: pad + 14 - focus.y * scale, scale });
     }
     if (focus)
-      return centerOn(t, focus.x + focus.width / 2, focus.y + focus.height / 2, width, height);
+      return below(
+        centerOn(t, focus.x + focus.width / 2, focus.y + focus.height / 2, width, height),
+      );
     if (currentFan) {
       // The whole fan, as large as fits.
-      if (fitRows) return fitFan(currentFan, width, height, FIT_PADDING);
+      if (fitRows) return below(fitFan(currentFan, width, height, FIT_PADDING));
       const b = currentFan.bounds;
-      return centerOn(t, b.minX + b.width / 2, b.minY + b.height / 2, width, height);
+      return below(centerOn(t, b.minX + b.width / 2, b.minY + b.height / 2, width, height));
     }
     return t;
   }, []);

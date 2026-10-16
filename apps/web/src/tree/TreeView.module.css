@@ -382,11 +382,41 @@
 }
 
 /* Partial load: the tree still shows, with a quiet retry at the top. */
-.notice {
+/*
+ * The notices and the tag pill, stacked down from the top center so none
+ * covers another. Taps between them reach the tree.
+ */
+.topStack {
   position: absolute;
   top: var(--oa-space-4);
   left: 50%;
-  z-index: 2;
+  translate: -50% 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--oa-space-2);
+  width: max-content;
+  max-width: calc(100% - 2 * var(--oa-space-4));
+  pointer-events: none;
+}
+
+.topStack > * {
+  pointer-events: auto;
+}
+
+/* Touch: the 44px targets of the rest of the phone layout. */
+@media (pointer: coarse) {
+  .topStack :is(a, button) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+.notice {
   display: flex;
   align-items: center;
   gap: var(--oa-space-3);
@@ -398,7 +428,6 @@
   box-shadow: var(--oa-shadow-2);
   color: var(--oa-text);
   font: var(--oa-text-sm);
-  transform: translateX(-50%);
 }
 
 /* A note rather than a warning: the view works, another goes further. */
@@ -435,24 +464,17 @@
 }
 
 .highlight {
-  position: absolute;
-  top: var(--oa-space-3);
-  left: 50%;
-  translate: -50% 0;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   align-items: center;
   gap: var(--oa-space-2);
-  width: max-content;
-  max-width: calc(100% - 2 * var(--oa-space-4));
   padding: var(--oa-space-1) var(--oa-space-2) var(--oa-space-1) var(--oa-space-3);
   border: 1px solid var(--oa-elevated-border);
   border-radius: var(--oa-radius-full);
   background: var(--oa-surface);
   box-shadow: var(--oa-shadow-2);
   font: var(--oa-text-sm);
-  z-index: 5;
 }
 
 .fanSegment[data-highlighted]:focus-visible path {

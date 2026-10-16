@@ -133,4 +133,25 @@ describe('family facts on re-import (#268)', () => {
       closeReimport(s);
     }
   });
+
+  it('keeps a deleted marriage deleted when the export corrects its date and place', async () => {
+    const f3 = fid(store, '@F3@');
+    store.transact('Delete marriage', (tx) => events.delete(tx, marriageId(f3)));
+    const before = '2 DATE 1892\n2 PLAC Elderford, Cask County, Ohio, USA';
+    const updated = renumber(
+      SAMPLE.replaceAll(before, '2 DATE 12 JUN 1892\n2 PLAC Wexmoor, Dale County, Ohio, USA'),
+    );
+    const s = await prepareReimport(store, { bytes: updated }, { today: TODAY });
+    try {
+      const adds = s.diff.people
+        .flatMap((p) => p.changes)
+        .filter((c) => c.kind === 'fact.add' && c.owner === 'family');
+      // The same marriage, corrected: the user's deletion is a conflict, not a fresh add.
+      expect(adds).toMatchObject([{ conflict: 'local-delete', defaultAccept: false }]);
+      applyReimport(store, s, defaults(s), 'Re-import');
+    } finally {
+      closeReimport(s);
+    }
+    expect(marriages(f3)).toBe(0);
+  });
 });

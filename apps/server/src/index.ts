@@ -184,6 +184,7 @@ export function createServer(options: ServerOptions = {}): FastifyInstance {
   // Once, at startup: warn if others can see an existing library folder
   // (a missing one is created, private, on first use).
   if (existsSync(library.root)) library.ensureRoot();
+  library.recoverRenames();
   library.sweepInterruptedImports();
   void sweepStaleUploads();
   const importLimits = resolveImportLimits(options.importLimits);

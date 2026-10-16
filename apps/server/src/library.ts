@@ -119,6 +119,11 @@ function assertTreeName(name: string): void {
   if (problem) throw new ApiError(400, 'bad_request', problem);
 }
 
+/** A tree folder mid-rename (see Library.rename), and the note of where it was going. */
+const RENAMING =
+  /^\.renaming-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.oatree$/;
+const RENAME_MARKER = '.rename-to';
+
 /** A tree's lock file while an import or compare runs in some server (#275 P3). */
 const BUSY_LOCK = 'busy.lock';
 /**
@@ -448,6 +453,53 @@ export class Library {
   }
 
   /**
+   * Startup: finishes renames a crash interrupted between their two steps
+   * (see rename), which left a tree under a hidden `.renaming-*` name. It
+   * takes the new name if free, else the old one, else the name stored in
+   * the tree. Returns the ids the trees got back.
+   */
+  recoverRenames(): string[] {
+    const recovered: string[] = [];
+    let names: string[];
+    try {
+      names = readdirSync(this.root);
+    } catch {
+      return recovered;
+    }
+    for (const name of names) {
+      if (!RENAMING.test(name)) continue;
+      const temp = join(this.root, name);
+      let wanted: string[] = [];
+      try {
+        const marker = JSON.parse(readFileSync(join(temp, RENAME_MARKER), 'utf8')) as {
+          from?: unknown;
+          to?: unknown;
+        };
+        wanted = [marker.to, marker.from].filter((n): n is string => typeof n === 'string');
+      } catch {
+        try {
+          const store = openTree(temp);
+          wanted = [meta.get(store, 'tree_name')].filter((n): n is string => !!n);
+          store.close();
+        } catch {
+          // Not a readable tree: left for the user.
+        }
+      }
+      const id = wanted
+        .map((n) => n.normalize('NFC'))
+        .find(
+          (n) =>
+            treeNameProblem(n) === null && !existsSync(join(this.root, `${n}${TREE_EXTENSION}`)),
+        );
+      if (!id) continue;
+      renameSync(temp, join(this.root, `${id}${TREE_EXTENSION}`));
+      rmSync(join(this.root, `${id}${TREE_EXTENSION}`, RENAME_MARKER), { force: true });
+      recovered.push(id);
+    }
+    return recovered;
+  }
+
+  /**
    * Startup: removes empty trees left by imports a crash or restart
    * interrupted. Only trees created over `minAgeMs` ago are touched, so an
    * import another server process is running on the same library is safe.
@@ -527,9 +579,15 @@ export class Library {
     this.close(id);
     if (own) {
       // Through a temporary name, so the file system records the new spelling.
+      // The marker lets recoverRenames finish the job after a crash in between.
       const temp = join(this.root, `.renaming-${randomUUID()}${TREE_EXTENSION}`);
+      const target = join(this.root, `${name.normalize('NFC')}${TREE_EXTENSION}`);
+      writeFileSync(join(from, RENAME_MARKER), JSON.stringify({ from: id, to: name }), {
+        mode: 0o600,
+      });
       renameSync(from, temp);
-      renameSync(temp, join(this.root, `${name.normalize('NFC')}${TREE_EXTENSION}`));
+      renameSync(temp, target);
+      rmSync(join(target, RENAME_MARKER), { force: true });
     } else {
       renameSync(from, to);
     }

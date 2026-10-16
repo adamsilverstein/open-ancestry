@@ -1,4 +1,4 @@
-import { openMemoryTree, type TreeStore } from '@open-ancestry/db';
+import { events, openMemoryTree, type TreeStore } from '@open-ancestry/db';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -80,6 +80,55 @@ describe('family facts on re-import (#268)', () => {
           defaultAccept: true,
         },
       ]);
+    } finally {
+      closeReimport(s);
+    }
+  });
+
+  it('pairs a marriage whose date and place were both corrected, as Ancestry often does', async () => {
+    const f3 = fid(store, '@F3@');
+    // The sample gives Josiah's marriage on his own record too; an export corrects both.
+    const before = '2 DATE 1892\n2 PLAC Elderford, Cask County, Ohio, USA';
+    expect(SAMPLE.split(before)).toHaveLength(3);
+    const updated = renumber(
+      SAMPLE.replaceAll(before, '2 DATE 12 JUN 1892\n2 PLAC Wexmoor, Dale County, Ohio, USA'),
+    );
+    const s = await prepareReimport(store, { bytes: updated }, { today: TODAY });
+    try {
+      const changes = s.diff.people.flatMap((p) => p.changes);
+      expect(changes.filter((c) => c.kind === 'fact.add')).toEqual([]);
+      expect(changes.filter((c) => c.kind === 'fact.change')).toMatchObject([
+        {
+          before: { type: 'MARR', date: '1892', place: 'Elderford, Cask County, Ohio, USA' },
+          after: { type: 'MARR', date: '12 JUN 1892', place: 'Wexmoor, Dale County, Ohio, USA' },
+          defaultAccept: true,
+        },
+      ]);
+      applyReimport(store, s, defaults(s), 'Re-import');
+    } finally {
+      closeReimport(s);
+    }
+    expect(marriages(f3)).toBe(1);
+  });
+
+  it('pairs a lone marriage only with one that came from an import, not one the user added', async () => {
+    const f3 = fid(store, '@F3@');
+    // The user's own second family fact of the type: no longer one of a kind on each side.
+    store.transact('Add engagement', (tx) =>
+      events.create(tx, { type: 'ENGA', date_text: '1891', roles: [{ family_id: f3 }] }),
+    );
+    const updated = renumber(
+      SAMPLE.replace(
+        '2 DATE 1892\n2 PLAC Elderford, Cask County, Ohio, USA\n2 SOUR @S4@',
+        '2 DATE 1892\n2 PLAC Elderford, Cask County, Ohio, USA\n2 SOUR @S4@\n1 ENGA\n2 DATE 1890\n2 PLAC Dalesend, Wexmoor',
+      ),
+    );
+    const s = await prepareReimport(store, { bytes: updated }, { today: TODAY });
+    try {
+      const changes = s.diff.people.flatMap((p) => p.changes);
+      // The export's engagement is new, not a correction of the one the user typed in.
+      expect(changes.filter((c) => c.kind === 'fact.change')).toEqual([]);
+      expect(changes.filter((c) => c.kind === 'fact.add').map((c) => c.kind)).toEqual(['fact.add']);
     } finally {
       closeReimport(s);
     }

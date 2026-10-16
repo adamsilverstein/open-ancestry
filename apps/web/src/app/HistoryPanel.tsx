@@ -1,7 +1,9 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useIsMutating, useQuery, useQueryClient } from '@tanstack/react-query';
+import { editKey } from '../api/edits';
 import { Redo2, Undo2 } from 'lucide-react';
 import { historyQuery, undoRedo, undoRedoMessage } from '../api/history';
 import { currentTreeQuery } from '../api/queries';
+import { useOpenRestored } from '../lib/useOpenRestored';
 import { Button } from '../components/Button/Button';
 import { Dialog } from '../components/Dialog/Dialog';
 import { useDismissToasts, useToast } from '../components/Toast/Toast';
@@ -33,12 +35,15 @@ export default function HistoryPanel({ open, onOpenChange }: HistoryPanelProps) 
   const queryClient = useQueryClient();
   const toast = useToast();
   const dismiss = useDismissToasts();
+  const onRestored = useOpenRestored();
   const { data: tree } = useQuery(currentTreeQuery);
   const { data: history } = useQuery({ ...historyQuery(tree ?? ''), enabled: !!tree });
+  // While an edit is on its way the list is about to change; undo waits for it anyway.
+  const saving = useIsMutating({ mutationKey: editKey(tree ?? '') }) > 0;
 
   const run = async (direction: 'undo' | 'redo') => {
     try {
-      const result = await undoRedo(queryClient, direction);
+      const result = await undoRedo(queryClient, direction, { onRestored });
       if (direction === 'undo' && result.batch) dismiss(`batch:${result.batch.id}`);
       // The panel shows what changed; only a step-over needs saying.
       if (result.skipped.length) toast({ ...undoRedoMessage(direction, result), duration: 6000 });
@@ -62,6 +67,7 @@ export default function HistoryPanel({ open, onOpenChange }: HistoryPanelProps) 
           <Button
             iconStart={<Undo2 size={16} aria-hidden />}
             disabled={!history?.canUndo}
+            loading={saving}
             onClick={() => void run('undo')}
           >
             Undo
@@ -69,6 +75,7 @@ export default function HistoryPanel({ open, onOpenChange }: HistoryPanelProps) 
           <Button
             iconStart={<Redo2 size={16} aria-hidden />}
             disabled={!history?.canRedo}
+            loading={saving}
             onClick={() => void run('redo')}
           >
             Redo

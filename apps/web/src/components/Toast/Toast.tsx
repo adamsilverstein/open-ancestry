@@ -22,6 +22,8 @@ export interface ToastOptions {
   duration?: number;
   /** Lets `useDismissToasts()` close it early, e.g. `batch:<id>` once that change is undone. */
   tag?: string;
+  /** One button in the toast, e.g. Undo; keep the same action reachable elsewhere (a shortcut). */
+  action?: { label: string; onClick: () => void };
 }
 
 export interface ToastItem extends ToastOptions {

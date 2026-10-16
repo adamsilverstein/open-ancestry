@@ -49,4 +49,25 @@ describe('error envelope', () => {
     expect(res.statusCode).toBe(status);
     expect(res.json().error.code).toBe(code);
   });
+
+  it.each([
+    [
+      'SQLITE_CONSTRAINT_UNIQUE',
+      'UNIQUE constraint failed: tag_link.tag_id, tag_link.owner_id',
+      'That is already in the tree',
+    ],
+    [
+      'SQLITE_CONSTRAINT_FOREIGNKEY',
+      'FOREIGN KEY constraint failed',
+      'Something this change refers to is no longer in the tree',
+    ],
+    [
+      'SQLITE_CONSTRAINT_CHECK',
+      'CHECK constraint failed: sex',
+      'That change does not fit the data already in the tree',
+    ],
+  ])('never shows raw SQLite text for %s', async (code, message, friendly) => {
+    const res = await throwing(Object.assign(new Error(message), { code }));
+    expect(res.json().error).toEqual({ code: 'conflict', message: friendly });
+  });
 });

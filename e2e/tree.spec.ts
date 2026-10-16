@@ -1545,13 +1545,15 @@ test.describe('phone width (#139)', () => {
     }
     expect((await transform(page)).scale).toBeGreaterThan(0.35);
     // A quarter of the way down a card, right under its up chevron, and under
-    // the down chevron of the row above.
-    for (const [name, key] of [
-      ['Ada Vale', ids.ada],
-      ['Wren Ash', ids.wren],
+    // the down chevron of the row above; and near the top of Ada's spouse to the
+    // right, beside her parent switcher.
+    for (const [name, key, down] of [
+      ['Ada Vale', ids.ada, 0.25],
+      ['Wren Ash', ids.wren, 0.25],
+      ['Lucan Reed', ids.lucan, 0.1],
     ] as const) {
       const b = await box(canvas(page).locator(`[data-key="${key}"]`));
-      await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height * 0.25);
+      await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height * down);
       await expect(page.getByRole('dialog', { name })).toBeVisible();
       await page.keyboard.press('Escape');
       await expect(page.getByRole('dialog', { name })).toHaveCount(0);

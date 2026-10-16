@@ -118,7 +118,9 @@ export function applyReimport(
     }
     const filling = new Set(
       changes.flatMap((c) =>
-        c.kind === 'media.file' && chosen.has(c.id) ? [c.incomingMediaId] : [],
+        (c.kind === 'media.file' || c.kind === 'media.replace') && chosen.has(c.id)
+          ? [c.incomingMediaId]
+          : [],
       ),
     );
     copier.prepare(
@@ -514,7 +516,9 @@ export function applyReimport(
         case 'media.add':
           link('media_link', 'media_id', ensureMedia(c.incomingMediaId), 'person', person!);
           break;
-        case 'media.file': {
+        // The new file goes beside the old one (never over it), so undo restores the old row whole.
+        case 'media.file':
+        case 'media.replace': {
           const m = get('media', c.incomingMediaId)!;
           const file = copier.copy(m);
           (file ? copied : refused).push(c.existingMediaId);
@@ -780,6 +784,15 @@ function recordBase(
       if (c.kind === 'fact.change') images[`event|${c.existingEventId}`] = imageOfView(c.after);
       else if (c.kind === 'fact.add' && c.deletedEventId) {
         images[`event|${c.deletedEventId}`] = imageOfView(c.fact);
+      } else if (c.kind === 'media.replace') {
+        // Only an unticked replacement gets here: a ticked one is in `written`
+        // whether its file was copied (the media row write is its base) or
+        // refused (no base, so it's offered again, ticked; see above).
+        const m = incAll<{ sha256: string | null }>(
+          'SELECT sha256 FROM media WHERE id = ?',
+          c.incomingMediaId,
+        )[0];
+        images[`media|${c.existingMediaId}`] = { sha256: m?.sha256 ?? null };
       } else if (c.kind === 'sex' && person.existingId) {
         images[`person|${person.existingId}`] = { sex: c.after };
       } else if (c.kind === 'name.add' && person.existingId && person.incomingId) {

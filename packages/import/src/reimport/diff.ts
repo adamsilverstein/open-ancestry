@@ -72,6 +72,13 @@ export type ReimportChange =
   | { kind: 'media.add'; incomingMediaId: string; title: string | null }
   /** A tree media placeholder (same Ancestry _OID, no file yet) that the export has a file for. */
   | { kind: 'media.file'; existingMediaId: string; incomingMediaId: string; title: string | null }
+  /** A tree media item whose file has other bytes in the export (see `mediaChanges`). */
+  | {
+      kind: 'media.replace';
+      existingMediaId: string;
+      incomingMediaId: string;
+      title: string | null;
+    }
   | {
       kind: 'family.add';
       incomingFamilyId: string;
@@ -212,6 +219,12 @@ export interface LocalHistory {
   /** People whose names the user changed or removed (adding a name is not a rename). */
   renamed: Set<string>;
   /**
+   * The sha256 of each media file as the last import (or applied re-import)
+   * left it, for media with logged changes; null when no import brought a
+   * file. Media without logged changes are as their import left them.
+   */
+  mediaBase: Map<string, string | null>;
+  /**
    * The value each locally changed row had when the export last wrote it
    * (`entity|id` to its row image): the base of the three-way diff (#185).
    */
@@ -287,6 +300,22 @@ export function localHistory(store: TreeStore): LocalHistory {
     after_json: string | null;
     batch_id: string;
   }[];
+  const mediaBase = new Map<string, string | null>();
+  const shaOf = (json: string | null) =>
+    json ? ((JSON.parse(json) as { sha256?: string | null }).sha256 ?? null) : null;
+  for (const r of rows) {
+    if (r.entity !== 'media') continue;
+    const byImport = reimportBatches.has(r.batch_id);
+    if (!mediaBase.has(r.entity_id)) {
+      // Rows a first import loaded are not logged, so the first logged change shows
+      // the imported version; a row first inserted outside an import has none.
+      mediaBase.set(
+        r.entity_id,
+        r.op === 'insert' ? (byImport ? shaOf(r.after_json) : null) : shaOf(r.before_json),
+      );
+    }
+    if (byImport && r.op !== 'delete') mediaBase.set(r.entity_id, shaOf(r.after_json));
+  }
   const edited = new Set<string>();
   const renamed = new Set<string>();
   const base = new Map<string, Image>();
@@ -444,6 +473,7 @@ export function localHistory(store: TreeStore): LocalHistory {
   return {
     edited,
     renamed,
+    mediaBase,
     base,
     formerNames,
     renamedPlaces,
@@ -470,6 +500,7 @@ function foldMerged(
     defaults: Partial<ReviewChange>,
   ) => (change: ReimportChange, extra?: Partial<ReviewChange>) => ReviewChange,
   typedNames: Set<string>,
+  mediaBase: (m: MediaRow) => string | null,
 ) {
   const confident = m.confidence >= HIGH_CONFIDENCE;
   const add = adder(r, confident ? {} : { defaultAccept: false });
@@ -531,39 +562,73 @@ function foldMerged(
       tag: t.category ? `${t.category}: ${t.name}` : t.name,
     });
   }
-  for (const change of mediaChanges(e.media, i.media)) add(change);
+  for (const [change, extra] of mediaChanges(e.media, i.media, mediaBase)) add(change, extra);
 }
 
+type MediaChange = Extract<ReimportChange, { kind: 'media.add' | 'media.file' | 'media.replace' }>;
+
 /**
- * The media changes for one person: media the export adds, and files for the
- * tree's placeholders. Media whose bytes the person already has (same sha256,
- * under another name or _OID) is the same media and is skipped.
+ * The media changes for one person: media the export adds, files for the
+ * tree's placeholders, and files whose bytes changed. Media whose bytes the
+ * person already has (same sha256, under another name or _OID) is the same
+ * media and is not added.
+ *
+ * Changed bytes are a three-way choice against the file the last import
+ * brought (`mediaBase`): changed only in the export, the new file is
+ * offered; only in the tree, the tree's file stays; in both, or with no
+ * import-time file to compare with, it is offered unticked as a conflict.
  */
 function mediaChanges(
   existing: SnapPerson['media'],
   incoming: SnapPerson['media'],
-): Extract<ReimportChange, { kind: 'media.add' | 'media.file' }>[] {
+  mediaBase: (m: MediaRow) => string | null,
+): [MediaChange, Partial<ReviewChange>][] {
   const byKey = new Map(existing.map((x) => [x.key, x.row]));
   const hashes = new Set(existing.map((x) => x.row.sha256).filter(Boolean));
-  const changes: Extract<ReimportChange, { kind: 'media.add' | 'media.file' }>[] = [];
+  const changes: [MediaChange, Partial<ReviewChange>][] = [];
+  const replaced = new Set<string>();
   for (const x of incoming) {
     const same = byKey.get(x.key);
     if (same) {
       if (!same.local_path && x.row.local_path && x.row.sha256 && !hashes.has(x.row.sha256)) {
-        changes.push({
-          kind: 'media.file',
-          existingMediaId: same.id,
-          incomingMediaId: x.row.id,
-          title: same.title ?? x.row.title,
-        });
+        changes.push([
+          {
+            kind: 'media.file',
+            existingMediaId: same.id,
+            incomingMediaId: x.row.id,
+            title: same.title ?? x.row.title,
+          },
+          {},
+        ]);
         hashes.add(x.row.sha256);
+      } else if (
+        same.local_path &&
+        same.sha256 &&
+        x.row.local_path &&
+        x.row.sha256 &&
+        x.row.sha256 !== same.sha256 &&
+        !replaced.has(same.id)
+      ) {
+        const base = mediaBase(same);
+        if (x.row.sha256 !== base) {
+          replaced.add(same.id);
+          changes.push([
+            {
+              kind: 'media.replace',
+              existingMediaId: same.id,
+              incomingMediaId: x.row.id,
+              title: same.title ?? x.row.title,
+            },
+            same.sha256 === base ? {} : { conflict: 'local-edit', defaultAccept: false },
+          ]);
+        }
       }
       continue;
     }
     if (x.row.sha256 && hashes.has(x.row.sha256)) continue;
     byKey.set(x.key, x.row);
     if (x.row.sha256) hashes.add(x.row.sha256);
-    changes.push({ kind: 'media.add', incomingMediaId: x.row.id, title: x.row.title });
+    changes.push([{ kind: 'media.add', incomingMediaId: x.row.id, title: x.row.title }, {}]);
   }
   return changes;
 }
@@ -783,6 +848,17 @@ export function diffTrees(
   typedNames: Set<string> = new Set(),
 ): ReimportDiff {
   const { edited } = local;
+  /**
+   * The file a media row had when the export last spoke for it: the stored
+   * baseline (#224) or, for rows it does not hold, the edit history. No
+   * logged change: as its import left it; not imported and never logged: unknown.
+   */
+  const mediaBase = (m: MediaRow) => {
+    const stored = local.base.get(`media|${m.id}`);
+    if (stored) return (stored.sha256 as string | null | undefined) ?? null;
+    if (local.mediaBase.has(m.id)) return local.mediaBase.get(m.id)!;
+    return m.import_batch_id ? m.sha256 : null;
+  };
   const gone = local.removed;
   const held = new Set<string>();
   const removed: Removed = {
@@ -867,6 +943,7 @@ export function diffTrees(
         m,
         adder,
         typedNames,
+        mediaBase,
       );
       if (folded.changes.length && !reviews.has(folded.key)) {
         reviews.set(folded.key, folded);
@@ -951,12 +1028,12 @@ export function diffTrees(
           tag: t.category ? `${t.category}: ${t.name}` : t.name,
         });
     }
-    for (const change of mediaChanges(e.media, i.media)) {
+    for (const [change, extra] of mediaChanges(e.media, i.media, mediaBase)) {
       const key = i.media.find((x) => x.row.id === change.incomingMediaId)!.key;
       // A photo the user unlinked and the export still has: their removal stands.
       if (change.kind === 'media.add' && gone.media.has(`${e.row.id}|${key}`)) {
         held.add(`person|${e.row.id}`);
-      } else add(change);
+      } else add(change, extra);
     }
     if (r.changes.length) {
       reviews.set(r.key, r);

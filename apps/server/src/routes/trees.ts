@@ -90,7 +90,10 @@ function hasBatch(store: TreeStore, state: 'applied' | 'undone'): boolean {
 
 /** Trees, home person, tags, history and export. */
 export function treeRoutes(app: Api, deps: Deps): void {
-  const { library } = deps;
+  const { library, thumbnails } = deps;
+  /** An undo or redo that swapped media files back (a re-import's replaced file) redraws their thumbnails. */
+  const swappedFiles = (tree: string, store: TreeStore, batchId: string) =>
+    thumbnails.refreshBatch(store, library.dirOf(tree), batchId);
 
   app.get('/api/trees', async () => ({ trees: library.list() }));
 
@@ -176,7 +179,9 @@ export function treeRoutes(app: Api, deps: Deps): void {
       const { expect } = request.query;
       if (expect === undefined) {
         // `skipped`: newer batches stepped over because the NFC upgrade made them un-undoable.
-        return undoLatest(store);
+        const result = undoLatest(store);
+        if (result.batch) await swappedFiles(request.params.tree, store, result.batch.id);
+        return result;
       }
       // A toast's Undo names its own batch: undo exactly that one, and only while nothing
       // newer exists, so it never undoes a later change in its place.
@@ -186,13 +191,17 @@ export function treeRoutes(app: Api, deps: Deps): void {
       if (newest?.id !== expect) {
         throw notNewest('Newer changes were made since; undo them from History first');
       }
-      return { batch: undo(store, expect), skipped: [] };
+      const batch = undo(store, expect);
+      await swappedFiles(request.params.tree, store, batch.id);
+      return { batch, skipped: [] };
     },
   );
 
   app.post('/api/trees/:tree/redo', { schema: { params: TreeParams } }, async (request) => {
     const store = library.open(request.params.tree);
-    return { batch: redoLast(store), skipped: [] };
+    const batch = redoLast(store);
+    if (batch) await swappedFiles(request.params.tree, store, batch.id);
+    return { batch, skipped: [] };
   });
 
   app.get(

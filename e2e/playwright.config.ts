@@ -62,5 +62,8 @@ export default defineConfig({
     url: `${baseURL}/api/health`,
     reuseExistingServer: false,
     timeout: 30_000,
+    // Workers share this server: room for every parallel test's re-import review,
+    // so one isn't dropped (and Compare again answered 404) mid-test.
+    env: { OA_MAX_REIMPORTS: '64' },
   },
 });

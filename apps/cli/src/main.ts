@@ -39,7 +39,8 @@ const SERVE_OPTIONS = `Options for serve:
   --no-open            Do not open the app in your browser (opened by default on a terminal)
   --open               Open it even when output is not a terminal
   --static-dir <dir>   Built web app to serve (default: bundled build)
-  --import-heap-mb <n> Memory for each import's worker, in MB (default 2048; $OA_IMPORT_HEAP_MB)`;
+  --import-heap-mb <n> Memory for each import's worker, in MB (default 2048; $OA_IMPORT_HEAP_MB)
+  $OA_MAX_REIMPORTS    Re-import reviews kept open at once, each in memory (default 4)`;
 
 const IMPORT_OPTIONS = `Options for import:
   --name <tree>        Tree name (default: the file name)
@@ -112,6 +113,8 @@ export type CliCommand =
       importLimits: Partial<ImportLimits>;
       /** Heap for each import worker, in MB (default IMPORT_RESOURCE_LIMITS). */
       importHeapMb: number | undefined;
+      /** Re-import reviews held at once (default 4; OA_MAX_REIMPORTS). */
+      maxReimports: number | undefined;
       sharedLibrary: boolean;
     }
   | {
@@ -227,7 +230,18 @@ export function parseCliArgs(
     importLimits: importLimits(values, env),
     sharedLibrary,
     importHeapMb: megabytes('import-heap-mb', values['import-heap-mb'], env, 'OA_IMPORT_HEAP_MB'),
+    maxReimports: count(env, 'OA_MAX_REIMPORTS'),
   };
+}
+
+/** A positive whole number from an environment variable, if set. */
+function count(env: NodeJS.ProcessEnv, variable: string): number | undefined {
+  const raw = env[variable] || undefined;
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0)
+    throw new Error(`Invalid ${variable}: ${raw} (a whole number)`);
+  return n;
 }
 
 /**
@@ -522,6 +536,7 @@ export async function run(
     port: cli.port,
     library: cli.library,
     sharedLibrary: cli.sharedLibrary,
+    maxReimports: cli.maxReimports,
     staticDir: cli.staticDir ?? bundledStaticDir(),
     importer: serverImporter(cli.importLimits, cli.importHeapMb),
     importLimits: cli.importLimits,

@@ -196,7 +196,18 @@ test('import, edit, re-import, review, apply, then undo', async ({
       .getByRole('listitem')
       .filter({ hasText: /Applied \d+ change/ }),
   ).toHaveCount(0);
-  await result.getByRole('link', { name: 'Go to the tree' }).click();
+  // The result page says so too, and stops linking to people the undo removed.
+  const undone = page.getByRole('region', { name: 'Re-import undone' });
+  await expect(undone).toContainText('This re-import was undone');
+  await expect(undone.getByRole('link', { name: 'Noah Ashgrove' })).toHaveCount(0);
+  await expect(undone.getByRole('link', { name: 'Thaddeus Ashgrove' })).toHaveCount(0);
+  await expect(undone.getByText('Noah Ashgrove')).toBeVisible();
+  // Redo applies it again, and the page follows.
+  await page.keyboard.press(`Shift+${mod}+z`);
+  await expect(result.getByRole('link', { name: 'Noah Ashgrove' })).toBeVisible();
+  await page.keyboard.press(`${mod}+z`);
+  await expect(undone).toBeVisible();
+  await undone.getByRole('link', { name: 'Go to the tree' }).click();
   await expect(page).toHaveURL(/\/(tree|person)\//);
   expect((await eventDate(request, seeded.tree, thaddeus, 'BIRT')).date_text).toBe('Abt. 1842');
   expect(await personByName(request, seeded.tree, 'Noah')).toBeUndefined();

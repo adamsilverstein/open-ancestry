@@ -20,8 +20,10 @@ const tree = ged(
   '1 _CUSTOM',
   '2 OBJE @O7@',
   '2 NOTE @N6@',
+  '2 OBJE @O8@',
   '0 @I2@ INDI',
   '1 NAME Petra /Keeper/',
+  '1 OBJE @O8@',
   '0 @I3@ INDI',
   '1 NAME Quinn /Sharer/',
   '1 _CUSTOM',
@@ -32,6 +34,10 @@ const tree = ged(
   '1 FILE photos/canaryphoto.jpg',
   '2 FORM jpg',
   '2 TITL Canaryphototitle',
+  '0 @O8@ OBJE',
+  '1 FILE photos/petra.jpg',
+  '2 FORM jpg',
+  '2 TITL Petra at the shore',
   '0 @S9@ SOUR',
   '1 TITL Canarysource letters',
 );
@@ -48,12 +54,14 @@ describe('deleting a person whose only pointers were imported text (#245)', () =
       media: count(store, 'media'),
       source: count(store, 'source'),
     };
-    expect(before).toEqual({ note: 2, media: 1, source: 1 });
+    expect(before).toEqual({ note: 2, media: 2, source: 1 });
 
     store.transact('Delete Ozias', (tx) => persons.delete(tx, pid(store, '@I1@')));
     expect(count(store, 'note')).toBe(1);
     expect(value(store, 'SELECT text FROM note')).toBe('Shared note Quinn still points to');
-    expect(count(store, 'media')).toBe(0);
+    // Petra links to her photo, and Quinn's imported text points to the shared note: both stay.
+    expect(count(store, 'media')).toBe(1);
+    expect(value(store, 'SELECT title FROM media')).toBe('Petra at the shore');
     expect(count(store, 'source')).toBe(0);
 
     for (const version of ['5.5.1', '7'] as const) {

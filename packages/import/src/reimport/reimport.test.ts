@@ -1613,6 +1613,44 @@ describe('three-way re-import, review findings (#224)', () => {
       closeReimport(s2);
     }
   });
+
+  it('brings back a deleted residence whose date and place both changed as a plain addition', async () => {
+    // A heuristic: with no shared date, place or value, nothing ties it to the deleted one.
+    const resi = eventIdOf('@I3@', 'RESI');
+    store.transact('Delete residence', (tx) => {
+      for (const r of rows<{ id: string }>(
+        store,
+        'SELECT id FROM event_role WHERE event_id = ?',
+        resi,
+      ))
+        tx.delete('event_role', r.id);
+      tx.delete('event', resi);
+    });
+    let inResi = false;
+    const s2 = await prepareReimport(
+      store,
+      {
+        bytes: edited('@I3@', (l) => {
+          if (l.startsWith('1 ')) inResi = l === '1 RESI';
+          if (!inResi) return l;
+          if (l === '2 DATE 1900') return '2 DATE 1910';
+          if (l.startsWith('2 PLAC ')) return '2 PLAC Millbrook, Harlow County, Vermont, USA';
+          return l;
+        }),
+      },
+      { today: TODAY },
+    );
+    try {
+      const [add, ...rest] = changesOf(s2, '@I3@').filter(
+        (c) => c.kind === 'fact.add' && c.fact.type === 'RESI',
+      );
+      expect(rest).toEqual([]);
+      expect(add).toMatchObject({ defaultAccept: true });
+      expect(add!.conflict).toBeUndefined();
+    } finally {
+      closeReimport(s2);
+    }
+  });
 });
 
 describe('dates compared by meaning (#194)', () => {

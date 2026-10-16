@@ -700,7 +700,10 @@ export function diffTrees(
     hold: (owner) => held.add(owner),
     // A deleted fact the export still has: by its base (what the export last said), the
     // same fact unchanged, or the same fact changed: same type, and for facts a person can
-    // have many of (residence), the same date, place or value.
+    // have many of (residence), the same date, place or value. This is a heuristic: one
+    // whose date and place both changed (and has no value) shares nothing with the deleted
+    // fact, so it comes back as a plain addition. Family events carry no place name here,
+    // so for them only the date or value can tie the two together.
     fact: (owner, incoming) => {
       let changed: string | undefined;
       for (const f of gone.facts.get(owner) ?? []) {

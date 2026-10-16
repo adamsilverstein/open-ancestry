@@ -102,9 +102,12 @@ export function ImportReport({
           <dt>Lines</dt>
           <dd>
             {n(lines.total)} lines: {n(lines.mapped)} mapped, {n(lines.preserved)} kept verbatim.{' '}
-            {report.unmapped.length === 0
-              ? 'Every line of the file was mapped; header lines are kept verbatim for export.'
-              : 'Lines that could not be mapped are kept verbatim and listed below.'}
+            {report.unmapped.length > 0
+              ? 'Lines that could not be mapped are kept verbatim and listed below.'
+              : lines.preserved > 0
+                ? // Not only the header: submitter, trailer and unlinked FILE lines are kept too.
+                  `Every line was mapped except ${n(lines.preserved)} kept verbatim for export.`
+                : 'Every line was mapped.'}
           </dd>
           <dt>Home person</dt>
           <dd>

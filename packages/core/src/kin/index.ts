@@ -60,9 +60,10 @@ export type SharedAdult = readonly [mine: ChildRelation, theirs: ChildRelation];
  *
  * - `full`: both are birth children of every shared adult, and `apart` is
  *   false.
- * - `half`: they share some birth parents but not all (a shared parent who is
- *   birth parent of only one, or of neither, makes them half), or (with
- *   `apart`, for a parent's other partnership) exactly the one parent passed.
+ * - `half`: they share a birth parent, and another shared parent is the birth
+ *   parent of exactly one of them (one birth parent to neither, as when a
+ *   stepfather adopted both, leaves them full); or (with `apart`, for a
+ *   parent's other partnership) exactly the one parent passed.
  * - `adopted`: they share parents only through adoption (a birth child and
  *   an adopted child of one couple): "adopted brother", as the relationship
  *   calculator says too.
@@ -80,7 +81,13 @@ export function siblingKind(shared: readonly SharedAdult[], apart = false): Sibl
   if (shared.length === 0) return 'full';
   const common = shared.filter(([mine, theirs]) => isParent(mine) && isParent(theirs)).length;
   const birth = shared.filter(([mine, theirs]) => isBirthParent(mine) && isBirthParent(theirs));
-  if (birth.length > 0) return birth.length === shared.length && !apart ? 'full' : 'half';
+  if (birth.length > 0) {
+    // Half when a shared parent is the birth parent of exactly one of them.
+    // One who is birth parent to neither (a stepfather who adopted both of
+    // his wife's children) leaves them full siblings.
+    const oneSided = shared.some(([mine, theirs]) => isBirthParent(mine) !== isBirthParent(theirs));
+    return oneSided || apart ? 'half' : 'full';
+  }
   if (common > 0) return 'adopted';
   // No shared parent: a step link makes them stepsiblings even where care
   // (foster, guardian) joins them too, as the calculator's marriage path says.

@@ -138,24 +138,20 @@ function joinPath(a: Arrival, b: Arrival): RelationshipPath {
  * nothing to compare, so the siblings count as full.
  */
 function isHalf(g: KinshipGraph, childA: string, childB: string, bio: boolean): boolean {
-  // Each child's parents read once: recorded ones, and those by birth.
-  const sets = (child: string) => {
-    const all = g.parents(child).filter((p) => !isVirtualParent(p.id));
-    return {
-      all: new Set(all.map((p) => p.id)),
-      birth: new Set(all.filter((p) => isBirthParent(p.rel)).map((p) => p.id)),
-    };
-  };
-  const a = sets(childA);
-  const b = sets(childB);
-  const [pa, pb] = bio ? [a.birth, b.birth] : [a.all, b.all];
+  // Compared by birth, a shared parent who is the birth parent of exactly one
+  // of them (the other adopted, say) makes them half, as core siblingKind
+  // says; one who is birth parent to neither leaves them full.
+  const set = (child: string) =>
+    new Set(
+      g
+        .parents(child)
+        .filter((p) => !isVirtualParent(p.id) && (!bio || isBirthParent(p.rel)))
+        .map((p) => p.id),
+    );
+  const pa = set(childA);
+  const pb = set(childB);
   if (pa.size === 0 || pb.size === 0) return false;
-  if (pa.size !== pb.size || [...pa].some((p) => !pb.has(p))) return true;
-  if (!bio) return false;
-  // Blood siblings with another shared recorded parent who is not birth
-  // parent to both (one adopted or step, say) share only some of their
-  // parents by birth: half, as core siblingKind says.
-  return [...a.all].some((p) => b.all.has(p) && !(pa.has(p) && pb.has(p)));
+  return pa.size !== pb.size || [...pa].some((p) => !pb.has(p));
 }
 
 /**

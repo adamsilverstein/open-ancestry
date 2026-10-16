@@ -148,7 +148,8 @@ describe('siblings sharing a birth mother and a non-birth father (#296 review)',
   for (const rel of ['adopted', 'step'] as const) {
     it(`calls them brothers when both are ${rel} to the husband`, () => {
       const g = mk({ mum: 'F', hus: 'M', a: 'M', b: 'M' }, [['F', 'hus', 'mum', ['a', 'b']]]);
-      for (const kid of g.families[0]!.children as { rel1?: ChildRelation }[]) kid.rel1 = rel;
+      for (const kid of g.families[0]!.children as unknown as { rel1?: ChildRelation }[])
+        kid.rel1 = rel;
       expect(calc(g, 'b', 'a')).toBe('brother');
       expect(labels(g, 'a').b).toBe('brother');
     });

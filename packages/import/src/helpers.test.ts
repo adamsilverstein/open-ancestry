@@ -303,6 +303,18 @@ describe('storing media in a tree', () => {
     }
   });
 
+  it('never creates folders outside the tree through a symlinked folder (L3, #267)', () => {
+    // Before, mkdir -p ran first and made deep/er inside the link's target,
+    // then the containment check threw.
+    const outside = makeTempDir('oa-outside-');
+    symlinkSync(outside, join(root, 'linked'));
+    const enc = new TextEncoder().encode('x');
+    expect(() => storeMediaFile(root, 'linked/deep/er/a.jpg', enc, hash)).toThrow(
+      /outside the tree/,
+    );
+    expect(readdirSync(outside)).toEqual([]);
+  });
+
   it('keeps files already in a tree folder and stores identical content once', async () => {
     const source = join(root, 'src');
     mkdirSync(join(source, 'photos'), { recursive: true });

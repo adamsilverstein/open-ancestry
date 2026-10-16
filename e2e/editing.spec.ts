@@ -25,6 +25,17 @@ async function editPerson(page: Page) {
 }
 
 test.describe('person', () => {
+  test('shows a saved nickname on the person page (#280)', async ({ page }) => {
+    await openSeeded(page, seeded);
+    await expect(page.getByTestId('nickname')).toHaveCount(0);
+    const dialog = await editPerson(page);
+    await dialog.getByRole('textbox', { name: 'Nickname' }).first().fill('Ro');
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.getByTestId('nickname')).toHaveText('Known as “Ro”');
+    await expect(h1(page)).toHaveText('Rowan Ashdown');
+  });
+
   test('edits names, sex and living status, then undoes and redoes with the keyboard', async ({
     page,
   }) => {

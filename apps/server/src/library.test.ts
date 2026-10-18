@@ -242,11 +242,19 @@ describe('treeNameProblem', () => {
     expect(newTreeNameProblem(name)).not.toBeNull();
   });
 
-  it.each(['\u200b', '\u200c', '\u200d', '\u2060', '\ufeff', '\u200e', '\u200f', '\u061c'])(
+  it.each(['\u200b', '\u2060', '\ufeff', '\u200e', '\u200f', '\u061c'])(
     'refuses the invisible %j in a new tree name, so two names cannot look the same (#264)',
     (char) => {
       expect(newTreeNameProblem(`Smi${char}th`)).toMatch(/invisible/);
       expect(treeNameFromFile(`Smi${char}th.ged`)).toBe('Smith');
+    },
+  );
+
+  it.each(['Family 👨‍👩‍👧', 'می‌خواهم'])(
+    'accepts %j: emoji sequences and Persian need ZWJ and ZWNJ (#264)',
+    (name) => {
+      expect(newTreeNameProblem(name)).toBeNull();
+      expect(treeNameFromFile(`${name}.ged`)).toBe(name);
     },
   );
 

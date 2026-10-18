@@ -112,9 +112,18 @@ describe('GEDCOM export routes', () => {
     expect(attachment('Fam\u202eily\u200b Tree', 'ged')).toBe(
       `attachment; filename="Family Tree.ged"; filename*=UTF-8''Family%20Tree.ged`,
     );
+    expect(attachment('\u2068Fam\u2069ily\ufeff', 'ged')).toBe(
+      `attachment; filename="Family.ged"; filename*=UTF-8''Family.ged`,
+    );
     expect(attachment('\u202e', 'ged')).toBe(
       `attachment; filename="tree.ged"; filename*=UTF-8''tree.ged`,
     );
+  });
+
+  it('keeps ZWJ and ZWNJ in the file name, which emoji and Persian names need (#264)', () => {
+    for (const name of ['Family 👨‍👩‍👧', 'می‌خواهم']) {
+      expect(attachment(name, 'ged')).toContain(`filename*=UTF-8''${encodeURIComponent(name)}.ged`);
+    }
   });
 
   it('writes event types the edit API accepts in lower case as GEDCOM tags', async () => {

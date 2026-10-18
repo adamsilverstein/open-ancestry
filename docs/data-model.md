@@ -437,7 +437,7 @@ One unit of work (one user action). See [undo and redo](#change-log-undo-and-red
 | Column | Type | Null | Meaning |
 |---|---|---|---|
 | `id` | TEXT | no | ULID. Its time part follows the wall clock, so it is **not** used for ordering (a session with its clock behind would sort its edits before older ones). |
-| `label` | TEXT | no | Human label for the history panel, e.g. `Edit birth of Ellis Vale`. |
+| `label` | TEXT | no | Human label for the history panel, e.g. `Edit birth of Ellis Vale`. The app stores it as plain text, without bidi isolates, and isolates it when shown. |
 | `state` | TEXT | no | `applied` (default), `undone`, or `superseded` (was undone, then a new edit discarded the redo stack). |
 | `created_at` | TEXT | no | When the batch was committed. |
 | `state_changed_at` | TEXT | yes | Last undo, redo or supersede. |

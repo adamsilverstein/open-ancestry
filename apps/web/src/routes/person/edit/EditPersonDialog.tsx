@@ -221,15 +221,19 @@ export function EditPersonDialog({
     });
 
     if (operations.length === 0) return onOpenChange(false);
-    const label = `Edit person: ${isolate(name)}`;
     edit.mutate({
-      label,
+      label: `Edit person: ${isolate(name)}`,
       optimistic: {
         personId: id,
         update: (current) => applyPerson(applyNames(current, names), personPatch),
       },
       // One request, one change batch: the whole save is a single undo step.
-      send: () => apiSend('POST', `${base}/batch`, { label, operations }),
+      // History stores plain text and isolates names when it shows them (#264).
+      send: () =>
+        apiSend('POST', `${base}/batch`, {
+          label: `Edit person: ${name}`,
+          operations,
+        }),
       ...saveState.handlers(),
     });
   }

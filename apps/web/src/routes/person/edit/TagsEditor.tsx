@@ -69,7 +69,8 @@ export function TagsEditor({ tree, detail }: { tree: string; detail: PersonDetai
       // Created and attached in one batch, so one undo removes both.
       send: async () => {
         const { results } = await apiSend<{ results: [TagRow] }>('POST', `${base}/batch`, {
-          label: `Tag ${isolate(fullName(detail.summary))}: ${isolate(tagName)}`,
+          // History stores plain text and isolates names when it shows them (#264).
+          label: `Tag ${fullName(detail.summary)}: ${tagName}`,
           operations: [{ op: 'tag.create', tag: { name: tagName }, attachTo: id }],
         });
         remember(results[0]);

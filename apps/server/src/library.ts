@@ -1,4 +1,10 @@
-import { displayText, unsafeTextReason } from '@open-ancestry/core';
+import {
+  displayText,
+  hex,
+  invisibleChar,
+  stripInvisible,
+  unsafeTextReason,
+} from '@open-ancestry/core';
 import { randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -86,13 +92,6 @@ export function treeNameProblem(name: string): string | null {
 }
 
 /**
- * Zero-width characters, word joiner, BOM and the direction marks (ALM, LRM,
- * RLM): harmless in a person's name, but two tree names that differ only by
- * one look the same in the switcher (#264).
- */
-const INVISIBLE = /[\u061c\u200b-\u200f\u2060\ufeff]/u;
-
-/**
  * Why `name` cannot be given to a new or renamed tree: `treeNameProblem`, or
  * text that displays as something else, such as a direction override (#190).
  * Every way a tree gets a name (the API, an upload, the CLI) comes through
@@ -100,12 +99,13 @@ const INVISIBLE = /[\u061c\u200b-\u200f\u2060\ufeff]/u;
  */
 export function newTreeNameProblem(name: string): string | null {
   const unsafe = unsafeTextReason(name);
-  const invisible = INVISIBLE.exec(name);
+  // Two tree names that differ only by an invisible character look the same in the switcher (#264).
+  const invisible = invisibleChar(name);
   return (
     treeNameProblem(name) ??
     (unsafe ? `Tree name ${unsafe}` : null) ??
     (invisible
-      ? `Tree name contains an invisible character (U+${invisible[0].codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}), so it could look like another tree's name`
+      ? `Tree name contains an invisible character (${hex(invisible)}), so it could look like another tree's name`
       : null)
   );
 }
@@ -121,8 +121,7 @@ export function treeNameFromFile(fileName: string): string {
     .pop()!
     .replace(/\.[^.]*$/, '');
   // displayText drops direction overrides and turns other controls into spaces (#190).
-  const name = displayText(base)
-    .replace(new RegExp(INVISIBLE, 'gu'), '')
+  const name = stripInvisible(displayText(base))
     // eslint-disable-next-line no-control-regex
     .replace(/[/\\:*?"<>|%\u0000-\u001f\u007f]+/g, ' ')
     .replace(/\s+/g, ' ')
@@ -220,8 +219,14 @@ export interface TreeInfo {
   modifiedAt: string;
 }
 
-/** Control and format characters (bidi overrides, zero-width marks) that could disguise a label. */
+/**
+ * Every control and format character, ZWJ and ZWNJ included: only for telling
+ * whether two labels look alike, where erring towards "alike" is safe.
+ */
 const HIDDEN_CHARS = /[\p{Cc}\p{Cf}]/gu;
+
+/** Stored text as a label shows it: cleaned (#190), without invisible characters (#264). */
+const shown = (text: string) => stripInvisible(displayText(text));
 
 /**
  * A tree's name lives inside its folder, so a folder copied by hand (a backup,
@@ -237,16 +242,13 @@ function withLabels(trees: TreeInfo[]): TreeInfo[] {
   for (const tree of trees) counts.set(seen(tree), (counts.get(seen(tree)) ?? 0) + 1);
   return trees.map((tree) => {
     if (counts.get(seen(tree))! < 2 || tree.id === tree.name) return tree;
-    const folder = tree.id.replace(HIDDEN_CHARS, '') || 'copy';
+    const folder = shown(tree.id) || 'copy';
     return { ...tree, label: `${tree.label} (${folder})` };
   });
 }
 
 /** What a tree's name shows as: a name stored before the checks is cleaned (#264). */
-const treeLabel = (name: string, id: string) =>
-  displayText(name).replace(new RegExp(INVISIBLE, 'gu'), '') ||
-  id.replace(HIDDEN_CHARS, '') ||
-  'Untitled tree';
+const treeLabel = (name: string, id: string) => shown(name) || shown(id) || 'Untitled tree';
 
 /** Drives `rebuildSearchIndexInChunks`, one chunk per turn of the event loop, until done or closed. */
 function rebuildInBackground(store: TreeStore): void {

@@ -216,7 +216,10 @@ export function useRelationshipEdits(tree: string, detail: PersonDetail) {
               setConfirm(removeChildLink(isolate(fullName(person)), parents, link.id))
             }
           >
-            Remove child <PersonName name={fullName(person)} />…
+            {/* One flex child, so the name stays inline with the words around it. */}
+            <span>
+              Remove child <PersonName name={fullName(person)} />…
+            </span>
           </MenuItem>
         ))}
       </GroupMenu>

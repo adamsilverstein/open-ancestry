@@ -40,6 +40,16 @@ test.describe('relationship to the home person', () => {
     const chart = page.getByRole('dialog', { name: 'Relationship path' });
     await expect(chart.getByRole('listitem').nth(1)).toContainText('stepson of Leopold Hollowell');
   });
+
+  test('names the step-parent on the path chart read the other way', async ({ page }) => {
+    await relationshipOf(page, 'George Eldermoor', 'Leopold Hollowell');
+    await expect(relationship(page)).toHaveText('stepson of Leopold Hollowell');
+    await page.getByRole('button', { name: 'Show path' }).click();
+    const chart = page.getByRole('dialog', { name: 'Relationship path' });
+    await expect(chart.getByRole('listitem').nth(1)).toContainText(
+      'stepfather of George Eldermoor',
+    );
+  });
 });
 
 test.describe('relationship paths', () => {

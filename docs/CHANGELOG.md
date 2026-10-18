@@ -42,7 +42,7 @@ open-ancestry is for one person per computer account. Don't run it on a shared o
 
 - **Family tree view**: the focus person with partners, parents and grandparents above, and children below. Generation labels, photos or silhouettes, and life years. Click a card for a quick view; double-click or press Enter to re-center on that person.
 - **Pedigree, descendant and fan views** from the same layout, switchable from the toolbar, keeping the focus person.
-- **Expand and collapse** ancestors, descendants and siblings card by card, at any depth: ancestors further up offer their siblings too, and a person whose children were partly shown in another view gets the rest. Half siblings hang from their shared parent, and cousins keep their parents together.
+- **Expand and collapse** ancestors, descendants and siblings card by card, at any depth: ancestors further up offer their siblings too, and a person whose children were partly shown in another view gets the rest. Half-siblings hang from their shared parent, and cousins keep their parents together.
 - **Pan, zoom, minimap and keyboard navigation**: arrow keys move between related cards. The web address names the focus person, so any view can be bookmarked, and a hand-edited address falls back to the default view instead of breaking it.
 - **Pedigree collapse** (the same person reached twice) is drawn as a linked duplicate card.
 - **Quick view polish**: Edit opens the editor directly, a living person shows "Living" once, and people without a photo get a silhouette tinted by sex. At phone width it opens above or below the card and stays on screen, with larger touch targets.

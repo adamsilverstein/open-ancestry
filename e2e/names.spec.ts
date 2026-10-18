@@ -128,6 +128,32 @@ test('saving a name with a text-direction override is refused', async ({
   );
 });
 
+test('labels saved to history are plain text, isolated only when shown (#264)', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seedTree(request, baseURL!, `${testInfo.project.name} ${testInfo.title}`);
+  await openSeeded(page, seeded);
+  await page.getByRole('button', { name: 'Edit person' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit person' });
+  await dialog.getByRole('combobox', { name: 'Sex' }).click();
+  await page.getByRole('option', { name: 'Other' }).click();
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(dialog).toBeHidden();
+  const header = page.getByTestId('person-header');
+  await header.getByRole('button', { name: 'Edit tags' }).click();
+  const popover = page.getByRole('dialog', { name: 'Tags' });
+  await popover.getByRole('textbox', { name: 'New tag' }).fill('Smiths');
+  await popover.getByRole('button', { name: 'Create tag' }).click();
+  await expect(popover.getByRole('checkbox', { name: 'Smiths' })).toBeChecked();
+
+  const res = await request.get(`/api/trees/${encodeURIComponent(seeded.tree)}/history`);
+  const labels = ((await res.json()) as { items: { label: string }[] }).items.map((i) => i.label);
+  // Stored without U+2068...U+2069, so exports, searches and comparisons see the plain text.
+  expect(labels.slice(0, 2)).toEqual(['Tag Rowan Ashdown: Smiths', 'Edit person: Rowan Ashdown']);
+});
+
 const ged = (...people: string[][]) =>
   ['0 HEAD', '1 GEDC', '2 VERS 5.5.1', '1 CHAR UTF-8', ...people.flat(), '0 TRLR', ''].join('\n');
 

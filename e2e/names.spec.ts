@@ -127,3 +127,117 @@ test('saving a name with a text-direction override is refused', async ({
     'Rowan Ashdown',
   );
 });
+
+test('labels saved to history are plain text, isolated only when shown (#264)', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const seeded = await seedTree(request, baseURL!, `${testInfo.project.name} ${testInfo.title}`);
+  await openSeeded(page, seeded);
+  await page.getByRole('button', { name: 'Edit person' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Edit person' });
+  await dialog.getByRole('combobox', { name: 'Sex' }).click();
+  await page.getByRole('option', { name: 'Other' }).click();
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(dialog).toBeHidden();
+  const header = page.getByTestId('person-header');
+  await header.getByRole('button', { name: 'Edit tags' }).click();
+  const popover = page.getByRole('dialog', { name: 'Tags' });
+  await popover.getByRole('textbox', { name: 'New tag' }).fill('Smiths');
+  await popover.getByRole('button', { name: 'Create tag' }).click();
+  await expect(popover.getByRole('checkbox', { name: 'Smiths' })).toBeChecked();
+
+  const res = await request.get(`/api/trees/${encodeURIComponent(seeded.tree)}/history`);
+  const labels = ((await res.json()) as { items: { label: string }[] }).items.map((i) => i.label);
+  // Stored without U+2068...U+2069, so exports, searches and comparisons see the plain text.
+  expect(labels.slice(0, 2)).toEqual(['Tag Rowan Ashdown: Smiths', 'Edit person: Rowan Ashdown']);
+});
+
+const ged = (...people: string[][]) =>
+  ['0 HEAD', '1 GEDC', '2 VERS 5.5.1', '1 CHAR UTF-8', ...people.flat(), '0 TRLR', ''].join('\n');
+
+async function idOf(request: APIRequestContext, tree: string, given: string) {
+  const res = await request.get(`/api/trees/${encodeURIComponent(tree)}/search?q=${given}`);
+  const { items } = (await res.json()) as { items: { person: { id: string; given: string } }[] };
+  return items.find((i) => i.person.given.startsWith(given))!.person.id;
+}
+
+test('a name from a re-imported file is isolated in its review line (#264)', async ({
+  page,
+  request,
+  baseURL,
+}) => {
+  const rowan = ['0 @I1@ INDI', '1 NAME Rowan /Ashdown/', '1 BIRT', '2 DATE 1880'];
+  const tree = await importGedcom(request, baseURL!, ged(rowan));
+  await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'File' }).click();
+  const chooser = page.waitForEvent('filechooser');
+  await page.getByRole('menuitem', { name: /Re-import updated export/ }).click();
+  await (
+    await chooser
+  ).setFiles({
+    name: 'Ashdown later.ged',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from(ged([...rowan, '1 NAME Evil‮ /Ashdown/'])),
+  });
+  await expect(
+    page.getByRole('heading', { level: 1, name: 'Review the updated export' }),
+  ).toBeVisible({ timeout: 30_000 });
+  // The override is gone, and the name is isolated from the text after it.
+  const add = page.getByRole('checkbox', { name: 'Add name: Evil Ashdown', exact: true });
+  await expect(add).toBeVisible();
+  const label = page.locator('label', { hasText: 'Add name: Evil Ashdown' });
+  await expect(label.locator('bdi')).toHaveText('Evil Ashdown');
+  expect(await label.textContent()).not.toMatch(/[‪-‮⁦-⁩]/);
+});
+
+test('the merge prompt and its toast isolate both names (#264)', async ({
+  page,
+  request,
+  baseURL,
+}) => {
+  const tree = await importGedcom(
+    request,
+    baseURL!,
+    ged(
+      ['0 @I1@ INDI', '1 NAME Evil‮ /Ashdown/', '1 BIRT', '2 DATE 1880'],
+      ['0 @I2@ INDI', '1 NAME Rowan /Ashdown/', '1 BIRT', '2 DATE 1880'],
+    ),
+  );
+  // labels.test.ts covers cleaning the override; this checks both names are isolated.
+  const [evil, rowan] = [await idOf(request, tree, 'Evil'), await idOf(request, tree, 'Rowan')];
+  await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+  await page.goto(`/merge?keep=${rowan}&other=${evil}`);
+  await page.getByRole('button', { name: 'Merge', exact: true }).click();
+  const confirm = page.getByRole('alertdialog', {
+    name: 'Merge Evil Ashdown into Rowan Ashdown?',
+  });
+  await expect(confirm).toBeVisible();
+  const title = confirm.getByRole('heading');
+  await expect(title.locator('bdi')).toHaveText(['Evil Ashdown', 'Rowan Ashdown']);
+  await expect(confirm.getByText(/is removed and everything/).locator('bdi')).toHaveText([
+    'Evil Ashdown',
+    'Rowan Ashdown',
+  ]);
+  expect(await confirm.textContent()).not.toMatch(/[‪-‮⁦-⁩]/);
+  await confirm.getByRole('button', { name: 'Merge', exact: true }).click();
+  const toast = page
+    .getByRole('region', { name: /Notifications/ })
+    .getByRole('listitem')
+    .filter({ hasText: 'Merged Evil Ashdown into Rowan Ashdown' });
+  await expect(toast.locator('bdi')).toHaveText(['Evil Ashdown', 'Rowan Ashdown']);
+
+  // The server builds the history label from the stored names: cleaned, and shown isolated.
+  const res = await request.get(`/api/trees/${encodeURIComponent(tree)}/history`);
+  const { items } = (await res.json()) as { items: { label: string }[] };
+  expect(items[0]!.label).toBe('Merge Evil Ashdown into Rowan Ashdown');
+  await page.getByRole('banner').getByRole('button', { name: 'History', exact: true }).click();
+  const row = page
+    .getByRole('dialog', { name: 'History' })
+    .getByRole('listitem')
+    .filter({ hasText: 'Merge Evil Ashdown into Rowan Ashdown' });
+  await expect(row.locator('bdi')).toHaveText('Merge Evil Ashdown into Rowan Ashdown');
+  expect(await row.textContent()).not.toMatch(/[‪-‮⁦-⁩]/);
+});

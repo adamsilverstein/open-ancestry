@@ -10,6 +10,7 @@ import {
 } from '../../lib/returnFocus';
 import { IconButton } from '../IconButton/IconButton';
 import styles from './Dialog.module.css';
+import { shownText, withIsolates } from '../../lib/isolates';
 
 export interface DialogProps {
   open?: boolean;
@@ -109,11 +110,11 @@ export function Dialog({
           {...(description ? {} : { 'aria-describedby': undefined })}
         >
           <RadixDialog.Title className={cx(styles.title, hideTitle && 'oa-visually-hidden')}>
-            {title}
+            {withIsolates(title)}
           </RadixDialog.Title>
           {description && (
             <RadixDialog.Description className={styles.description}>
-              {description}
+              {shownText(description)}
             </RadixDialog.Description>
           )}
           {children}

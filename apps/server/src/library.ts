@@ -1,4 +1,10 @@
-import { displayText, unsafeTextReason } from '@open-ancestry/core';
+import {
+  displayText,
+  hex,
+  invisibleChar,
+  stripInvisible,
+  unsafeTextReason,
+} from '@open-ancestry/core';
 import { randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -93,7 +99,15 @@ export function treeNameProblem(name: string): string | null {
  */
 export function newTreeNameProblem(name: string): string | null {
   const unsafe = unsafeTextReason(name);
-  return treeNameProblem(name) ?? (unsafe ? `Tree name ${unsafe}` : null);
+  // Two tree names that differ only by an invisible character look the same in the switcher (#264).
+  const invisible = invisibleChar(name);
+  return (
+    treeNameProblem(name) ??
+    (unsafe ? `Tree name ${unsafe}` : null) ??
+    (invisible
+      ? `Tree name contains an invisible character (${hex(invisible)}), so it could look like another tree's name`
+      : null)
+  );
 }
 
 /**
@@ -107,7 +121,7 @@ export function treeNameFromFile(fileName: string): string {
     .pop()!
     .replace(/\.[^.]*$/, '');
   // displayText drops direction overrides and turns other controls into spaces (#190).
-  const name = displayText(base)
+  const name = stripInvisible(displayText(base))
     // eslint-disable-next-line no-control-regex
     .replace(/[/\\:*?"<>|%\u0000-\u001f\u007f]+/g, ' ')
     .replace(/\s+/g, ' ')
@@ -205,8 +219,14 @@ export interface TreeInfo {
   modifiedAt: string;
 }
 
-/** Control and format characters (bidi overrides, zero-width marks) that could disguise a label. */
+/**
+ * Every control and format character, ZWJ and ZWNJ included: only for telling
+ * whether two labels look alike, where erring towards "alike" is safe.
+ */
 const HIDDEN_CHARS = /[\p{Cc}\p{Cf}]/gu;
+
+/** Stored text as a label shows it: cleaned (#190), without invisible characters (#264). */
+const shown = (text: string) => stripInvisible(displayText(text));
 
 /**
  * A tree's name lives inside its folder, so a folder copied by hand (a backup,
@@ -216,14 +236,19 @@ const HIDDEN_CHARS = /[\p{Cc}\p{Cf}]/gu;
  * depends only on each tree's own folder, so labels never swap between trees.
  */
 function withLabels(trees: TreeInfo[]): TreeInfo[] {
+  // Names that look the same count as the same (one may predate the checks, #264).
+  const seen = (tree: TreeInfo) => tree.label.replace(HIDDEN_CHARS, '');
   const counts = new Map<string, number>();
-  for (const tree of trees) counts.set(tree.name, (counts.get(tree.name) ?? 0) + 1);
+  for (const tree of trees) counts.set(seen(tree), (counts.get(seen(tree)) ?? 0) + 1);
   return trees.map((tree) => {
-    if (counts.get(tree.name)! < 2 || tree.id === tree.name) return tree;
-    const folder = tree.id.replace(HIDDEN_CHARS, '') || 'copy';
-    return { ...tree, label: `${tree.name} (${folder})` };
+    if (counts.get(seen(tree))! < 2 || tree.id === tree.name) return tree;
+    const folder = shown(tree.id) || 'copy';
+    return { ...tree, label: `${tree.label} (${folder})` };
   });
 }
+
+/** What a tree's name shows as: a name stored before the checks is cleaned (#264). */
+const treeLabel = (name: string, id: string) => shown(name) || shown(id) || 'Untitled tree';
 
 /** Drives `rebuildSearchIndexInChunks`, one chunk per turn of the event loop, until done or closed. */
 function rebuildInBackground(store: TreeStore): void {
@@ -422,7 +447,7 @@ export class Library {
     if (this.stores.has(id)) return this.info(id);
     const dir = this.dirOf(id);
     const modifiedAt = statSync(treePaths(dir).database).mtime.toISOString();
-    const byFolder = { id, name: id, label: id, modifiedAt };
+    const byFolder = { id, name: id, label: treeLabel(id, id), modifiedAt };
     if ((this.lockedUntil.get(id) ?? 0) > now) return byFolder;
     this.lockedUntil.delete(id);
     let name: string | undefined;
@@ -437,7 +462,7 @@ export class Library {
       return byFolder;
     }
     const stored = name || id;
-    return { id, name: stored, label: stored, modifiedAt };
+    return { id, name: stored, label: treeLabel(stored, id), modifiedAt };
   }
 
   info(id: string): TreeInfo {
@@ -445,7 +470,7 @@ export class Library {
     return {
       id,
       name,
-      label: name,
+      label: treeLabel(name, id),
       modifiedAt: statSync(treePaths(this.dirOf(id)).database).mtime.toISOString(),
     };
   }

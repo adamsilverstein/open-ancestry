@@ -24,7 +24,7 @@ import { fullName, isLivingStatus } from '../../lib/person';
 import { tagColor } from '../../lib/tags';
 import { relationshipCharts } from '../../lib/relationship';
 import { RelationshipCalculator } from './RelationshipCalculator';
-import { formatDate } from '@open-ancestry/core';
+import { formatDate, isolate } from '@open-ancestry/core';
 import type { EventBrief } from '../../api/types';
 import styles from './PersonPage.module.css';
 import { PersonName } from '../../components/PersonName/PersonName';
@@ -100,7 +100,7 @@ function useSetHome(tree: string, detail: PersonDetail) {
       send: () => apiSend('PUT', `/trees/${seg(tree)}/home`, { personId: detail.person.id }),
       onDone: () =>
         toast({
-          title: `${name} is now the home person`,
+          title: `${isolate(name)} is now the home person`,
           description: 'Undo from History or with Ctrl+Z (⌘Z on a Mac).',
         }),
     });

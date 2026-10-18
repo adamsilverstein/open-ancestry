@@ -1,3 +1,4 @@
+import { displayText, stripInvisible, stripIsolates } from '@open-ancestry/core';
 import {
   LATEST_SCHEMA_VERSION,
   exportJsonString,
@@ -56,12 +57,16 @@ function treeDetail(deps: Deps, id: string) {
 /**
  * Content-Disposition for a download named after the tree: an ASCII fallback
  * (anything outside letters, digits, space, dot, dash and underscore becomes
- * `_`, so no quote or header syntax gets through) plus the exact UTF-8 name.
+ * `_`, so no quote or header syntax gets through) plus the UTF-8 name. A name
+ * from before the checks loses its direction controls and invisible
+ * characters, so the saved file's name cannot be spoofed (#264). ZWJ and ZWNJ
+ * stay: emoji and Persian names need them.
  */
 export function attachment(tree: string, extension: string): string {
-  const ascii = tree.replace(/[^A-Za-z0-9 ._-]/g, '_');
+  const name = stripIsolates(stripInvisible(displayText(tree))).trim() || 'tree';
+  const ascii = name.replace(/[^A-Za-z0-9 ._-]/g, '_');
   // RFC 8187 ext-value: encodeURIComponent leaves ' ( ) * as they are, which are not allowed.
-  const utf8 = encodeURIComponent(tree).replace(
+  const utf8 = encodeURIComponent(name).replace(
     /['()*]/g,
     (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
   );

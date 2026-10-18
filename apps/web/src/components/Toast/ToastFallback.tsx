@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { cx } from '../../lib/cx';
 import type { ToastItem } from './Toast';
 import styles from './Toast.module.css';
+import { withIsolates } from '../../lib/isolates';
 
 /**
  * Toasts without Radix, for when its chunk cannot load (offline, or a new
@@ -45,8 +46,8 @@ export function ToastFallback({
         {toasts.map(({ id, title, description, variant = 'info' }) => (
           <li key={id} className={cx(styles.toast, styles[variant])} data-testid="toast-fallback">
             <div className={styles.body}>
-              <p className={styles.title}>{title}</p>
-              {description && <p className={styles.description}>{description}</p>}
+              <p className={styles.title}>{withIsolates(title)}</p>
+              {description && <p className={styles.description}>{withIsolates(description)}</p>}
             </div>
           </li>
         ))}

@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { foldForIndex, foldForSearch, normalizeForSearch } from '../names/phonetic';
-import { displayText, unsafeTextReason } from './safety';
+import {
+  displayText,
+  hex,
+  invisibleChar,
+  isolate,
+  stripInvisible,
+  stripIsolates,
+  unsafeTextReason,
+} from './safety';
 
 /* Names, places and dates: no control characters or bidi overrides (#190). */
 
@@ -52,6 +60,42 @@ describe('displayText', () => {
 
   it('leaves ordinary text alone', () => {
     expect(displayText('Zoë Ashdown')).toBe('Zoë Ashdown');
+  });
+});
+
+describe('isolate (#264)', () => {
+  it('wraps cleaned text in a first-strong isolate, so it cannot reorder what follows', () => {
+    expect(isolate('Rowan Ashdown')).toBe('\u2068Rowan Ashdown\u2069');
+    expect(isolate('Evil\u202e')).toBe('\u2068Evil\u2069');
+    expect(isolate('Cohen\u2069')).toBe('\u2068Cohen\u2069');
+    expect(isolate('')).toBe('');
+  });
+});
+
+describe('invisible characters (#264)', () => {
+  it('finds and strips zero-width space, word joiner, BOM and direction marks', () => {
+    for (const char of ['\u200b', '\u2060', '\ufeff', '\u200e', '\u200f', '\u061c']) {
+      expect(invisibleChar(`Smi${char}th`), hex(char)).toBe(char);
+      expect(stripInvisible(`Smi${char}th`), hex(char)).toBe('Smith');
+    }
+  });
+
+  it('keeps ZWJ and ZWNJ, which emoji sequences and Persian need', () => {
+    for (const text of ['Family 👨‍👩‍👧', 'می‌خواهم']) {
+      expect(invisibleChar(text), text).toBeNull();
+      expect(stripInvisible(text)).toBe(text);
+    }
+  });
+
+  it('strips isolates for plain text, such as a toast read aloud', () => {
+    expect(stripIsolates('Merge \u2068Evil\u2069 into \u2067שרה\u2069')).toBe(
+      'Merge Evil into שרה',
+    );
+  });
+
+  it('writes a character as U+XXXX', () => {
+    expect(hex('\u200b')).toBe('U+200B');
+    expect(hex('😀')).toBe('U+1F600');
   });
 });
 

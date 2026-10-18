@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { getRouteApi, useNavigate } from '@tanstack/react-router';
 import { ArrowLeftRight, Merge } from 'lucide-react';
-import { formatDate } from '@open-ancestry/core';
+import { formatDate, isolate } from '@open-ancestry/core';
 import { apiSend, seg } from '../../api/client';
 import { useEdit } from '../../api/edits';
 import { currentTreeQuery, personQuery } from '../../api/queries';
@@ -176,7 +176,7 @@ export function MergePage() {
     }
     if (Object.keys(preferred).length) choices.preferred = preferred;
     edit.mutate({
-      label: `Merge ${nameB} into ${nameA}`,
+      label: `Merge ${isolate(nameB)} into ${isolate(nameA)}`,
       send: () =>
         apiSend('POST', `/trees/${seg(tree!)}/people/${seg(keep)}/merge`, {
           otherId: other,
@@ -184,7 +184,7 @@ export function MergePage() {
         }),
       onDone: () => {
         toast({
-          title: `Merged ${nameB} into ${nameA}`,
+          title: `Merged ${isolate(nameB)} into ${isolate(nameA)}`,
           description: 'Press Ctrl+Z (⌘Z on a Mac) to undo.',
         });
         void navigate({ to: '/person/$personId', params: { personId: keep } });
@@ -281,8 +281,8 @@ export function MergePage() {
           <ConfirmDialog
             open={confirm}
             onOpenChange={setConfirm}
-            title={`Merge ${nameB} into ${nameA}?`}
-            description={`${nameB} is removed and everything recorded for them moves to ${nameA}. You can undo this.`}
+            title={`Merge ${isolate(nameB)} into ${isolate(nameA)}?`}
+            description={`${isolate(nameB)} is removed and everything recorded for them moves to ${isolate(nameA)}. You can undo this.`}
             confirmLabel="Merge"
             danger={false}
             onConfirm={merge}

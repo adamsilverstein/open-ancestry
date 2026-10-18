@@ -20,8 +20,16 @@ const EMBEDDING = /[‪-‮]/u;
 const EMBEDDINGS = /[‪-‮]/gu;
 /** LRI, RLI, FSI open an isolate; PDI closes one. Balanced isolates are harmless. */
 const ISOLATES = /[⁦-⁩]/gu;
+/**
+ * Zero-width space, word joiner, BOM and the direction marks (ALM, LRM, RLM):
+ * harmless in a name, but two names that differ only by one look the same.
+ * ZWJ and ZWNJ are left out: emoji sequences and Persian need them.
+ */
+const INVISIBLE = /[\u061c\u200b\u200e\u200f\u2060\ufeff]/u;
+const INVISIBLES = /[\u061c\u200b\u200e\u200f\u2060\ufeff]/gu;
 
-const hex = (char: string) =>
+/** A character as `U+XXXX`, for messages about characters people cannot see. */
+export const hex = (char: string) =>
   `U+${char.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}`;
 
 function isolatesBalanced(text: string): boolean {
@@ -57,3 +65,25 @@ export function displayText(text: string): string {
     .replace(/ {2,}/g, ' ')
     .trim();
 }
+
+/**
+ * Stored text for a sentence such as "Merge X into Y?": cleaned, and wrapped
+ * in a first-strong isolate (U+2068...U+2069) so a right-to-left name cannot
+ * reorder the words around it (#264). Components that show such strings turn
+ * the isolates into `<bdi>`.
+ */
+export function isolate(text: string): string {
+  const shown = displayText(text);
+  return shown ? `⁨${shown}⁩` : '';
+}
+
+/** The first invisible character in `text` (see `INVISIBLE`), or null. */
+export function invisibleChar(text: string): string | null {
+  return INVISIBLE.exec(text)?.[0] ?? null;
+}
+
+/** `text` without invisible characters (see `INVISIBLE`). */
+export const stripInvisible = (text: string): string => text.replace(INVISIBLES, '');
+
+/** `text` without bidi isolates, for plain text such as a toast's screen reader alternative. */
+export const stripIsolates = (text: string): string => text.replace(ISOLATES, '');

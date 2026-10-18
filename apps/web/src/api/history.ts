@@ -1,3 +1,4 @@
+import { isolate } from '@open-ancestry/core';
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
 import type { ChangeBatchRow } from '@open-ancestry/db';
 import { apiGet, seg } from './client';
@@ -98,15 +99,18 @@ export async function undoRedo(
   return { batch, skipped: result.skipped ?? [] };
 }
 
-/** The toast for an undo or redo: what changed, and what was stepped over. */
+/**
+ * The toast for an undo or redo: what changed, and what was stepped over.
+ * Labels are stored text (often built from names), so they are cleaned and isolated (#264).
+ */
 export function undoRedoMessage(
   action: 'undo' | 'redo',
   { batch, skipped }: UndoRedoResult,
 ): { title: string; description?: string } {
   const title = batch
-    ? `${action === 'undo' ? 'Undid' : 'Redid'} ${batch.label}`
+    ? `${action === 'undo' ? 'Undid' : 'Redid'} ${isolate(batch.label)}`
     : `Nothing to ${action}`;
   if (skipped.length === 0) return { title };
-  const names = skipped.map((b) => `"${b.label}"`).join(', ');
+  const names = skipped.map((b) => `"${isolate(b.label)}"`).join(', ');
   return { title, description: `Skipped ${names} (can't be undone after the upgrade)` };
 }

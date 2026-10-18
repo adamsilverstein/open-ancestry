@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { parseGedcom, readGedzip } from '@open-ancestry/gedcom';
 import { importGedcom } from '@open-ancestry/import';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { attachment } from './routes/trees';
 import { createTestTree, seed, testApi, type Seeded, type TestApi } from './test/helpers';
 
 let api: TestApi;
@@ -105,6 +106,24 @@ describe('GEDCOM export routes', () => {
     expect(res.headers['content-disposition']).toBe(
       `attachment; filename="Vale _ Reed_s __tree.ged"; filename*=UTF-8''Vale%20%26%20Reed%27s%20%C3%BC%3Btree.ged`,
     );
+  });
+
+  it('leaves direction overrides and invisible characters out of the file name (#264)', () => {
+    expect(attachment('Fam\u202eily\u200b Tree', 'ged')).toBe(
+      `attachment; filename="Family Tree.ged"; filename*=UTF-8''Family%20Tree.ged`,
+    );
+    expect(attachment('\u2068Fam\u2069ily\ufeff', 'ged')).toBe(
+      `attachment; filename="Family.ged"; filename*=UTF-8''Family.ged`,
+    );
+    expect(attachment('\u202e', 'ged')).toBe(
+      `attachment; filename="tree.ged"; filename*=UTF-8''tree.ged`,
+    );
+  });
+
+  it('keeps ZWJ and ZWNJ in the file name, which emoji and Persian names need (#264)', () => {
+    for (const name of ['Family 👨‍👩‍👧', 'می‌خواهم']) {
+      expect(attachment(name, 'ged')).toContain(`filename*=UTF-8''${encodeURIComponent(name)}.ged`);
+    }
   });
 
   it('writes event types the edit API accepts in lower case as GEDCOM tags', async () => {

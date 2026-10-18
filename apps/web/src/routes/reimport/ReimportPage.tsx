@@ -30,6 +30,7 @@ import { compareProgress, conflictText, describeChange, placeRenameText } from '
 import { summarizeApply, type ApplySummary, type SummaryPerson } from './summary';
 import styles from './Reimport.module.css';
 import { PersonName } from '../../components/PersonName/PersonName';
+import { withIsolates } from '../../lib/isolates';
 
 /** People shown per page of the review. */
 export const PAGE = 100;
@@ -112,7 +113,7 @@ function PersonCard({
                     <CircleHelp aria-hidden size={14} /> Check
                   </span>
                 )}
-                {label}
+                {withIsolates(label)}
                 {change.kind === 'person.missing' && '. Kept in your tree.'}
               </li>
             );
@@ -132,7 +133,7 @@ function PersonCard({
                       <span className={styles.flag}>
                         <TriangleAlert aria-hidden size={14} /> Conflict
                       </span>
-                      {conflictText(change, person.name)}
+                      {withIsolates(conflictText(change, person.name) ?? '')}
                     </>
                   ) : waiting ? (
                     'Needs the new person above.'
@@ -482,15 +483,17 @@ function SummaryList({ people, undone = false }: { people: SummaryPerson[]; undo
         <li key={`${p.personId ?? ''}|${p.name}`}>
           {p.personId && !(undone && p.created) ? (
             <Link to="/person/$personId" params={{ personId: p.personId }} className={styles.name}>
-              {p.name}
+              <PersonName name={p.name} />
             </Link>
           ) : (
-            <span className={styles.name}>{p.name}</span>
+            <span className={styles.name}>
+              <PersonName name={p.name} />
+            </span>
           )}
           <ul className={styles.changes}>
             {p.changes.map((c, i) => (
               <li key={i} className={styles.info}>
-                {c}
+                {withIsolates(c)}
               </li>
             ))}
           </ul>

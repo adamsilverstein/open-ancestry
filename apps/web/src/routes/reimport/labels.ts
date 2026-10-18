@@ -1,4 +1,4 @@
-import { formatDate } from '@open-ancestry/core';
+import { formatDate, isolate } from '@open-ancestry/core';
 import { eventLabel } from '../../lib/timeline';
 import type { ImportProgress } from '../../library/api';
 import type { FactView, ExportPlaceRename, ReviewChange } from './api';
@@ -18,7 +18,11 @@ const NAME_TYPES: Record<string, string> = {
 /** A fact's date as the app shows dates ("12 Mar 1842", "abt. 1842"), not raw GEDCOM. */
 const shownDate = (date: string | null) => (date ? formatDate(date) : null);
 
-const parts = (f: FactView) => [shownDate(f.date), f.place, f.value].filter(Boolean) as string[];
+// Places and values come from the file: isolated, so none can reorder the label (#264).
+const parts = (f: FactView) =>
+  [shownDate(f.date), f.place && isolate(f.place), f.value && isolate(f.value)].filter(
+    Boolean,
+  ) as string[];
 
 /** "Residence, 1900, Millbrook" */
 export function factText(f: FactView): string {
@@ -33,20 +37,25 @@ export function changeText(before: FactView, after: FactView): string {
   // Dates are shown as the app formats them, unless that hides the difference.
   const raw = shownDate(before.date) === shownDate(after.date);
   const side = (f: FactView) =>
-    fields.map((k) => (k === 'date' && !raw ? shownDate(f.date) : f[k]) || '(none)').join(', ');
+    fields
+      .map((k) => (k === 'date' && !raw ? shownDate(f.date) : f[k] && isolate(f[k])) || '(none)')
+      .join(', ');
   return `${eventLabel(after.type, after.customType)}: ${side(before)} → ${side(after)}`;
 }
 
-const list = (names: string[]) =>
-  names.length <= 1
+const list = (raw: string[]) => {
+  const names = raw.map(isolate);
+  return names.length <= 1
     ? (names[0] ?? 'unknown')
     : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+};
 
 /** What ticking a conflicting change does, under its checkbox; undefined for other changes. */
-export function conflictText(change: ReviewChange, personName: string): string | undefined {
+export function conflictText(change: ReviewChange, rawName: string): string | undefined {
   if (change.kind === 'name.add' && change.conflict === 'local-edit') {
-    const was = change.was ? ` (it was ${change.was})` : '';
-    return `The export now calls this person ${change.name}${was}; you renamed them ${personName} here. Tick to also keep ${change.name} as an alternate name; ${personName} stays the primary name.`;
+    const [name, personName] = [isolate(change.name), isolate(rawName)];
+    const was = change.was ? ` (it was ${isolate(change.was)})` : '';
+    return `The export now calls this person ${name}${was}; you renamed them ${personName} here. Tick to also keep ${name} as an alternate name; ${personName} stays the primary name.`;
   }
   if (change.conflict === 'local-edit') {
     return 'Edited in this tree since the last import; your edit is kept unless you tick this.';
@@ -61,7 +70,10 @@ export function conflictText(change: ReviewChange, personName: string): string |
 }
 
 /** One line describing a change, used as its checkbox label. */
-export function describeChange(change: ReviewChange, personName: string): string {
+export function describeChange(change: ReviewChange, rawName: string): string {
+  // Every name, title and tag here may come from the file: isolated (#264).
+  const personName = isolate(rawName);
+  const others = (names: string[]) => list(names.filter((n) => n !== rawName));
   switch (change.kind) {
     case 'person.new':
       return `Add ${personName}`;
@@ -71,8 +83,8 @@ export function describeChange(change: ReviewChange, personName: string): string
       // Ticking adds an alternate name: say so when it competes with the user's own.
       const type = change.nameType ? ` (${NAME_TYPES[change.nameType] ?? change.nameType})` : '';
       return change.conflict === 'local-edit'
-        ? `Also keep ${change.name}${type} as an alternate name`
-        : `Add name: ${change.name}${type}`;
+        ? `Also keep ${isolate(change.name)}${type} as an alternate name`
+        : `Add name: ${isolate(change.name)}${type}`;
     }
     case 'fact.add':
       return `Add ${change.owner === 'family' ? 'family fact' : 'fact'}: ${factText(change.fact)}`;
@@ -85,23 +97,26 @@ export function describeChange(change: ReviewChange, personName: string): string
     case 'fact.missing':
       return `Not in the new export: ${factText(change.fact)}`;
     case 'citation.add':
-      return `Add source: ${[change.source, change.page].filter(Boolean).join(', ')}`;
+      return `Add source: ${[change.source, change.page]
+        .filter((part): part is string => !!part)
+        .map(isolate)
+        .join(', ')}`;
     case 'tag.add':
-      return `Add tag: ${change.tag}`;
+      return `Add tag: ${isolate(change.tag)}`;
     case 'media.add':
-      return `Add media: ${change.title ?? 'untitled'}`;
+      return `Add media: ${change.title ? isolate(change.title) : 'untitled'}`;
     case 'media.file':
-      return `Add the file for ${change.title ?? 'untitled media'}`;
+      return `Add the file for ${change.title ? isolate(change.title) : 'untitled media'}`;
     case 'media.replace':
-      return `Use the new export's file for ${change.title ?? 'untitled media'}`;
+      return `Use the new export's file for ${change.title ? isolate(change.title) : 'untitled media'}`;
     case 'family.add':
-      return `Partner: ${list(change.partnerNames.filter((n) => n !== personName))}`;
+      return `Partner: ${others(change.partnerNames)}`;
     case 'child.add':
       return `Child of ${list(change.parentNames)}`;
     case 'person.missing':
       return 'Not in the new export';
     case 'family.missing':
-      return `Not in the new export: partner ${list(change.partnerNames.filter((n) => n !== personName))}. Kept in your tree.`;
+      return `Not in the new export: partner ${others(change.partnerNames)}. Kept in your tree.`;
     case 'child.missing':
       return `Not in the new export: child of ${list(change.parentNames)}. Kept in your tree.`;
     case 'deleted-here':
@@ -110,12 +125,12 @@ export function describeChange(change: ReviewChange, personName: string): string
       return 'New child of a partnership not in this tree; tick to add';
     case 'possible-match':
       return change.taken
-        ? `Looks like ${change.existingName} (${Math.round(change.confidence * 100)}%), who is already matched; not added unless you tick it`
-        : `Possibly ${change.existingName} (${Math.round(change.confidence * 100)}% match); not added unless you tick it`;
+        ? `Looks like ${isolate(change.existingName)} (${Math.round(change.confidence * 100)}%), who is already matched; not added unless you tick it`
+        : `Possibly ${isolate(change.existingName)} (${Math.round(change.confidence * 100)}% match); not added unless you tick it`;
     case 'possibly-merged':
-      return `Possibly merged into ${change.existingName} earlier (shares a relative); not added unless you tick it`;
+      return `Possibly merged into ${isolate(change.existingName)} earlier (shares a relative); not added unless you tick it`;
     case 'merged':
-      return `Exported separately as ${change.incomingName}; previously merged into ${personName}, so not added again`;
+      return `Exported separately as ${isolate(change.incomingName)}; previously merged into ${personName}, so not added again`;
   }
 }
 
@@ -142,5 +157,5 @@ export function compareProgress(progress: ImportProgress | null | undefined): st
 /** "Place renamed: Millbrook → Millbrook Falls (6 facts)" */
 export function placeRenameText(rename: ExportPlaceRename): string {
   const n = rename.changeIds.length;
-  return `Place renamed: ${rename.from} → ${rename.to} (${n} fact${n === 1 ? '' : 's'})`;
+  return `Place renamed: ${isolate(rename.from)} → ${isolate(rename.to)} (${n} fact${n === 1 ? '' : 's'})`;
 }

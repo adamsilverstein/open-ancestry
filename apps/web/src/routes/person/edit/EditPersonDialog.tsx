@@ -1,3 +1,4 @@
+import { isolate } from '@open-ancestry/core';
 import { useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
@@ -12,7 +13,7 @@ import type {
 import { isNotFound, seg } from '../../../api/client';
 import { useEdit } from '../../../api/edits';
 import { ApiError, apiSend } from '../../../api/client';
-import { rememberDeletedPerson, undoRedo } from '../../../api/history';
+import { rememberDeletedPerson, undoRedo, undoRedoMessage } from '../../../api/history';
 import { personQuery } from '../../../api/queries';
 import type { PersonDetail } from '../../../api/types';
 import { Button } from '../../../components/Button/Button';
@@ -220,15 +221,19 @@ export function EditPersonDialog({
     });
 
     if (operations.length === 0) return onOpenChange(false);
-    const label = `Edit person: ${name}`;
     edit.mutate({
-      label,
+      label: `Edit person: ${isolate(name)}`,
       optimistic: {
         personId: id,
         update: (current) => applyPerson(applyNames(current, names), personPatch),
       },
       // One request, one change batch: the whole save is a single undo step.
-      send: () => apiSend('POST', `${base}/batch`, { label, operations }),
+      // History stores plain text and isolates names when it shows them (#264).
+      send: () =>
+        apiSend('POST', `${base}/batch`, {
+          label: `Edit person: ${name}`,
+          operations,
+        }),
       ...saveState.handlers(),
     });
   }
@@ -317,7 +322,7 @@ export function EditPersonDialog({
           : navigate({ to: '/people' }));
         queryClient.removeQueries({ queryKey: personQuery(tree, id).queryKey });
         toast({
-          title: `Deleted ${name}`,
+          title: `Deleted ${isolate(name)}`,
           description: 'Press Ctrl+Z (⌘Z on a Mac) to undo.',
           duration: 8000,
           action: {
@@ -325,7 +330,9 @@ export function EditPersonDialog({
             // This delete only: refused if anything was changed after it.
             onClick: () =>
               void undoRedo(queryClient, 'undo', { expect: batchId, onRestored }).then(
-                ({ batch }) => batch && toast({ title: `Undid ${batch.label}`, duration: 3000 }),
+                (result) =>
+                  result.batch &&
+                  toast({ title: undoRedoMessage('undo', result).title, duration: 3000 }),
                 (error: unknown) =>
                   toast(
                     error instanceof ApiError && error.code === 'not_newest'
@@ -539,7 +546,7 @@ export function EditPersonDialog({
       <ConfirmDialog
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
-        title={`Delete ${name}?`}
+        title={`Delete ${isolate(name)}?`}
         description="Their names, events and links to family are removed. You can undo this."
         confirmLabel="Delete person"
         onConfirm={deletePerson}

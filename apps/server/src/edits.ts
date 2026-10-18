@@ -1,6 +1,7 @@
 import {
   ancestorWord,
   descendantWord,
+  displayText,
   inferLiving,
   replaceNickname,
   unsafeTextReason,
@@ -347,7 +348,8 @@ export function personLabel(store: TreeStore, personId: string | null | undefine
   const text = [name?.prefix, name?.given, name?.surname_prefix, name?.surname, name?.suffix]
     .filter((p) => p?.trim())
     .join(' ');
-  return text || 'unnamed person';
+  // A name stored before the checks (#190) may carry an override into the history label.
+  return displayText(text) || 'unnamed person';
 }
 
 /**

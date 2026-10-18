@@ -266,6 +266,16 @@ describe('batch', () => {
     }
   });
 
+  it('refuses a label that would show as something else, and changes nothing (#264)', async () => {
+    const res = await api.post(`${s.base}/batch`, {
+      label: 'Edit Evil\u202e Vale',
+      operations: [{ op: 'person.update', id: s.ada, patch: { sex: 'X' } }],
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.message).toMatch(/^label .*direction/);
+    expect((await detail(s.ada)).person.sex).not.toBe('X');
+  });
+
   it('needs the mutation token like every write', async () => {
     const res = await api.inject({
       method: 'POST',

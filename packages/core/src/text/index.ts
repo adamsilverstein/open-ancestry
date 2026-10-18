@@ -1,1 +1,9 @@
-export { displayText, unsafeTextReason } from './safety';
+export {
+  displayText,
+  hex,
+  invisibleChar,
+  isolate,
+  stripInvisible,
+  stripIsolates,
+  unsafeTextReason,
+} from './safety';

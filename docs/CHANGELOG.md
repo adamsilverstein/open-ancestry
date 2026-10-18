@@ -10,8 +10,7 @@ open-ancestry is for one person per computer account. Don't run it on a shared o
 
 ### Known limitations
 
-- **Names with right-to-left or other control characters** can change how the text after them is displayed. This includes the labels on the re-import review and the merge prompt, and tree names accept these characters too (#190, #264).
-- **Search matches surnames by sound, but not yet common spellings across scripts**: Yılmaz and Yilmaz, Straße and Strasse, pointed and unpointed Hebrew, O'Brien and OBrien (#199).
+- **Tree cards call a parent's later spouse a step-parent even when the dates rule it out.** The person page and the relationship calculator check the marriage and death dates ("husband of mother"); the tree cards don't yet (#320).
 - **Dual dates sort apart from the same day in the old calendar.** A dual-dated day such as `29 FEB 1751/52` sorts as if it were a modern calendar date, so it lands 11 days away from the same day written as an old-calendar (Julian) date, which is how a GEDCOM 7 export writes it (#298).
 
 ### Import and re-import
@@ -48,7 +47,7 @@ open-ancestry is for one person per computer account. Don't run it on a shared o
 - **Quick view polish**: Edit opens the editor directly, a living person shows "Living" once, and people without a photo get a silhouette tinted by sex. At phone width it opens above or below the card and stays on screen, with larger touch targets.
 - **Fan chart labels fit inside their segments**, and Fit stays readable on phones. Switching trees from the top bar moves the open person page or tree view to the new tree, and the tree view settles correctly after fast changes.
 - **Copied trees are told apart**: a tree folder copied by hand shows its folder name next to the tree name in the switcher, start page and export dialog.
-- **Kinship labels** on tree cards name step, adoptive and foster links, not just birth relationships, and come from the relationship calculator itself, so the two always agree ("sister-in-law", "stepmother", "3rd great-grandfather"). The parent-set switcher reaches every set of parents, and a family with thousands of children still fits.
+- **Kinship labels** on tree cards name step, adoptive and foster links, not just birth relationships, and come from the relationship calculator itself ("sister-in-law", "stepmother", "3rd great-grandfather"). The parent-set switcher reaches every set of parents, and a family with thousands of children still fits.
 - **Dates read the same everywhere**: tree cards keep "abt." and "bef.", and the people list and gallery show `bet. 1870 and 1872` or `28 May 1960` rather than the date as typed.
 
 ### Person page
@@ -67,6 +66,8 @@ open-ancestry is for one person per computer account. Don't run it on a shared o
 
 - **Command palette** (Cmd/Ctrl-K) searches people by name, place and year, matching surnames by sound. Equally good matches are listed by name, and when more people match than it shows, "Show all N people" lists up to 100. It also runs app actions. Results update on each pause in typing, keys typed right after opening it aren't lost, and screen readers hear how many results there are and land on the heading of the page a result opens.
 - **People list**: every person in the tree, sortable and filterable by tag, living status and sex.
+- **Manage tags** at Tags (from the people list or the command palette): create, rename, recolor and delete tags, and rename or delete a whole category in one undo step. Each tag links to the people list filtered by it, and to the tree with its people highlighted: tagged cards get a ring and a badge, everyone else is dimmed without losing contrast, and a pill counts them and steps to the next tagged person, even one outside the loaded tree.
+- **Common spellings match across scripts**: search finds Yılmaz from Yilmaz, Straße from Strasse, pointed Hebrew and Arabic names from unpointed ones, and O'Brien from OBrien. A tree's search index is rebuilt once on first open, with no schema change. A one-character Chinese, Japanese or Korean query matches names that start with it.
 - **Tree checker**: possible duplicates, impossible dates and people without sources, each linking to the person.
 
 ### Editing
@@ -102,6 +103,7 @@ open-ancestry is for one person per computer account. Don't run it on a shared o
 ### Security
 
 - The app only answers requests from this computer. It checks where each request comes from, every change needs a per-session token, which stops other websites, not other programs on this computer, and pages can only run the app's own scripts.
+- Names, places and dates can't carry control characters or direction overrides that would make text read as something else. Names are isolated wherever they are shown, including the re-import review, the merge prompt, toasts and the History panel, so a right-to-left name can't reorder the text around it. Tree names refuse invisible characters, and two trees whose names differ only by one are told apart.
 - GEDCOM files are treated as untrusted. Values cannot inject extra GEDCOM lines on export, text that looks like a link to another record stays text, coordinates are read safely, and control characters are escaped in command-line output.
 - When the app imports, shows or exports media, it refuses files outside the tree, hard-linked files, a symlinked media folder and a file swapped in during the import, and checks again after reading. Uploads have size limits. A GEDZIP whose entries share or overlap stored data is refused.
 - The library's files are private to your user account, and another site can't make the app drop an export into Downloads. open-ancestry assumes one user per computer: a running app answers anyone on that machine. A library folder that other accounts can change is refused unless you start the app with `--shared-library`.

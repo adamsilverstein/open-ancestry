@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.0.0 (draft)
+## v1.0.0 (2026-10-18)
 
 The first release of open-ancestry: a local-first family tree app. Import your Ancestry.com tree, then browse, search, edit and export it on your own computer. The app sends nothing anywhere; what you export is up to you, and exports leave living people's details out by default (see [Privacy and export](#privacy-and-export)).
 

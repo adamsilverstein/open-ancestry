@@ -2,6 +2,7 @@ import { parseDate } from '@open-ancestry/core';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  countPeople,
   createTree,
   events,
   exportJson,
@@ -10,7 +11,10 @@ import {
   openTree,
   persons,
   redoLast,
+  rebuildSearchIndex,
+  rebuildSearchIndexInChunks,
   refreshDerivedColumns,
+  searchIndexStale,
   searchPeople,
   undoLast,
   type TreeStore,
@@ -100,13 +104,126 @@ describe('derived column refresh', () => {
     store.close();
 
     store = openTree(dir, { log: (m) => messages.push(m) });
-    expect(messages).toEqual(['Recomputed event_date_sort for 2 rows (date parser changed)']);
+    expect(messages).toContain('Recomputed event_date_sort for 2 rows (date parser changed)');
     expect(sorts(store)[2]).toMatchObject({ date_sort: parseDate(HEBREW).sortKey });
     store.close();
 
     messages.length = 0;
     openTree(dir, { log: (m) => messages.push(m) }).close();
     expect(messages).toEqual([]);
+  });
+
+  it('rebuilds the search index on open when the search fold changed (#199)', () => {
+    const dir = join(root, 'search.oatree');
+    let store = createTree(dir);
+    const { result: p } = store.transact('add', (tx) =>
+      persons.create(tx, { names: [{ given: 'Emre', surname: 'Yılmaz' }] }),
+    );
+    store.db.prepare("DELETE FROM derived_state WHERE name = 'search_index'").run();
+    store.close();
+
+    const messages: string[] = [];
+    store = openTree(dir, { log: (m) => messages.push(m) });
+    expect(messages).toEqual(['Recomputed search_index for 1 rows (search fold changed)']);
+    expect(searchPeople(store, 'yilmaz').map((r) => r.person.id)).toEqual([p.id]);
+    store.close();
+    messages.length = 0;
+    openTree(dir, { log: (m) => messages.push(m) }).close();
+    expect(messages).toEqual([]);
+  });
+
+  it('can leave a stale search index for a chunked rebuild off the open path', () => {
+    const dir = join(root, 'deferred.oatree');
+    let store = createTree(dir);
+    const ids = store.transact('add', (tx) =>
+      ['Yılmaz', 'Straße', 'Kaya'].map(
+        (surname) => persons.create(tx, { names: [{ given: 'Ada', surname }] }).id,
+      ),
+    ).result;
+    store.db.prepare("DELETE FROM derived_state WHERE name = 'search_index'").run();
+    store.close();
+
+    const messages: string[] = [];
+    store = openTree(dir, { log: (m) => messages.push(m), deferSearch: true });
+    expect(messages).toEqual([]);
+    expect(searchIndexStale(store)).toBe(true);
+    // Each step refreshes one chunk; search keeps working between them.
+    const steps = [...rebuildSearchIndexInChunks(store, 2)];
+    expect(steps).toEqual([2, 3]);
+    expect(searchIndexStale(store)).toBe(false);
+    expect(searchPeople(store, 'yilmaz').map((r) => r.person.id)).toEqual([ids[0]]);
+    expect(searchPeople(store, 'strasse').map((r) => r.person.id)).toEqual([ids[1]]);
+    expect(messages).toEqual(['Recomputed search_index for 3 rows (search fold changed)']);
+    store.close();
+  });
+
+  it('finds people by their old spelling while a deferred rebuild is pending', () => {
+    const dir = join(root, 'pending.oatree');
+    let store = createTree(dir);
+    const id = store.transact('add', (tx) =>
+      persons.create(tx, { names: [{ given: 'Emre', surname: 'Yılmaz' }] }),
+    ).result.id;
+    // An index written before the fold: the name as typed, and no fingerprint.
+    store.db
+      .prepare(
+        "UPDATE person_search SET names = 'Emre Yılmaz' WHERE rowid = (SELECT doc_id FROM search_doc WHERE person_id = ?)",
+      )
+      .run(id);
+    store.db.prepare("DELETE FROM derived_state WHERE name = 'search_index'").run();
+    store.close();
+
+    store = openTree(dir, { deferSearch: true, log: () => {} });
+    expect(store.searchRebuildPending).toBe(true);
+    // The query is folded to "yilmaz", which the old document lacks; the spelling
+    // as typed still finds it, as it did before the upgrade.
+    expect(searchPeople(store, 'Yılmaz').map((r) => r.person.id)).toEqual([id]);
+    // The palette's total counts the same way (#305's countPeople).
+    expect(countPeople(store, 'Yılmaz')).toBe(1);
+    for (const done of rebuildSearchIndexInChunks(store)) void done;
+    expect(store.searchRebuildPending).toBe(false);
+    expect(searchPeople(store, 'Yılmaz').map((r) => r.person.id)).toEqual([id]);
+    expect(searchPeople(store, 'Yilmaz').map((r) => r.person.id)).toEqual([id]);
+    expect(countPeople(store, 'Yilmaz')).toBe(1);
+    // A full rebuild clears the flag too, so it always agrees with the index.
+    store.searchRebuildPending = true;
+    rebuildSearchIndex(store);
+    expect(store.searchRebuildPending).toBe(false);
+    store.close();
+  });
+
+  it('keeps an edit made between rebuild chunks', () => {
+    const dir = join(root, 'edit-between.oatree');
+    let store = createTree(dir);
+    const ids = store
+      .transact('add', (tx) =>
+        ['Aksoy', 'Yılmaz', 'Kaya'].map(
+          (surname) => persons.create(tx, { names: [{ given: 'Ada', surname }] }).id,
+        ),
+      )
+      .result.sort();
+    store.db.prepare("DELETE FROM derived_state WHERE name = 'search_index'").run();
+    store.close();
+
+    store = openTree(dir, { deferSearch: true, log: () => {} });
+    const chunks = rebuildSearchIndexInChunks(store, 1);
+    expect(chunks.next().value).toBe(1);
+    // Rename someone whose chunk has not run yet, and someone whose chunk has.
+    store.transact('rename', (tx) => {
+      for (const [id, surname] of [
+        [ids[2]!, 'Öztürk'],
+        [ids[0]!, 'Şahin'],
+      ] as const) {
+        const name = tx.store.stmt('SELECT id FROM person_name WHERE person_id = ?').get(id) as {
+          id: string;
+        };
+        tx.update('person_name', name.id, { surname });
+      }
+    });
+    for (const done of chunks) void done;
+    expect(searchIndexStale(store)).toBe(false);
+    expect(searchPeople(store, 'ozturk').map((r) => r.person.id)).toEqual([ids[2]]);
+    expect(searchPeople(store, 'sahin').map((r) => r.person.id)).toEqual([ids[0]]);
+    store.close();
   });
 
   it('keeps undo working across a recompute, restoring fresh sort keys', () => {

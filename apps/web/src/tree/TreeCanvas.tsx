@@ -849,6 +849,42 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     [animateTo, apply, focusCard, measure, nodeByKey],
   );
 
+  /**
+   * Where the view was last placed for the reader, until they move it. On phones
+   * the notices and tag pill can arrive after that (the tagged people load on
+   * their own): a view still where it was placed moves to clear them.
+   */
+  const framed = useRef<{ at: Transform; fitRows: boolean } | null>(null);
+  useEffect(() => {
+    const region = viewportRef.current?.closest<HTMLElement>('[data-tree-region]');
+    if (!region) return;
+    const bars = () =>
+      ['--oa-tree-top-bar', '--oa-tree-bottom-bar']
+        .map((name) => region.style.getPropertyValue(name))
+        .join('|');
+    let last = bars();
+    const same = (a: Transform, b: Transform) =>
+      Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.scale - b.scale) < 1e-6;
+    const observer = new MutationObserver(() => {
+      const now = bars();
+      if (now === last) return;
+      last = now;
+      const placed = framed.current;
+      if (!placed) return;
+      const heading = animationTarget.current;
+      if (!(heading ? same(heading, placed.at) : same(transform.current, placed.at))) {
+        framed.current = null;
+        return;
+      }
+      const target = centeredOnFocus(heading ?? transform.current, placed.fitRows);
+      framed.current = { at: target, fitRows: placed.fitRows };
+      if (heading) animateTo(target);
+      else apply(target);
+    });
+    observer.observe(region, { attributes: true, attributeFilter: ['style'] });
+    return () => observer.disconnect();
+  }, [apply, animateTo, centeredOnFocus]);
+
   // New layout: place the view, then mount what is visible before paint.
   useLayoutEffect(() => {
     if (!source) return;
@@ -869,6 +905,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     if (!prev || prev.kind !== kind) {
       stopAnimation();
       apply(centeredOnFocus(transform.current, true));
+      framed.current = { at: transform.current, fitRows: true };
     } else if (prev.focus !== focusPersonId) {
       // Keyboard focus follows to the new focus card when the re-focus came from
       // the canvas, or focus is still in the tree or was lost to the page (Find in
@@ -890,8 +927,10 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         const t = transform.current;
         apply({ x: t.x + old.x * t.scale, y: t.y + old.y * t.scale, scale: t.scale });
         animateTo(centeredOnFocus(transform.current));
+        framed.current = { at: animationTarget.current ?? transform.current, fitRows: false };
       } else {
         apply(centeredOnFocus(transform.current));
+        framed.current = { at: transform.current, fitRows: false };
       }
     }
     updateVisible(true);

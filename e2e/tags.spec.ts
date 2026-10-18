@@ -245,6 +245,48 @@ test.describe('highlight pill on a phone', () => {
     }
   });
 
+  test('reframes when the pill arrives after the first view', async ({ page }) => {
+    // The tagged people load after the tree has framed itself: the pill then
+    // takes room at the top, and the untouched view moves down to clear it.
+    await page.route('**/api/trees/*/tags/*/people', async (route) => {
+      await new Promise((r) => setTimeout(r, 1500));
+      await route.continue();
+    });
+    await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+    await page.goto(`/tree/${rowan}?tag=${smiths}`);
+    await expect(page.locator('[data-key][aria-label^="Rowan Ashdown"]').first()).toBeVisible();
+    const pill = page.getByRole('status').filter({ hasText: 'tagged Smiths' });
+    await expect(pill).toBeVisible();
+    const pillBox = (await pill.boundingBox())!;
+    for (const name of ['Rowan Ashdown', 'Edmund Ashdown', 'Silas Ashdown']) {
+      const card = page.locator(`[data-key][aria-label^="${name}"]`).first();
+      await expect
+        .poll(async () => overlaps((await card.boundingBox())!, pillBox), { message: name })
+        .toBe(false);
+    }
+  });
+
+  test('keeps a view the reader moved when the pill arrives', async ({ page }) => {
+    await page.route('**/api/trees/*/tags/*/people', async (route) => {
+      await new Promise((r) => setTimeout(r, 1500));
+      await route.continue();
+    });
+    await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
+    await page.goto(`/tree/${rowan}?tag=${smiths}`);
+    const world = page.getByTestId('tree-world');
+    await expect(page.locator('[data-key][aria-label^="Rowan Ashdown"]').first()).toBeVisible();
+    await expect(world).not.toHaveAttribute('data-animating');
+    const framed = await world.getAttribute('data-scale');
+    await page.locator('[data-key][aria-label^="Rowan Ashdown"]').first().focus();
+    await page.keyboard.press('+');
+    await expect(world).not.toHaveAttribute('data-scale', framed!);
+    await expect(world).not.toHaveAttribute('data-animating');
+    const moved = await world.getAttribute('data-y');
+    await expect(page.getByRole('status').filter({ hasText: 'tagged Smiths' })).toBeVisible();
+    await page.waitForTimeout(300);
+    expect(await world.getAttribute('data-y')).toBe(moved);
+  });
+
   test('gives the pill buttons 44px touch targets', async ({ page, request }) => {
     const base = `/api/trees/${encodeURIComponent(tree)}`;
     const wren = (

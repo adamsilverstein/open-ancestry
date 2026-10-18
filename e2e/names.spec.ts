@@ -206,6 +206,7 @@ test('the merge prompt and its toast isolate both names (#264)', async ({
       ['0 @I2@ INDI', '1 NAME Rowan /Ashdown/', '1 BIRT', '2 DATE 1880'],
     ),
   );
+  // labels.test.ts covers cleaning the override; this checks both names are isolated.
   const [evil, rowan] = [await idOf(request, tree, 'Evil'), await idOf(request, tree, 'Rowan')];
   await page.addInitScript((t) => localStorage.setItem('oa-tree', t), tree);
   await page.goto(`/merge?keep=${rowan}&other=${evil}`);

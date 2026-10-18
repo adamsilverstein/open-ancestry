@@ -146,7 +146,11 @@ test('removes a child link from the parent page and undoes it', async ({ page })
   await openSeeded(page, seeded, seeded.edmund);
   const family = group(page, 'Spouse and children');
   await expect(family.getByRole('link', { name: /Rowan Ashdown/ })).toBeVisible();
-  await groupAction(page, 'Spouse and children', 'Remove child Rowan Ashdown…');
+  await family.getByRole('button', { name: 'Actions for Spouse and children' }).click();
+  const item = page.getByRole('menuitem', { name: 'Remove child Rowan Ashdown…' });
+  // The name is isolated, so a right-to-left name cannot move the ellipsis (#264).
+  await expect(item.locator('bdi')).toHaveText('Rowan Ashdown');
+  await item.click();
   const confirm = page.getByRole('alertdialog', {
     name: 'Remove Rowan Ashdown from the family of Edmund Ashdown and Clara Penhallow?',
   });

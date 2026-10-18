@@ -10,6 +10,7 @@ import { ConfirmDialog } from '../../../components/ConfirmDialog/ConfirmDialog';
 import { Dialog, DialogClose } from '../../../components/Dialog/Dialog';
 import { IconButtonBase } from '../../../components/IconButton/IconButtonBase';
 import { Menu, MenuContent, MenuItem, MenuTrigger } from '../../../components/Menu/Menu';
+import { PersonName } from '../../../components/PersonName/PersonName';
 import { Select } from '../../../components/Select/Select';
 import { fullName } from '../../../lib/person';
 import { RELATIONSHIP_TYPES } from './EditPersonDialog';
@@ -215,7 +216,7 @@ export function useRelationshipEdits(tree: string, detail: PersonDetail) {
               setConfirm(removeChildLink(isolate(fullName(person)), parents, link.id))
             }
           >
-            Remove child {fullName(person)}…
+            Remove child <PersonName name={fullName(person)} />…
           </MenuItem>
         ))}
       </GroupMenu>

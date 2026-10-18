@@ -201,4 +201,16 @@ test('the merge prompt and its toast isolate both names (#264)', async ({
     .getByRole('listitem')
     .filter({ hasText: 'Merged Evil Ashdown into Rowan Ashdown' });
   await expect(toast.locator('bdi')).toHaveText(['Evil Ashdown', 'Rowan Ashdown']);
+
+  // The server builds the history label from the stored names: cleaned, and shown isolated.
+  const res = await request.get(`/api/trees/${encodeURIComponent(tree)}/history`);
+  const { items } = (await res.json()) as { items: { label: string }[] };
+  expect(items[0]!.label).toBe('Merge Evil Ashdown into Rowan Ashdown');
+  await page.getByRole('banner').getByRole('button', { name: 'History', exact: true }).click();
+  const row = page
+    .getByRole('dialog', { name: 'History' })
+    .getByRole('listitem')
+    .filter({ hasText: 'Merge Evil Ashdown into Rowan Ashdown' });
+  await expect(row.locator('bdi')).toHaveText('Merge Evil Ashdown into Rowan Ashdown');
+  expect(await row.textContent()).not.toMatch(/[‪-‮⁦-⁩]/);
 });

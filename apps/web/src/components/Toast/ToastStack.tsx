@@ -1,3 +1,4 @@
+import { stripIsolates } from '@open-ancestry/core';
 import * as RadixToast from '@radix-ui/react-toast';
 import { CircleAlert, Info, X } from 'lucide-react';
 import { cx } from '../../lib/cx';
@@ -36,7 +37,7 @@ export default function ToastStack({
             )}
           </div>
           {action && (
-            <RadixToast.Action asChild altText={`${action.label}: ${title}`}>
+            <RadixToast.Action asChild altText={`${action.label}: ${stripIsolates(title)}`}>
               <button type="button" className={styles.action} onClick={action.onClick}>
                 {action.label}
               </button>

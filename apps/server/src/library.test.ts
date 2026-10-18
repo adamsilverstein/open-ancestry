@@ -651,3 +651,50 @@ describe.skipIf(process.platform === 'win32')('library permissions', () => {
     library.closeAll();
   });
 });
+
+describe('search index rebuild (#199)', () => {
+  it('opens a tree with a stale index at once and rebuilds it in the background', async () => {
+    const { persons, searchIndexStale, searchPeople } = await import('@open-ancestry/db');
+    const root = makeTempDir('oa-library-search-');
+    const first = new Library(root);
+    const store = first.create('Fold');
+    const id = store.transact('add', (tx) =>
+      persons.create(tx, { names: [{ given: 'Emre', surname: 'Yılmaz' }] }),
+    ).result.id;
+    store.db.prepare("DELETE FROM derived_state WHERE name = 'search_index'").run();
+    first.closeAll();
+
+    const library = new Library(root);
+    const opened = library.open('Fold');
+    // Opening did not rebuild: the request that opened it is not held up.
+    expect(searchIndexStale(opened)).toBe(true);
+    await expect.poll(() => searchIndexStale(opened), { interval: 5, timeout: 5000 }).toBe(false);
+    expect(searchPeople(opened, 'yilmaz').map((r) => r.person.id)).toEqual([id]);
+    library.closeAll();
+  });
+
+  it('stops a background rebuild when the tree closes, and finishes it after reopening', async () => {
+    const { persons, searchIndexStale, searchPeople } = await import('@open-ancestry/db');
+    const root = makeTempDir('oa-library-search-');
+    const first = new Library(root);
+    const store = first.create('Fold');
+    const id = store.transact('add', (tx) =>
+      persons.create(tx, { names: [{ given: 'Ada', surname: 'Straße' }] }),
+    ).result.id;
+    store.db.prepare("DELETE FROM derived_state WHERE name = 'search_index'").run();
+    first.closeAll();
+
+    const interrupted = new Library(root);
+    interrupted.open('Fold');
+    // Closed before the first chunk runs: the rebuild stops without touching a closed database.
+    interrupted.closeAll();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const library = new Library(root);
+    const reopened = library.open('Fold');
+    expect(searchIndexStale(reopened)).toBe(true);
+    await expect.poll(() => searchIndexStale(reopened), { interval: 5, timeout: 5000 }).toBe(false);
+    expect(searchPeople(reopened, 'strasse').map((r) => r.person.id)).toEqual([id]);
+    library.closeAll();
+  });
+});

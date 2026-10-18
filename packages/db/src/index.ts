@@ -37,6 +37,7 @@ export {
   readTreeName,
   treePaths,
   type CreateTreeOptions,
+  type OpenTreeOptions,
   type TreePaths,
 } from './tree';
 export * from './repositories';
@@ -93,7 +94,9 @@ export {
   CONVERTED_CALENDARS,
   DERIVED_STEPS,
   deriveDateSort,
+  rebuildSearchIndexInChunks,
   refreshDerivedColumns,
+  searchIndexStale,
   type RefreshOptions,
 } from './derived';
 export { getRelationship, type RelationshipView } from './kinship';

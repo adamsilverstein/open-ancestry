@@ -2,6 +2,7 @@ import type { Database, Statement } from 'better-sqlite3';
 import { MIGRATIONS, migrate, type Migration } from './migrations/index';
 import { nfcRow } from './nfc';
 import { markSearchDirty, refreshSearch } from './search';
+import { registerSearchFold } from './search-docs';
 import { assertDataTable } from './tables';
 import type { InsertRow, PatchRow, TableName, TableRows } from './types';
 import { ulid } from './ulid';
@@ -74,6 +75,11 @@ export class TreeStore {
   /** The schema version this store migrated to and writes change_log images under. */
   readonly schemaVersion: number;
   readonly log: (message: string) => void;
+  /**
+   * Set while a stale search index waits for `rebuildSearchIndexInChunks`: some
+   * documents predate the current fold, so searches also try the query as typed.
+   */
+  searchRebuildPending = false;
   private readonly statements = new Map<string, Statement>();
   private readonly plans = new Map<string, TablePlan>();
 
@@ -93,6 +99,7 @@ export class TreeStore {
     db.pragma('synchronous = NORMAL');
     db.pragma('temp_store = MEMORY');
     db.pragma('cache_size = -65536');
+    registerSearchFold(db);
     this.log = options.log ?? ((message) => console.info(message));
     this.migrations = options.migrations ?? MIGRATIONS;
     this.schemaVersion = this.migrations.length;

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useRouterState } from '@tanstack/react-router';
-import { House, ListChecks, Moon, Palette, Sun, UserPlus, Users } from 'lucide-react';
+import { House, ListChecks, Moon, Palette, Sun, Tags, UserPlus, Users } from 'lucide-react';
 import { useAddPerson } from './addPerson';
 import {
   PALETTE_ALL_RESULTS,
@@ -103,6 +103,13 @@ export default function ShellCommandPalette({
             icon: <ListChecks size={16} aria-hidden />,
             keywords: ['check', 'checker', 'problems', 'duplicates', 'errors', 'sources'],
             onSelect: () => openPage(navigate({ to: '/checker' })),
+          },
+          {
+            id: 'tags',
+            label: 'Manage tags',
+            icon: <Tags size={16} aria-hidden />,
+            keywords: ['tags', 'mytreetags', 'categories', 'labels'],
+            onSelect: () => void navigate({ to: '/tags' }),
           },
           {
             id: 'add-person',

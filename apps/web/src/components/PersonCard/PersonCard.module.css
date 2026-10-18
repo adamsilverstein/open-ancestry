@@ -84,6 +84,36 @@
   font-weight: var(--oa-weight-bold);
 }
 
+/*
+ * Tree highlight by tag: the people in it get an attached ring in the canvas
+ * focus color plus a tag badge; everyone else steps back with no color and no
+ * shadow, never with opacity, so their text keeps full contrast.
+ */
+.highlighted {
+  box-shadow:
+    0 0 0 3px var(--oa-focus-canvas),
+    var(--oa-shadow-2);
+}
+
+.highlighted.focusPerson {
+  box-shadow:
+    0 0 0 2px var(--oa-canvas-text),
+    0 0 0 5px var(--oa-focus-canvas),
+    var(--oa-shadow-2);
+}
+
+.highlightBadge {
+  color: var(--oa-accent);
+}
+
+.dimmed {
+  --oa-sex-color: var(--oa-border-strong);
+  border-color: var(--oa-border);
+  background: var(--oa-surface-sunken);
+  box-shadow: none;
+  filter: grayscale(1);
+}
+
 /* Duplicate (pedigree collapse): dashed border plus link icon. */
 .duplicate {
   border-style: dashed;

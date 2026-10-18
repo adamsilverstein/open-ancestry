@@ -103,6 +103,8 @@ export interface TreeCanvasProps {
   onViewportChange: (world: Rect) => void;
   /** The layout is on screen (cards mounted). */
   onRendered: () => void;
+  /** Highlight by tag: these people stand out, everyone else is dimmed. Null for none. */
+  highlight?: { personIds: ReadonlySet<string>; label: string } | null;
   children?: ReactNode;
 }
 
@@ -156,6 +158,9 @@ interface CardProps {
   lod: boolean;
   light: boolean;
   alternate: ParentFamilyChoice | undefined;
+  /** A tag highlight is on: this person is in it, or is dimmed. */
+  highlighted: boolean;
+  dimmed: boolean;
 }
 
 /** One card with its chevrons. Events are delegated to the canvas. */
@@ -168,6 +173,8 @@ const TreeCard = memo(function TreeCard({
   lod,
   light,
   alternate,
+  highlighted,
+  dimmed,
 }: CardProps) {
   const tabIndex = tabbable ? 0 : -1;
   const common = {
@@ -192,6 +199,8 @@ const TreeCard = memo(function TreeCard({
           className={styles.lodCard}
           data-sex={person.sex}
           data-focus={node.isFocus || undefined}
+          data-highlighted={highlighted || undefined}
+          data-dimmed={dimmed || undefined}
           {...common}
         />
       ) : light ? (
@@ -203,9 +212,13 @@ const TreeCard = memo(function TreeCard({
             cardStyles[`sex${person.sex}`],
             node.isFocus && cardStyles.focusPerson,
             node.isDuplicate && cardStyles.duplicate,
+            highlighted && cardStyles.highlighted,
+            dimmed && cardStyles.dimmed,
             styles.card,
             styles.lightCard,
           )}
+          data-highlighted={highlighted || undefined}
+          data-dimmed={dimmed || undefined}
           {...common}
         >
           <PersonName className={cardStyles.name} name={person.name} />
@@ -217,6 +230,8 @@ const TreeCard = memo(function TreeCard({
           size={node.width < 120 ? 'compact' : 'regular'}
           focusPerson={node.isFocus}
           duplicate={node.isDuplicate}
+          highlighted={highlighted}
+          dimmed={dimmed}
           className={styles.card}
           {...common}
         />
@@ -287,6 +302,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     layout,
     fan,
     kin,
+    highlight = null,
     focusPersonId,
     person,
     popoverKey,
@@ -638,11 +654,13 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
    */
   const centeredOnFocus = useCallback((t: Transform, fitRows = false): Transform => {
     const { width } = size.current;
-    // On phones the toolbar runs along the bottom: frame the space above it.
-    const bar = viewportRef.current
-      ? parseFloat(getComputedStyle(viewportRef.current).getPropertyValue('--oa-tree-bottom-bar'))
-      : 0;
-    const height = size.current.height - (bar || 0);
+    // On phones the toolbar runs along the bottom and the notices and tag pill
+    // along the top: frame the space between them.
+    const style = viewportRef.current ? getComputedStyle(viewportRef.current) : null;
+    const bar = style ? parseFloat(style.getPropertyValue('--oa-tree-bottom-bar')) : 0;
+    const topBar = (style && parseFloat(style.getPropertyValue('--oa-tree-top-bar'))) || 0;
+    const height = size.current.height - (bar || 0) - topBar;
+    const below = (r: Transform): Transform => ({ ...r, y: r.y + topBar });
     const { layout: current, fan: currentFan } = latest.current;
     const focus = current?.nodes.find((n) => n.isFocus);
     if (focus && current && latest.current.kind === 'family') {
@@ -683,7 +701,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         const room = width - pad - (right * scale + x);
         if (overlap > 0) x += Math.max(0, Math.min(overlap, room));
       }
-      return { x, y, scale };
+      return below({ x, y, scale });
     }
     const pad = 32;
     // Clear of the floating toolbar on the left (along the bottom on phones).
@@ -705,25 +723,27 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         ? fitScale(width - toolbar - 2 * pad, height - 2 * pad - heads)
         : t.scale;
       const b = current.bounds;
-      return {
+      return below({
         x: toolbar + pad - focus.x * scale,
         y: (height + heads) / 2 - (b.minY + b.height / 2) * scale,
         scale,
-      };
+      });
     }
     if (focus && current && latest.current.kind === 'descendants') {
       // Focus at the top center, descendants below.
       const scale = fitRows ? fitScale(width - 2 * pad, height - 2 * pad - 28) : t.scale;
       const centered = centerOn({ ...t, scale }, focus.x + focus.width / 2, 0, width, height);
-      return { x: centered.x, y: pad + 14 - focus.y * scale, scale };
+      return below({ x: centered.x, y: pad + 14 - focus.y * scale, scale });
     }
     if (focus)
-      return centerOn(t, focus.x + focus.width / 2, focus.y + focus.height / 2, width, height);
+      return below(
+        centerOn(t, focus.x + focus.width / 2, focus.y + focus.height / 2, width, height),
+      );
     if (currentFan) {
       // The whole fan, as large as fits.
-      if (fitRows) return fitFan(currentFan, width, height, FIT_PADDING);
+      if (fitRows) return below(fitFan(currentFan, width, height, FIT_PADDING));
       const b = currentFan.bounds;
-      return centerOn(t, b.minX + b.width / 2, b.minY + b.height / 2, width, height);
+      return below(centerOn(t, b.minX + b.width / 2, b.minY + b.height / 2, width, height));
     }
     return t;
   }, []);
@@ -829,6 +849,42 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     [animateTo, apply, focusCard, measure, nodeByKey],
   );
 
+  /**
+   * Where the view was last placed for the reader, until they move it. On phones
+   * the notices and tag pill can arrive after that (the tagged people load on
+   * their own): a view still where it was placed moves to clear them.
+   */
+  const framed = useRef<{ at: Transform; fitRows: boolean } | null>(null);
+  useEffect(() => {
+    const region = viewportRef.current?.closest<HTMLElement>('[data-tree-region]');
+    if (!region) return;
+    const bars = () =>
+      ['--oa-tree-top-bar', '--oa-tree-bottom-bar']
+        .map((name) => region.style.getPropertyValue(name))
+        .join('|');
+    let last = bars();
+    const same = (a: Transform, b: Transform) =>
+      Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.scale - b.scale) < 1e-6;
+    const observer = new MutationObserver(() => {
+      const now = bars();
+      if (now === last) return;
+      last = now;
+      const placed = framed.current;
+      if (!placed) return;
+      const heading = animationTarget.current;
+      if (!(heading ? same(heading, placed.at) : same(transform.current, placed.at))) {
+        framed.current = null;
+        return;
+      }
+      const target = centeredOnFocus(heading ?? transform.current, placed.fitRows);
+      framed.current = { at: target, fitRows: placed.fitRows };
+      if (heading) animateTo(target);
+      else apply(target);
+    });
+    observer.observe(region, { attributes: true, attributeFilter: ['style'] });
+    return () => observer.disconnect();
+  }, [apply, animateTo, centeredOnFocus]);
+
   // New layout: place the view, then mount what is visible before paint.
   useLayoutEffect(() => {
     if (!source) return;
@@ -849,6 +905,7 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
     if (!prev || prev.kind !== kind) {
       stopAnimation();
       apply(centeredOnFocus(transform.current, true));
+      framed.current = { at: transform.current, fitRows: true };
     } else if (prev.focus !== focusPersonId) {
       // Keyboard focus follows to the new focus card when the re-focus came from
       // the canvas, or focus is still in the tree or was lost to the page (Find in
@@ -870,8 +927,10 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
         const t = transform.current;
         apply({ x: t.x + old.x * t.scale, y: t.y + old.y * t.scale, scale: t.scale });
         animateTo(centeredOnFocus(transform.current));
+        framed.current = { at: animationTarget.current ?? transform.current, fitRows: false };
       } else {
         apply(centeredOnFocus(transform.current));
+        framed.current = { at: transform.current, fitRows: false };
       }
     }
     updateVisible(true);
@@ -1390,11 +1449,14 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
             const p = person(node.personId);
             if (!p) return null;
             const relation = kin[node.key];
-            const cardLabel = personCardLabel({
+            const highlighted = highlight ? highlight.personIds.has(node.personId) : false;
+            const baseLabel = personCardLabel({
               person: p,
               focusPerson: node.isFocus,
               duplicate: node.isDuplicate,
             });
+            // Highlighting is in the label too, not only in the dimming.
+            const cardLabel = highlighted ? `${baseLabel}, ${highlight!.label}` : baseLabel;
             return (
               <TreeCard
                 key={node.key}
@@ -1406,11 +1468,19 @@ export const TreeCanvas = forwardRef<TreeCanvasHandle, TreeCanvasProps>(function
                 lod={shown.lod}
                 light={shown.light}
                 alternate={layout.alternateParentFamilies[node.personId]}
+                highlighted={highlighted}
+                dimmed={highlight !== null && !highlighted}
               />
             );
           })}
         {fan && visible.source === fan && (
-          <FanChart fan={fan} focusPersonId={focusPersonId} person={person} onRefocus={refocus} />
+          <FanChart
+            fan={fan}
+            focusPersonId={focusPersonId}
+            person={person}
+            onRefocus={refocus}
+            highlight={highlight}
+          />
         )}
       </div>
       {/* Row labels stay in a column beside the toolbar and follow their rows as you pan. */}

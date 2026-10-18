@@ -11,6 +11,8 @@ interface FanChartProps {
   focusPersonId: string;
   person: (personId: string) => PersonSummary | undefined;
   onRefocus: (personId: string) => void;
+  /** Highlight by tag, as on the cards: these people are marked, the rest dimmed. */
+  highlight?: { personIds: ReadonlySet<string>; label: string } | null;
 }
 
 const point = (r: number, a: number) => `${r * Math.cos(a)} ${r * Math.sin(a)}`;
@@ -72,7 +74,13 @@ function fanNeighbor(
  * (decorative: the chart's buttons already say who is shown). One Tab stop
  * (roving tabindex): arrows move by relationship and Home returns to the center.
  */
-export function FanChart({ fan, focusPersonId, person, onRefocus }: FanChartProps) {
+export function FanChart({
+  fan,
+  focusPersonId,
+  person,
+  onRefocus,
+  highlight = null,
+}: FanChartProps) {
   const focusName = person(focusPersonId)?.name ?? '';
   const svgRef = useRef<SVGSVGElement>(null);
   // Only drawn segments (their person is loaded) can hold the tab stop.
@@ -145,7 +153,10 @@ export function FanChart({ fan, focusPersonId, person, onRefocus }: FanChartProp
         const relation = segment.isFocus
           ? 'focus person'
           : `${ancestorTerm(segment.generation, p.sex)} of ${focusName}`;
-        const label = [p.name, lifespan, relation].filter(Boolean).join(', ');
+        const highlighted = highlight?.personIds.has(segment.personId) ?? false;
+        const label = [p.name, lifespan, relation, highlighted && highlight!.label]
+          .filter(Boolean)
+          .join(', ');
         const text = labels.get(segment.key);
         const go = () => {
           if (!segment.isFocus) onRefocus(segment.personId);
@@ -160,6 +171,8 @@ export function FanChart({ fan, focusPersonId, person, onRefocus }: FanChartProp
             className={styles.fanSegment}
             data-sex={p.sex}
             data-focus={segment.isFocus || undefined}
+            data-highlighted={highlighted || undefined}
+            data-dimmed={(highlight !== null && !highlighted) || undefined}
             onClick={go}
             onFocus={() => setRoving({ focus: focusPersonId, key: segment.key })}
             onKeyDown={(event) => {

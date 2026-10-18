@@ -13,7 +13,7 @@ import type {
 import { isNotFound, seg } from '../../../api/client';
 import { useEdit } from '../../../api/edits';
 import { ApiError, apiSend } from '../../../api/client';
-import { rememberDeletedPerson, undoRedo } from '../../../api/history';
+import { rememberDeletedPerson, undoRedo, undoRedoMessage } from '../../../api/history';
 import { personQuery } from '../../../api/queries';
 import type { PersonDetail } from '../../../api/types';
 import { Button } from '../../../components/Button/Button';
@@ -326,7 +326,9 @@ export function EditPersonDialog({
             // This delete only: refused if anything was changed after it.
             onClick: () =>
               void undoRedo(queryClient, 'undo', { expect: batchId, onRestored }).then(
-                ({ batch }) => batch && toast({ title: `Undid ${batch.label}`, duration: 3000 }),
+                (result) =>
+                  result.batch &&
+                  toast({ title: undoRedoMessage('undo', result).title, duration: 3000 }),
                 (error: unknown) =>
                   toast(
                     error instanceof ApiError && error.code === 'not_newest'

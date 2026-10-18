@@ -1,3 +1,4 @@
+import { displayText } from '@open-ancestry/core';
 import { useIsMutating, useQuery, useQueryClient } from '@tanstack/react-query';
 import { editKey } from '../api/edits';
 import { Redo2, Undo2 } from 'lucide-react';
@@ -104,7 +105,10 @@ export default function HistoryPanel({ open, onOpenChange }: HistoryPanelProps) 
         <ol className={styles.list} aria-label="Changes" tabIndex={0}>
           {history.items.map((batch) => (
             <li key={batch.id} className={batch.state === 'undone' ? styles.undone : undefined}>
-              <span className={styles.label}>{withIsolates(batch.label)}</span>
+              {/* Stored text, often built from names: cleaned, and isolated from the chip and time (#264). */}
+              <span className={styles.label}>
+                <bdi>{withIsolates(displayText(batch.label))}</bdi>
+              </span>
               {batch.state === 'undone' && <span className={styles.chip}>undone</span>}
               <time className={styles.time} dateTime={batch.created_at}>
                 {timeAgo(batch.created_at)}

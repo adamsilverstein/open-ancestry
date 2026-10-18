@@ -641,6 +641,8 @@ export function editRoutes(app: Api, { library }: Deps): void {
     async (request) => {
       const store = open(request.params.tree);
       const { label, operations } = request.body;
+      // The label is shown in History and undo toasts, so it is checked like a name (#264).
+      refuseUnsafeText('label', label);
       const { batchId, result } = edit(store, label, (tx) => {
         checkSeen(tx.store, operations);
         return operations.map((operation) => runOperation(tx, operation));

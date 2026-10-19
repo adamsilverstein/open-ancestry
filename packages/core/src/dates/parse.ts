@@ -1,4 +1,4 @@
-import { daysInMonth, isHebrewLeap, monthNumber, monthsInYear } from './calendar';
+import { dayCalendar, daysInMonth, isHebrewLeap, monthNumber, monthsInYear } from './calendar';
 import { pointKey, UNDATED_SORT_KEY } from './sort-key';
 import type { Calendar, DatePoint, DateQualifier, ParsedDate } from './types';
 
@@ -378,7 +378,7 @@ function validPoint(
     // A dual-dated day falls in the new-style year and in the Julian calendar
     // (Old Style), so 29 FEB 1751/52 and 29 FEB 1699/1700 are real days.
     const inYear = point.dualYear ?? point.year;
-    const rules = point.dualYear === undefined ? calendar : 'julian';
+    const rules = dayCalendar(point, calendar);
     if (month === undefined || !(day >= 1 && day <= daysInMonth(rules, inYear, month)))
       return undefined;
     point.day = day;

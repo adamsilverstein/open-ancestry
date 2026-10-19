@@ -29,7 +29,24 @@ const DATE_PROBES = [
   '@#DJULIAN@ 1 JAN 1700',
   '@#DJULIAN@ 11 FEB 1731/32',
   'ABT @#DJULIAN@ 1066',
+  // Unmarked dual dates are Old Style days (#298).
+  '29 FEB 1751/52',
 ];
+
+/**
+ * SQL prefilter for Gregorian dates (calendar null or 'gregorian') that may be
+ * dual-dated (`1750/51`). It also matches numeric dates such as `05/06/1790`;
+ * isDualDated tells them apart.
+ */
+const MAYBE_DUAL_SQL =
+  "(calendar IS NULL OR calendar = 'gregorian') AND date_text GLOB '*[0-9]/[0-9]*'";
+
+/** Whether a date has an Old Style / New Style year, whose day converts from Julian. */
+export function isDualDated(dateText: string): boolean {
+  if (!dateText.includes('/')) return false;
+  const { start, end } = parseDate(dateText);
+  return start?.dualYear !== undefined || end?.dualYear !== undefined;
+}
 
 /** event.date_sort and date_sort_end for a date as written, as the importer computes them. */
 export function deriveDateSort(dateText: string): {
@@ -42,15 +59,17 @@ export function deriveDateSort(dateText: string): {
     : { date_sort: null, date_sort_end: null };
 }
 
-/** Whether an event row's sort keys are derived through calendar conversion. */
+/**
+ * Whether an event row's sort keys are derived through calendar conversion:
+ * a Julian, Hebrew or French Republican date, or an unmarked dual date.
+ */
 export function hasConvertedDate(row: Record<string, unknown>): row is Record<string, unknown> & {
   date_text: string;
 } {
-  return (
-    typeof row.date_text === 'string' &&
-    typeof row.calendar === 'string' &&
-    CONVERTED_CALENDARS.includes(row.calendar)
-  );
+  if (typeof row.date_text !== 'string') return false;
+  if (typeof row.calendar === 'string' && CONVERTED_CALENDARS.includes(row.calendar)) return true;
+  // Null and 'gregorian' both mean Gregorian (the importer writes null).
+  return (row.calendar ?? 'gregorian') === 'gregorian' && isDualDated(row.date_text);
 }
 
 interface DerivedStep {
@@ -73,19 +92,30 @@ const eventDateSort: DerivedStep = {
       }),
     ),
   recompute(store) {
-    const rows = store.db
-      .prepare(
-        // Matches the partial index event_converted_calendar_idx exactly.
-        `SELECT id, date_text, calendar, date_sort, date_sort_end FROM event
-         WHERE calendar IN (${CONVERTED_CALENDARS.map((c) => `'${c}'`).join(', ')})
-           AND date_text IS NOT NULL`,
-      )
-      .all() as {
+    type Row = {
       id: string;
       date_text: string;
       date_sort: number | null;
       date_sort_end: number | null;
-    }[];
+    };
+    const converted = store.db
+      .prepare(
+        // Matches the partial index event_converted_calendar_idx exactly.
+        `SELECT id, date_text, date_sort, date_sort_end FROM event
+         WHERE calendar IN (${CONVERTED_CALENDARS.map((c) => `'${c}'`).join(', ')})
+           AND date_text IS NOT NULL`,
+      )
+      .all() as Row[];
+    // Unmarked dual dates have no index of their own; this scan only runs
+    // when the fingerprint changes, and the GLOB skips most rows unparsed.
+    const dual = (
+      store.db
+        .prepare(
+          `SELECT id, date_text, date_sort, date_sort_end FROM event WHERE ${MAYBE_DUAL_SQL}`,
+        )
+        .all() as Row[]
+    ).filter((row) => isDualDated(row.date_text));
+    const rows = [...converted, ...dual];
     const update = store.db.prepare(
       'UPDATE event SET date_sort = ?, date_sort_end = ? WHERE id = ?',
     );

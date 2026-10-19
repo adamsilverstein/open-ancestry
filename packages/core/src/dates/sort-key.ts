@@ -8,7 +8,9 @@
  *   before < exact < after. The out-of-range days are never real dates.
  * - `ABT`, `CAL`, `EST`, `INT`, `FROM` and `TO` sort at the midpoint like exact dates.
  * - `BET` and `FROM .. TO` sort by their earliest day; `sortKeyEnd` is the latest.
- * - Dual years sort by the new-style year (`1750/51` as 1751).
+ * - Dual years sort by the new-style year (`1750/51` as 1751). A dual-dated
+ *   full date is an Old Style day, so it converts like a Julian one
+ *   (`29 FEB 1751/52` is 1752-03-11), matching its GEDCOM 7 export (#298).
  * - Julian full dates are converted exactly. Partial Julian dates keep their
  *   Julian year/month (up to ~13 days off), since a month or year has no single
  *   Gregorian equivalent.
@@ -17,7 +19,7 @@
  * - B.C. years are negative; the encoding stays monotonic.
  * - Unparseable text gets UNDATED_SORT_KEY so it sorts after every date.
  */
-import { exactMonthDays, monthsInYear, toGregorian } from './calendar';
+import { dayCalendar, exactMonthDays, monthsInYear, toGregorian } from './calendar';
 import type { Calendar, DatePoint } from './types';
 
 export const UNDATED_SORT_KEY = Number.MAX_SAFE_INTEGER;
@@ -54,6 +56,6 @@ export function pointKey(point: DatePoint, calendar: Calendar, bound: Bound): nu
         : encode(year, 7, 1);
   if (day === undefined)
     return encode(year, month, bound === 'low' ? 1 : bound === 'high' ? 31 : 15);
-  const g = toGregorian(calendar, year, month, day);
+  const g = toGregorian(dayCalendar(point, calendar), year, month, day);
   return encode(g.year, g.month, g.day);
 }

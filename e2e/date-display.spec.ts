@@ -1,10 +1,12 @@
 import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures';
+import { openTree, person, send, session, uniqueTreeName } from './edit-seed';
 import { sampleTree, setHome } from './sample-tree';
 
 /*
  * Issue #278: dates read the same everywhere. The people list formats stored
  * dates, and tree cards keep their qualifiers ("Uncertainty is visible").
+ * Issue #298: dual dates sort as Old Style days, like their GEDCOM 7 export.
  */
 
 async function openSample(page: Page, path: (id: (name: string) => string) => string) {
@@ -44,4 +46,44 @@ test('tree cards keep date qualifiers in lifespans', async ({ page }) => {
   ]) {
     await expect(card(name!)).toContainText(lifespan!);
   }
+});
+
+test('dual dates sort as their Old Style (Julian) day (#298)', async ({
+  page,
+  request,
+  baseURL,
+}, testInfo) => {
+  const s = await session(request, baseURL!);
+  const tree = uniqueTreeName('dual', testInfo.project.name);
+  await send(request, s, 'post', '/api/trees', { name: tree });
+  const base = `/api/trees/${encodeURIComponent(tree)}`;
+  // Old Style 29 Feb 1752 is New Style 11 Mar 1752, and 8 Mar is 19 Mar.
+  const { person: oldStyle } = await send<{ person: { id: string } }>(
+    request,
+    s,
+    'post',
+    `${base}/people`,
+    {
+      sex: 'F',
+      names: [{ given: 'Wynn', surname: 'Hollis' }],
+      events: [
+        { type: 'BIRT', date_text: '29 FEB 1751/52' },
+        { type: 'CHR', date_text: '8 MAR 1751/52' },
+        { type: 'RESI', date_text: '15 MAR 1752' },
+      ],
+    },
+  );
+  await send(request, s, 'post', `${base}/people`, person('Tamsin', 'Hollis', 'F', '5 MAR 1752'));
+
+  await openTree(page, tree, '/people?sort=birth');
+  const table = page.getByRole('table', { name: 'People' });
+  const births = table.locator('[role="row"][aria-rowindex] [data-column="birth"]');
+  await expect(births).toHaveText(['5 Mar 1752', '29 Feb 1751/52']);
+
+  await page.goto(`/person/${oldStyle.id}`);
+  const titles = page
+    .getByRole('region', { name: 'Timeline', exact: true })
+    .getByRole('listitem')
+    .locator('[data-title]');
+  await expect(titles).toHaveText(['Birth', 'Residence', 'Christening']);
 });

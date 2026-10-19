@@ -1,4 +1,4 @@
-import { astronomical, toGregorian } from './calendar';
+import { astronomical, dayCalendar, toGregorian } from './calendar';
 import { asParsed } from './format';
 import type { DateInput, ParsedDate } from './types';
 
@@ -36,7 +36,7 @@ function reference(date: ParsedDate): Reference | undefined {
   const approximate = qualifier !== 'exact' && qualifier !== 'interpreted';
   const year = start.dualYear ?? start.year;
   if (start.month !== undefined && start.day !== undefined) {
-    const g = toGregorian(calendar, year, start.month, start.day);
+    const g = toGregorian(dayCalendar(start, calendar), year, start.month, start.day);
     return { year: astronomical(g.year), month: g.month, day: g.day, approximate };
   }
   return { year: astronomical(year), month: start.month, approximate };

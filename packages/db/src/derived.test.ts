@@ -19,6 +19,7 @@ import {
   undoLast,
   type TreeStore,
 } from './index';
+import { hasConvertedDate } from './derived';
 import { makeTempDir } from '../../../fixtures/temp-dir';
 
 const HEBREW = '@#DHEBREW@ 1 TSH 5780';
@@ -111,6 +112,109 @@ describe('derived column refresh', () => {
     messages.length = 0;
     openTree(dir, { log: (m) => messages.push(m) }).close();
     expect(messages).toEqual([]);
+  });
+
+  describe('unmarked dual dates, whose days are Julian (#298)', () => {
+    const DUAL = '29 FEB 1751/52';
+    /** event_date_sort's fingerprint as v1.0.0 saved it, before dual days were Julian. */
+    const V1_FINGERPRINT =
+      '[[20190930,null],[20240224,null],[19400311,null],[19400409,19410921],[17920922,null],[18030922,null],[17940922,17990424],[17000111,null],[17320222,null],[10660701,null]]';
+
+    /** A dual birth, a numeric date with a slash and a range, keyed as v1.0.0 keyed them. */
+    function seedV1(store: TreeStore) {
+      return store.transact('seed', (tx) => {
+        const p = persons.create(tx, { names: [{ given: 'Wynn', surname: 'Hollis' }] });
+        for (const [type, date_text, date_sort, date_sort_end] of [
+          ['BIRT', DUAL, 17520229, null],
+          ['RESI', 'BET 1 JAN 1750/51 AND 24 MAR 1750/51', 17510101, 17510324],
+          // Not dual: a stale key here is not this step's to fix.
+          ['DEAT', '05/06/1790', 10000101, null],
+        ] as const) {
+          events.create(tx, {
+            type,
+            date_text,
+            calendar: null,
+            date_sort,
+            date_sort_end,
+            roles: [{ person_id: p.id }],
+          });
+        }
+        return p.id;
+      }).result;
+    }
+
+    it('re-derives their sort keys through the Julian calendar', () => {
+      const store = openMemoryTree();
+      const id = seedV1(store);
+      const logged = count(store, 'change_log');
+      expect(refreshDerivedColumns(store, { force: true })).toMatchObject({ event_date_sort: 2 });
+      expect(sorts(store)).toEqual([
+        { date_text: '05/06/1790', date_sort: 10000101, date_sort_end: null },
+        { date_text: DUAL, date_sort: 17520311, date_sort_end: null },
+        {
+          date_text: 'BET 1 JAN 1750/51 AND 24 MAR 1750/51',
+          date_sort: 17510112,
+          date_sort_end: 17510404,
+        },
+      ]);
+      // The same key as the day written in the Julian calendar.
+      expect(parseDate('@#DJULIAN@ 29 FEB 1752').sortKey).toBe(17520311);
+      expect(count(store, 'change_log')).toBe(logged);
+      // The people list's birth key follows.
+      expect(
+        store.db.prepare('SELECT birth_key FROM person_sort WHERE person_id = ?').pluck().get(id),
+      ).toBe(17520311);
+      store.close();
+    });
+
+    it("covers rows that spell the calendar out as 'gregorian', as from a JSON backup", () => {
+      const source = openMemoryTree();
+      seedV1(source);
+      // The column is free text; the importer writes null, other writers may not.
+      source.db.exec("UPDATE event SET calendar = 'gregorian'");
+      const doc = exportJson(source);
+      source.close();
+      const store = openMemoryTree();
+      importJson(store, doc);
+      expect(sorts(store)[1]).toMatchObject({ date_text: DUAL, date_sort: 17520311 });
+      // Undo treats its keys as derived too.
+      expect(hasConvertedDate({ date_text: DUAL, calendar: 'gregorian' })).toBe(true);
+      expect(hasConvertedDate({ date_text: '05/06/1790', calendar: 'gregorian' })).toBe(false);
+      store.close();
+    });
+
+    it('refreshes a tree last opened by v1.0.0', () => {
+      const dir = join(root, 'v1.oatree');
+      let store = createTree(dir);
+      seedV1(store);
+      store.db
+        .prepare("UPDATE derived_state SET fingerprint = ? WHERE name = 'event_date_sort'")
+        .run(V1_FINGERPRINT);
+      store.close();
+
+      const messages: string[] = [];
+      store = openTree(dir, { log: (m) => messages.push(m) });
+      expect(messages).toContain('Recomputed event_date_sort for 2 rows (date parser changed)');
+      expect(sorts(store)[1]).toMatchObject({ date_text: DUAL, date_sort: 17520311 });
+      store.close();
+    });
+
+    it('keeps undo working across the recompute', () => {
+      const store = openMemoryTree();
+      seedV1(store);
+      store.transact('note it', (tx) => {
+        const birth = store.db.prepare('SELECT id FROM event WHERE date_text = ?').get(DUAL) as {
+          id: string;
+        };
+        events.update(tx, birth.id, { description: 'at home' });
+      });
+      refreshDerivedColumns(store, { force: true });
+      const fresh = sorts(store);
+      expect(undoLast(store)?.label).toBe('note it');
+      expect(redoLast(store)?.label).toBe('note it');
+      expect(sorts(store)).toEqual(fresh);
+      store.close();
+    });
   });
 
   it('rebuilds the search index on open when the search fold changed (#199)', () => {

@@ -1,3 +1,4 @@
+import { parseDate } from '@open-ancestry/core';
 import { parseGedcom } from '@open-ancestry/gedcom';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -221,6 +222,12 @@ describe(
           { date_text: 'BEF 1850 (per census)', date_qualifier: 'before' },
         ],
       );
+      // Sorted as the Julian day the export names, before and after (#298).
+      const sortOf = (s: typeof store) =>
+        rows(s, "SELECT date_sort FROM event WHERE date_text = '29 FEB 1751/52'");
+      expect(sortOf(store)).toEqual([{ date_sort: 17520311 }]);
+      expect(sortOf(again)).toEqual(sortOf(store));
+      expect(parseDate('JULIAN 29 FEB 1752').sortKey).toBe(17520311);
     });
 
     it('keeps both dates as written in GEDCOM 5.5.1', async () => {

@@ -223,6 +223,13 @@ export function exactMonthDays(
 }
 
 /**
+ * The calendar a point's day is counted in: a dual-dated day (`29 FEB 1751/52`)
+ * is Old Style, so Julian, whatever calendar the date is marked with.
+ */
+export const dayCalendar = (point: DatePoint, calendar: Calendar): Calendar =>
+  point.dualYear === undefined ? calendar : 'julian';
+
+/**
  * Gregorian year/month/day for a fully specified date in any calendar.
  * Julian and Hebrew are exact; French Republican is exact for the years it was
  * in use (I to XIV).

@@ -84,6 +84,42 @@ describe('dual-dated leap days follow Julian (Old Style) rules (#272 review)', (
   );
 });
 
+describe('dual dates sort as Julian (Old Style) days (#298)', () => {
+  it.each([
+    ['29 FEB 1751/52', '@#DJULIAN@ 29 FEB 1752', 17520311],
+    ['11 FEB 1731/32', '@#DJULIAN@ 11 FEB 1732', 17320222],
+    ['29 FEB 1699/00', '@#DJULIAN@ 29 FEB 1700', 17000311],
+    ['@#DJULIAN@ 1 JAN 1750/51', '@#DJULIAN@ 1 JAN 1751', 17510112],
+  ])('%s sorts as %s', (dual, julian, key) => {
+    expect(parseDate(dual).sortKey).toBe(key);
+    expect(parseDate(julian).sortKey).toBe(key);
+    // The GEDCOM 7 form, read without its PHRASE, is the same day.
+    expect(parseDate(toGedcom(dual, '7')).sortKey).toBe(key);
+  });
+
+  it('converts both ends of a range and its qualifiers', () => {
+    expect(parseDate('BET 1 JAN 1750/51 AND 24 MAR 1750/51')).toMatchObject({
+      sortKey: 17510112,
+      sortKeyEnd: 17510404,
+    });
+    expect(parseDate('BEF 29 FEB 1751/52').sortKey).toBe(17520310);
+    expect(parseDate('AFT 29 FEB 1751/52').sortKey).toBe(17520312);
+  });
+
+  it('keeps partial dual dates on their new-style year and month, like partial Julian ones', () => {
+    expect(parseDate('FEB 1751/52').sortKey).toBe(parseDate('@#DJULIAN@ FEB 1752').sortKey);
+    expect(parseDate('1750/51').sortKey).toBe(parseDate('@#DJULIAN@ 1751').sortKey);
+  });
+
+  it('orders a dual date after a Gregorian day that falls before it', () => {
+    // Old Style 29 Feb 1752 is New Style 11 Mar 1752.
+    expect(['29 FEB 1751/52', '5 MAR 1752'].sort(compareDates)).toEqual([
+      '5 MAR 1752',
+      '29 FEB 1751/52',
+    ]);
+  });
+});
+
 describe('a note after a range or period (#272 review)', () => {
   it.each([
     [

@@ -34,10 +34,12 @@ const DATE_PROBES = [
 ];
 
 /**
- * SQL prefilter for unmarked dates that may be dual-dated (`1750/51`). It also
- * matches numeric dates such as `05/06/1790`; isDualDated tells them apart.
+ * SQL prefilter for Gregorian dates (calendar null or 'gregorian') that may be
+ * dual-dated (`1750/51`). It also matches numeric dates such as `05/06/1790`;
+ * isDualDated tells them apart.
  */
-const MAYBE_DUAL_SQL = "calendar IS NULL AND date_text GLOB '*[0-9]/[0-9]*'";
+const MAYBE_DUAL_SQL =
+  "(calendar IS NULL OR calendar = 'gregorian') AND date_text GLOB '*[0-9]/[0-9]*'";
 
 /** Whether a date has an Old Style / New Style year, whose day converts from Julian. */
 export function isDualDated(dateText: string): boolean {
@@ -65,9 +67,9 @@ export function hasConvertedDate(row: Record<string, unknown>): row is Record<st
   date_text: string;
 } {
   if (typeof row.date_text !== 'string') return false;
-  return typeof row.calendar === 'string'
-    ? CONVERTED_CALENDARS.includes(row.calendar)
-    : isDualDated(row.date_text);
+  if (typeof row.calendar === 'string' && CONVERTED_CALENDARS.includes(row.calendar)) return true;
+  // Null and 'gregorian' both mean Gregorian (the importer writes null).
+  return (row.calendar ?? 'gregorian') === 'gregorian' && isDualDated(row.date_text);
 }
 
 interface DerivedStep {

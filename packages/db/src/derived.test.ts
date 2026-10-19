@@ -19,6 +19,7 @@ import {
   undoLast,
   type TreeStore,
 } from './index';
+import { hasConvertedDate } from './derived';
 import { makeTempDir } from '../../../fixtures/temp-dir';
 
 const HEBREW = '@#DHEBREW@ 1 TSH 5780';
@@ -163,6 +164,22 @@ describe('derived column refresh', () => {
       expect(
         store.db.prepare('SELECT birth_key FROM person_sort WHERE person_id = ?').pluck().get(id),
       ).toBe(17520311);
+      store.close();
+    });
+
+    it("covers rows that spell the calendar out as 'gregorian', as from a JSON backup", () => {
+      const source = openMemoryTree();
+      seedV1(source);
+      // The column is free text; the importer writes null, other writers may not.
+      source.db.exec("UPDATE event SET calendar = 'gregorian'");
+      const doc = exportJson(source);
+      source.close();
+      const store = openMemoryTree();
+      importJson(store, doc);
+      expect(sorts(store)[1]).toMatchObject({ date_text: DUAL, date_sort: 17520311 });
+      // Undo treats its keys as derived too.
+      expect(hasConvertedDate({ date_text: DUAL, calendar: 'gregorian' })).toBe(true);
+      expect(hasConvertedDate({ date_text: '05/06/1790', calendar: 'gregorian' })).toBe(false);
       store.close();
     });
 
